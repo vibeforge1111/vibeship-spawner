@@ -96,7 +96,13 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
   } catch (error) {
     if (error instanceof Response) throw error;
 
-    console.error('OAuth error:', error);
-    throw redirect(302, '/summary?auth=error');
+    // Check if it's a redirect (from SvelteKit)
+    if (error && typeof error === 'object' && 'status' in error && 'location' in error) {
+      throw error;
+    }
+
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('OAuth error:', errorMessage);
+    throw redirect(302, `/summary?auth=error&reason=${encodeURIComponent(errorMessage)}`);
   }
 };
