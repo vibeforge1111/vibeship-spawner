@@ -19,7 +19,7 @@
   import { goto } from '$app/navigation';
 
   let projectNameInput = $state($projectName || 'my-project');
-  let exportFormat = $state<'gist' | 'github' | 'download'>('gist');
+  let exportFormat = $state<'github' | 'download'>('github');
   let selectedBehaviors = $state<string[]>(['tdd-mode']);
   let isExporting = $state(false);
   let exportedGist = $state<{ id: string; url: string; owner?: string } | null>(null);
@@ -277,20 +277,6 @@
       <div class="export-options">
         <button
           class="export-option"
-          class:selected={exportFormat === 'gist'}
-          onclick={() => exportFormat = 'gist'}
-        >
-          <div class="option-icon">
-            <Icon name="zap" size={24} />
-          </div>
-          <div class="option-info">
-            <h3>Quick Export</h3>
-            <p>Anonymous gist, instant setup</p>
-          </div>
-        </button>
-
-        <button
-          class="export-option"
           class:selected={exportFormat === 'github'}
           onclick={() => exportFormat = 'github'}
         >
@@ -323,7 +309,7 @@
     </div>
 
     <!-- Export Result / Actions -->
-    {#if exportFormat === 'gist' || exportFormat === 'github'}
+    {#if exportFormat === 'github'}
       {#if exportedGist}
         <div class="export-success">
           <div class="success-header">
@@ -396,28 +382,19 @@
 
           <button
             class="btn btn-primary btn-large"
-            onclick={() => exportToGist(exportFormat === 'github')}
+            onclick={() => exportToGist(true)}
             disabled={isExporting}
           >
             {#if isExporting}
               <span class="spinner"></span>
               <span>Creating Gist...</span>
-            {:else if exportFormat === 'github'}
+            {:else}
               <Icon name="github" size={18} />
               <span>Save to My GitHub</span>
-            {:else}
-              <Icon name="zap" size={18} />
-              <span>Export to GitHub Gist</span>
             {/if}
           </button>
 
-          <p class="export-note">
-            {#if exportFormat === 'github'}
-              Creates a gist in your GitHub account
-            {:else}
-              Creates an anonymous gist with your config
-            {/if}
-          </p>
+          <p class="export-note">Creates a gist in your GitHub account</p>
         </div>
       {/if}
     {:else}
@@ -723,7 +700,7 @@
   /* Export Options */
   .export-options {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: var(--space-3);
   }
 
@@ -978,7 +955,7 @@
 
   @media (max-width: 900px) {
     .export-options {
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 1fr;
     }
   }
 
