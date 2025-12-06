@@ -8,37 +8,91 @@
     selectedMcpObjects,
     selectedAgents,
     selectedMcps,
+    discoveryAnswers,
     resetStack
   } from '$lib/stores/stack';
+  import { createAnonymousGist, buildConfig, type GistConfig } from '$lib/services/gist';
   import { goto } from '$app/navigation';
 
   let projectNameInput = $state($projectName || 'my-project');
-  let exportFormat = $state<'claude' | 'github' | 'zip'>('claude');
+  let exportFormat = $state<'gist' | 'download'>('gist');
+  let selectedBehaviors = $state<string[]>(['tdd-mode']);
+  let isExporting = $state(false);
+  let exportedGist = $state<{ id: string; url: string } | null>(null);
+  let exportError = $state<string | null>(null);
 
-  function generateConfig() {
-    const config = {
-      project_name: projectNameInput,
-      description: $projectDescription,
-      agents: $selectedAgents,
-      mcps: $selectedMcps,
-      generated_at: new Date().toISOString()
-    };
-    return JSON.stringify(config, null, 2);
+  // Available optional behaviors
+  const optionalBehaviors = [
+    { id: 'tdd-mode', label: 'TDD Mode', description: 'Write tests first, then implement' },
+    { id: 'commit-per-task', label: 'Commit per Task', description: 'Auto-commit after each task' },
+    { id: 'explain-as-you-go', label: 'Explain as You Go', description: 'Add comments explaining decisions' }
+  ];
+
+  function toggleBehavior(id: string) {
+    if (selectedBehaviors.includes(id)) {
+      selectedBehaviors = selectedBehaviors.filter(b => b !== id);
+    } else {
+      selectedBehaviors = [...selectedBehaviors, id];
+    }
   }
 
-  function copyToClipboard() {
-    const config = generateConfig();
-    navigator.clipboard.writeText(config);
-    alert('Configuration copied to clipboard!');
+  function generateConfig(): GistConfig {
+    // Convert discovery answers to record
+    const discovery: Record<string, string> = {};
+    $discoveryAnswers.forEach(a => {
+      discovery[a.question] = a.answer;
+    });
+
+    return buildConfig(
+      projectNameInput,
+      $projectDescription,
+      discovery,
+      $selectedAgents,
+      $selectedMcps,
+      selectedBehaviors
+    );
+  }
+
+  function generateConfigJson() {
+    return JSON.stringify(generateConfig(), null, 2);
+  }
+
+  async function exportToGist() {
+    isExporting = true;
+    exportError = null;
+    exportedGist = null;
+
+    try {
+      const config = generateConfig();
+      const gist = await createAnonymousGist(config);
+      exportedGist = {
+        id: gist.id,
+        url: gist.html_url
+      };
+    } catch (e) {
+      exportError = e instanceof Error ? e.message : 'Failed to create gist';
+    } finally {
+      isExporting = false;
+    }
+  }
+
+  function copyCommand() {
+    if (exportedGist) {
+      navigator.clipboard.writeText(`npx vibeship init ${exportedGist.id}`);
+    }
+  }
+
+  function copyConfig() {
+    navigator.clipboard.writeText(generateConfigJson());
   }
 
   function downloadConfig() {
-    const config = generateConfig();
+    const config = generateConfigJson();
     const blob = new Blob([config], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${projectNameInput}-stack.json`;
+    a.download = `${projectNameInput}-vibeship-config.json`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -54,7 +108,7 @@
 
   // Estimate build time based on agents
   let estimatedTime = $derived(() => {
-    const baseTime = 30; // minutes
+    const baseTime = 30;
     const timePerAgent = 15;
     return baseTime + ($selectedAgents.length - 1) * timePerAgent;
   });
@@ -126,102 +180,185 @@
       </div>
     </div>
 
+    <!-- Build Discipline -->
+    <div class="section">
+      <h2 class="section-title">Build Discipline</h2>
+      <p class="section-desc">These behaviors guide how Claude builds your project</p>
+
+      <div class="behaviors">
+        <div class="behavior-group">
+          <h4 class="behavior-label">Always On</h4>
+          <div class="behavior-list">
+            <div class="behavior mandatory">
+              <Icon name="check" size={14} />
+              <span>Verify before complete</span>
+            </div>
+            <div class="behavior mandatory">
+              <Icon name="check" size={14} />
+              <span>Follow architecture</span>
+            </div>
+            <div class="behavior mandatory">
+              <Icon name="check" size={14} />
+              <span>Maintainable code</span>
+            </div>
+            <div class="behavior mandatory">
+              <Icon name="check" size={14} />
+              <span>Secure code (OpenGrep)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="behavior-group">
+          <h4 class="behavior-label">Optional</h4>
+          <div class="behavior-list">
+            {#each optionalBehaviors as behavior}
+              <button
+                class="behavior optional"
+                class:selected={selectedBehaviors.includes(behavior.id)}
+                onclick={() => toggleBehavior(behavior.id)}
+              >
+                <span class="behavior-checkbox">
+                  {#if selectedBehaviors.includes(behavior.id)}
+                    <Icon name="check" size={12} />
+                  {/if}
+                </span>
+                <span class="behavior-text">
+                  <strong>{behavior.label}</strong>
+                  <small>{behavior.description}</small>
+                </span>
+              </button>
+            {/each}
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Export Options -->
     <div class="section">
-      <h2 class="section-title">Export Options</h2>
+      <h2 class="section-title">Export</h2>
 
       <div class="export-options">
         <button
           class="export-option"
-          class:selected={exportFormat === 'claude'}
-          onclick={() => exportFormat = 'claude'}
-        >
-          <div class="option-icon">
-            <Icon name="zap" size={24} />
-          </div>
-          <div class="option-info">
-            <h3>Build with Claude</h3>
-            <p>Copy config and paste into Claude Code</p>
-          </div>
-        </button>
-
-        <button
-          class="export-option"
-          class:selected={exportFormat === 'github'}
-          onclick={() => exportFormat = 'github'}
+          class:selected={exportFormat === 'gist'}
+          onclick={() => exportFormat = 'gist'}
         >
           <div class="option-icon">
             <Icon name="github" size={24} />
           </div>
           <div class="option-info">
-            <h3>Push to GitHub</h3>
-            <p>Create repo with full scaffold</p>
+            <h3>Quick Export</h3>
+            <p>Create GitHub Gist, get one-liner command</p>
           </div>
         </button>
 
         <button
           class="export-option"
-          class:selected={exportFormat === 'zip'}
-          onclick={() => exportFormat = 'zip'}
+          class:selected={exportFormat === 'download'}
+          onclick={() => exportFormat = 'download'}
         >
           <div class="option-icon">
             <Icon name="download" size={24} />
           </div>
           <div class="option-info">
             <h3>Download Config</h3>
-            <p>Get JSON configuration file</p>
+            <p>Save JSON file locally</p>
           </div>
         </button>
       </div>
     </div>
 
+    <!-- Export Result / Actions -->
+    {#if exportFormat === 'gist'}
+      {#if exportedGist}
+        <div class="export-success">
+          <div class="success-header">
+            <Icon name="check-circle" size={24} />
+            <h3>Ready to Build!</h3>
+          </div>
+
+          <div class="command-box">
+            <code>npx vibeship init {exportedGist.id}</code>
+            <button class="copy-btn" onclick={copyCommand}>
+              <Icon name="copy" size={16} />
+            </button>
+          </div>
+
+          <div class="gist-link">
+            <a href={exportedGist.url} target="_blank" rel="noopener">
+              View config on GitHub
+              <Icon name="external-link" size={14} />
+            </a>
+          </div>
+
+          <div class="next-steps">
+            <h4>Next Steps</h4>
+            <ol>
+              <li>Open your terminal</li>
+              <li>Run the command above</li>
+              <li>cd into your project folder</li>
+              <li>Run <code>claude</code> and start building!</li>
+            </ol>
+          </div>
+        </div>
+      {:else}
+        <div class="export-action">
+          {#if exportError}
+            <div class="error-message">
+              <Icon name="alert-circle" size={16} />
+              <span>{exportError}</span>
+            </div>
+          {/if}
+
+          <button
+            class="btn btn-primary btn-large"
+            onclick={exportToGist}
+            disabled={isExporting}
+          >
+            {#if isExporting}
+              <span class="spinner"></span>
+              <span>Creating Gist...</span>
+            {:else}
+              <Icon name="zap" size={18} />
+              <span>Export to GitHub Gist</span>
+            {/if}
+          </button>
+
+          <p class="export-note">Creates an anonymous gist with your config</p>
+        </div>
+      {/if}
+    {:else}
+      <div class="export-action">
+        <button class="btn btn-primary btn-large" onclick={downloadConfig}>
+          <Icon name="download" size={18} />
+          <span>Download {projectNameInput}-vibeship-config.json</span>
+        </button>
+
+        <p class="export-note">Then run: <code>npx vibeship init --local ./config.json</code></p>
+      </div>
+    {/if}
+
     <!-- Config Preview -->
     <div class="section">
       <div class="section-header">
-        <h2 class="section-title">Configuration</h2>
-        <button class="btn btn-sm btn-ghost" onclick={copyToClipboard}>
+        <h2 class="section-title">Configuration Preview</h2>
+        <button class="btn btn-sm btn-ghost" onclick={copyConfig}>
+          <Icon name="copy" size={14} />
           Copy
         </button>
       </div>
-      <pre class="config-preview">{generateConfig()}</pre>
+      <pre class="config-preview">{generateConfigJson()}</pre>
     </div>
 
-    <!-- Actions -->
+    <!-- Bottom Actions -->
     <div class="actions">
       <button class="btn btn-ghost" onclick={editStack}>
+        <Icon name="arrow-left" size={16} />
         Edit Stack
       </button>
-      <div class="actions-right">
-        <button class="btn btn-ghost" onclick={startOver}>
-          Start Over
-        </button>
-        {#if exportFormat === 'claude'}
-          <button class="btn btn-primary" onclick={copyToClipboard}>
-            <span>Copy Config</span>
-            <Icon name="arrow-right" size={16} />
-          </button>
-        {:else if exportFormat === 'zip'}
-          <button class="btn btn-primary" onclick={downloadConfig}>
-            <span>Download</span>
-            <Icon name="download" size={16} />
-          </button>
-        {:else}
-          <button class="btn btn-primary" disabled>
-            <span>Coming Soon</span>
-          </button>
-        {/if}
-      </div>
-    </div>
-
-    <!-- Next Steps -->
-    <div class="next-steps">
-      <h3>Next Steps</h3>
-      <ol>
-        <li>Initialize your project: <code>./init.sh {projectNameInput}</code></li>
-        <li>Enter the project: <code>cd {projectNameInput}</code></li>
-        <li>Start Claude Code: <code>claude</code></li>
-        <li>Paste your configuration and start building!</li>
-      </ol>
+      <button class="btn btn-ghost" onclick={startOver}>
+        Start Over
+      </button>
     </div>
   </div>
 </main>
@@ -286,6 +423,12 @@
     letter-spacing: 0.1em;
     color: var(--text-primary);
     margin: 0;
+  }
+
+  .section-desc {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    margin: var(--space-2) 0 var(--space-4);
   }
 
   .name-input {
@@ -392,9 +535,102 @@
     letter-spacing: 0.1em;
   }
 
+  /* Behaviors */
+  .behaviors {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-6);
+  }
+
+  .behavior-group {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    padding: var(--space-4);
+  }
+
+  .behavior-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-tertiary);
+    margin: 0 0 var(--space-3);
+  }
+
+  .behavior-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .behavior {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+  }
+
+  .behavior.mandatory {
+    color: var(--green-dim);
+  }
+
+  .behavior.optional {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    text-align: left;
+    width: 100%;
+  }
+
+  .behavior.optional:hover {
+    border-color: var(--text-primary);
+  }
+
+  .behavior.optional.selected {
+    border-color: var(--green-dim);
+  }
+
+  .behavior-checkbox {
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: var(--green-dim);
+  }
+
+  .behavior.optional.selected .behavior-checkbox {
+    border-color: var(--green-dim);
+    background: var(--green-dim);
+    color: var(--bg-primary);
+  }
+
+  .behavior-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .behavior-text strong {
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+
+  .behavior-text small {
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+  }
+
+  /* Export Options */
   .export-options {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: var(--space-3);
   }
 
@@ -442,35 +678,132 @@
     margin: 0;
   }
 
-  .config-preview {
-    background: var(--bg-inverse);
-    color: var(--text-inverse);
-    padding: var(--space-4);
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    overflow-x: auto;
-    margin: 0;
-  }
-
-  .actions {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+  /* Export Action */
+  .export-action {
+    text-align: center;
+    padding: var(--space-8);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
     margin-bottom: var(--space-8);
   }
 
-  .actions-right {
+  .btn-large {
+    padding: var(--space-4) var(--space-8);
+    font-size: var(--text-base);
+  }
+
+  .export-note {
+    font-size: var(--text-sm);
+    color: var(--text-tertiary);
+    margin-top: var(--space-4);
+  }
+
+  .export-note code {
+    background: var(--bg-tertiary);
+    padding: var(--space-1) var(--space-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+  }
+
+  .error-message {
     display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    color: var(--red);
+    margin-bottom: var(--space-4);
+  }
+
+  .spinner {
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--bg-primary);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* Export Success */
+  .export-success {
+    background: var(--bg-secondary);
+    border: 1px solid var(--green-dim);
+    padding: var(--space-6);
+    margin-bottom: var(--space-8);
+  }
+
+  .success-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    color: var(--green-dim);
+    margin-bottom: var(--space-6);
+  }
+
+  .success-header h3 {
+    font-family: var(--font-serif);
+    font-size: var(--text-xl);
+    font-weight: 400;
+    margin: 0;
+  }
+
+  .command-box {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     gap: var(--space-3);
+    background: var(--bg-inverse);
+    padding: var(--space-4);
+    margin-bottom: var(--space-4);
+  }
+
+  .command-box code {
+    font-family: var(--font-mono);
+    font-size: var(--text-lg);
+    color: var(--green-dim);
+  }
+
+  .copy-btn {
+    background: transparent;
+    border: 1px solid var(--text-inverse);
+    color: var(--text-inverse);
+    padding: var(--space-2);
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity var(--transition-fast);
+  }
+
+  .copy-btn:hover {
+    opacity: 1;
+  }
+
+  .gist-link {
+    text-align: center;
+    margin-bottom: var(--space-6);
+  }
+
+  .gist-link a {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+  }
+
+  .gist-link a:hover {
+    color: var(--green-dim);
   }
 
   .next-steps {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    padding: var(--space-6);
+    border-top: 1px solid var(--border);
+    padding-top: var(--space-6);
   }
 
-  .next-steps h3 {
+  .next-steps h4 {
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     font-weight: 600;
@@ -498,8 +831,32 @@
     color: var(--green-dim);
   }
 
+  /* Config Preview */
+  .config-preview {
+    background: var(--bg-inverse);
+    color: var(--text-inverse);
+    padding: var(--space-4);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    overflow-x: auto;
+    margin: 0;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  /* Actions */
+  .actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
   @media (max-width: 768px) {
     .export-options {
+      grid-template-columns: 1fr;
+    }
+
+    .behaviors {
       grid-template-columns: 1fr;
     }
 
