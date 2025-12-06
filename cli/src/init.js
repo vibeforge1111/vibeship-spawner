@@ -18,7 +18,8 @@ export async function init(gistIdOrFile, options = {}) {
     // Load config from gist or local file
     if (options.local) {
       spinner.start('Reading local config...');
-      const content = await fs.readFile(options.local, 'utf-8');
+      const localPath = path.resolve(process.cwd(), options.local);
+      const content = await fs.readFile(localPath, 'utf-8');
       config = validateConfig(JSON.parse(content));
       spinner.succeed('Config loaded from local file');
     } else {
