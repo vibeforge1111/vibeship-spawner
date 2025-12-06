@@ -19,7 +19,8 @@ export interface GistConfig {
 export interface GistResponse {
   id: string;
   html_url: string;
-  files: Record<string, { filename: string; content: string }>;
+  files?: Record<string, { filename: string; content: string }>;
+  owner?: string;
 }
 
 /**
@@ -95,4 +96,25 @@ export function extractGistId(urlOrId: string): string {
     return parts[parts.length - 1];
   }
   return urlOrId;
+}
+
+/**
+ * Create an authenticated GitHub Gist via server API
+ * Uses the user's OAuth token stored in httpOnly cookie
+ */
+export async function createAuthenticatedGist(config: GistConfig): Promise<GistResponse> {
+  const response = await fetch('/api/gist', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ config })
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to create gist');
+  }
+
+  return response.json();
 }

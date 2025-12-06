@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import { page } from '$app/stores';
   import Navbar from '$lib/components/Navbar.svelte';
   import Icon from '$lib/components/Icon.svelte';
   import {
@@ -11,15 +13,30 @@
     discoveryAnswers,
     resetStack
   } from '$lib/stores/stack';
-  import { createAnonymousGist, buildConfig, type GistConfig } from '$lib/services/gist';
+  import { createAnonymousGist, createAuthenticatedGist, buildConfig, type GistConfig } from '$lib/services/gist';
+  import { githubUser, initAuth } from '$lib/stores/auth';
   import { goto } from '$app/navigation';
 
   let projectNameInput = $state($projectName || 'my-project');
-  let exportFormat = $state<'gist' | 'download'>('gist');
+  let exportFormat = $state<'gist' | 'github' | 'download'>('gist');
   let selectedBehaviors = $state<string[]>(['tdd-mode']);
   let isExporting = $state(false);
-  let exportedGist = $state<{ id: string; url: string } | null>(null);
+  let exportedGist = $state<{ id: string; url: string; owner?: string } | null>(null);
   let exportError = $state<string | null>(null);
+
+  // Initialize auth state on mount
+  onMount(() => {
+    initAuth();
+
+    // Check for auth callback status
+    const authStatus = $page.url.searchParams.get('auth');
+    if (authStatus === 'success') {
+      initAuth(); // Re-init to pick up new cookie
+      exportFormat = 'github';
+    } else if (authStatus === 'error') {
+      exportError = 'GitHub authentication failed. Please try again.';
+    }
+  });
 
   // Available optional behaviors
   const optionalBehaviors = [
@@ -57,23 +74,41 @@
     return JSON.stringify(generateConfig(), null, 2);
   }
 
-  async function exportToGist() {
+  async function exportToGist(authenticated: boolean = false) {
     isExporting = true;
     exportError = null;
     exportedGist = null;
 
     try {
       const config = generateConfig();
-      const gist = await createAnonymousGist(config);
-      exportedGist = {
-        id: gist.id,
-        url: gist.html_url
-      };
+
+      if (authenticated) {
+        const gist = await createAuthenticatedGist(config);
+        exportedGist = {
+          id: gist.id,
+          url: gist.html_url,
+          owner: gist.owner
+        };
+      } else {
+        const gist = await createAnonymousGist(config);
+        exportedGist = {
+          id: gist.id,
+          url: gist.html_url
+        };
+      }
     } catch (e) {
       exportError = e instanceof Error ? e.message : 'Failed to create gist';
     } finally {
       isExporting = false;
     }
+  }
+
+  function loginWithGitHub() {
+    window.location.href = '/api/auth/github';
+  }
+
+  function logout() {
+    window.location.href = '/api/auth/logout';
   }
 
   function copyCommand() {
@@ -244,11 +279,28 @@
           onclick={() => exportFormat = 'gist'}
         >
           <div class="option-icon">
-            <Icon name="github" size={24} />
+            <Icon name="zap" size={24} />
           </div>
           <div class="option-info">
             <h3>Quick Export</h3>
-            <p>Create GitHub Gist, get one-liner command</p>
+            <p>Anonymous gist, instant setup</p>
+          </div>
+        </button>
+
+        <button
+          class="export-option"
+          class:selected={exportFormat === 'github'}
+          onclick={() => exportFormat = 'github'}
+        >
+          <div class="option-icon">
+            <Icon name="github" size={24} />
+          </div>
+          <div class="option-info">
+            <h3>Save to GitHub</h3>
+            <p>Your gist, editable later</p>
+            {#if $githubUser}
+              <span class="auth-badge">Logged in as {$githubUser}</span>
+            {/if}
           </div>
         </button>
 
@@ -269,13 +321,17 @@
     </div>
 
     <!-- Export Result / Actions -->
-    {#if exportFormat === 'gist'}
+    {#if exportFormat === 'gist' || exportFormat === 'github'}
       {#if exportedGist}
         <div class="export-success">
           <div class="success-header">
             <Icon name="check-circle" size={24} />
             <h3>Ready to Build!</h3>
           </div>
+
+          {#if exportedGist.owner}
+            <p class="owner-note">Saved to your GitHub account (@{exportedGist.owner})</p>
+          {/if}
 
           <div class="command-box">
             <code>npx vibeship init {exportedGist.id}</code>
@@ -301,7 +357,7 @@
             </ol>
           </div>
         </div>
-      {:else}
+      {:else if exportFormat === 'github' && !$githubUser}
         <div class="export-action">
           {#if exportError}
             <div class="error-message">
@@ -312,19 +368,54 @@
 
           <button
             class="btn btn-primary btn-large"
-            onclick={exportToGist}
+            onclick={loginWithGitHub}
+          >
+            <Icon name="github" size={18} />
+            <span>Login with GitHub</span>
+          </button>
+
+          <p class="export-note">Connect your GitHub account to save gists you own</p>
+        </div>
+      {:else}
+        <div class="export-action">
+          {#if exportError}
+            <div class="error-message">
+              <Icon name="alert-circle" size={16} />
+              <span>{exportError}</span>
+            </div>
+          {/if}
+
+          {#if exportFormat === 'github' && $githubUser}
+            <div class="auth-status">
+              <span>Logged in as <strong>{$githubUser}</strong></span>
+              <button class="btn btn-sm btn-ghost" onclick={logout}>Logout</button>
+            </div>
+          {/if}
+
+          <button
+            class="btn btn-primary btn-large"
+            onclick={() => exportToGist(exportFormat === 'github')}
             disabled={isExporting}
           >
             {#if isExporting}
               <span class="spinner"></span>
               <span>Creating Gist...</span>
+            {:else if exportFormat === 'github'}
+              <Icon name="github" size={18} />
+              <span>Save to My GitHub</span>
             {:else}
               <Icon name="zap" size={18} />
               <span>Export to GitHub Gist</span>
             {/if}
           </button>
 
-          <p class="export-note">Creates an anonymous gist with your config</p>
+          <p class="export-note">
+            {#if exportFormat === 'github'}
+              Creates a gist in your GitHub account
+            {:else}
+              Creates an anonymous gist with your config
+            {/if}
+          </p>
         </div>
       {/if}
     {:else}
@@ -630,7 +721,7 @@
   /* Export Options */
   .export-options {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: var(--space-3);
   }
 
@@ -676,6 +767,38 @@
     font-size: var(--text-xs);
     color: var(--text-secondary);
     margin: 0;
+  }
+
+  .auth-badge {
+    display: inline-block;
+    margin-top: var(--space-1);
+    padding: 2px var(--space-2);
+    background: var(--green-dim);
+    color: var(--bg-primary);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    border-radius: 2px;
+  }
+
+  .auth-status {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+  }
+
+  .auth-status strong {
+    color: var(--text-primary);
+  }
+
+  .owner-note {
+    text-align: center;
+    font-size: var(--text-sm);
+    color: var(--green-dim);
+    margin: 0 0 var(--space-4);
   }
 
   /* Export Action */
@@ -849,6 +972,12 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+  }
+
+  @media (max-width: 900px) {
+    .export-options {
+      grid-template-columns: 1fr 1fr;
+    }
   }
 
   @media (max-width: 768px) {
