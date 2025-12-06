@@ -41,8 +41,8 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
     if (!response.ok) {
       const error = await response.text();
-      console.error('GitHub API error:', error);
-      return json({ error: 'Failed to create gist' }, { status: response.status });
+      console.error('GitHub API error:', response.status, error);
+      return json({ error: `Failed to create gist: ${error}` }, { status: response.status });
     }
 
     const gist = await response.json();
