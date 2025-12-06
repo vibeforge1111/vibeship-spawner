@@ -1,4 +1,5 @@
 import { writable, derived } from 'svelte/store';
+import { analyzeProject, detectProjectType, type RecommendationResult } from '$lib/services/recommendations';
 
 // Types
 export interface Agent {
@@ -213,6 +214,18 @@ export const selectedAgents = writable<string[]>(['planner']);
 export const selectedMcps = writable<string[]>(['filesystem']);
 export const discoveryAnswers = writable<DiscoveryAnswer[]>([]);
 export const currentStep = writable<number>(1);
+export const customSkillsNeeded = writable<string[]>([]);
+
+// Recommendations store - computed from description
+export const recommendations = writable<RecommendationResult>({
+  agents: [],
+  mcps: [],
+  behaviors: [],
+  customSkills: []
+});
+
+// Detected project type
+export const detectedProjectType = writable<string | null>(null);
 
 // Derived stores
 export const selectedAgentObjects = derived(selectedAgents, ($selectedAgents) =>
@@ -302,4 +315,59 @@ export function resetStack() {
   selectedMcps.set(['filesystem']);
   discoveryAnswers.set([]);
   currentStep.set(1);
+  customSkillsNeeded.set([]);
+  recommendations.set({ agents: [], mcps: [], behaviors: [], customSkills: [] });
+  detectedProjectType.set(null);
+}
+
+/**
+ * Analyze project description and update recommendations
+ */
+export function updateRecommendations(description: string, answers: DiscoveryAnswer[] = []) {
+  // Convert answers to record format
+  const answersRecord: Record<string, string> = {};
+  answers.forEach(a => {
+    answersRecord[a.question] = a.answer;
+  });
+
+  // Run analysis
+  const result = analyzeProject(description, answersRecord);
+  recommendations.set(result);
+
+  // Detect project type
+  const allText = [description, ...Object.values(answersRecord)].join(' ');
+  const projectType = detectProjectType(allText);
+  detectedProjectType.set(projectType);
+
+  // Update custom skills needed
+  const skills = result.customSkills.map(cs => cs.id);
+  customSkillsNeeded.set(skills);
+
+  return result;
+}
+
+/**
+ * Apply all recommendations to the current stack
+ */
+export function applyAllRecommendations(result: RecommendationResult) {
+  // Add recommended agents
+  for (const rec of result.agents) {
+    addAgent(rec.id);
+  }
+
+  // Add recommended MCPs
+  for (const rec of result.mcps) {
+    addMcp(rec.id);
+  }
+}
+
+/**
+ * Apply a single recommendation
+ */
+export function applyRecommendation(type: 'agent' | 'mcp', id: string) {
+  if (type === 'agent') {
+    addAgent(id);
+  } else if (type === 'mcp') {
+    addMcp(id);
+  }
 }
