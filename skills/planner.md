@@ -365,6 +365,95 @@ Execute this task. When done:
 
 ---
 
+## Custom Skill Generation
+
+When `state.json` contains `custom_skills_needed` array:
+
+### On First Run
+
+1. Check `state.json` for `custom_skills_needed`
+2. For each skill not yet in `skills/` directory:
+   - Generate the skill file using the template below
+   - Save to `skills/{skill-name}.md`
+   - Add to the agent roster
+3. Clear the skill from `custom_skills_needed` after generation
+
+### Custom Skill Template
+
+```markdown
+# {Skill Name} Skill
+
+> Auto-generated for {project_name}
+
+---
+
+## Read First
+
+Before any work, read `skills/_schema.md` for state management protocols.
+
+---
+
+## Identity
+
+You are the {Skill Name} specialist. Your expertise: {description based on skill name}
+
+---
+
+## Capabilities
+
+- {capability 1 based on skill type}
+- {capability 2 based on skill type}
+- {capability 3 based on skill type}
+
+---
+
+## Approach
+
+1. Check `docs/ARCHITECTURE.md` for project decisions
+2. Review existing code related to this feature
+3. Follow established patterns in the codebase
+4. Implement with security and maintainability in mind
+
+---
+
+## Integration
+
+Works with: {related agents based on skill type}
+Required MCPs: filesystem
+
+---
+
+## Handoff Protocol
+
+When task is complete:
+
+1. **Update task_queue.json:**
+   - Set `status: "completed"`
+   - Add `outputs: [list of files created]`
+
+2. **Update state.json:**
+   - Set `checkpoint: "{skill}:{task_id}:completed"`
+
+3. **Log to docs/PROJECT_LOG.md:**
+   - What was completed
+   - Files created
+   - Any decisions made
+
+4. **Return control to planner** - DO NOT start next task
+```
+
+### Skill Type Mappings
+
+| Skill ID | Description | Related Agents |
+|----------|-------------|----------------|
+| `realtime` | WebSocket/real-time features | backend, frontend |
+| `scheduling` | Calendar and booking logic | backend, database |
+| `media-handling` | Image/video upload and processing | backend, frontend |
+| `social-features` | Friends, follows, feeds | backend, database |
+| `game-engine` | Game loop and mechanics | frontend, testing |
+
+---
+
 ## Handoff Protocol
 
 When completing orchestration:

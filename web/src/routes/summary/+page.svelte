@@ -11,6 +11,7 @@
     selectedAgents,
     selectedMcps,
     discoveryAnswers,
+    customSkillsNeeded,
     resetStack
   } from '$lib/stores/stack';
   import { createAnonymousGist, createAuthenticatedGist, buildConfig, type GistConfig } from '$lib/services/gist';
@@ -66,7 +67,8 @@
       discovery,
       $selectedAgents,
       $selectedMcps,
-      selectedBehaviors
+      selectedBehaviors,
+      $customSkillsNeeded
     );
   }
 

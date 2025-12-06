@@ -63,7 +63,8 @@ export function buildConfig(
   discovery: Record<string, string>,
   agents: string[],
   mcps: string[],
-  selectedBehaviors: string[] = []
+  selectedBehaviors: string[] = [],
+  customSkillsNeeded: string[] = []
 ): GistConfig {
   return {
     project_name: projectName || 'my-project',
@@ -81,7 +82,7 @@ export function buildConfig(
       ],
       selected: selectedBehaviors
     },
-    custom_skills_needed: [], // Will be populated by intelligence system later
+    custom_skills_needed: customSkillsNeeded,
     generated_at: new Date().toISOString()
   };
 }

@@ -12,13 +12,14 @@ This project uses VibeShip Orchestrator for AI-powered development orchestration
 
 ALWAYS do this first:
 
-1. Read `state.json` - check current phase
-2. Based on phase:
+1. Read `state.json` - check current phase and custom_skills_needed
+2. If `custom_skills_needed` has items, generate those skills first (see planner skill)
+3. Based on phase:
    - `discovery` -> Load `skills/planner.md`, continue discovery
    - `planning` -> Load `skills/planner.md`, continue architecture
    - `building` -> Read `task_queue.json`, load skill for next pending task
    - `review` -> Show summary, ask for feedback
-3. Resume from checkpoint if set
+4. Resume from checkpoint if set
 
 ---
 
