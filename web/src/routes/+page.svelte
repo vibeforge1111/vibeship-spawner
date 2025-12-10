@@ -456,6 +456,7 @@
     width: 100%;
     max-width: 600px;
     height: 440px;
+    overflow: hidden;
   }
 
   .terminal {
@@ -464,6 +465,9 @@
     border-radius: 8px;
     overflow: hidden;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 40px rgba(0, 196, 154, 0.1);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
   }
 
   .terminal-header {
@@ -515,7 +519,7 @@
 
   .terminal-body {
     padding: var(--space-4);
-    height: 380px;
+    flex: 1;
     overflow-y: auto;
     font-family: var(--font-mono);
     font-size: var(--text-sm);
