@@ -325,10 +325,7 @@
   <!-- Closing Statement -->
   <section class="closing-section">
     <p class="closing-text">
-      Most just prompt, and get spaghetti.
-    </p>
-    <p class="closing-text highlight-line">
-      Try <span class="highlight">orchestrating</span>.
+      Most just prompt, and get spaghetti. Try <span class="highlight">orchestrating</span>.
     </p>
     <div class="closing-formula">
       <span class="formula-text">your_idea</span>
@@ -872,16 +869,10 @@
 
   .closing-text {
     font-family: var(--font-serif);
-    font-size: var(--text-xl);
-    font-style: italic;
-    color: var(--text-tertiary);
-    margin: 0 0 var(--space-2);
-  }
-
-  .closing-text.highlight-line {
     font-size: var(--text-2xl);
+    font-style: italic;
     color: var(--text-secondary);
-    margin-bottom: var(--space-6);
+    margin: 0 0 var(--space-6);
   }
 
   .closing-text .highlight {
@@ -1051,10 +1042,6 @@
     }
 
     .closing-text {
-      font-size: var(--text-base);
-    }
-
-    .closing-text.highlight-line {
       font-size: var(--text-xl);
     }
 
