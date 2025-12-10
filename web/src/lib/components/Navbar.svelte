@@ -20,6 +20,7 @@
   </a>
 
   <div class="nav-links">
+    <a href="/how-it-works">How It Works</a>
     <a href="/builder">Build</a>
     {#if $isAuthenticated}
       <span class="user-info">
