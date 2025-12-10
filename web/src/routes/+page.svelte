@@ -883,7 +883,7 @@
     font-size: var(--text-2xl);
     font-style: italic;
     color: var(--text-secondary);
-    margin: 0 0 var(--space-6);
+    margin: 0 0 var(--space-3);
   }
 
   .closing-text .highlight {
