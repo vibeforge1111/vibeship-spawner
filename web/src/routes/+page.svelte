@@ -896,7 +896,7 @@
     gap: var(--space-2);
     flex-wrap: wrap;
     font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    font-size: var(--text-base);
     color: var(--text-tertiary);
   }
 
