@@ -302,19 +302,19 @@
           <div class="terminal-output-list">
             <div class="terminal-output-line success">
               <span class="output-prefix">+</span>
-              <span>Assembles your AI agent crew</span>
+              <span>Assembles your specialized agent crew with Claude Skills tailored for your idea</span>
             </div>
             <div class="terminal-output-line success">
               <span class="output-prefix">+</span>
-              <span>Connects the right MCPs</span>
+              <span>Connects the right tools and their MCPs to right agents, and your project</span>
             </div>
             <div class="terminal-output-line success">
               <span class="output-prefix">+</span>
-              <span>Scaffolds your project</span>
+              <span>Builds your Architecture, PRD, and Implementation Plan in an organized way</span>
             </div>
             <div class="terminal-output-line success">
               <span class="output-prefix">+</span>
-              <span>Starts building immediately</span>
+              <span>Starts building immediately, with specialized Opus agents, instead of a generalistic one</span>
             </div>
           </div>
         </div>
