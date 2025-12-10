@@ -324,7 +324,7 @@
     <div class="closing-formula">
       <span class="formula-text">your_idea</span>
       <span class="formula-op">×</span>
-      <span class="formula-text highlight">(skilled_agents + mcp_powers)</span>
+      <span class="formula-text highlight">(skilled_agents + mcp_powers + vibeship_process)</span>
       <span class="formula-op">=</span>
       <span class="formula-result">shipped<span class="claude-highlight">_on_nitro</span></span>
     </div>
