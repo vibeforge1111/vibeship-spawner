@@ -426,7 +426,7 @@
 
   .hero-tagline {
     font-family: var(--font-serif);
-    font-size: var(--text-2xl);
+    font-size: var(--text-3xl);
     font-style: italic;
     color: var(--text-primary);
     margin: 0 0 var(--space-4);
