@@ -176,7 +176,7 @@
     <div class="hero-content">
       <div class="hero-badges">
         <span class="hero-badge">MCP-FIRST DEVELOPMENT</span>
-        <span class="hero-badge">SKILL-BASED AGENTS</span>
+        <span class="hero-badge claude-badge">SKILL-BASED AGENTS</span>
       </div>
       <p class="hero-tagline">The MCP that orchestrates your <span class="claude-highlight">Claude On Nitro.</span></p>
       <p class="hero-subtitle">The singularity of focused, trained Claude Opus agents and MCPs, instead of the generic approach. One command to summon your entire vibe coding crew and tools to work for you.</p>
@@ -407,6 +407,12 @@
     font-weight: 600;
     letter-spacing: 0.1em;
     color: var(--green-dim);
+  }
+
+  .hero-badge.claude-badge {
+    background: rgba(217, 119, 87, 0.1);
+    border-color: #D97757;
+    color: #D97757;
   }
 
   .hero-title {
