@@ -594,7 +594,7 @@
 
   .section-title {
     font-family: var(--font-serif);
-    font-size: var(--text-2xl);
+    font-size: var(--text-3xl);
     font-weight: 400;
     color: var(--text-primary);
     margin: 0 0 var(--space-2);
@@ -603,7 +603,7 @@
 
   .section-desc {
     text-align: center;
-    font-size: var(--text-sm);
+    font-size: var(--text-base);
     color: var(--text-secondary);
     margin: 0 0 var(--space-8);
   }
