@@ -115,9 +115,14 @@
 
   function copyCommand() {
     if (exportedGist) {
-      navigator.clipboard.writeText(`npx vibeship init ${exportedGist.id}`);
+      navigator.clipboard.writeText(`npx vibeship-orchestrator create ${exportedGist.id}`);
     }
   }
+
+  // Expandable help sections state
+  let showFirstTimeHelp = $state(false);
+  let showWindowsHelp = $state(false);
+  let showTroubleshootHelp = $state(false);
 
   function copyConfig() {
     navigator.clipboard.writeText(generateConfigJson());
@@ -321,11 +326,32 @@
             <p class="owner-note">Saved to your GitHub account (@{exportedGist.owner})</p>
           {/if}
 
+          <!-- Where to run section -->
+          <div class="where-to-run">
+            <h4>WHERE TO RUN THIS</h4>
+            <p>Open any terminal - this command creates a new folder for you.</p>
+            <ul class="terminal-examples">
+              <li><strong>VS Code / Cursor:</strong> View → Terminal (then paste command below)</li>
+              <li><strong>Mac:</strong> Open Terminal app</li>
+              <li><strong>Windows:</strong> Open PowerShell or Command Prompt</li>
+            </ul>
+          </div>
+
           <div class="command-box">
-            <code>npx vibeship init {exportedGist.id}</code>
+            <code>npx vibeship-orchestrator create {exportedGist.id}</code>
             <button class="copy-btn" onclick={copyCommand}>
               <Icon name="copy" size={16} />
             </button>
+          </div>
+
+          <div class="what-this-creates">
+            <p>This will create a folder called <strong>"{projectNameInput}"</strong> containing:</p>
+            <ul>
+              <li>CLAUDE.md - Your project config</li>
+              <li>{$selectedAgents.length} agent skills ({$selectedAgents.join(', ')})</li>
+              <li>{$selectedMcps.length} MCPs configured ({$selectedMcps.join(', ')})</li>
+              <li>PRD and architecture templates</li>
+            </ul>
           </div>
 
           <div class="gist-link">
@@ -336,13 +362,61 @@
           </div>
 
           <div class="next-steps">
-            <h4>Next Steps</h4>
+            <h4>THEN</h4>
             <ol>
-              <li>Open your terminal</li>
-              <li>Run the command above</li>
-              <li>cd into your project folder</li>
-              <li>Run <code>claude</code> and start building!</li>
+              <li>Open your IDE (VS Code, Cursor, etc.)</li>
+              <li>File → Open Folder → select <strong>"{projectNameInput}"</strong>
+                <span class="step-hint">(it's in the folder where you ran the command)</span>
+              </li>
+              <li>Open terminal in your IDE: View → Terminal</li>
+              <li>Type <code>claude</code> and press Enter</li>
+              <li>Claude greets you and starts the discovery process!</li>
             </ol>
+          </div>
+
+          <!-- Expandable help sections -->
+          <div class="help-sections">
+            <button class="help-toggle" onclick={() => showFirstTimeHelp = !showFirstTimeHelp}>
+              <Icon name={showFirstTimeHelp ? 'chevron-down' : 'chevron-right'} size={16} />
+              <span>First time? What you'll need...</span>
+            </button>
+            {#if showFirstTimeHelp}
+              <div class="help-content">
+                <ul>
+                  <li><strong>Node.js 18 or higher</strong> - Download at <a href="https://nodejs.org" target="_blank" rel="noopener">nodejs.org</a></li>
+                  <li><strong>Claude CLI</strong> - Install with: <code>npm install -g @anthropic-ai/claude-code</code></li>
+                  <li><strong>Anthropic API key</strong> - For Claude CLI to work</li>
+                </ul>
+              </div>
+            {/if}
+
+            <button class="help-toggle" onclick={() => showWindowsHelp = !showWindowsHelp}>
+              <Icon name={showWindowsHelp ? 'chevron-down' : 'chevron-right'} size={16} />
+              <span>Using Windows?</span>
+            </button>
+            {#if showWindowsHelp}
+              <div class="help-content">
+                <ul>
+                  <li>Use PowerShell, Command Prompt, or VS Code's built-in terminal</li>
+                  <li>All commands work the same way</li>
+                  <li>If using Git Bash, the commands also work identically</li>
+                </ul>
+              </div>
+            {/if}
+
+            <button class="help-toggle" onclick={() => showTroubleshootHelp = !showTroubleshootHelp}>
+              <Icon name={showTroubleshootHelp ? 'chevron-down' : 'chevron-right'} size={16} />
+              <span>Something not working?</span>
+            </button>
+            {#if showTroubleshootHelp}
+              <div class="help-content">
+                <ul>
+                  <li>Run <code>npx vibeship-orchestrator doctor</code> to check your environment</li>
+                  <li>This shows what's installed and what's missing</li>
+                  <li>Common issues: Node.js too old, Claude CLI not installed</li>
+                </ul>
+              </div>
+            {/if}
           </div>
         </div>
       {:else if exportFormat === 'github' && !$githubUser}
@@ -404,7 +478,7 @@
           <span>Download {projectNameInput}-vibeship-config.json</span>
         </button>
 
-        <p class="export-note">Then run: <code>npx vibeship init --local ./config.json</code></p>
+        <p class="export-note">Then run: <code>npx vibeship-orchestrator create --local ./{projectNameInput}-vibeship-config.json</code></p>
       </div>
     {/if}
 
@@ -975,5 +1049,148 @@
     .flow-arrow {
       transform: rotate(90deg);
     }
+  }
+
+  /* Where to run section */
+  .where-to-run {
+    margin-bottom: var(--space-4);
+    padding: var(--space-4);
+    background: var(--bg-tertiary);
+    border-left: 3px solid var(--green-dim);
+  }
+
+  .where-to-run h4 {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--green-dim);
+    margin: 0 0 var(--space-2);
+  }
+
+  .where-to-run p {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    margin: 0 0 var(--space-3);
+  }
+
+  .terminal-examples {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .terminal-examples li {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    padding: var(--space-1) 0;
+  }
+
+  .terminal-examples li strong {
+    color: var(--text-primary);
+  }
+
+  /* What this creates section */
+  .what-this-creates {
+    margin-bottom: var(--space-4);
+    padding: var(--space-4);
+    background: var(--bg-tertiary);
+  }
+
+  .what-this-creates p {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    margin: 0 0 var(--space-2);
+  }
+
+  .what-this-creates strong {
+    color: var(--green-dim);
+  }
+
+  .what-this-creates ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .what-this-creates li {
+    font-size: var(--text-sm);
+    color: var(--text-tertiary);
+    padding: var(--space-1) 0;
+    padding-left: var(--space-4);
+    position: relative;
+  }
+
+  .what-this-creates li::before {
+    content: '•';
+    position: absolute;
+    left: var(--space-1);
+    color: var(--green-dim);
+  }
+
+  /* Step hints */
+  .step-hint {
+    display: block;
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+    margin-top: 2px;
+  }
+
+  /* Help sections */
+  .help-sections {
+    margin-top: var(--space-6);
+    border-top: 1px solid var(--border);
+    padding-top: var(--space-4);
+  }
+
+  .help-toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    padding: var(--space-3);
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+    cursor: pointer;
+    text-align: left;
+    transition: color var(--transition-fast);
+  }
+
+  .help-toggle:hover {
+    color: var(--green-dim);
+  }
+
+  .help-content {
+    padding: 0 var(--space-3) var(--space-3) var(--space-8);
+  }
+
+  .help-content ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .help-content li {
+    font-size: var(--text-sm);
+    color: var(--text-tertiary);
+    padding: var(--space-1) 0;
+  }
+
+  .help-content li strong {
+    color: var(--text-secondary);
+  }
+
+  .help-content li a {
+    color: var(--green-dim);
+  }
+
+  .help-content li code {
+    background: var(--bg-tertiary);
+    padding: 2px var(--space-1);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
   }
 </style>
