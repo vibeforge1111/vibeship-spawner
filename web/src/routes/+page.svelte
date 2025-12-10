@@ -87,7 +87,7 @@
       { type: 'system', text: `+ Agents: ${example.agents}`, delay: 200 },
       { type: 'system', text: `+ MCPs: ${example.mcps}`, delay: 200 },
       { type: 'blank', delay: 300 },
-      { type: 'system', text: '> Summoning your vibe coding crew...', delay: 500 },
+      { type: 'system', text: '> Assembling your crew...', delay: 500 },
       { type: 'success', text: `+ ${example.agentCount} specialized agents activated`, delay: 200 },
       { type: 'success', text: `+ ${example.mcpCount} MCPs connected`, delay: 200 },
       { type: 'blank', delay: 300 },
@@ -158,7 +158,7 @@
   "mcpServers": {
     "vibeship": {
       "command": "npx",
-      "args": ["vibeship-orchestrator-mcp"]
+      "args": ["vibeship-crew"]
     }
   }
 }`);
@@ -178,8 +178,8 @@
         <span class="hero-badge">MCP-FIRST DEVELOPMENT</span>
         <span class="hero-badge claude-badge">SKILL-BASED AGENTS</span>
       </div>
-      <p class="hero-tagline">The MCP that orchestrates your <span class="claude-highlight">Claude On Nitro.</span></p>
-      <p class="hero-subtitle">The singularity of focused, trained Claude Opus agents and MCPs, instead of the generic approach. One command to summon your entire vibe coding crew and tools to work for you.</p>
+      <p class="hero-tagline">The MCP that assembles your <span class="claude-highlight">Claude Crew.</span></p>
+      <p class="hero-subtitle">The singularity of focused, trained Claude Opus agents and MCPs, instead of the generic approach. One command to summon your entire crew and tools to work for you.</p>
     </div>
 
     <!-- Animated Terminal -->
@@ -243,7 +243,7 @@
           <div class="terminal-code-block">
             <pre><code>{`"vibeship": {
   "command": "npx",
-  "args": ["vibeship-orchestrator-mcp"]
+  "args": ["vibeship-crew"]
 }`}</code></pre>
           </div>
           <div class="terminal-line-output dim">
@@ -288,7 +288,7 @@
         <div class="terminal-step-body">
           <div class="terminal-line-output">
             <span class="terminal-prompt">$</span>
-            <span class="terminal-cmd">vibeship orchestrates everything:</span>
+            <span class="terminal-cmd">vibeship crew assembles:</span>
           </div>
           <div class="terminal-output-list">
             <div class="terminal-output-line success">
@@ -319,15 +319,16 @@
   <!-- Closing Statement -->
   <section class="closing-section">
     <p class="closing-text">
-      Most just prompt, and get a spaghetti. Try <span class="highlight">orchestrating</span>.
+      Vibing solo? Try shipping with a crew.
     </p>
     <div class="closing-formula">
       <span class="formula-text">your_idea</span>
       <span class="formula-op">×</span>
-      <span class="formula-text highlight">(skilled_agents + mcp_powers + vibeship_process)</span>
+      <span class="formula-text highlight">(skilled_agents + mcp_powers + vibeship_crew)</span>
       <span class="formula-op">=</span>
       <span class="formula-result">shipped<span class="claude-highlight">_on_nitro</span></span>
     </div>
+    <a href="/how-it-works" class="cta-button">See How It Works</a>
   </section>
 
   <footer class="footer">
@@ -919,6 +920,24 @@
   .formula-result {
     color: var(--text-primary);
     font-weight: 600;
+  }
+
+  .cta-button {
+    display: inline-block;
+    margin-top: var(--space-8);
+    padding: var(--space-4) var(--space-8);
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: var(--text-base);
+    text-decoration: none;
+    transition: all var(--transition-fast);
+  }
+
+  .cta-button:hover {
+    border-color: var(--green-dim);
+    color: var(--green-dim);
   }
 
   /* Advanced section */

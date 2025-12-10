@@ -115,7 +115,7 @@
 
   function copyCommand() {
     if (exportedGist) {
-      navigator.clipboard.writeText(`npx vibeship-orchestrator create ${exportedGist.id}`);
+      navigator.clipboard.writeText(`npx vibeship-crew create ${exportedGist.id}`);
     }
   }
 
@@ -361,7 +361,7 @@
             </div>
 
             <div class="command-box">
-              <code>npx vibeship-orchestrator create {exportedGist.id}</code>
+              <code>npx vibeship-crew create {exportedGist.id}</code>
               <button class="copy-btn" onclick={copyCommand}>
                 <Icon name="copy" size={16} />
               </button>
@@ -393,9 +393,9 @@
                 <p>Add to your <code>claude_desktop_config.json</code>:</p>
                 <pre class="mcp-config">{`{
   "mcpServers": {
-    "vibeship-orchestrator": {
+    "vibeship-crew": {
       "command": "npx",
-      "args": ["vibeship-orchestrator-mcp"]
+      "args": ["vibeship-crew"]
     }
   }
 }`}</pre>

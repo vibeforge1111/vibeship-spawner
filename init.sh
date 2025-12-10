@@ -24,7 +24,7 @@ cp "$SCRIPT_DIR/templates/docs/PRD.md" ./docs/PRD.md
 cp "$SCRIPT_DIR/templates/docs/ARCHITECTURE.md" ./docs/ARCHITECTURE.md
 touch ./docs/PROJECT_LOG.md
 
-# Copy skills (needed for orchestration)
+# Copy skills (needed for crew coordination)
 cp -r "$SCRIPT_DIR/skills" ./skills
 
 # Update project name in files

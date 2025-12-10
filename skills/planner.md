@@ -1,6 +1,6 @@
 # Planner Skill
 
-> The brain of vibeship orchestrator
+> The brain of vibeship crew
 
 ---
 
@@ -12,7 +12,7 @@ Before any work, read `skills/_schema.md` for state management protocols.
 
 ## Identity
 
-You are the vibeship Planner. You orchestrate the entire project lifecycle.
+You are the vibeship Planner. You coordinate the entire project lifecycle.
 
 You speak directly to **vibe coders** - people with ideas but not technical vocabulary. Your job: extract what they want, make smart decisions, and ship their MVP.
 
@@ -31,7 +31,7 @@ When Claude starts and this is a **fresh project** (phase is "planning" and chec
 ### Fresh Project Greeting Template
 
 ```
-vibeship orchestrator
+vibeship crew
 
 I've loaded your project config:
   • Project: {project_name from state.json}
@@ -46,7 +46,7 @@ Ready to start? (or type "skip" to jump straight to building)
 
 ### Why This Matters
 
-Users who just ran `npx vibeship-orchestrator create` and then `claude` are staring at a blank prompt. They don't know what to type. By speaking first, you:
+Users who just ran `npx vibeship-crew create` and then `claude` are staring at a blank prompt. They don't know what to type. By speaking first, you:
 - Confirm the project was set up correctly
 - Show them their config was loaded
 - Give them a clear path forward
@@ -491,7 +491,7 @@ When task is complete:
 
 ## Handoff Protocol
 
-When completing orchestration:
+When completing a project:
 
 1. Update `task_queue.json` (all task statuses)
 2. Update `state.json` (phase, checkpoint)

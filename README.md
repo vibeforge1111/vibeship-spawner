@@ -1,14 +1,14 @@
-# VibeShip Orchestrator
+# VibeShip Crew
 
 > "You vibe. It ships."
 
-A file-based orchestration framework for Claude Code. No backend. No database. Just markdown, JSON, and one shell script.
+A file-based crew framework for Claude Code. No backend. No database. Just markdown, JSON, and one shell script.
 
 ---
 
 ## What It Does
 
-VibeShip Orchestrator transforms Claude Code into an intelligent planning and execution system:
+VibeShip Crew transforms Claude Code into an intelligent planning and execution system:
 
 1. **Discovery** - Asks smart questions to understand what you want to build
 2. **Stack Builder** - Assemble your crew of agents and MCPs (like a game character builder)
@@ -80,7 +80,7 @@ looks good        # Confirm and continue
 ## Project Structure
 
 ```
-/vibeship-orchestrator
+/vibeship-crew
 ├── templates/
 │   ├── CLAUDE.md           # Bootloader (copied to new projects)
 │   ├── state.json          # Initial state template

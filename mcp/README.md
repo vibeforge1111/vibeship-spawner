@@ -1,6 +1,6 @@
-# vibeship-orchestrator-mcp
+# vibeship-crew
 
-MCP server for vibeship orchestrator - scaffold AI-powered projects directly from Claude.
+MCP server for vibeship crew - scaffold AI-powered projects directly from Claude.
 
 ## Installation
 
@@ -9,9 +9,9 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
-    "vibeship-orchestrator": {
+    "vibeship-crew": {
       "command": "node",
-      "args": ["C:/path/to/vibeship-orchestrator/mcp/src/index.js"]
+      "args": ["C:/path/to/vibeship-crew/mcp/src/index.js"]
     }
   }
 }
@@ -22,9 +22,9 @@ Or if published to npm:
 ```json
 {
   "mcpServers": {
-    "vibeship-orchestrator": {
+    "vibeship-crew": {
       "command": "npx",
-      "args": ["vibeship-orchestrator-mcp"]
+      "args": ["vibeship-crew"]
     }
   }
 }
@@ -34,7 +34,7 @@ Or if published to npm:
 
 ### create_project
 
-Create a new vibeship orchestrator project.
+Create a new vibeship crew project.
 
 **Parameters:**
 - `gist_id` - GitHub Gist ID from vibeship web configurator

@@ -1,8 +1,8 @@
 # {project_name}
 
-## vibeship orchestrator
+## vibeship crew
 
-This project uses vibeship orchestrator for AI-powered development orchestration.
+This project uses vibeship crew for AI-powered development.
 
 > "You vibe. It ships."
 
@@ -28,7 +28,7 @@ ALWAYS do this first:
 When starting a fresh project, greet the user like this:
 
 ```
-vibeship orchestrator
+vibeship crew
 
 I've loaded your project config:
   • Project: {project_name}

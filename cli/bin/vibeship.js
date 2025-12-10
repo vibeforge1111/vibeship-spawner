@@ -6,8 +6,8 @@ import { create } from '../src/create.js';
 import { doctor } from '../src/doctor.js';
 
 program
-  .name('vibeship-orchestrator')
-  .description('CLI for vibeship orchestrator - scaffold projects from your stack config')
+  .name('vibeship-crew')
+  .description('CLI for vibeship crew - scaffold projects from your stack config')
   .version('1.0.0');
 
 // Primary command: create
