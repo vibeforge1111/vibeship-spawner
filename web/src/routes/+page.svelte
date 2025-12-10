@@ -245,13 +245,6 @@
   "command": "npx",
   "args": ["vibeship-orchestrator-mcp"]
 }`}</code></pre>
-            <button class="copy-btn" onclick={copyConfig}>
-              {#if copied}
-                <Icon name="check" size={14} />
-              {:else}
-                <Icon name="copy" size={14} />
-              {/if}
-            </button>
           </div>
           <div class="terminal-line-output dim">
             <span class="terminal-prompt">#</span>
