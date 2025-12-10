@@ -453,7 +453,7 @@
     z-index: 1;
     width: 100%;
     max-width: 600px;
-    height: 446px;
+    height: 456px;
     overflow: hidden;
   }
 
