@@ -325,8 +325,18 @@
   <!-- Closing Statement -->
   <section class="closing-section">
     <p class="closing-text">
-      Stop prompting. Start <span class="highlight">orchestrating</span>.
+      Most just prompt, and get spaghetti.
     </p>
+    <p class="closing-text highlight-line">
+      Try <span class="highlight">orchestrating</span>.
+    </p>
+    <div class="closing-formula">
+      <span class="formula-text">your_idea</span>
+      <span class="formula-op">×</span>
+      <span class="formula-text highlight">(skilled_agents + mcp_powers)</span>
+      <span class="formula-op">=</span>
+      <span class="formula-result">shipped<span class="claude-highlight">_on_nitro</span></span>
+    </div>
   </section>
 
   <footer class="footer">
@@ -862,16 +872,50 @@
 
   .closing-text {
     font-family: var(--font-serif);
-    font-size: var(--text-2xl);
+    font-size: var(--text-xl);
     font-style: italic;
+    color: var(--text-tertiary);
+    margin: 0 0 var(--space-2);
+  }
+
+  .closing-text.highlight-line {
+    font-size: var(--text-2xl);
     color: var(--text-secondary);
-    margin: 0;
+    margin-bottom: var(--space-6);
   }
 
   .closing-text .highlight {
     color: var(--green-dim);
     font-style: normal;
     font-weight: 500;
+  }
+
+  .closing-formula {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-tertiary);
+  }
+
+  .formula-text {
+    color: var(--text-secondary);
+  }
+
+  .formula-text.highlight {
+    color: var(--green-dim);
+  }
+
+  .formula-op {
+    color: var(--text-tertiary);
+  }
+
+  .formula-result {
+    color: var(--text-primary);
+    font-weight: 600;
   }
 
   /* Advanced section */
@@ -1007,7 +1051,15 @@
     }
 
     .closing-text {
+      font-size: var(--text-base);
+    }
+
+    .closing-text.highlight-line {
       font-size: var(--text-xl);
+    }
+
+    .closing-formula {
+      font-size: var(--text-xs);
     }
   }
 </style>
