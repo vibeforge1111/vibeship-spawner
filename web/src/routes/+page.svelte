@@ -532,7 +532,7 @@
   .terminal-line.prompt { color: #8b949e; }
   .terminal-line.user { color: var(--green-dim); }
   .terminal-line.system { color: #8b949e; }
-  .terminal-line.success { color: #3fb950; }
+  .terminal-line.success { color: var(--green-dim); }
   .terminal-line.files { color: #58a6ff; }
   .terminal-line.magic { color: #f0883e; font-weight: 600; }
   .terminal-line.blank { height: 1.6em; }
@@ -753,11 +753,12 @@
   }
 
   .terminal-output-line.success {
-    color: #3fb950;
+    color: #c9d1d9;
   }
 
   .output-prefix {
     font-weight: 700;
+    color: var(--green-dim);
   }
 
   /* Crew Section */
