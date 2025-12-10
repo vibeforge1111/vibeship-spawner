@@ -192,11 +192,9 @@
             <span class="dot green"></span>
           </div>
           <span class="terminal-title">claude</span>
-          {#if animationComplete}
-            <button class="replay-btn" onclick={startAnimation} title="Replay animation">
-              <Icon name="rotate-ccw" size={14} />
-            </button>
-          {/if}
+          <button class="replay-btn" class:visible={animationComplete} onclick={startAnimation} title="Replay animation">
+            <Icon name="rotate-ccw" size={14} />
+          </button>
         </div>
         <div class="terminal-body">
           {#each visibleLines as line}
@@ -505,15 +503,22 @@
 
   .replay-btn {
     background: transparent;
-    border: 1px solid #30363d;
-    color: #8b949e;
+    border: 1px solid transparent;
+    color: transparent;
     padding: 4px 8px;
     border-radius: 4px;
     cursor: pointer;
     transition: all var(--transition-fast);
+    pointer-events: none;
   }
 
-  .replay-btn:hover {
+  .replay-btn.visible {
+    border-color: #30363d;
+    color: #8b949e;
+    pointer-events: auto;
+  }
+
+  .replay-btn.visible:hover {
     border-color: var(--green-dim);
     color: var(--green-dim);
   }
