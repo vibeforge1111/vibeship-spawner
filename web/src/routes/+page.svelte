@@ -325,7 +325,7 @@
   <!-- Closing Statement -->
   <section class="closing-section">
     <p class="closing-text">
-      Most just prompt, and get spaghetti. Try <span class="highlight">orchestrating</span>.
+      Most just prompt, and get a spaghetti. Try <span class="highlight">orchestrating</span>.
     </p>
     <div class="closing-formula">
       <span class="formula-text">your_idea</span>
