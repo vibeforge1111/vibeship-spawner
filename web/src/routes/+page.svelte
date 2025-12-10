@@ -295,93 +295,31 @@
     </div>
   </section>
 
-  <!-- The Crew: Templates/Agents visualization -->
-  <section class="crew-section">
-    <h2 class="section-title">
-      <span class="title-icon">👥</span>
-      Your Crew
-    </h2>
-    <p class="section-desc">AI agents that work together, orchestrated by vibeship</p>
-
-    <div class="crew-visual">
-      <div class="agent-grid">
-        <div class="agent-card">
-          <span class="agent-icon">📋</span>
-          <span class="agent-name">Planner</span>
-        </div>
-        <div class="agent-card">
-          <span class="agent-icon">🎨</span>
-          <span class="agent-name">Frontend</span>
-        </div>
-        <div class="agent-card">
-          <span class="agent-icon">⚙️</span>
-          <span class="agent-name">Backend</span>
-        </div>
-        <div class="agent-card">
-          <span class="agent-icon">🗄️</span>
-          <span class="agent-name">Database</span>
-        </div>
-        <div class="agent-card">
-          <span class="agent-icon">🧪</span>
-          <span class="agent-name">Testing</span>
-        </div>
-        <div class="agent-card">
-          <span class="agent-icon">💳</span>
-          <span class="agent-name">Payments</span>
+  <!-- The Flow -->
+  <section class="flow-section">
+    <div class="flow-container">
+      <div class="flow-item">
+        <div class="flow-icon">💡</div>
+        <div class="flow-label">Your Idea</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-item flow-combo">
+        <div class="flow-combo-row">
+          <div class="flow-mini">
+            <span class="flow-mini-icon">🤖</span>
+            <span>Skilled Crew</span>
+          </div>
+          <span class="flow-plus">+</span>
+          <div class="flow-mini">
+            <span class="flow-mini-icon">⚡</span>
+            <span>MCP Powers</span>
+          </div>
         </div>
       </div>
-    </div>
-
-    <h3 class="templates-title">Choose a Template</h3>
-    <div class="templates-grid">
-      {#each templates as template}
-        <TemplateCard
-          {template}
-          selected={false}
-          onClick={() => selectTemplate(template.id)}
-        />
-      {/each}
-    </div>
-  </section>
-
-  <!-- MCP Constellation -->
-  <section class="mcp-section">
-    <h2 class="section-title">
-      <span class="title-icon">🔌</span>
-      MCP Superpowers
-    </h2>
-    <p class="section-desc">Connect to any service. vibeship knows which MCPs you need.</p>
-
-    <div class="mcp-grid">
-      <div class="mcp-card">
-        <span class="mcp-icon">📂</span>
-        <span class="mcp-name">filesystem</span>
-        <span class="mcp-desc">Read & write files</span>
-      </div>
-      <div class="mcp-card">
-        <span class="mcp-icon">🔷</span>
-        <span class="mcp-name">supabase</span>
-        <span class="mcp-desc">Database & auth</span>
-      </div>
-      <div class="mcp-card">
-        <span class="mcp-icon">💳</span>
-        <span class="mcp-name">stripe</span>
-        <span class="mcp-desc">Payments</span>
-      </div>
-      <div class="mcp-card">
-        <span class="mcp-icon">🐙</span>
-        <span class="mcp-name">github</span>
-        <span class="mcp-desc">Version control</span>
-      </div>
-      <div class="mcp-card">
-        <span class="mcp-icon">🤖</span>
-        <span class="mcp-name">anthropic</span>
-        <span class="mcp-desc">AI integration</span>
-      </div>
-      <div class="mcp-card">
-        <span class="mcp-icon">🔍</span>
-        <span class="mcp-name">algolia</span>
-        <span class="mcp-desc">Search</span>
+      <div class="flow-arrow">=</div>
+      <div class="flow-item flow-result">
+        <div class="flow-icon">🚀</div>
+        <div class="flow-label">Vibe Coded <span class="claude-highlight">On Nitro</span></div>
       </div>
     </div>
   </section>
@@ -389,8 +327,6 @@
   <!-- CTA -->
   <section class="cta-section">
     <div class="cta-glow"></div>
-    <h2>Ready to become a vibe coding wizard?</h2>
-    <p>Install the MCP and start building with just your words.</p>
     <button class="cta-btn" onclick={copyConfig}>
       {#if copied}
         <Icon name="check" size={20} />
@@ -401,16 +337,6 @@
       {/if}
     </button>
     <p class="cta-hint">Add to claude_desktop_config.json → Restart Claude → Start vibing</p>
-  </section>
-
-  <!-- Advanced section for web builder -->
-  <section class="advanced">
-    <h3>Want more control?</h3>
-    <p>Use the web builder to customize agents, MCPs, and behaviors.</p>
-    <button class="btn btn-secondary" onclick={() => goto('/builder')}>
-      Open Builder
-      <Icon name="arrow-right" size={16} />
-    </button>
   </section>
 
   <footer class="footer">
@@ -524,6 +450,7 @@
     z-index: 1;
     width: 100%;
     max-width: 600px;
+    height: 440px;
   }
 
   .terminal {
@@ -912,6 +839,100 @@
     color: var(--text-tertiary);
   }
 
+  /* Flow Section */
+  .flow-section {
+    padding: var(--space-12) var(--space-8);
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  .flow-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-6);
+    flex-wrap: wrap;
+  }
+
+  .flow-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-4) var(--space-5);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    transition: all var(--transition-fast);
+  }
+
+  .flow-item:hover {
+    border-color: var(--green-dim);
+  }
+
+  .flow-icon {
+    font-size: var(--text-3xl);
+  }
+
+  .flow-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--text-primary);
+    text-align: center;
+  }
+
+  .flow-arrow {
+    font-size: var(--text-2xl);
+    color: var(--green-dim);
+    font-weight: 700;
+  }
+
+  .flow-combo {
+    padding: var(--space-4) var(--space-6);
+    background: rgba(0, 196, 154, 0.05);
+    border-color: var(--green-dim);
+  }
+
+  .flow-combo-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+  }
+
+  .flow-mini {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+  }
+
+  .flow-mini-icon {
+    font-size: var(--text-lg);
+  }
+
+  .flow-plus {
+    font-size: var(--text-xl);
+    font-weight: 700;
+    color: var(--green-dim);
+  }
+
+  .flow-result {
+    background: var(--green-dim);
+    border-color: var(--green-dim);
+  }
+
+  .flow-result .flow-label {
+    color: var(--bg-primary);
+  }
+
+  .flow-result .claude-highlight {
+    color: #fff;
+    font-weight: 700;
+  }
+
   /* CTA Section */
   .cta-section {
     position: relative;
@@ -1125,6 +1146,24 @@
 
     .templates-grid {
       grid-template-columns: 1fr;
+    }
+
+    .flow-section {
+      padding: var(--space-8) var(--space-4);
+    }
+
+    .flow-container {
+      flex-direction: column;
+      gap: var(--space-4);
+    }
+
+    .flow-arrow {
+      transform: rotate(90deg);
+    }
+
+    .flow-combo-row {
+      flex-direction: column;
+      gap: var(--space-2);
     }
   }
 </style>
