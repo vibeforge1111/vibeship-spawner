@@ -477,6 +477,7 @@
     padding: var(--space-3) var(--space-4);
     background: #161b22;
     border-bottom: 1px solid #30363d;
+    flex-shrink: 0;
   }
 
   .terminal-dots {
