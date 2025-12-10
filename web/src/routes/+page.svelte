@@ -11,38 +11,107 @@
   let copied = $state(false);
   let isAnimating = $state(false);
   let animationComplete = $state(false);
+  let currentExample = $state(0);
 
-  const terminalLines = [
-    { type: 'prompt', text: '> ' },
-    { type: 'user', text: '"Create a saas project called my-startup"', delay: 50 },
-    { type: 'blank', delay: 800 },
-    { type: 'system', text: '+ vibeship orchestrator connected', delay: 100 },
-    { type: 'system', text: '> Analyzing project type...', delay: 400 },
-    { type: 'system', text: '+ Template: SaaS', delay: 200 },
-    { type: 'system', text: '+ Agents: planner, frontend, backend, database, testing', delay: 200 },
-    { type: 'system', text: '+ MCPs: filesystem, supabase, stripe', delay: 200 },
-    { type: 'blank', delay: 300 },
-    { type: 'system', text: '> Scaffolding project...', delay: 500 },
-    { type: 'success', text: '+ Project "my-startup" created!', delay: 300 },
-    { type: 'blank', delay: 200 },
-    { type: 'files', text: '  my-startup/', delay: 100 },
-    { type: 'files', text: '  ├── CLAUDE.md', delay: 80 },
-    { type: 'files', text: '  ├── state.json', delay: 80 },
-    { type: 'files', text: '  ├── skills/', delay: 80 },
-    { type: 'files', text: '  │   ├── planner.md', delay: 60 },
-    { type: 'files', text: '  │   ├── frontend.md', delay: 60 },
-    { type: 'files', text: '  │   └── ...', delay: 60 },
-    { type: 'files', text: '  └── docs/', delay: 80 },
-    { type: 'blank', delay: 400 },
-    { type: 'magic', text: '✨ Ready to build. Just start vibing.', delay: 100 },
+  const examples = [
+    // Web3 NFT Marketplace
+    {
+      prompt: '"Build me a web3 NFT marketplace with Solana integration"',
+      template: 'Web3 Marketplace',
+      agents: 'architect, smart-contracts, frontend, backend, security',
+      mcps: 'filesystem, solana, ipfs, supabase',
+      agentCount: 5,
+      mcpCount: 4,
+      projectName: 'nft-marketplace',
+      skills: ['architect.md', 'smart-contracts.md', 'security-auditor.md'],
+      extraFolder: 'contracts/'
+    },
+    // AI Research Assistant
+    {
+      prompt: '"Create an AI research assistant with RAG and memory"',
+      template: 'AI Application',
+      agents: 'architect, ml-engineer, backend, data-pipeline, eval',
+      mcps: 'filesystem, anthropic, pinecone, postgres',
+      agentCount: 5,
+      mcpCount: 4,
+      projectName: 'research-assistant',
+      skills: ['ml-engineer.md', 'data-pipeline.md', 'eval-specialist.md'],
+      extraFolder: 'embeddings/'
+    },
+    // Fintech Trading Platform
+    {
+      prompt: '"Build a real-time crypto trading bot with alerts"',
+      template: 'Fintech Tool',
+      agents: 'architect, quant, backend, data-streams, risk-mgmt',
+      mcps: 'filesystem, binance, telegram, redis, postgres',
+      agentCount: 5,
+      mcpCount: 5,
+      projectName: 'trading-bot',
+      skills: ['quant-analyst.md', 'risk-mgmt.md', 'data-streams.md'],
+      extraFolder: 'strategies/'
+    },
+    // Healthcare SaaS
+    {
+      prompt: '"Create a HIPAA-compliant telemedicine platform"',
+      template: 'Healthcare SaaS',
+      agents: 'architect, compliance, frontend, backend, security',
+      mcps: 'filesystem, twilio, stripe, supabase, aws-health',
+      agentCount: 5,
+      mcpCount: 5,
+      projectName: 'telehealth-app',
+      skills: ['compliance.md', 'hipaa-security.md', 'video-integration.md'],
+      extraFolder: 'compliance/'
+    },
+    // Game Development
+    {
+      prompt: '"Build a multiplayer roguelike with procedural dungeons"',
+      template: 'Game Dev',
+      agents: 'game-designer, engine-dev, netcode, procedural-gen, audio',
+      mcps: 'filesystem, unity, photon, steamworks',
+      agentCount: 5,
+      mcpCount: 4,
+      projectName: 'dungeon-crawler',
+      skills: ['game-designer.md', 'procedural-gen.md', 'netcode.md'],
+      extraFolder: 'assets/'
+    }
   ];
 
-  let visibleLines = $state<typeof terminalLines>([]);
+  function getTerminalLines(example: typeof examples[0]) {
+    return [
+      { type: 'prompt', text: '> ' },
+      { type: 'user', text: example.prompt, delay: 50 },
+      { type: 'blank', delay: 800 },
+      { type: 'system', text: '+ vibeship connected', delay: 100 },
+      { type: 'system', text: '> Analyzing project scope...', delay: 400 },
+      { type: 'success', text: `+ Template: ${example.template}`, delay: 200 },
+      { type: 'system', text: `+ Agents: ${example.agents}`, delay: 200 },
+      { type: 'system', text: `+ MCPs: ${example.mcps}`, delay: 200 },
+      { type: 'blank', delay: 300 },
+      { type: 'system', text: '> Summoning your vibe coding crew...', delay: 500 },
+      { type: 'success', text: `+ ${example.agentCount} specialized agents activated`, delay: 200 },
+      { type: 'success', text: `+ ${example.mcpCount} MCPs connected`, delay: 200 },
+      { type: 'blank', delay: 300 },
+      { type: 'system', text: `> Scaffolding ${example.projectName}...`, delay: 400 },
+      { type: 'files', text: `  ${example.projectName}/`, delay: 100 },
+      { type: 'files', text: '  ├── CLAUDE.md', delay: 60 },
+      { type: 'files', text: '  ├── skills/', delay: 60 },
+      { type: 'files', text: `  │   ├── ${example.skills[0]}`, delay: 40 },
+      { type: 'files', text: `  │   ├── ${example.skills[1]}`, delay: 40 },
+      { type: 'files', text: `  │   └── ${example.skills[2]}`, delay: 40 },
+      { type: 'files', text: `  └── ${example.extraFolder}`, delay: 60 },
+      { type: 'blank', delay: 400 },
+      { type: 'magic', text: '✨ Your crew is ready. Start vibing.', delay: 100 },
+    ];
+  }
+
+  let visibleLines = $state<ReturnType<typeof getTerminalLines>>([]);
 
   function startAnimation() {
     visibleLines = [];
     isAnimating = true;
     animationComplete = false;
+
+    const terminalLines = getTerminalLines(examples[currentExample]);
     let lineIndex = 0;
 
     function showNextLine() {
@@ -56,6 +125,8 @@
       } else {
         isAnimating = false;
         animationComplete = true;
+        // Rotate to next example for next replay
+        currentExample = (currentExample + 1) % examples.length;
       }
     }
 
@@ -100,10 +171,12 @@
   <section class="hero">
     <div class="hero-glow"></div>
     <div class="hero-content">
-      <div class="hero-badge">MCP-FIRST DEVELOPMENT</div>
-      <h1 class="hero-title">vibeship orchestrator</h1>
-      <p class="hero-tagline">You vibe. It ships.</p>
-      <p class="hero-subtitle">The singularity of AI agents and MCPs. One command to summon your entire dev crew.</p>
+      <div class="hero-badges">
+        <span class="hero-badge">MCP-FIRST DEVELOPMENT</span>
+        <span class="hero-badge">SKILL-BASED AGENTS</span>
+      </div>
+      <p class="hero-tagline">The MCP that orchestrates your <span class="claude-highlight">Claude On Nitro.</span></p>
+      <p class="hero-subtitle">The singularity of focused, trained Claude Opus agents and MCPs, instead of the generic approach. One command to summon your entire vibe coding crew and tools to work for you.</p>
     </div>
 
     <!-- Animated Terminal -->
@@ -228,40 +301,35 @@
     <p class="section-desc">AI agents that work together, orchestrated by vibeship</p>
 
     <div class="crew-visual">
-      <div class="crew-center">
-        <div class="orchestrator-node">
-          <span class="node-icon">🎯</span>
-          <span class="node-label">vibeship</span>
+      <div class="agent-grid">
+        <div class="agent-card">
+          <span class="agent-icon">📋</span>
+          <span class="agent-name">Planner</span>
         </div>
-      </div>
-      <div class="crew-orbit">
-        <div class="agent-node" style="--delay: 0s; --position: 0;">
-          <span class="node-icon">📋</span>
-          <span class="node-label">Planner</span>
+        <div class="agent-card">
+          <span class="agent-icon">🎨</span>
+          <span class="agent-name">Frontend</span>
         </div>
-        <div class="agent-node" style="--delay: 0.5s; --position: 1;">
-          <span class="node-icon">🎨</span>
-          <span class="node-label">Frontend</span>
+        <div class="agent-card">
+          <span class="agent-icon">⚙️</span>
+          <span class="agent-name">Backend</span>
         </div>
-        <div class="agent-node" style="--delay: 1s; --position: 2;">
-          <span class="node-icon">⚙️</span>
-          <span class="node-label">Backend</span>
+        <div class="agent-card">
+          <span class="agent-icon">🗄️</span>
+          <span class="agent-name">Database</span>
         </div>
-        <div class="agent-node" style="--delay: 1.5s; --position: 3;">
-          <span class="node-icon">🗄️</span>
-          <span class="node-label">Database</span>
+        <div class="agent-card">
+          <span class="agent-icon">🧪</span>
+          <span class="agent-name">Testing</span>
         </div>
-        <div class="agent-node" style="--delay: 2s; --position: 4;">
-          <span class="node-icon">🧪</span>
-          <span class="node-label">Testing</span>
-        </div>
-        <div class="agent-node" style="--delay: 2.5s; --position: 5;">
-          <span class="node-icon">💳</span>
-          <span class="node-label">Payments</span>
+        <div class="agent-card">
+          <span class="agent-icon">💳</span>
+          <span class="agent-name">Payments</span>
         </div>
       </div>
     </div>
 
+    <h3 class="templates-title">Choose a Template</h3>
     <div class="templates-grid">
       {#each templates as template}
         <TemplateCard
@@ -364,9 +432,10 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: var(--space-12) var(--space-8);
+    padding: var(--space-16) var(--space-8);
+    padding-top: 120px;
     text-align: center;
-    min-height: 90vh;
+    min-height: auto;
     overflow: hidden;
   }
 
@@ -395,6 +464,14 @@
     margin-bottom: var(--space-8);
   }
 
+  .hero-badges {
+    display: flex;
+    gap: var(--space-3);
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: var(--space-4);
+  }
+
   .hero-badge {
     display: inline-block;
     padding: var(--space-1) var(--space-3);
@@ -403,9 +480,8 @@
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     font-weight: 600;
-    letter-spacing: 0.15em;
+    letter-spacing: 0.1em;
     color: var(--green-dim);
-    margin-bottom: var(--space-4);
   }
 
   .hero-title {
@@ -421,17 +497,22 @@
     font-family: var(--font-serif);
     font-size: var(--text-2xl);
     font-style: italic;
-    color: var(--green-dim);
+    color: var(--text-primary);
     margin: 0 0 var(--space-4);
   }
 
+  .claude-highlight {
+    color: #D97757;
+  }
+
   .hero-subtitle {
-    font-size: var(--text-lg);
-    color: var(--text-secondary);
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.85);
     margin: 0;
-    max-width: 500px;
+    max-width: 550px;
     margin-left: auto;
     margin-right: auto;
+    line-height: 1.6;
   }
 
   /* Terminal */
@@ -564,6 +645,7 @@
     padding: var(--space-16) var(--space-8);
     max-width: 900px;
     margin: 0 auto;
+    margin-top: var(--space-8);
   }
 
   .section-title {
@@ -724,95 +806,53 @@
   }
 
   .crew-visual {
-    position: relative;
-    height: 300px;
-    max-width: 400px;
-    margin: 0 auto var(--space-10);
+    max-width: 600px;
+    margin: 0 auto var(--space-8);
   }
 
-  .crew-center {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 2;
+  .agent-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: var(--space-3);
   }
 
-  .orchestrator-node {
+  .agent-card {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--space-1);
-    padding: var(--space-4);
-    background: var(--green-dim);
-    border-radius: 50%;
-    width: 80px;
-    height: 80px;
-    justify-content: center;
-    box-shadow: 0 0 40px rgba(0, 196, 154, 0.4);
-  }
-
-  .orchestrator-node .node-icon {
-    font-size: var(--text-xl);
-  }
-
-  .orchestrator-node .node-label {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    font-weight: 600;
-    color: var(--bg-primary);
-  }
-
-  .crew-orbit {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    animation: rotate 30s linear infinite;
-  }
-
-  @keyframes rotate {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-  }
-
-  .agent-node {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    padding: var(--space-2);
+    gap: var(--space-2);
+    padding: var(--space-4) var(--space-2);
     background: var(--bg-primary);
     border: 1px solid var(--border);
     border-radius: 8px;
-    transform-origin: center;
-    animation: counter-rotate 30s linear infinite;
+    transition: all var(--transition-fast);
   }
 
-  @keyframes counter-rotate {
-    from { transform: translate(-50%, -50%) rotate(0deg); }
-    to { transform: translate(-50%, -50%) rotate(-360deg); }
+  .agent-card:hover {
+    border-color: var(--green-dim);
+    transform: translateY(-2px);
   }
 
-  .agent-node:nth-child(1) { transform: translate(-50%, -50%) translateY(-120px); }
-  .agent-node:nth-child(2) { transform: translate(-50%, -50%) translateY(-120px) rotate(60deg) translateY(120px) rotate(-60deg) translateY(-120px); }
-  .agent-node:nth-child(3) { transform: translate(-50%, -50%) rotate(60deg) translateY(-120px); }
-  .agent-node:nth-child(4) { transform: translate(-50%, -50%) rotate(120deg) translateY(-120px); }
-  .agent-node:nth-child(5) { transform: translate(-50%, -50%) rotate(180deg) translateY(-120px); }
-  .agent-node:nth-child(6) { transform: translate(-50%, -50%) rotate(240deg) translateY(-120px); }
-
-  .agent-node .node-icon {
-    font-size: var(--text-lg);
+  .agent-icon {
+    font-size: var(--text-2xl);
   }
 
-  .agent-node .node-label {
+  .agent-name {
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    text-align: center;
+  }
+
+  .templates-title {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
     color: var(--text-tertiary);
+    text-align: center;
+    margin: 0 0 var(--space-6);
   }
 
   .templates-grid {
@@ -1007,12 +1047,30 @@
 
   /* Responsive */
   @media (max-width: 768px) {
+    .hero {
+      min-height: auto;
+      padding: var(--space-8) var(--space-4);
+    }
+
     .hero-title {
       font-size: var(--text-3xl);
     }
 
     .hero-tagline {
       font-size: var(--text-xl);
+    }
+
+    .terminal-container {
+      max-width: 100%;
+    }
+
+    .terminal-body {
+      min-height: 250px;
+      font-size: var(--text-xs);
+    }
+
+    .magic-section {
+      padding: var(--space-12) var(--space-4);
     }
 
     .magic-step {
@@ -1033,14 +1091,36 @@
       width: 100%;
     }
 
-    .crew-visual {
-      height: 250px;
+    .crew-section {
+      padding: var(--space-12) var(--space-4);
     }
 
-    .agent-node:nth-child(1) { transform: translate(-50%, -50%) translateY(-100px); }
-    .agent-node:nth-child(3) { transform: translate(-50%, -50%) rotate(60deg) translateY(-100px); }
-    .agent-node:nth-child(4) { transform: translate(-50%, -50%) rotate(120deg) translateY(-100px); }
-    .agent-node:nth-child(5) { transform: translate(-50%, -50%) rotate(180deg) translateY(-100px); }
-    .agent-node:nth-child(6) { transform: translate(-50%, -50%) rotate(240deg) translateY(-100px); }
+    .agent-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    .agent-card {
+      padding: var(--space-3) var(--space-2);
+    }
+
+    .agent-icon {
+      font-size: var(--text-xl);
+    }
+
+    .mcp-section {
+      padding: var(--space-12) var(--space-4);
+    }
+
+    .mcp-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+
+    .cta-section {
+      padding: var(--space-12) var(--space-4);
+    }
+
+    .templates-grid {
+      grid-template-columns: 1fr;
+    }
   }
 </style>
