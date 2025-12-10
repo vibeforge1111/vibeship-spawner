@@ -125,8 +125,11 @@
       } else {
         isAnimating = false;
         animationComplete = true;
-        // Rotate to next example for next replay
-        currentExample = (currentExample + 1) % examples.length;
+        // Auto-rotate to next example after 15 seconds
+        setTimeout(() => {
+          currentExample = (currentExample + 1) % examples.length;
+          startAnimation();
+        }, 15000);
       }
     }
 
@@ -580,7 +583,8 @@
 
   .terminal-body {
     padding: var(--space-4);
-    min-height: 300px;
+    height: 380px;
+    overflow-y: auto;
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     line-height: 1.6;
