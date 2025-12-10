@@ -223,21 +223,26 @@
     </div>
   </section>
 
+  <!-- Divider -->
+  <div class="section-divider"></div>
+
   <!-- The Magic: How it works -->
   <section class="magic-section">
-    <h2 class="section-title">
-      <span class="title-icon">✨</span>
-      The Magic
-    </h2>
-    <p class="section-desc">Three steps to vibe coding wizardry</p>
+    <h2 class="section-title">The Magic</h2>
+    <p class="section-desc">Three terminal commands to vibe coding superpowers</p>
 
     <div class="magic-steps">
-      <div class="magic-step">
-        <div class="step-number">1</div>
-        <div class="step-content">
-          <h3>Install the MCP</h3>
-          <p>One-time setup. Add this to your Claude Desktop config:</p>
-          <div class="code-block">
+      <div class="terminal-step">
+        <div class="terminal-step-header">
+          <span class="step-label">01</span>
+          <span class="step-title">Install the MCP</span>
+        </div>
+        <div class="terminal-step-body">
+          <div class="terminal-line-output">
+            <span class="terminal-prompt">$</span>
+            <span class="terminal-cmd">Add to claude_desktop_config.json:</span>
+          </div>
+          <div class="terminal-code-block">
             <pre><code>{`"vibeship": {
   "command": "npx",
   "args": ["vibeship-orchestrator-mcp"]
@@ -250,43 +255,65 @@
               {/if}
             </button>
           </div>
-          <p class="step-hint">Restart Claude Desktop after adding</p>
-        </div>
-      </div>
-
-      <div class="magic-step">
-        <div class="step-number">2</div>
-        <div class="step-content">
-          <h3>Describe Your Vision</h3>
-          <p>Just tell Claude what you want to build:</p>
-          <div class="prompt-examples">
-            <div class="prompt-example">"Build me a marketplace for vintage watches"</div>
-            <div class="prompt-example">"Create an AI-powered note-taking app"</div>
-            <div class="prompt-example">"Start a web3 NFT gallery project"</div>
+          <div class="terminal-line-output dim">
+            <span class="terminal-prompt">#</span>
+            <span>Restart Claude Desktop after adding</span>
           </div>
         </div>
       </div>
 
-      <div class="magic-step">
-        <div class="step-number">3</div>
-        <div class="step-content">
-          <h3>Watch the Magic</h3>
-          <p>vibeship orchestrates everything:</p>
-          <div class="magic-list">
-            <div class="magic-item">
-              <span class="magic-icon">🤖</span>
+      <div class="terminal-step">
+        <div class="terminal-step-header">
+          <span class="step-label">02</span>
+          <span class="step-title">Describe Your Vision</span>
+        </div>
+        <div class="terminal-step-body">
+          <div class="terminal-line-output">
+            <span class="terminal-prompt">$</span>
+            <span class="terminal-cmd">Tell Claude what you want to build:</span>
+          </div>
+          <div class="terminal-prompts">
+            <div class="terminal-prompt-line">
+              <span class="prompt-arrow">›</span>
+              <span>"Build me a marketplace for vintage watches"</span>
+            </div>
+            <div class="terminal-prompt-line">
+              <span class="prompt-arrow">›</span>
+              <span>"Create an AI-powered note-taking app"</span>
+            </div>
+            <div class="terminal-prompt-line">
+              <span class="prompt-arrow">›</span>
+              <span>"Start a web3 NFT gallery project"</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="terminal-step">
+        <div class="terminal-step-header">
+          <span class="step-label">03</span>
+          <span class="step-title">Watch the Magic</span>
+        </div>
+        <div class="terminal-step-body">
+          <div class="terminal-line-output">
+            <span class="terminal-prompt">$</span>
+            <span class="terminal-cmd">vibeship orchestrates everything:</span>
+          </div>
+          <div class="terminal-output-list">
+            <div class="terminal-output-line success">
+              <span class="output-prefix">+</span>
               <span>Assembles your AI agent crew</span>
             </div>
-            <div class="magic-item">
-              <span class="magic-icon">⚡</span>
+            <div class="terminal-output-line success">
+              <span class="output-prefix">+</span>
               <span>Connects the right MCPs</span>
             </div>
-            <div class="magic-item">
-              <span class="magic-icon">📁</span>
+            <div class="terminal-output-line success">
+              <span class="output-prefix">+</span>
               <span>Scaffolds your project</span>
             </div>
-            <div class="magic-item">
-              <span class="magic-icon">🚀</span>
+            <div class="terminal-output-line success">
+              <span class="output-prefix">+</span>
               <span>Starts building immediately</span>
             </div>
           </div>
@@ -571,98 +598,116 @@
     box-shadow: 0 0 30px rgba(0, 196, 154, 0.4);
   }
 
+  /* Section Divider */
+  .section-divider {
+    width: 100%;
+    max-width: 900px;
+    height: 1px;
+    background: var(--border);
+    margin: 0 auto;
+  }
+
   /* Magic Section */
   .magic-section {
-    padding: var(--space-16) var(--space-8);
+    padding: var(--space-12) var(--space-8);
     max-width: 900px;
     margin: 0 auto;
-    margin-top: var(--space-8);
   }
 
   .section-title {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-2);
     font-family: var(--font-serif);
     font-size: var(--text-2xl);
     font-weight: 400;
     color: var(--text-primary);
     margin: 0 0 var(--space-2);
-  }
-
-  .title-icon {
-    font-size: var(--text-xl);
+    text-align: center;
   }
 
   .section-desc {
     text-align: center;
-    font-size: var(--text-base);
+    font-size: var(--text-sm);
     color: var(--text-secondary);
-    margin: 0 0 var(--space-10);
+    margin: 0 0 var(--space-8);
   }
 
   .magic-steps {
     display: flex;
     flex-direction: column;
-    gap: var(--space-8);
-  }
-
-  .magic-step {
-    display: flex;
     gap: var(--space-6);
-    align-items: flex-start;
   }
 
-  .step-number {
-    flex-shrink: 0;
-    width: 48px;
-    height: 48px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--green-dim);
-    color: var(--bg-primary);
-    font-family: var(--font-mono);
-    font-size: var(--text-xl);
-    font-weight: 700;
-    border-radius: 50%;
-  }
-
-  .step-content {
-    flex: 1;
-  }
-
-  .step-content h3 {
-    font-family: var(--font-mono);
-    font-size: var(--text-lg);
-    font-weight: 600;
-    color: var(--text-primary);
-    margin: 0 0 var(--space-2);
-  }
-
-  .step-content > p {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    margin: 0 0 var(--space-3);
-  }
-
-  .step-hint {
-    font-size: var(--text-xs);
-    color: var(--text-tertiary);
-    margin-top: var(--space-2);
-  }
-
-  .code-block {
-    position: relative;
+  /* Terminal Step Cards */
+  .terminal-step {
     background: #0d1117;
     border: 1px solid #30363d;
-    border-radius: 6px;
-    padding: var(--space-4);
-    margin-bottom: var(--space-2);
+    border-radius: 8px;
+    overflow: hidden;
   }
 
-  .code-block pre {
+  .terminal-step-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: #161b22;
+    border-bottom: 1px solid #30363d;
+  }
+
+  .step-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 700;
+    color: var(--green-dim);
+    background: rgba(0, 196, 154, 0.15);
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  .step-title {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: #e2e4e9;
+  }
+
+  .terminal-step-body {
+    padding: var(--space-4);
+  }
+
+  .terminal-line-output {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: #8b949e;
+    margin-bottom: var(--space-3);
+  }
+
+  .terminal-line-output.dim {
+    color: #6b7489;
+    margin-top: var(--space-3);
+    margin-bottom: 0;
+  }
+
+  .terminal-prompt {
+    color: var(--green-dim);
+    font-weight: 600;
+  }
+
+  .terminal-cmd {
+    color: #c9d1d9;
+  }
+
+  .terminal-code-block {
+    position: relative;
+    background: #0a0c10;
+    border: 1px solid #21262d;
+    border-radius: 6px;
+    padding: var(--space-4);
+  }
+
+  .terminal-code-block pre {
     margin: 0;
     font-family: var(--font-mono);
     font-size: var(--text-sm);
@@ -670,7 +715,7 @@
     overflow-x: auto;
   }
 
-  .code-block .copy-btn {
+  .terminal-code-block .copy-btn {
     position: absolute;
     top: var(--space-2);
     right: var(--space-2);
@@ -683,49 +728,55 @@
     transition: all var(--transition-fast);
   }
 
-  .code-block .copy-btn:hover {
+  .terminal-code-block .copy-btn:hover {
     border-color: var(--green-dim);
     color: var(--green-dim);
   }
 
-  .prompt-examples {
+  .terminal-prompts {
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
   }
 
-  .prompt-example {
-    padding: var(--space-3) var(--space-4);
-    background: var(--bg-secondary);
-    border-left: 3px solid var(--green-dim);
+  .terminal-prompt-line {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     color: var(--green-dim);
-    font-style: italic;
+    padding: var(--space-2) var(--space-3);
+    background: rgba(0, 196, 154, 0.05);
+    border-left: 2px solid var(--green-dim);
   }
 
-  .magic-list {
+  .prompt-arrow {
+    color: var(--green-dim);
+    font-weight: 600;
+  }
+
+  .terminal-output-list {
     display: flex;
     flex-direction: column;
-    gap: var(--space-2);
+    gap: var(--space-1);
   }
 
-  .magic-item {
+  .terminal-output-line {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-2) var(--space-3);
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-  }
-
-  .magic-icon {
-    font-size: var(--text-lg);
-  }
-
-  .magic-item span:last-child {
+    gap: var(--space-2);
+    font-family: var(--font-mono);
     font-size: var(--text-sm);
-    color: var(--text-secondary);
+    padding: var(--space-1) 0;
+  }
+
+  .terminal-output-line.success {
+    color: #3fb950;
+  }
+
+  .output-prefix {
+    font-weight: 700;
   }
 
   /* Crew Section */
@@ -1095,45 +1146,27 @@
     }
 
     .magic-section {
-      padding: var(--space-12) var(--space-4);
+      padding: var(--space-8) var(--space-4);
     }
 
-    .magic-step {
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
+    .terminal-step-body {
+      padding: var(--space-3);
     }
 
-    .step-content {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
+    .terminal-line-output {
+      font-size: var(--text-xs);
     }
 
-    .prompt-examples,
-    .magic-list,
-    .code-block {
-      width: 100%;
+    .terminal-code-block pre {
+      font-size: var(--text-xs);
     }
 
-    .crew-section {
-      padding: var(--space-12) var(--space-4);
+    .terminal-prompt-line {
+      font-size: var(--text-xs);
     }
 
-    .agent-grid {
-      grid-template-columns: repeat(3, 1fr);
-    }
-
-    .agent-card {
-      padding: var(--space-3) var(--space-2);
-    }
-
-    .agent-icon {
-      font-size: var(--text-xl);
-    }
-
-    .mcp-section {
-      padding: var(--space-12) var(--space-4);
+    .terminal-output-line {
+      font-size: var(--text-xs);
     }
 
     .mcp-grid {
