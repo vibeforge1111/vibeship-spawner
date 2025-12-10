@@ -337,7 +337,6 @@
   </section>
 
   <footer class="footer">
-    <p class="footer-tagline">"You vibe. It ships."</p>
     <div class="footer-links">
       <a href="https://github.com/vibeforge1111/vibeship-orchestrator" target="_blank" rel="noopener">GitHub</a>
       <a href="/builder">Builder</a>
