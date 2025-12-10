@@ -322,29 +322,11 @@
     </div>
   </section>
 
-  <!-- The Equation -->
-  <section class="equation-section">
-    <div class="equation-terminal">
-      <div class="equation-header">
-        <span class="equation-prompt">$</span>
-        <span class="equation-cmd">vibeship.calculate()</span>
-      </div>
-      <div class="equation-body">
-        <div class="equation-line">
-          <span class="eq-var">your_idea</span>
-          <span class="eq-op">×</span>
-          <span class="eq-bracket">(</span>
-          <span class="eq-var highlight">skilled_agents</span>
-          <span class="eq-op">+</span>
-          <span class="eq-var highlight">mcp_powers</span>
-          <span class="eq-bracket">)</span>
-        </div>
-        <div class="equation-equals">=</div>
-        <div class="equation-result">
-          <span class="result-text">shipped<span class="claude-highlight">_on_nitro</span></span>
-        </div>
-      </div>
-    </div>
+  <!-- Closing Statement -->
+  <section class="closing-section">
+    <p class="closing-text">
+      Stop prompting. Start <span class="highlight">orchestrating</span>.
+    </p>
   </section>
 
   <footer class="footer">
@@ -872,98 +854,24 @@
     color: var(--text-tertiary);
   }
 
-  /* Equation Section */
-  .equation-section {
-    padding: var(--space-10) var(--space-8);
-    max-width: 700px;
-    margin: 0 auto;
+  /* Closing Section */
+  .closing-section {
+    padding: var(--space-12) var(--space-8);
+    text-align: center;
   }
 
-  .equation-terminal {
-    background: #0d1117;
-    border: 1px solid #30363d;
-    border-radius: 8px;
-    overflow: hidden;
-  }
-
-  .equation-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-3) var(--space-4);
-    background: #161b22;
-    border-bottom: 1px solid #30363d;
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-  }
-
-  .equation-prompt {
-    color: var(--green-dim);
-    font-weight: 600;
-  }
-
-  .equation-cmd {
-    color: #8b949e;
-  }
-
-  .equation-body {
-    padding: var(--space-6) var(--space-8);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-4);
-  }
-
-  .equation-line {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    font-family: var(--font-mono);
-    font-size: var(--text-lg);
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-
-  .eq-var {
-    color: #58a6ff;
-    font-weight: 500;
-  }
-
-  .eq-var.highlight {
-    color: var(--green-dim);
-  }
-
-  .eq-op {
-    color: #8b949e;
-    font-weight: 600;
-  }
-
-  .eq-bracket {
-    color: #f0883e;
-    font-weight: 600;
-  }
-
-  .equation-equals {
-    font-family: var(--font-mono);
+  .closing-text {
+    font-family: var(--font-serif);
     font-size: var(--text-2xl);
-    color: var(--green-dim);
-    font-weight: 700;
-    padding: var(--space-2) 0;
+    font-style: italic;
+    color: var(--text-secondary);
+    margin: 0;
   }
 
-  .equation-result {
-    background: rgba(0, 196, 154, 0.1);
-    border: 2px solid var(--green-dim);
-    border-radius: 6px;
-    padding: var(--space-3) var(--space-6);
-  }
-
-  .result-text {
-    font-family: var(--font-mono);
-    font-size: var(--text-xl);
-    font-weight: 700;
+  .closing-text .highlight {
     color: var(--green-dim);
-    font-weight: 700;
+    font-style: normal;
+    font-weight: 500;
   }
 
   /* Advanced section */
@@ -1094,25 +1002,12 @@
       grid-template-columns: 1fr;
     }
 
-    .equation-section {
-      padding: var(--space-6) var(--space-4);
+    .closing-section {
+      padding: var(--space-8) var(--space-4);
     }
 
-    .equation-body {
-      padding: var(--space-4);
-    }
-
-    .equation-line {
-      font-size: var(--text-sm);
-      gap: var(--space-2);
-    }
-
-    .equation-equals {
+    .closing-text {
       font-size: var(--text-xl);
-    }
-
-    .result-text {
-      font-size: var(--text-base);
     }
   }
 </style>
