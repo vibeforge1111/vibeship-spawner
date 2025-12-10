@@ -347,21 +347,6 @@
     </div>
   </section>
 
-  <!-- CTA -->
-  <section class="cta-section">
-    <div class="cta-glow"></div>
-    <button class="cta-btn" onclick={copyConfig}>
-      {#if copied}
-        <Icon name="check" size={20} />
-        <span>Copied!</span>
-      {:else}
-        <Icon name="copy" size={20} />
-        <span>Copy MCP Config</span>
-      {/if}
-    </button>
-    <p class="cta-hint">Add to claude_desktop_config.json → Restart Claude → Start vibing</p>
-  </section>
-
   <footer class="footer">
     <p class="footer-tagline">"You vibe. It ships."</p>
     <div class="footer-links">
@@ -980,71 +965,6 @@
     font-weight: 700;
   }
 
-  /* CTA Section */
-  .cta-section {
-    position: relative;
-    padding: var(--space-16) var(--space-8);
-    text-align: center;
-    background: var(--bg-secondary);
-    border-top: 1px solid var(--border);
-    overflow: hidden;
-  }
-
-  .cta-glow {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 500px;
-    height: 500px;
-    background: radial-gradient(circle, rgba(0, 196, 154, 0.1) 0%, transparent 70%);
-    pointer-events: none;
-  }
-
-  .cta-section h2 {
-    position: relative;
-    font-family: var(--font-serif);
-    font-size: var(--text-2xl);
-    font-weight: 400;
-    color: var(--text-primary);
-    margin: 0 0 var(--space-2);
-  }
-
-  .cta-section > p {
-    position: relative;
-    font-size: var(--text-base);
-    color: var(--text-secondary);
-    margin: 0 0 var(--space-6);
-  }
-
-  .cta-btn {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-4) var(--space-8);
-    background: var(--green-dim);
-    border: none;
-    color: var(--bg-primary);
-    font-family: var(--font-mono);
-    font-size: var(--text-base);
-    font-weight: 600;
-    cursor: pointer;
-    transition: all var(--transition-fast);
-  }
-
-  .cta-btn:hover {
-    box-shadow: 0 0 30px rgba(0, 196, 154, 0.4);
-    transform: translateY(-2px);
-  }
-
-  .cta-hint {
-    position: relative;
-    font-size: var(--text-sm);
-    color: var(--text-tertiary);
-    margin-top: var(--space-4);
-  }
-
   /* Advanced section */
   .advanced {
     text-align: center;
@@ -1167,10 +1087,6 @@
 
     .mcp-grid {
       grid-template-columns: repeat(2, 1fr);
-    }
-
-    .cta-section {
-      padding: var(--space-12) var(--space-4);
     }
 
     .templates-grid {
