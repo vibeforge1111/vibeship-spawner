@@ -322,6 +322,9 @@
     </div>
   </section>
 
+  <!-- Divider -->
+  <div class="section-divider"></div>
+
   <!-- Closing Statement -->
   <section class="closing-section">
     <p class="closing-text">
