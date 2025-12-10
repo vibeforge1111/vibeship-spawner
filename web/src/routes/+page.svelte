@@ -582,7 +582,7 @@
     max-width: 900px;
     height: 1px;
     background: var(--border);
-    margin: 0 auto;
+    margin: var(--space-8) auto 0;
   }
 
   /* Magic Section */
