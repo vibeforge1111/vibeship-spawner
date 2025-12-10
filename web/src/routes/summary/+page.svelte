@@ -123,6 +123,10 @@
   let showFirstTimeHelp = $state(false);
   let showWindowsHelp = $state(false);
   let showTroubleshootHelp = $state(false);
+  let showMcpHelp = $state(false);
+
+  // Install method preference
+  let installMethod = $state<'cli' | 'mcp'>('cli');
 
   function copyConfig() {
     navigator.clipboard.writeText(generateConfigJson());
@@ -326,23 +330,79 @@
             <p class="owner-note">Saved to your GitHub account (@{exportedGist.owner})</p>
           {/if}
 
-          <!-- Where to run section -->
-          <div class="where-to-run">
-            <h4>WHERE TO RUN THIS</h4>
-            <p>Open any terminal - this command creates a new folder for you.</p>
-            <ul class="terminal-examples">
-              <li><strong>VS Code / Cursor:</strong> View → Terminal (then paste command below)</li>
-              <li><strong>Mac:</strong> Open Terminal app</li>
-              <li><strong>Windows:</strong> Open PowerShell or Command Prompt</li>
-            </ul>
-          </div>
-
-          <div class="command-box">
-            <code>npx vibeship-orchestrator create {exportedGist.id}</code>
-            <button class="copy-btn" onclick={copyCommand}>
-              <Icon name="copy" size={16} />
+          <!-- Install method toggle -->
+          <div class="install-method-toggle">
+            <button
+              class="method-btn"
+              class:active={installMethod === 'cli'}
+              onclick={() => installMethod = 'cli'}
+            >
+              CLI (npx)
+            </button>
+            <button
+              class="method-btn"
+              class:active={installMethod === 'mcp'}
+              onclick={() => installMethod = 'mcp'}
+            >
+              MCP (Claude native)
             </button>
           </div>
+
+          {#if installMethod === 'cli'}
+            <!-- CLI Method -->
+            <div class="where-to-run">
+              <h4>WHERE TO RUN THIS</h4>
+              <p>Open any terminal - this command creates a new folder for you.</p>
+              <ul class="terminal-examples">
+                <li><strong>VS Code / Cursor:</strong> View → Terminal (then paste command below)</li>
+                <li><strong>Mac:</strong> Open Terminal app</li>
+                <li><strong>Windows:</strong> Open PowerShell or Command Prompt</li>
+              </ul>
+            </div>
+
+            <div class="command-box">
+              <code>npx vibeship-orchestrator create {exportedGist.id}</code>
+              <button class="copy-btn" onclick={copyCommand}>
+                <Icon name="copy" size={16} />
+              </button>
+            </div>
+          {:else}
+            <!-- MCP Method -->
+            <div class="where-to-run mcp-method">
+              <h4>USING CLAUDE MCP</h4>
+              <p>If you have the vibeship MCP installed, just tell Claude:</p>
+            </div>
+
+            <div class="command-box mcp-command">
+              <code>"Create a project called {projectNameInput} from gist {exportedGist.id}"</code>
+              <button class="copy-btn" onclick={() => navigator.clipboard.writeText(`Create a project called ${projectNameInput} from gist ${exportedGist.id}`)}>
+                <Icon name="copy" size={16} />
+              </button>
+            </div>
+
+            <p class="mcp-alt-note">
+              Or skip the gist entirely - Claude can use your config directly since it's saved to GitHub.
+            </p>
+
+            <button class="help-toggle mcp-setup-toggle" onclick={() => showMcpHelp = !showMcpHelp}>
+              <Icon name={showMcpHelp ? 'chevron-down' : 'chevron-right'} size={16} />
+              <span>How to install the MCP</span>
+            </button>
+            {#if showMcpHelp}
+              <div class="help-content mcp-install-guide">
+                <p>Add to your <code>claude_desktop_config.json</code>:</p>
+                <pre class="mcp-config">{`{
+  "mcpServers": {
+    "vibeship-orchestrator": {
+      "command": "npx",
+      "args": ["vibeship-orchestrator-mcp"]
+    }
+  }
+}`}</pre>
+                <p class="mcp-note">Then restart Claude Desktop. The MCP gives Claude direct access to scaffold projects.</p>
+              </div>
+            {/if}
+          {/if}
 
           <div class="what-this-creates">
             <p>This will create a folder called <strong>"{projectNameInput}"</strong> containing:</p>
@@ -1192,5 +1252,87 @@
     padding: 2px var(--space-1);
     font-family: var(--font-mono);
     font-size: var(--text-xs);
+  }
+
+  /* Install method toggle */
+  .install-method-toggle {
+    display: flex;
+    justify-content: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+  }
+
+  .method-btn {
+    padding: var(--space-2) var(--space-4);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+
+  .method-btn:hover {
+    border-color: var(--text-primary);
+    color: var(--text-primary);
+  }
+
+  .method-btn.active {
+    background: var(--green-dim);
+    border-color: var(--green-dim);
+    color: var(--bg-primary);
+  }
+
+  /* MCP specific styles */
+  .mcp-method {
+    border-left-color: var(--accent-purple, #a855f7);
+  }
+
+  .mcp-method h4 {
+    color: var(--accent-purple, #a855f7);
+  }
+
+  .mcp-command code {
+    color: var(--accent-purple, #a855f7);
+    font-style: italic;
+  }
+
+  .mcp-setup-toggle {
+    margin-top: var(--space-2);
+  }
+
+  .mcp-install-guide {
+    background: var(--bg-tertiary);
+    padding: var(--space-4);
+    margin-top: var(--space-2);
+  }
+
+  .mcp-install-guide p {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    margin: 0 0 var(--space-2);
+  }
+
+  .mcp-config {
+    background: var(--bg-inverse);
+    color: var(--text-inverse);
+    padding: var(--space-3);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    overflow-x: auto;
+    margin: 0 0 var(--space-2);
+  }
+
+  .mcp-note {
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+  }
+
+  .mcp-alt-note {
+    text-align: center;
+    font-size: var(--text-sm);
+    color: var(--text-tertiary);
+    margin: var(--space-3) 0;
   }
 </style>
