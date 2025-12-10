@@ -38,17 +38,17 @@
       skills: ['ml-engineer.md', 'data-pipeline.md', 'eval-specialist.md'],
       extraFolder: 'embeddings/'
     },
-    // Fintech Trading Platform
+    // Developer Tools Platform
     {
-      prompt: '"Build a real-time crypto trading bot with alerts"',
-      template: 'Fintech Tool',
-      agents: 'architect, quant, backend, data-streams, risk-mgmt',
-      mcps: 'filesystem, binance, telegram, redis, postgres',
+      prompt: '"Build an AI-powered IDE that writes tests as you code"',
+      template: 'Dev Tools',
+      agents: 'architect, compiler-dev, lsp-engineer, ml-engineer, ux',
+      mcps: 'filesystem, github, treesitter, anthropic, vscode',
       agentCount: 5,
       mcpCount: 5,
-      projectName: 'trading-bot',
-      skills: ['quant-analyst.md', 'risk-mgmt.md', 'data-streams.md'],
-      extraFolder: 'strategies/'
+      projectName: 'ai-ide',
+      skills: ['compiler-dev.md', 'lsp-engineer.md', 'ml-integration.md'],
+      extraFolder: 'extensions/'
     },
     // Healthcare SaaS
     {
