@@ -33,6 +33,7 @@ import { templatesToolDefinition, executeTemplates } from './templates.js';
 import { skillsToolDefinition, executeSkills } from './skills.js';
 import { planToolDefinition, executePlan } from './plan.js';
 import { analyzeToolDefinition, executeAnalyze } from './analyze.js';
+import { skillCreateToolDefinition, executeSkillCreate } from './skill-create.js';
 
 // =============================================================================
 // Register all tools
@@ -86,6 +87,12 @@ registerTool({
   execute: (env, args, _userId) => executeAnalyze(env, args),
 });
 
+// Skill Creation Tool
+registerTool({
+  definition: skillCreateToolDefinition,
+  execute: (env, args, _userId) => executeSkillCreate(env, args),
+});
+
 // =============================================================================
 // Re-exports for backwards compatibility
 // =============================================================================
@@ -105,6 +112,7 @@ export {
   skillsToolDefinition,
   planToolDefinition,
   analyzeToolDefinition,
+  skillCreateToolDefinition,
 };
 
 // Re-export executors for direct access if needed
@@ -118,4 +126,5 @@ export {
   executeSkills,
   executePlan,
   executeAnalyze,
+  executeSkillCreate,
 };
