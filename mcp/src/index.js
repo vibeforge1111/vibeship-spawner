@@ -15,6 +15,17 @@ import { promisify } from 'util';
 const execAsync = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Load skill registry
+let skillRegistry = null;
+async function getSkillRegistry() {
+  if (!skillRegistry) {
+    const registryPath = path.join(__dirname, '..', '..', 'skills', 'registry.json');
+    const data = await fs.readFile(registryPath, 'utf-8');
+    skillRegistry = JSON.parse(data);
+  }
+  return skillRegistry;
+}
+
 // Templates for different project types
 const templates = {
   saas: {
@@ -117,6 +128,54 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: 'object',
           properties: {}
         }
+      },
+      {
+        name: 'find_skill',
+        description: 'Search for specialist skills by keyword, tag, or get squad recommendations. Use this to find the right skill for a task.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Search query - matches skill names, descriptions, tags, and trigger phrases'
+            },
+            tag: {
+              type: 'string',
+              description: 'Find skills with a specific tag (e.g., "auth", "supabase", "react")'
+            },
+            squad: {
+              type: 'string',
+              description: 'Get a pre-configured squad for a feature type (e.g., "auth-complete", "payments-complete", "crud-feature", "ai-feature")'
+            },
+            layer: {
+              type: 'integer',
+              enum: [1, 2, 3],
+              description: 'List skills by layer: 1=Core, 2=Integration, 3=Polish'
+            }
+          }
+        }
+      },
+      {
+        name: 'list_skills',
+        description: 'List all available specialist skills organized by layer',
+        inputSchema: {
+          type: 'object',
+          properties: {}
+        }
+      },
+      {
+        name: 'get_skill',
+        description: 'Get the full content of a specific specialist skill file',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'Name of the skill (e.g., "auth-flow", "supabase-backend", "typescript-strict")'
+            }
+          },
+          required: ['name']
+        }
       }
     ]
   };
@@ -133,6 +192,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return await handleCheckEnvironment();
     case 'list_templates':
       return handleListTemplates();
+    case 'find_skill':
+      return await handleFindSkill(args);
+    case 'list_skills':
+      return await handleListSkills();
+    case 'get_skill':
+      return await handleGetSkill(args);
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
@@ -358,6 +423,196 @@ async function fetchGistConfig(gistId) {
   config.behaviors = config.behaviors || { mandatory: [], selected: [] };
 
   return config;
+}
+
+async function handleFindSkill(args) {
+  try {
+    const registry = await getSkillRegistry();
+    const lines = [];
+
+    // Search by query
+    if (args.query) {
+      const q = args.query.toLowerCase();
+      const results = registry.specialists.filter(s =>
+        s.name.includes(q) ||
+        s.description.toLowerCase().includes(q) ||
+        s.tags.some(t => t.includes(q)) ||
+        s.triggers.some(t => t.toLowerCase().includes(q))
+      );
+
+      if (results.length === 0) {
+        return {
+          content: [{ type: 'text', text: `No skills found matching "${args.query}"` }]
+        };
+      }
+
+      lines.push(`Found ${results.length} skill(s) matching "${args.query}":\n`);
+      for (const skill of results) {
+        lines.push(`${skill.name} (Layer ${skill.layer})`);
+        lines.push(`  ${skill.description}`);
+        lines.push(`  Tags: ${skill.tags.join(', ')}`);
+        lines.push(`  Pairs with: ${skill.pairs_with.join(', ')}`);
+        lines.push('');
+      }
+    }
+
+    // Search by tag
+    if (args.tag) {
+      const skills = registry.tag_index[args.tag.toLowerCase()];
+      if (!skills || skills.length === 0) {
+        return {
+          content: [{
+            type: 'text',
+            text: `No skills with tag "${args.tag}"\n\nAvailable tags: ${Object.keys(registry.tag_index).join(', ')}`
+          }]
+        };
+      }
+
+      lines.push(`Skills with tag "${args.tag}":\n`);
+      for (const name of skills) {
+        const skill = registry.specialists.find(s => s.name === name);
+        if (skill) {
+          lines.push(`${skill.name} (Layer ${skill.layer})`);
+          lines.push(`  ${skill.description}`);
+          lines.push('');
+        }
+      }
+    }
+
+    // Get squad
+    if (args.squad) {
+      const squad = registry.squads[args.squad];
+      if (!squad) {
+        return {
+          content: [{
+            type: 'text',
+            text: `Squad "${args.squad}" not found\n\nAvailable squads: ${Object.keys(registry.squads).join(', ')}`
+          }]
+        };
+      }
+
+      lines.push(`Squad: ${args.squad}`);
+      lines.push(`${squad.description}\n`);
+      lines.push(`Lead: ${squad.lead}`);
+      lines.push(`Support: ${squad.support.join(', ')}`);
+      if (squad.on_call) {
+        lines.push(`On-call: ${squad.on_call.join(', ')}`);
+      }
+      lines.push('\nRecommended loading order:');
+      lines.push(`1. ${squad.lead} (lead)`);
+      squad.support.forEach((s, i) => {
+        lines.push(`${i + 2}. ${s}`);
+      });
+    }
+
+    // List by layer
+    if (args.layer) {
+      const layer = registry.layers[args.layer];
+      if (!layer) {
+        return {
+          content: [{ type: 'text', text: 'Invalid layer. Use 1, 2, or 3' }]
+        };
+      }
+
+      lines.push(`Layer ${args.layer}: ${layer.name}`);
+      lines.push(`${layer.description}\n`);
+      for (const name of layer.specialists) {
+        const skill = registry.specialists.find(s => s.name === name);
+        if (skill) {
+          lines.push(`${skill.name}`);
+          lines.push(`  ${skill.tags.join(', ')}`);
+        }
+      }
+    }
+
+    return {
+      content: [{ type: 'text', text: lines.join('\n') }]
+    };
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `Error finding skill: ${error.message}` }],
+      isError: true
+    };
+  }
+}
+
+async function handleListSkills() {
+  try {
+    const registry = await getSkillRegistry();
+    const lines = [
+      `Skill Registry v${registry.version}`,
+      `${registry.specialists.length} specialists\n`
+    ];
+
+    for (const layerNum of [1, 2, 3]) {
+      const layer = registry.layers[layerNum];
+      lines.push(`── Layer ${layerNum}: ${layer.name} ──`);
+      lines.push(`   ${layer.description}\n`);
+      for (const name of layer.specialists) {
+        const skill = registry.specialists.find(s => s.name === name);
+        if (skill) {
+          lines.push(`   ${skill.name}`);
+          lines.push(`   └─ ${skill.tags.join(', ')}`);
+        }
+      }
+      lines.push('');
+    }
+
+    lines.push('── Pre-configured Squads ──\n');
+    for (const [name, squad] of Object.entries(registry.squads)) {
+      lines.push(`   ${name}: ${squad.description}`);
+    }
+
+    return {
+      content: [{ type: 'text', text: lines.join('\n') }]
+    };
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `Error listing skills: ${error.message}` }],
+      isError: true
+    };
+  }
+}
+
+async function handleGetSkill(args) {
+  try {
+    if (!args.name) {
+      return {
+        content: [{ type: 'text', text: 'Error: skill name is required' }],
+        isError: true
+      };
+    }
+
+    const registry = await getSkillRegistry();
+    const skill = registry.specialists.find(s => s.name === args.name);
+
+    if (!skill) {
+      const available = registry.specialists.map(s => s.name).join(', ');
+      return {
+        content: [{
+          type: 'text',
+          text: `Skill "${args.name}" not found\n\nAvailable skills: ${available}`
+        }],
+        isError: true
+      };
+    }
+
+    // Read the skill file
+    const skillPath = path.join(__dirname, '..', '..', 'skills', skill.path);
+    const content = await fs.readFile(skillPath, 'utf-8');
+
+    return {
+      content: [{
+        type: 'text',
+        text: `# ${skill.name}\n\nPath: ${skill.path}\nLayer: ${skill.layer}\nTags: ${skill.tags.join(', ')}\nPairs with: ${skill.pairs_with.join(', ')}\n\n---\n\n${content}`
+      }]
+    };
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `Error getting skill: ${error.message}` }],
+      isError: true
+    };
+  }
 }
 
 async function scaffoldProject(config, targetDir) {
