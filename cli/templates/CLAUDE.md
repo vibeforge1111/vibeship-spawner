@@ -1,8 +1,8 @@
 # {{project_name}}
 
-## vibeship crew
+## vibeship spawner
 
-This project uses vibeship crew for AI-powered development.
+This project uses vibeship spawner for AI-powered development.
 
 > "You vibe. It ships."
 
@@ -28,7 +28,7 @@ ALWAYS do this first:
 When starting a fresh project, greet the user like this:
 
 ```
-vibeship crew
+vibeship spawner
 
 I've loaded your project config:
   • Project: {{project_name}}

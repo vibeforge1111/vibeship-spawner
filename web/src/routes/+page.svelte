@@ -87,7 +87,7 @@
       { type: 'system', text: `+ Agents: ${example.agents}`, delay: 200 },
       { type: 'system', text: `+ MCPs: ${example.mcps}`, delay: 200 },
       { type: 'blank', delay: 300 },
-      { type: 'system', text: '> Assembling your crew...', delay: 500 },
+      { type: 'system', text: '> Spawning your agents...', delay: 500 },
       { type: 'success', text: `+ ${example.agentCount} specialized agents activated`, delay: 200 },
       { type: 'success', text: `+ ${example.mcpCount} MCPs connected`, delay: 200 },
       { type: 'blank', delay: 300 },
@@ -100,7 +100,7 @@
       { type: 'files', text: `  │   └── ${example.skills[2]}`, delay: 40 },
       { type: 'files', text: `  └── ${example.extraFolder}`, delay: 60 },
       { type: 'blank', delay: 400 },
-      { type: 'magic', text: '✨ Your crew is ready. Start vibing.', delay: 100 },
+      { type: 'magic', text: '✨ Your agents are ready. Start vibing.', delay: 100 },
     ];
   }
 
@@ -156,9 +156,9 @@
   function copyConfig() {
     navigator.clipboard.writeText(`{
   "mcpServers": {
-    "vibeship": {
+    "vibeship-spawner": {
       "command": "npx",
-      "args": ["vibeship-crew"]
+      "args": ["vibeship-spawner"]
     }
   }
 }`);
@@ -178,8 +178,8 @@
         <span class="hero-badge">MCP-FIRST DEVELOPMENT</span>
         <span class="hero-badge claude-badge">SKILL-BASED AGENTS</span>
       </div>
-      <p class="hero-tagline">The MCP that assembles your <span class="claude-highlight">Claude Crew.</span></p>
-      <p class="hero-subtitle">The singularity of focused, trained Claude Opus agents and MCPs, instead of the generic approach. One command to summon your entire crew and tools to work for you.</p>
+      <p class="hero-tagline">The MCP that spawns your <span class="claude-highlight">Claude Agents.</span></p>
+      <p class="hero-subtitle">The singularity of focused, trained Claude Opus agents and MCPs, instead of the generic approach. One command to spawn your entire agent stack and tools to work for you.</p>
     </div>
 
     <!-- Animated Terminal -->
@@ -241,9 +241,9 @@
             <span class="terminal-cmd">Add to claude_desktop_config.json:</span>
           </div>
           <div class="terminal-code-block">
-            <pre><code>{`"vibeship": {
+            <pre><code>{`"vibeship-spawner": {
   "command": "npx",
-  "args": ["vibeship-crew"]
+  "args": ["vibeship-spawner"]
 }`}</code></pre>
           </div>
           <div class="terminal-line-output dim">
@@ -288,12 +288,12 @@
         <div class="terminal-step-body">
           <div class="terminal-line-output">
             <span class="terminal-prompt">$</span>
-            <span class="terminal-cmd">vibeship crew assembles:</span>
+            <span class="terminal-cmd">vibeship spawner creates:</span>
           </div>
           <div class="terminal-output-list">
             <div class="terminal-output-line success">
               <span class="output-prefix">+</span>
-              <span>Assembles your specialized agent crew with Claude Skills tailored for your idea</span>
+              <span>Spawns your specialized agents with Claude Skills tailored for your idea</span>
             </div>
             <div class="terminal-output-line success">
               <span class="output-prefix">+</span>
@@ -319,12 +319,12 @@
   <!-- Closing Statement -->
   <section class="closing-section">
     <p class="closing-text">
-      Vibing solo? Try shipping with a crew.
+      Vibing solo? Try shipping with agents.
     </p>
     <div class="closing-formula">
       <span class="formula-text">your_idea</span>
       <span class="formula-op">×</span>
-      <span class="formula-text highlight">(skilled_agents + mcp_powers + vibeship_crew)</span>
+      <span class="formula-text highlight">(skilled_agents + mcp_powers + vibeship_spawner)</span>
       <span class="formula-op">=</span>
       <span class="formula-result">shipped<span class="claude-highlight">_on_nitro</span></span>
     </div>
@@ -763,15 +763,15 @@
     color: var(--green-dim);
   }
 
-  /* Crew Section */
-  .crew-section {
+  /* Agents Section */
+  .agents-section {
     padding: var(--space-16) var(--space-8);
     background: var(--bg-secondary);
     border-top: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
   }
 
-  .crew-visual {
+  .spawn-visual {
     max-width: 600px;
     margin: 0 auto var(--space-8);
   }

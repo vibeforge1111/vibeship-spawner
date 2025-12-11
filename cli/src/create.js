@@ -83,7 +83,7 @@ async function loadAgentsCatalog() {
 
 export async function create(gistIdOrOptions, options = {}) {
   console.log('');
-  console.log(chalk.dim('  vibeship crew'));
+  console.log(chalk.dim('  vibeship spawner'));
   console.log(chalk.dim('  "You vibe. It ships."'));
   console.log('');
 
@@ -115,7 +115,7 @@ async function createFromGist(gistId, options) {
     if (!preflightOk) {
       console.log('');
       console.log(chalk.yellow('  Fix the issues above before continuing.'));
-      console.log(chalk.dim('  Run `npx vibeship-crew doctor` for more details.'));
+      console.log(chalk.dim('  Run `npx vibeship-spawner doctor` for more details.'));
       console.log('');
       process.exit(1);
     }
@@ -268,7 +268,7 @@ async function createInteractive(options) {
     console.log(chalk.dim('  Configure your stack at: https://vibeship.dev'));
     console.log('');
     console.log(chalk.dim('  After configuring, run:'));
-    console.log(chalk.cyan('  npx vibeship-crew create <gist-id>'));
+    console.log(chalk.cyan('  npx vibeship-spawner create <gist-id>'));
     console.log('');
     // TODO: Actually open browser and wait for config
     process.exit(0);
@@ -282,7 +282,7 @@ async function createInteractive(options) {
     .map(a => ({ name: a.name, value: a.id }));
 
   console.log('');
-  console.log(chalk.dim(`  Your crew: ${selectedAgents.join(', ')}`));
+  console.log(chalk.dim(`  Your agents: ${selectedAgents.join(', ')}`));
 
   if (availableAgents.length > 0) {
     const addMore = await select({

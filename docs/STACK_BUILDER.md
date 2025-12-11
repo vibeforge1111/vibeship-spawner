@@ -6,7 +6,7 @@
 
 ## Core Concept
 
-Think of it like a character builder in a video game, but for your project. You're assembling your **crew** of AI agents and giving them **superpowers** (MCPs).
+Think of it like a character builder in a video game, but for your project. You're assembling your AI agents and giving them **superpowers** (MCPs).
 
 ---
 
@@ -59,13 +59,13 @@ Core transaction?
 
 Max 3-4 questions. Skip anytime for smart defaults.
 
-### 3. Build Your Crew
+### 3. Build Your Agents
 
 This is the fun part. Visual, tactile, game-like.
 
 ```
-YOUR CREW                           AVAILABLE AGENTS
----------                           ----------------
+YOUR AGENTS                         AVAILABLE AGENTS
+-----------                         ----------------
 
 +-------------------+               +-------------------+
 | PLANNER           |               | PAYMENTS          | [+]

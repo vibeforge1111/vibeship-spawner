@@ -115,7 +115,7 @@
 
   function copyCommand() {
     if (exportedGist) {
-      navigator.clipboard.writeText(`npx vibeship-crew create ${exportedGist.id}`);
+      navigator.clipboard.writeText(`npx vibeship-spawner create ${exportedGist.id}`);
     }
   }
 
@@ -361,7 +361,7 @@
             </div>
 
             <div class="command-box">
-              <code>npx vibeship-crew create {exportedGist.id}</code>
+              <code>npx vibeship-spawner create {exportedGist.id}</code>
               <button class="copy-btn" onclick={copyCommand}>
                 <Icon name="copy" size={16} />
               </button>
@@ -393,9 +393,9 @@
                 <p>Add to your <code>claude_desktop_config.json</code>:</p>
                 <pre class="mcp-config">{`{
   "mcpServers": {
-    "vibeship-crew": {
+    "vibeship-spawner": {
       "command": "npx",
-      "args": ["vibeship-crew"]
+      "args": ["vibeship-spawner"]
     }
   }
 }`}</pre>
@@ -471,7 +471,7 @@
             {#if showTroubleshootHelp}
               <div class="help-content">
                 <ul>
-                  <li>Run <code>npx vibeship-orchestrator doctor</code> to check your environment</li>
+                  <li>Run <code>npx vibeship-spawner doctor</code> to check your environment</li>
                   <li>This shows what's installed and what's missing</li>
                   <li>Common issues: Node.js too old, Claude CLI not installed</li>
                 </ul>
@@ -538,7 +538,7 @@
           <span>Download {projectNameInput}-vibeship-config.json</span>
         </button>
 
-        <p class="export-note">Then run: <code>npx vibeship-orchestrator create --local ./{projectNameInput}-vibeship-config.json</code></p>
+        <p class="export-note">Then run: <code>npx vibeship-spawner create --local ./{projectNameInput}-vibeship-config.json</code></p>
       </div>
     {/if}
 

@@ -1,17 +1,17 @@
-# VibeShip Crew
+# VibeShip Spawner
 
 > "You vibe. It ships."
 
-A file-based crew framework for Claude Code. No backend. No database. Just markdown, JSON, and one shell script.
+The agent spawning framework for Claude Code. No backend. No database. Just markdown, JSON, and one shell script.
 
 ---
 
 ## What It Does
 
-VibeShip Crew transforms Claude Code into an intelligent planning and execution system:
+VibeShip Spawner transforms Claude Code into an intelligent planning and execution system:
 
 1. **Discovery** - Asks smart questions to understand what you want to build
-2. **Stack Builder** - Assemble your crew of agents and MCPs (like a game character builder)
+2. **Stack Builder** - Spawn agents and connect them with MCPs (like a game character builder)
 3. **Planning** - Generates PRD, architecture, and task breakdown
 4. **Building** - Executes via specialized skill-based agents
 5. **Review** - Summarizes, gets feedback, iterates
@@ -51,7 +51,7 @@ Claude will:
 
 ## The Stack Builder
 
-Think of it like a character builder in a video game. You're assembling your **crew** of AI agents and giving them **superpowers** (MCPs).
+Think of it like a character builder in a video game. You're **spawning** AI agents and connecting them with **superpowers** (MCPs).
 
 ### Templates
 
@@ -80,7 +80,7 @@ looks good        # Confirm and continue
 ## Project Structure
 
 ```
-/vibeship-crew
+/vibeship-spawner
 ├── templates/
 │   ├── CLAUDE.md           # Bootloader (copied to new projects)
 │   ├── state.json          # Initial state template
@@ -190,9 +190,9 @@ The planner assesses your input:
 
 ### Phase 2: Stack Builder
 
-Assemble your crew:
+Spawn your agents:
 ```
-Your Crew:
+Your Agents:
 + PLANNER (always included)
 + FRONTEND (Next.js + Tailwind)
 + BACKEND (Supabase + Auth)

@@ -16,7 +16,7 @@
 <nav class="navbar">
   <a href="/" class="logo">
     <span class="logo-text">vibeship</span>
-    <span class="logo-sub">crew</span>
+    <span class="logo-sub">spawner</span>
   </a>
 
   <div class="nav-links">

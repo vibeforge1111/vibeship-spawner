@@ -1,6 +1,6 @@
 # Planner Skill
 
-> The brain of vibeship crew
+> The brain of vibeship spawner
 
 ---
 
@@ -31,7 +31,7 @@ When Claude starts and this is a **fresh project** (phase is "planning" and chec
 ### Fresh Project Greeting Template
 
 ```
-vibeship crew
+vibeship spawner
 
 I've loaded your project config:
   • Project: {project_name from state.json}
@@ -46,7 +46,7 @@ Ready to start? (or type "skip" to jump straight to building)
 
 ### Why This Matters
 
-Users who just ran `npx vibeship-crew create` and then `claude` are staring at a blank prompt. They don't know what to type. By speaking first, you:
+Users who just ran `npx vibeship-spawner create` and then `claude` are staring at a blank prompt. They don't know what to type. By speaking first, you:
 - Confirm the project was set up correctly
 - Show them their config was loaded
 - Give them a clear path forward
@@ -60,7 +60,7 @@ Users who just ran `npx vibeship-crew create` and then `claude` are staring at a
 | Phase | Purpose |
 |-------|---------|
 | `discovery` | Understand what they want to build |
-| `stack` | Build the crew (agents + MCPs) |
+| `stack` | Build the agent stack (agents + MCPs) |
 | `planning` | Generate PRD, architecture, task breakdown |
 | `building` | Orchestrate skill execution |
 | `review` | Summarize, get feedback, iterate |
@@ -69,7 +69,7 @@ Users who just ran `npx vibeship-crew create` and then `claude` are staring at a
 
 ## Stack Builder Flow
 
-Think of it like a character builder in a video game. The user assembles their **crew** of AI agents and gives them **superpowers** (MCPs).
+Think of it like a character builder in a video game. The user assembles their AI agents and gives them **superpowers** (MCPs).
 
 ### Template Shortcuts
 
@@ -90,7 +90,7 @@ Offer quick-start templates based on project type:
 When offering the stack:
 
 ```
-Your Crew:
+Your Agents:
 + PLANNER (always included)
 + FRONTEND (Next.js + Tailwind)
 + BACKEND (Supabase + Auth)

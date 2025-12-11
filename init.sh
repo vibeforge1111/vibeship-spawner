@@ -6,7 +6,7 @@ PROJECT_NAME=${1:-"my-project"}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo ""
-echo "> Initializing VibeShip Orchestrator project: $PROJECT_NAME"
+echo "> Spawning VibeShip project: $PROJECT_NAME"
 echo ""
 
 # Create project directory
@@ -24,7 +24,7 @@ cp "$SCRIPT_DIR/templates/docs/PRD.md" ./docs/PRD.md
 cp "$SCRIPT_DIR/templates/docs/ARCHITECTURE.md" ./docs/ARCHITECTURE.md
 touch ./docs/PROJECT_LOG.md
 
-# Copy skills (needed for crew coordination)
+# Copy skills (needed for agent coordination)
 cp -r "$SCRIPT_DIR/skills" ./skills
 
 # Update project name in files

@@ -12,11 +12,11 @@
     <p class="hero-subtitle">The architecture behind your vibe coding superpowers</p>
   </section>
 
-  <!-- Why a Crew -->
+  <!-- Why Agents -->
   <section class="section">
     <div class="section-header">
       <span class="section-number">00</span>
-      <h2>Why a Crew</h2>
+      <h2>Why Agents</h2>
     </div>
     <div class="section-content">
       <div class="problem-grid">
@@ -35,7 +35,7 @@
         </div>
         <div class="vs">vs</div>
         <div class="problem-card highlight">
-          <h3>Claude with a Crew</h3>
+          <h3>Claude with Agents</h3>
           <ul>
             <li><strong>Focused Agents</strong> - One task per agent,<br/>no context loss</li>
             <li><strong>Skill Files</strong> - Enforce conventions<br/>and best practices</li>
@@ -69,7 +69,7 @@
         <div class="arch-layer">
           <span class="layer-label">MCP</span>
           <div class="arch-box mcp">
-            <span>vibeship-crew</span>
+            <span>vibeship-spawner</span>
           </div>
         </div>
         <div class="arch-arrow">↓</div>

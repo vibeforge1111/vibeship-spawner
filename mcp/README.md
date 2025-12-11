@@ -1,6 +1,6 @@
-# vibeship-crew
+# vibeship-spawner
 
-MCP server for vibeship crew - scaffold AI-powered projects directly from Claude.
+MCP server for vibeship spawner - spawn AI agent stacks directly from Claude.
 
 ## Installation
 
@@ -9,9 +9,9 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
-    "vibeship-crew": {
+    "vibeship-spawner": {
       "command": "node",
-      "args": ["C:/path/to/vibeship-crew/mcp/src/index.js"]
+      "args": ["C:/path/to/vibeship-spawner/mcp/src/index.js"]
     }
   }
 }
@@ -22,9 +22,9 @@ Or if published to npm:
 ```json
 {
   "mcpServers": {
-    "vibeship-crew": {
+    "vibeship-spawner": {
       "command": "npx",
-      "args": ["vibeship-crew"]
+      "args": ["vibeship-spawner"]
     }
   }
 }
@@ -34,7 +34,7 @@ Or if published to npm:
 
 ### create_project
 
-Create a new vibeship crew project.
+Spawn a new vibeship project with agents and MCPs.
 
 **Parameters:**
 - `gist_id` - GitHub Gist ID from vibeship web configurator

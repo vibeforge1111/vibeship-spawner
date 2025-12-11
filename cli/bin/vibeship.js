@@ -6,8 +6,8 @@ import { create } from '../src/create.js';
 import { doctor } from '../src/doctor.js';
 
 program
-  .name('vibeship-crew')
-  .description('CLI for vibeship crew - scaffold projects from your stack config')
+  .name('vibeship-spawner')
+  .description('CLI for vibeship spawner - spawn your AI agent stack')
   .version('1.0.0');
 
 // Primary command: create

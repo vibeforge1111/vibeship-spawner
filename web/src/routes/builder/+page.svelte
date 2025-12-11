@@ -74,7 +74,7 @@
 <main class="builder">
   <div class="builder-header">
     <div class="header-left">
-      <h1 class="page-title">Build Your Crew</h1>
+      <h1 class="page-title">Build Your Agents</h1>
       {#if $projectDescription}
         <p class="project-desc">{$projectDescription}</p>
       {/if}
@@ -179,16 +179,16 @@
   {/if}
 
   <div class="builder-content">
-    <!-- Your Crew (Selected) -->
-    <div class="panel crew-panel">
+    <!-- Your Agents (Selected) -->
+    <div class="panel agents-panel">
       <div class="panel-header">
-        <h2 class="panel-title">Your Crew</h2>
+        <h2 class="panel-title">Your Agents</h2>
         <span class="panel-count">{$selectedAgents.length}</span>
       </div>
       <div class="panel-content">
-        <div class="crew-flow">
+        <div class="agents-flow">
           {#each $selectedAgentObjects as agent, i}
-            <div class="crew-item">
+            <div class="agents-item">
               <AgentCard
                 {agent}
                 selected={true}
@@ -368,13 +368,13 @@
     overflow-y: auto;
   }
 
-  .crew-flow {
+  .agents-flow {
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
   }
 
-  .crew-item {
+  .agents-item {
     display: flex;
     flex-direction: column;
     align-items: center;
