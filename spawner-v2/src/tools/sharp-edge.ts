@@ -5,13 +5,57 @@
  */
 
 import { z } from 'zod';
-import type { Env, SharpEdgeInput, SharpEdgeOutput } from '../types';
-import {
-  loadSharpEdges,
-  filterEdgesBySituation,
-  matchEdgesAgainstCode,
-} from '../skills/sharp-edges';
+import type { Env, SharpEdgeInput, SharpEdgeOutput, SharpEdge } from '../types';
+import { loadRelevantSkills, loadSkillEdges } from '../skills/loader';
 import { emitEvent } from '../telemetry/events';
+
+type EdgeWithMatch = SharpEdge & { matches_code?: boolean };
+
+/**
+ * Filter edges by situation keywords
+ */
+function filterEdgesBySituation(
+  edges: EdgeWithMatch[],
+  situation: string
+): EdgeWithMatch[] {
+  const keywords = situation.toLowerCase().split(/\s+/);
+
+  return edges.filter(edge => {
+    const edgeText = [
+      edge.summary,
+      edge.situation,
+      ...(edge.symptoms ?? []),
+    ].join(' ').toLowerCase();
+
+    return keywords.some(kw => edgeText.includes(kw));
+  });
+}
+
+/**
+ * Match edges against code
+ */
+function matchEdgesAgainstCode(
+  edges: EdgeWithMatch[],
+  code: string
+): EdgeWithMatch[] {
+  return edges.map(edge => {
+    if (edge.detection_pattern) {
+      try {
+        const matches = new RegExp(edge.detection_pattern).test(code);
+        return { ...edge, matches_code: matches };
+      } catch {
+        // Invalid regex pattern, skip matching
+        return edge;
+      }
+    }
+    return edge;
+  }).sort((a, b) => {
+    // Sort matching edges first
+    if (a.matches_code && !b.matches_code) return -1;
+    if (!a.matches_code && b.matches_code) return 1;
+    return 0;
+  });
+}
 
 /**
  * Input schema for spawner_sharp_edge
@@ -74,15 +118,22 @@ export async function executeSharpEdge(
 
   const { stack, situation, code_context } = parsed.data;
 
-  // 1. Get all edges for this stack
-  let edges = await loadSharpEdges(env.SHARP_EDGES, stack);
+  // 1. Get skills for this stack
+  const skills = await loadRelevantSkills(env, stack);
 
-  // 2. Filter by situation if provided
+  // 2. Load edges for all matched skills
+  let edges: EdgeWithMatch[] = [];
+  for (const skill of skills) {
+    const skillEdges = await loadSkillEdges(env, skill.id);
+    edges.push(...skillEdges);
+  }
+
+  // 3. Filter by situation if provided
   if (situation) {
     edges = filterEdgesBySituation(edges, situation);
   }
 
-  // 3. Check code against detection patterns if provided
+  // 4. Check code against detection patterns if provided
   if (code_context) {
     edges = matchEdgesAgainstCode(edges, code_context);
   }

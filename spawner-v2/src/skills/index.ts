@@ -3,4 +3,3 @@
  */
 
 export * from './loader';
-export * from './sharp-edges';

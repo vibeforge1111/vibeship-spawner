@@ -167,6 +167,21 @@ export interface Check {
   applies_to?: string[];  // File patterns (e.g., "*.tsx")
 }
 
+/**
+ * Validation definition (stored in KV as validations:{skill_id})
+ */
+export interface Validation {
+  id: string;
+  skill_id: string;
+  name: string;
+  severity: 'critical' | 'error' | 'warning';
+  type: 'regex' | 'ast' | 'file';
+  pattern: string | string[];
+  message: string;
+  fix_action: string;
+  applies_to: string[];
+}
+
 export interface ValidationResult {
   check_id: string;
   passed: boolean;

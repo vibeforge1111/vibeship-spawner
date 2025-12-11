@@ -14,8 +14,7 @@ import {
 } from '../db/projects';
 import { getLastSession } from '../db/sessions';
 import { getOpenIssues } from '../db/issues';
-import { loadRelevantSkills } from '../skills/loader';
-import { loadSharpEdges } from '../skills/sharp-edges';
+import { loadRelevantSkills, loadSkillEdges, type Skill } from '../skills/loader';
 import { emitEvent } from '../telemetry/events';
 
 /**
@@ -109,10 +108,14 @@ export async function executeContext(
 
   // 2. Determine relevant skills
   const stack = stack_hints ?? project.stack ?? [];
-  const skills = await loadRelevantSkills(env.SKILLS, stack);
+  const skills = await loadRelevantSkills(env, stack);
 
-  // 3. Load sharp edges for this stack
-  const sharpEdges = await loadSharpEdges(env.SHARP_EDGES, stack);
+  // 3. Load sharp edges for matched skills
+  const sharpEdges: Awaited<ReturnType<typeof loadSkillEdges>> = [];
+  for (const skill of skills) {
+    const edges = await loadSkillEdges(env, skill.id);
+    sharpEdges.push(...edges);
+  }
 
   // 4. Get last session summary
   const lastSession = await getLastSession(env.DB, project.id);
@@ -152,7 +155,7 @@ export async function executeContext(
     id: s.id,
     name: s.name,
     owns: s.owns,
-    sharp_edges_count: s.sharp_edges?.length ?? 0,
+    sharp_edges_count: s.sharp_edges_count,
   }));
 
   const instruction = buildInstruction(
