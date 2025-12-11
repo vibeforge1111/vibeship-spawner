@@ -3,16 +3,22 @@
  *
  * Cloudflare Worker that provides MCP tools for AI-powered development.
  *
- * Tools:
+ * V2 Original Tools:
  * - spawner_context: Load project context and relevant skills
  * - spawner_validate: Run guardrail checks on code
  * - spawner_remember: Save decisions and session progress
  * - spawner_sharp_edge: Query gotchas for current situation
  * - spawner_unstick: Get help when stuck
+ *
+ * V1 Ported Tools:
+ * - spawner_create: Create new project with scaffolding
+ * - spawner_templates: List available project templates
+ * - spawner_skills: Search and retrieve skills (V1 markdown + V2 YAML)
  */
 
 import type { Env } from './types';
 import {
+  // V2 Original
   contextToolDefinition,
   executeContext,
   validateToolDefinition,
@@ -23,6 +29,13 @@ import {
   executeSharpEdge,
   unstickToolDefinition,
   executeUnstick,
+  // V1 Ported
+  createToolDefinition,
+  executeCreate,
+  templatesToolDefinition,
+  executeTemplates,
+  skillsToolDefinition,
+  executeSkills,
 } from './tools';
 
 /**
@@ -50,11 +63,16 @@ interface McpResponse {
  * Tool definitions for MCP
  */
 const TOOLS = [
+  // V2 Original
   contextToolDefinition,
   validateToolDefinition,
   rememberToolDefinition,
   sharpEdgeToolDefinition,
   unstickToolDefinition,
+  // V1 Ported
+  createToolDefinition,
+  templatesToolDefinition,
+  skillsToolDefinition,
 ];
 
 /**
@@ -275,6 +293,44 @@ async function handleCallTool(
             attempts: toolArgs.attempts as string[],
             errors: toolArgs.errors as string[],
             current_code: toolArgs.current_code as string | undefined,
+          }
+        );
+        break;
+
+      // V1 Ported Tools
+      case 'spawner_create':
+        result = await executeCreate(
+          env,
+          {
+            template: toolArgs.template as 'saas' | 'marketplace' | 'ai-app' | 'web3' | 'tool',
+            project_name: toolArgs.project_name as string,
+            description: toolArgs.description as string | undefined,
+            stack_overrides: toolArgs.stack_overrides as string[] | undefined,
+          },
+          userId
+        );
+        break;
+
+      case 'spawner_templates':
+        result = await executeTemplates(
+          env,
+          {
+            filter: toolArgs.filter as string | undefined,
+          }
+        );
+        break;
+
+      case 'spawner_skills':
+        result = await executeSkills(
+          env,
+          {
+            action: toolArgs.action as 'search' | 'list' | 'get' | 'squad',
+            query: toolArgs.query as string | undefined,
+            name: toolArgs.name as string | undefined,
+            tag: toolArgs.tag as string | undefined,
+            layer: toolArgs.layer as number | undefined,
+            squad: toolArgs.squad as string | undefined,
+            source: toolArgs.source as 'all' | 'v1' | 'v2' | undefined,
           }
         );
         break;

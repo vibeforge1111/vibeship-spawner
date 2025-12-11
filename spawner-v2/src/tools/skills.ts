@@ -1,0 +1,596 @@
+/**
+ * spawner_skills Tool
+ *
+ * Search and retrieve skills from both V1 (markdown) and V2 (YAML) formats.
+ * Provides unified access to all specialist skills.
+ */
+
+import { z } from 'zod';
+import type { Env } from '../types';
+
+/**
+ * V1 Skill Registry structure (from /skills/registry.json)
+ */
+interface V1SkillRegistry {
+  version: string;
+  specialists: V1Specialist[];
+  tag_index: Record<string, string[]>;
+  layers: Record<string, {
+    name: string;
+    description: string;
+    specialists: string[];
+  }>;
+  squads: Record<string, {
+    description: string;
+    lead: string;
+    support: string[];
+    on_call?: string[];
+  }>;
+}
+
+interface V1Specialist {
+  name: string;
+  path: string;
+  description: string;
+  tags: string[];
+  triggers: string[];
+  pairs_with: string[];
+  layer: number;
+}
+
+/**
+ * V2 Skill structure (from KV)
+ */
+interface V2Skill {
+  id: string;
+  name: string;
+  description: string;
+  layer: number;
+  tags: string[];
+  owns: string[];
+  pairs_with: string[];
+  triggers: string[];
+  has_validations: boolean;
+  has_sharp_edges: boolean;
+}
+
+/**
+ * Unified skill result
+ */
+interface UnifiedSkill {
+  name: string;
+  description: string;
+  layer: number;
+  tags: string[];
+  pairs_with: string[];
+  source: 'v1' | 'v2';
+  has_validations: boolean;
+  has_sharp_edges: boolean;
+}
+
+/**
+ * Input schema for spawner_skills
+ */
+export const skillsInputSchema = z.object({
+  action: z.enum(['search', 'list', 'get', 'squad']).describe(
+    'Action: search (by query), list (all skills), get (specific skill), squad (get skill squad)'
+  ),
+  query: z.string().optional().describe(
+    'Search query - matches names, descriptions, tags, triggers'
+  ),
+  name: z.string().optional().describe(
+    'Skill name for get action'
+  ),
+  tag: z.string().optional().describe(
+    'Filter by tag'
+  ),
+  layer: z.number().min(1).max(3).optional().describe(
+    'Filter by layer: 1=Core, 2=Integration, 3=Polish'
+  ),
+  squad: z.string().optional().describe(
+    'Squad name for squad action (e.g., "auth-complete", "payments-complete")'
+  ),
+  source: z.enum(['all', 'v1', 'v2']).optional().describe(
+    'Filter by source: all (default), v1 (markdown), v2 (yaml)'
+  ),
+});
+
+/**
+ * Tool definition for MCP
+ */
+export const skillsToolDefinition = {
+  name: 'spawner_skills',
+  description: 'Search, list, and retrieve specialist skills. Searches both V1 (markdown) and V2 (YAML) skill formats.',
+  inputSchema: {
+    type: 'object' as const,
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['search', 'list', 'get', 'squad'],
+        description: 'Action: search (by query), list (all skills), get (specific skill content), squad (get skill squad)',
+      },
+      query: {
+        type: 'string',
+        description: 'Search query - matches names, descriptions, tags, triggers',
+      },
+      name: {
+        type: 'string',
+        description: 'Skill name for get action (e.g., "auth-flow", "supabase-backend")',
+      },
+      tag: {
+        type: 'string',
+        description: 'Filter by tag (e.g., "auth", "supabase", "react")',
+      },
+      layer: {
+        type: 'integer',
+        enum: [1, 2, 3],
+        description: 'Filter by layer: 1=Core, 2=Integration, 3=Polish',
+      },
+      squad: {
+        type: 'string',
+        description: 'Squad name (e.g., "auth-complete", "payments-complete", "crud-feature")',
+      },
+      source: {
+        type: 'string',
+        enum: ['all', 'v1', 'v2'],
+        description: 'Filter by source: all (default), v1 (markdown skills), v2 (yaml skills with validations)',
+      },
+    },
+    required: ['action'],
+  },
+};
+
+/**
+ * Output type
+ */
+export interface SkillsOutput {
+  skills?: UnifiedSkill[];
+  skill_content?: string;
+  squad?: {
+    name: string;
+    description: string;
+    lead: string;
+    support: string[];
+    on_call?: string[];
+  };
+  layers?: {
+    layer: number;
+    name: string;
+    description: string;
+    count: number;
+  }[];
+  _instruction: string;
+}
+
+/**
+ * Execute the spawner_skills tool
+ */
+export async function executeSkills(
+  env: Env,
+  input: z.infer<typeof skillsInputSchema>
+): Promise<SkillsOutput> {
+  const parsed = skillsInputSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new Error(`Invalid input: ${parsed.error.message}`);
+  }
+
+  const { action, query, name, tag, layer, squad, source = 'all' } = parsed.data;
+
+  // Load V1 registry from KV
+  const v1Registry = await loadV1Registry(env);
+
+  // Load V2 skills index from KV
+  const v2Skills = await loadV2SkillsIndex(env);
+
+  switch (action) {
+    case 'search':
+      return handleSearch(v1Registry, v2Skills, query, tag, layer, source);
+
+    case 'list':
+      return handleList(v1Registry, v2Skills, layer, source);
+
+    case 'get':
+      if (!name) {
+        throw new Error('name is required for get action');
+      }
+      return await handleGet(env, v1Registry, v2Skills, name);
+
+    case 'squad':
+      if (!squad) {
+        throw new Error('squad is required for squad action');
+      }
+      return handleSquad(v1Registry, squad);
+
+    default:
+      throw new Error(`Unknown action: ${action}`);
+  }
+}
+
+/**
+ * Load V1 registry from KV
+ */
+async function loadV1Registry(env: Env): Promise<V1SkillRegistry | null> {
+  const registry = await env.SKILLS.get<V1SkillRegistry>('v1:registry', 'json');
+  return registry;
+}
+
+/**
+ * Load V2 skills index from KV
+ */
+async function loadV2SkillsIndex(env: Env): Promise<V2Skill[]> {
+  const index = await env.SKILLS.get<V2Skill[]>('v2:index', 'json');
+  return index ?? [];
+}
+
+/**
+ * Handle search action
+ */
+function handleSearch(
+  v1Registry: V1SkillRegistry | null,
+  v2Skills: V2Skill[],
+  query?: string,
+  tag?: string,
+  layer?: number,
+  source: string = 'all'
+): SkillsOutput {
+  const results: UnifiedSkill[] = [];
+  const q = query?.toLowerCase();
+
+  // Search V1 skills
+  if (source === 'all' || source === 'v1') {
+    if (v1Registry) {
+      for (const skill of v1Registry.specialists) {
+        if (matchesFilters(skill, q, tag, layer)) {
+          results.push({
+            name: skill.name,
+            description: skill.description,
+            layer: skill.layer,
+            tags: skill.tags,
+            pairs_with: skill.pairs_with,
+            source: 'v1',
+            has_validations: false,
+            has_sharp_edges: false, // V1 has them in markdown, not structured
+          });
+        }
+      }
+    }
+  }
+
+  // Search V2 skills
+  if (source === 'all' || source === 'v2') {
+    for (const skill of v2Skills) {
+      if (matchesFiltersV2(skill, q, tag, layer)) {
+        results.push({
+          name: skill.name,
+          description: skill.description,
+          layer: skill.layer,
+          tags: skill.tags,
+          pairs_with: skill.pairs_with,
+          source: 'v2',
+          has_validations: skill.has_validations,
+          has_sharp_edges: skill.has_sharp_edges,
+        });
+      }
+    }
+  }
+
+  // Sort by relevance (exact name match first, then layer)
+  results.sort((a, b) => {
+    if (q) {
+      const aExact = a.name.toLowerCase() === q;
+      const bExact = b.name.toLowerCase() === q;
+      if (aExact && !bExact) return -1;
+      if (bExact && !aExact) return 1;
+    }
+    return a.layer - b.layer;
+  });
+
+  return {
+    skills: results,
+    _instruction: buildSearchInstruction(results, query, tag, layer),
+  };
+}
+
+/**
+ * Handle list action
+ */
+function handleList(
+  v1Registry: V1SkillRegistry | null,
+  v2Skills: V2Skill[],
+  layer?: number,
+  source: string = 'all'
+): SkillsOutput {
+  const results: UnifiedSkill[] = [];
+
+  // Add V1 skills
+  if (source === 'all' || source === 'v1') {
+    if (v1Registry) {
+      for (const skill of v1Registry.specialists) {
+        if (!layer || skill.layer === layer) {
+          results.push({
+            name: skill.name,
+            description: skill.description,
+            layer: skill.layer,
+            tags: skill.tags,
+            pairs_with: skill.pairs_with,
+            source: 'v1',
+            has_validations: false,
+            has_sharp_edges: false,
+          });
+        }
+      }
+    }
+  }
+
+  // Add V2 skills
+  if (source === 'all' || source === 'v2') {
+    for (const skill of v2Skills) {
+      if (!layer || skill.layer === layer) {
+        // Skip if already in results (V2 overrides V1 for same name)
+        if (!results.some(r => r.name === skill.name)) {
+          results.push({
+            name: skill.name,
+            description: skill.description,
+            layer: skill.layer,
+            tags: skill.tags,
+            pairs_with: skill.pairs_with,
+            source: 'v2',
+            has_validations: skill.has_validations,
+            has_sharp_edges: skill.has_sharp_edges,
+          });
+        }
+      }
+    }
+  }
+
+  // Sort by layer then name
+  results.sort((a, b) => {
+    if (a.layer !== b.layer) return a.layer - b.layer;
+    return a.name.localeCompare(b.name);
+  });
+
+  // Build layer summary
+  const layers = [
+    { layer: 1, name: 'Core', description: 'Foundation - language, framework, data layer', count: results.filter(r => r.layer === 1).length },
+    { layer: 2, name: 'Integration', description: 'Features - combine core skills into complete features', count: results.filter(r => r.layer === 2).length },
+    { layer: 3, name: 'Polish', description: 'Quality - security, UX, design refinement', count: results.filter(r => r.layer === 3).length },
+  ];
+
+  return {
+    skills: results,
+    layers,
+    _instruction: buildListInstruction(results, layers, layer),
+  };
+}
+
+/**
+ * Handle get action - retrieve full skill content
+ */
+async function handleGet(
+  env: Env,
+  v1Registry: V1SkillRegistry | null,
+  v2Skills: V2Skill[],
+  name: string
+): Promise<SkillsOutput> {
+  // Check V2 first (preferred)
+  const v2Skill = v2Skills.find(s => s.name === name || s.id === name);
+  if (v2Skill) {
+    const content = await env.SKILLS.get(`skill:${v2Skill.id}`);
+    if (content) {
+      return {
+        skill_content: content,
+        _instruction: `Loaded V2 skill: ${v2Skill.name}\n\nThis skill has structured validations and sharp edges that spawner_validate can use.`,
+      };
+    }
+  }
+
+  // Check V1
+  if (v1Registry) {
+    const v1Skill = v1Registry.specialists.find(s => s.name === name);
+    if (v1Skill) {
+      const content = await env.SKILLS.get(`v1:skill:${name}`);
+      if (content) {
+        return {
+          skill_content: content,
+          _instruction: `Loaded V1 skill: ${v1Skill.name}\n\nThis is a markdown skill without structured validations. Use spawner_sharp_edge for gotchas.`,
+        };
+      }
+    }
+  }
+
+  // Not found
+  const available = [
+    ...(v1Registry?.specialists.map(s => s.name) ?? []),
+    ...v2Skills.map(s => s.name),
+  ].filter((v, i, a) => a.indexOf(v) === i).sort();
+
+  throw new Error(`Skill "${name}" not found. Available: ${available.join(', ')}`);
+}
+
+/**
+ * Handle squad action
+ */
+function handleSquad(
+  v1Registry: V1SkillRegistry | null,
+  squadName: string
+): SkillsOutput {
+  if (!v1Registry?.squads) {
+    throw new Error('Squad registry not available');
+  }
+
+  const squad = v1Registry.squads[squadName];
+  if (!squad) {
+    const available = Object.keys(v1Registry.squads);
+    throw new Error(`Squad "${squadName}" not found. Available: ${available.join(', ')}`);
+  }
+
+  return {
+    squad: {
+      name: squadName,
+      ...squad,
+    },
+    _instruction: buildSquadInstruction(squadName, squad),
+  };
+}
+
+/**
+ * Check if V1 skill matches filters
+ */
+function matchesFilters(
+  skill: V1Specialist,
+  query?: string,
+  tag?: string,
+  layer?: number
+): boolean {
+  if (layer && skill.layer !== layer) return false;
+  if (tag && !skill.tags.includes(tag.toLowerCase())) return false;
+
+  if (query) {
+    const q = query.toLowerCase();
+    return (
+      skill.name.includes(q) ||
+      skill.description.toLowerCase().includes(q) ||
+      skill.tags.some(t => t.includes(q)) ||
+      skill.triggers.some(t => t.toLowerCase().includes(q))
+    );
+  }
+
+  return true;
+}
+
+/**
+ * Check if V2 skill matches filters
+ */
+function matchesFiltersV2(
+  skill: V2Skill,
+  query?: string,
+  tag?: string,
+  layer?: number
+): boolean {
+  if (layer && skill.layer !== layer) return false;
+  if (tag && !skill.tags.includes(tag.toLowerCase())) return false;
+
+  if (query) {
+    const q = query.toLowerCase();
+    return (
+      skill.name.includes(q) ||
+      skill.id.includes(q) ||
+      skill.description.toLowerCase().includes(q) ||
+      skill.tags.some(t => t.includes(q)) ||
+      skill.triggers.some(t => t.toLowerCase().includes(q))
+    );
+  }
+
+  return true;
+}
+
+/**
+ * Build search instruction
+ */
+function buildSearchInstruction(
+  results: UnifiedSkill[],
+  query?: string,
+  tag?: string,
+  layer?: number
+): string {
+  if (results.length === 0) {
+    const filters = [query, tag, layer ? `layer ${layer}` : null].filter(Boolean);
+    return `No skills found matching: ${filters.join(', ')}\n\nTry a broader search or use action="list" to see all skills.`;
+  }
+
+  const lines: string[] = [
+    `Found ${results.length} skill${results.length === 1 ? '' : 's'}:`,
+    '',
+  ];
+
+  for (const skill of results) {
+    const badge = skill.source === 'v2' ? '[V2]' : '[V1]';
+    const extras = [];
+    if (skill.has_validations) extras.push('validations');
+    if (skill.has_sharp_edges) extras.push('sharp-edges');
+
+    lines.push(`${badge} **${skill.name}** (Layer ${skill.layer})`);
+    lines.push(`    ${skill.description}`);
+    if (extras.length) lines.push(`    Features: ${extras.join(', ')}`);
+  }
+
+  lines.push('');
+  lines.push('Use action="get" with name="<skill>" to load full content.');
+
+  return lines.join('\n');
+}
+
+/**
+ * Build list instruction
+ */
+function buildListInstruction(
+  results: UnifiedSkill[],
+  layers: { layer: number; name: string; count: number }[],
+  filterLayer?: number
+): string {
+  const lines: string[] = [];
+
+  if (filterLayer) {
+    const layerInfo = layers.find(l => l.layer === filterLayer);
+    lines.push(`Layer ${filterLayer}: ${layerInfo?.name} (${results.length} skills)`);
+  } else {
+    lines.push(`All Skills: ${results.length} total`);
+    lines.push('');
+    for (const l of layers) {
+      lines.push(`  Layer ${l.layer} (${l.name}): ${l.count} skills`);
+    }
+  }
+
+  lines.push('');
+  lines.push('Skills by layer:');
+
+  let currentLayer = 0;
+  for (const skill of results) {
+    if (skill.layer !== currentLayer) {
+      currentLayer = skill.layer;
+      const layerInfo = layers.find(l => l.layer === currentLayer);
+      lines.push('');
+      lines.push(`── Layer ${currentLayer}: ${layerInfo?.name} ──`);
+    }
+    const badge = skill.source === 'v2' ? '[V2]' : '[V1]';
+    lines.push(`  ${badge} ${skill.name}`);
+  }
+
+  lines.push('');
+  lines.push('[V2] = Has structured validations/sharp-edges');
+  lines.push('[V1] = Markdown format');
+
+  return lines.join('\n');
+}
+
+/**
+ * Build squad instruction
+ */
+function buildSquadInstruction(
+  name: string,
+  squad: { description: string; lead: string; support: string[]; on_call?: string[] }
+): string {
+  const lines: string[] = [
+    `Squad: ${name}`,
+    squad.description,
+    '',
+    `Lead: ${squad.lead}`,
+    `Support: ${squad.support.join(', ')}`,
+  ];
+
+  if (squad.on_call?.length) {
+    lines.push(`On-call: ${squad.on_call.join(', ')}`);
+  }
+
+  lines.push('');
+  lines.push('Recommended loading order:');
+  lines.push(`1. ${squad.lead} (lead)`);
+  squad.support.forEach((s, i) => {
+    lines.push(`${i + 2}. ${s}`);
+  });
+
+  lines.push('');
+  lines.push('Use action="get" with each skill name to load the full content.');
+
+  return lines.join('\n');
+}
