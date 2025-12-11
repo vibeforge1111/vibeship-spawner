@@ -1,29 +1,69 @@
 # VibeShip Spawner
 
+```
+    __      ___ _          _____ _     _
+    \ \    / (_) |        / ____| |   (_)
+     \ \  / / _| |__   __| (___ | |__  _ _ __
+      \ \/ / | | '_ \ / _ \___ \| '_ \| | '_ \
+       \  /  | | |_) |  __/___) | | | | | |_) |
+        \/   |_|_.__/ \___|____/|_| |_|_| .__/
+                                        | |
+                                        |_|
+```
+
 > "You vibe. It ships."
 
-An MCP server that transforms Claude into a specialized product-building system with project memory, guardrails, sharp edges, and escape hatches.
+```
+                    *  .  *
+               . _\/ \/_ .
+                \  \ /  /             🚀 SPAWNER
+            .    \_|_|_/    .
+                  /   \               Transform Claude into a
+             .   /     \   .          product-building system
+         *      /_______\      *
+                |  |||  |             ┌─────────────────────┐
+                |  |||  |             │ Memory • Guardrails │
+           _____|__|||__|_____        │ Sharp Edges • Skills│
+          /____________________\      └─────────────────────┘
+               \  ___  /
+                \/   \/
+```
 
 ---
 
 ## What It Does
 
-Spawner adds capabilities Claude doesn't have by default:
-
-1. **Project Memory** - Remembers your project across sessions (decisions, issues, progress)
-2. **Guardrails** - Actually catches code issues (not just suggests)
-3. **Sharp Edges** - Knows gotchas Claude doesn't know
-4. **Escape Hatches** - Detects when you're stuck and offers alternatives
-5. **Skill System** - Unified specialist knowledge (markdown + YAML formats)
-6. **Skill Level Detection** - Adapts guidance to your experience level
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                     SPAWNER CAPABILITIES                         │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  🧠 PROJECT MEMORY      Remembers across sessions                │
+│                         (decisions, issues, progress)            │
+│                                                                  │
+│  🛡️ GUARDRAILS          Actually catches code issues             │
+│                         (not just suggests)                      │
+│                                                                  │
+│  ⚡ SHARP EDGES          Knows gotchas Claude doesn't             │
+│                         (versioned, situation-matched)           │
+│                                                                  │
+│  🚪 ESCAPE HATCHES       Detects when you're stuck               │
+│                         (offers alternatives)                    │
+│                                                                  │
+│  📚 SKILL SYSTEM         Unified specialist knowledge            │
+│                         (markdown + YAML formats)                │
+│                                                                  │
+│  🎯 SKILL DETECTION      Adapts to your experience               │
+│                         (vibe-coder → expert)                    │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
 ## Quick Start
 
 ### 1. Configure Claude Desktop
-
-Add to your Claude Desktop MCP configuration:
 
 ```json
 {
@@ -36,63 +76,79 @@ Add to your Claude Desktop MCP configuration:
 }
 ```
 
-Restart Claude Desktop.
-
 ### 2. Start Building
 
-Open Claude and describe your idea:
-
 ```
-You: I want to build a marketplace for selling digital art
+┌─────────────────────────────────────────────────────────────────┐
+│  You: I want to build a marketplace for selling digital art     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Spawner automatically:                                         │
+│                                                                 │
+│    ① Detects your skill level                                   │
+│    ② Asks clarifying questions (max 3)                          │
+│    ③ Recommends template, stack, and skills                     │
+│    ④ Creates your project when ready                            │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
-
-Spawner automatically:
-1. Detects your skill level
-2. Asks clarifying questions (max 3)
-3. Recommends template, stack, and skills
-4. Creates your project when ready
 
 ---
 
 ## MCP Tools
 
-| Tool | Purpose |
-|------|---------|
-| `spawner_plan` | Plan and create projects (discover → recommend → create) |
-| `spawner_analyze` | Analyze existing codebase for stack/skill recommendations |
-| `spawner_load` | Load project context and skills for session |
-| `spawner_validate` | Run guardrail checks on code |
-| `spawner_remember` | Save decisions and session progress |
-| `spawner_watch_out` | Query gotchas for your current situation |
-| `spawner_unstick` | Get help when stuck on a problem |
-| `spawner_templates` | List available project templates |
-| `spawner_skills` | Search, list, get skills and squads |
+```
+┌────────────────────┬────────────────────────────────────────────┐
+│ TOOL               │ PURPOSE                                    │
+├────────────────────┼────────────────────────────────────────────┤
+│ spawner_plan       │ Plan & create projects (discover→create)   │
+│ spawner_analyze    │ Analyze codebase for recommendations       │
+│ spawner_load       │ Load project context and skills            │
+│ spawner_validate   │ Run guardrail checks on code               │
+│ spawner_remember   │ Save decisions and progress                │
+│ spawner_watch_out  │ Query gotchas for your situation           │
+│ spawner_unstick    │ Get help when stuck                        │
+│ spawner_templates  │ List available project templates           │
+│ spawner_skills     │ Search, list, get skills and squads        │
+└────────────────────┴────────────────────────────────────────────┘
 
-**Production endpoint:** https://mcp.vibeship.co
+Production endpoint: https://mcp.vibeship.co
+```
 
 ---
 
 ## Project Templates
 
-| Template | Use Case | Stack |
-|----------|----------|-------|
-| `saas` | Subscription products | Next.js, Supabase, Stripe |
-| `marketplace` | Buy/sell platforms | Next.js, Supabase, Stripe, Algolia |
-| `ai-app` | LLM-powered apps | Next.js, Supabase, OpenAI |
-| `web3` | Blockchain apps | Next.js, wagmi, viem |
-| `tool` | CLIs and utilities | TypeScript, Node |
+```
+┌─────────────┬─────────────────────────┬─────────────────────────────┐
+│ TEMPLATE    │ USE CASE                │ STACK                       │
+├─────────────┼─────────────────────────┼─────────────────────────────┤
+│ saas        │ Subscription products   │ Next.js, Supabase, Stripe   │
+│ marketplace │ Buy/sell platforms      │ Next.js, Supabase, Algolia  │
+│ ai-app      │ LLM-powered apps        │ Next.js, Supabase, OpenAI   │
+│ web3        │ Blockchain apps         │ Next.js, wagmi, viem        │
+│ tool        │ CLIs and utilities      │ TypeScript, Node            │
+└─────────────┴─────────────────────────┴─────────────────────────────┘
+```
 
 ---
 
 ## Skill System
 
-### Unified Skills
-
-Spawner searches both V1 (markdown) and V2 (YAML) skill formats, giving you access to all specialist knowledge:
-
 ```
-You: What skills are available for authentication?
-Claude: [Uses spawner_skills({ query: "auth" })]
+                    ┌─────────────────────┐
+                    │   UNIFIED SKILLS    │
+                    └──────────┬──────────┘
+                               │
+              ┌────────────────┴────────────────┐
+              │                                 │
+      ┌───────▼───────┐               ┌────────▼────────┐
+      │  V1 MARKDOWN  │               │   V2 YAML       │
+      │               │               │                 │
+      │  • Easy write │               │  • Validations  │
+      │  • Triggers   │               │  • Sharp edges  │
+      │  • Tags       │               │  • Detection    │
+      └───────────────┘               └─────────────────┘
 ```
 
 ### Squads
@@ -100,97 +156,129 @@ Claude: [Uses spawner_skills({ query: "auth" })]
 Pre-configured skill combinations for common tasks:
 
 ```
-You: I need to add authentication to my app
-Claude: [Uses spawner_skills({ action: "squad", squad: "auth-complete" })]
-```
+┌─────────────────────┬───────────────────────────────────────────┐
+│ SQUAD               │ WHAT IT DOES                              │
+├─────────────────────┼───────────────────────────────────────────┤
+│ auth-complete       │ Full authentication implementation        │
+│ payments-complete   │ Stripe/payments integration               │
+│ crud-feature        │ Database CRUD operations                  │
+└─────────────────────┴───────────────────────────────────────────┘
 
-Available squads:
-- `auth-complete` - Full authentication implementation
-- `payments-complete` - Stripe/payments integration
-- `crud-feature` - Database CRUD operations
+Usage: spawner_skills({ action: "squad", squad: "auth-complete" })
+```
 
 ### Skill Level Detection
 
-Spawner detects your experience level and adapts guidance:
-- **vibe-coder** - Non-technical, needs maximum guidance
-- **builder** - Some tech knowledge, learning
-- **developer** - Technical, familiar with patterns
-- **expert** - Senior developer, strong opinions
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                    SKILL LEVELS                                  │
+├──────────────┬───────────────────────────────────────────────────┤
+│ vibe-coder   │ Non-technical, needs maximum guidance             │
+│ builder      │ Some tech knowledge, learning                     │
+│ developer    │ Technical, familiar with patterns                 │
+│ expert       │ Senior developer, strong opinions                 │
+└──────────────┴───────────────────────────────────────────────────┘
+
+Spawner detects your level from phrases and adapts its guidance!
+```
 
 ---
 
 ## Example Workflows
 
-### New Project
-
 ```
-You: I want to build a SaaS for team task management
+┌─────────────────────────────────────────────────────────────────┐
+│ 🆕 NEW PROJECT                                                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  You: I want to build a SaaS for team task management           │
+│                                                                 │
+│  Claude: [Uses spawner_plan to understand your needs]           │
+│  Claude: Based on your idea, I recommend the SaaS template...   │
+│  Claude: [Creates project with spawner_plan action="create"]    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 
-Claude: [Uses spawner_plan to understand your needs]
-Claude: Based on your idea, I recommend the SaaS template with...
-Claude: [Creates project with spawner_plan action="create"]
-```
+┌─────────────────────────────────────────────────────────────────┐
+│ 📂 EXISTING PROJECT                                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  You: Analyze my codebase and suggest improvements              │
+│                                                                 │
+│  Claude: [Uses spawner_analyze with your files]                 │
+│  Claude: I detected Next.js + Supabase. Missing auth...         │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 
-### Existing Project
+┌─────────────────────────────────────────────────────────────────┐
+│ 🆘 WHEN STUCK                                                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  You: I've been trying to fix this auth redirect for hours      │
+│                                                                 │
+│  Claude: [Uses spawner_unstick]                                 │
+│  Claude: Here are 3 alternative approaches...                   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 
-```
-You: Analyze my codebase and suggest improvements
-
-Claude: [Uses spawner_analyze with your package.json and files]
-Claude: I detected Next.js + Supabase. Missing auth. Recommend adding...
-```
-
-### When Stuck
-
-```
-You: I've been trying to fix this auth redirect for hours
-
-Claude: [Uses spawner_unstick]
-Claude: Here are 3 alternative approaches...
-```
-
-### Watch Out for Gotchas
-
-```
-You: What should I watch out for with Supabase RLS?
-
-Claude: [Uses spawner_watch_out]
-Claude: Found 3 sharp edges for your stack...
-```
-
-### Get a Skill Squad
-
-```
-You: I need to implement payments with Stripe
-
-Claude: [Uses spawner_skills({ action: "squad", squad: "payments-complete" })]
-Claude: Loading payments squad: payments-flow (lead), stripe-webhooks, error-handling
+┌─────────────────────────────────────────────────────────────────┐
+│ ⚠️ WATCH OUT FOR GOTCHAS                                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  You: What should I watch out for with Supabase RLS?            │
+│                                                                 │
+│  Claude: [Uses spawner_watch_out]                               │
+│  Claude: Found 3 sharp edges for your stack...                  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Stack Detection
 
-`spawner_analyze` automatically detects technologies from your codebase:
-- **Framework:** Next.js, React, Vue, Svelte
-- **Database:** Supabase, Prisma, Drizzle, Firebase
-- **Auth:** NextAuth, Clerk, Supabase Auth
-- **Payments:** Stripe, LemonSqueezy
-- **Styling:** Tailwind, shadcn/ui
-- **AI:** OpenAI, Anthropic, Vercel AI
-- **Web3:** wagmi, viem, ethers
-- **Testing:** Jest, Vitest, Playwright
-- **Deployment:** Vercel, Cloudflare
+```
+spawner_analyze automatically detects:
+
+┌─────────────┬──────────────────────────────────────────────────┐
+│ CATEGORY    │ TECHNOLOGIES                                     │
+├─────────────┼──────────────────────────────────────────────────┤
+│ Framework   │ Next.js, React, Vue, Svelte                      │
+│ Database    │ Supabase, Prisma, Drizzle, Firebase              │
+│ Auth        │ NextAuth, Clerk, Supabase Auth                   │
+│ Payments    │ Stripe, LemonSqueezy                             │
+│ Styling     │ Tailwind, shadcn/ui                              │
+│ AI          │ OpenAI, Anthropic, Vercel AI                     │
+│ Web3        │ wagmi, viem, ethers                              │
+│ Testing     │ Jest, Vitest, Playwright                         │
+│ Deployment  │ Vercel, Cloudflare                               │
+└─────────────┴──────────────────────────────────────────────────┘
+```
 
 ---
 
 ## Tech Stack
 
-- **Runtime:** Cloudflare Workers
-- **Database:** Cloudflare D1 (SQLite)
-- **Cache/Skills:** Cloudflare KV
-- **Protocol:** MCP (Model Context Protocol)
-- **Language:** TypeScript
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                     SPAWNER ARCHITECTURE                         │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐         │
+│   │  Cloudflare │    │  Cloudflare │    │  Cloudflare │         │
+│   │   Workers   │    │     D1      │    │     KV      │         │
+│   │  (Runtime)  │    │  (SQLite)   │    │  (Cache)    │         │
+│   └──────┬──────┘    └──────┬──────┘    └──────┬──────┘         │
+│          │                  │                  │                 │
+│          └──────────────────┼──────────────────┘                 │
+│                             │                                    │
+│                    ┌────────▼────────┐                           │
+│                    │   MCP Protocol  │                           │
+│                    │   (TypeScript)  │                           │
+│                    └─────────────────┘                           │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -198,62 +286,46 @@ Claude: Loading payments squad: payments-flow (lead), stripe-webhooks, error-han
 
 ```
 vibeship-spawner/
-├── spawner-v2/           # MCP Server (Cloudflare Worker)
+│
+├── spawner-v2/               # 🚀 MCP Server (Cloudflare Worker)
 │   ├── src/
-│   │   ├── index.ts      # Main worker, MCP routing
-│   │   ├── tools/        # MCP tool implementations
-│   │   ├── validation/   # Code checking
-│   │   ├── skills/       # Skill loading
-│   │   └── db/           # D1 database operations
-│   ├── skills/           # V2 Skills (YAML)
-│   └── migrations/       # D1 schema
-├── skills/               # V1 Skills (markdown)
-├── catalogs/             # Agent and MCP catalogs
-├── docs/
-│   ├── TUTORIAL.md       # Getting started guide
-│   └── V2/               # V2 documentation
-│       ├── PRD.md        # Product requirements
+│   │   ├── index.ts          #    Main worker, MCP routing
+│   │   ├── tools/            #    MCP tool implementations
+│   │   ├── validation/       #    Code checking
+│   │   ├── skills/           #    Skill loading
+│   │   └── db/               #    D1 database operations
+│   ├── skills/               #    V2 Skills (YAML)
+│   └── migrations/           #    D1 schema
+│
+├── skills/                   # 📚 V1 Skills (markdown)
+├── catalogs/                 # 📋 Agent and MCP catalogs
+├── docs/                     # 📖 Documentation
+│   ├── TUTORIAL.md
+│   └── V2/
+│       ├── PRD.md
 │       ├── ARCHITECTURE.md
 │       ├── SKILL_SPEC.md
 │       └── ROADMAP.md
-└── web/                  # Web UI (SvelteKit)
+│
+└── web/                      # 🌐 Web UI (SvelteKit)
 ```
-
----
-
-## Documentation
-
-| Doc | Purpose |
-|-----|---------|
-| [Tutorial](docs/TUTORIAL.md) | Getting started guide |
-| [PRD](docs/V2/PRD.md) | Product requirements |
-| [Architecture](docs/V2/ARCHITECTURE.md) | Technical deep dive |
-| [Skill Spec](docs/V2/SKILL_SPEC.md) | How to build skills |
-| [Roadmap](docs/V2/ROADMAP.md) | What to build when |
 
 ---
 
 ## Development
 
-### Local Development
-
 ```bash
+# Start local dev
 cd spawner-v2
 npm install
 wrangler dev
-```
 
-### Deploy
-
-```bash
+# Deploy
 wrangler deploy
+
+# Test with Claude Desktop
+# Update MCP config to: http://localhost:8787/mcp
 ```
-
-### Test with Claude Desktop
-
-1. Run `wrangler dev`
-2. Update MCP config to use `http://localhost:8787/mcp`
-3. Restart Claude Desktop
 
 ---
 
@@ -271,4 +343,10 @@ MIT
 
 ---
 
-Built with VibeShip. "You vibe. It ships."
+```
+╔══════════════════════════════════════════════════════════════════╗
+║                                                                  ║
+║     Built with VibeShip. "You vibe. It ships." 🚀                ║
+║                                                                  ║
+╚══════════════════════════════════════════════════════════════════╝
+```
