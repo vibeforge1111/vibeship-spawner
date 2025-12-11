@@ -1,7 +1,8 @@
 /**
- * spawner_sharp_edge Tool
+ * spawner_watch_out Tool
  *
- * Query sharp edges (gotchas) relevant to current situation.
+ * Query gotchas and pitfalls relevant to current situation.
+ * Renamed from spawner_sharp_edge for better vibe coder UX.
  */
 
 import { z } from 'zod';
@@ -80,9 +81,9 @@ export const sharpEdgeInputSchema = z.object({
 /**
  * Tool definition for MCP
  */
-export const sharpEdgeToolDefinition = {
-  name: 'spawner_sharp_edge',
-  description: 'Query sharp edges (gotchas) relevant to current situation. Use this when you encounter issues or want to proactively check for common pitfalls.',
+export const watchOutToolDefinition = {
+  name: 'spawner_watch_out',
+  description: 'Get gotchas and pitfalls to watch out for with your tech stack. Use this proactively to avoid common mistakes.',
   inputSchema: {
     type: 'object' as const,
     properties: {
@@ -105,9 +106,9 @@ export const sharpEdgeToolDefinition = {
 };
 
 /**
- * Execute the spawner_sharp_edge tool
+ * Execute the spawner_watch_out tool
  */
-export async function executeSharpEdge(
+export async function executeWatchOut(
   env: Env,
   input: SharpEdgeInput,
   projectId?: string
@@ -185,10 +186,10 @@ export async function executeSharpEdge(
 /**
  * Create the tool handler
  */
-export function sharpEdgeTool(env: Env) {
+export function watchOutTool(env: Env) {
   return {
-    definition: sharpEdgeToolDefinition,
+    definition: watchOutToolDefinition,
     execute: (input: SharpEdgeInput, projectId?: string) =>
-      executeSharpEdge(env, input, projectId),
+      executeWatchOut(env, input, projectId),
   };
 }

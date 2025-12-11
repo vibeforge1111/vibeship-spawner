@@ -4,10 +4,10 @@
  * Cloudflare Worker that provides MCP tools for AI-powered development.
  *
  * V2 Original Tools:
- * - spawner_context: Load project context and relevant skills
+ * - spawner_load: Load project context and relevant skills (was: spawner_context)
  * - spawner_validate: Run guardrail checks on code
  * - spawner_remember: Save decisions and session progress
- * - spawner_sharp_edge: Query gotchas for current situation
+ * - spawner_watch_out: Get gotchas for current situation (was: spawner_sharp_edge)
  * - spawner_unstick: Get help when stuck
  *
  * V1 Ported Tools:
@@ -22,14 +22,14 @@
 import type { Env } from './types';
 import {
   // V2 Original
-  contextToolDefinition,
-  executeContext,
+  loadToolDefinition,
+  executeLoad,
   validateToolDefinition,
   executeValidate,
   rememberToolDefinition,
   executeRemember,
-  sharpEdgeToolDefinition,
-  executeSharpEdge,
+  watchOutToolDefinition,
+  executeWatchOut,
   unstickToolDefinition,
   executeUnstick,
   // V1 Ported
@@ -70,10 +70,10 @@ interface McpResponse {
  */
 const TOOLS = [
   // V2 Original
-  contextToolDefinition,
+  loadToolDefinition,
   validateToolDefinition,
   rememberToolDefinition,
-  sharpEdgeToolDefinition,
+  watchOutToolDefinition,
   unstickToolDefinition,
   // V1 Ported
   templatesToolDefinition,
@@ -242,8 +242,8 @@ async function handleCallTool(
     let result: unknown;
 
     switch (toolName) {
-      case 'spawner_context':
-        result = await executeContext(
+      case 'spawner_load':
+        result = await executeLoad(
           env,
           {
             project_id: toolArgs.project_id as string | undefined,
@@ -282,8 +282,8 @@ async function handleCallTool(
         );
         break;
 
-      case 'spawner_sharp_edge':
-        result = await executeSharpEdge(
+      case 'spawner_watch_out':
+        result = await executeWatchOut(
           env,
           {
             stack: toolArgs.stack as string[],

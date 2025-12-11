@@ -54,11 +54,11 @@ async function resolveProjectId(env: Env, userId: string): Promise<string> {
 
 ---
 
-### 3. `spawner_sharp_edge` - Requires stack array
-**Status:** 🔴 CRITICAL
+### 3. `spawner_watch_out` (was: spawner_sharp_edge) - Optional stack array
+**Status:** ✅ FIXED + RENAMED
 **Effort:** 15 min
 
-"The tool to help users avoid gotchas IS ITSELF A GOTCHA."
+"The tool to help users avoid gotchas IS ITSELF A GOTCHA." → Now fixed!
 
 ```typescript
 // File: spawner-v2/src/tools/sharp-edge.ts
@@ -148,7 +148,7 @@ if (!parsed.success) {
 ---
 
 ### 7. `spawner_remember` - Rich Success Response
-**Status:** 🟠 NEEDS WORK
+**Status:** ✅ FIXED
 **Effort:** 15 min
 
 Current response is minimal `{ saved: [...] }`.
@@ -164,7 +164,7 @@ return {
   what_this_means: "I'll remember this across sessions",
   next_steps: [
     "Continue building - I'll reference this decision when relevant",
-    "Use spawner_context to see all saved decisions",
+    "Use spawner_load to see all saved decisions",  // renamed from spawner_context
     "Use spawner_remember again to save more context"
   ],
 };
@@ -172,14 +172,22 @@ return {
 
 ---
 
-### 8. All Tools - Consistent Response Envelope
-**Status:** 🟠 NEEDS WORK
+### 8. Tool Renames for Better UX
+**Status:** ✅ DONE
+**Effort:** 30 min
+
+Renamed tools for better vibe coder understanding:
+- `spawner_context` → `spawner_load` (more intuitive action)
+- `spawner_sharp_edge` → `spawner_watch_out` (clearer intent)
+
+---
+
+### 9. All Tools - Consistent Response Envelope (SKIPPED)
+**Status:** ⏭️ SKIPPED
 **Effort:** 1 hour
 
-Every success response should include:
-- `success: true`
-- `what_happened: string`
-- `next_steps: string[]`
+Not every tool needs the full envelope - only where it makes sense.
+Most tools already have good contextual responses.
 
 ---
 
@@ -189,13 +197,14 @@ Every success response should include:
 |---|------|-----|------|--------|
 | 1 | templates | Wrong tool reference | 5 min | ✅ |
 | 2 | remember | Optional project_id | 30 min | ✅ |
-| 3 | sharp_edge | Optional stack | 15 min | ✅ |
+| 3 | watch_out | Optional stack + rename | 15 min | ✅ |
 | 4 | skills | Default action | 10 min | ✅ |
 | 5 | unstick | Accept situation | 30 min | ✅ |
 | 6 | validate | Better errors | 20 min | ✅ |
 | 7 | remember | Rich response | 15 min | ✅ |
+| 8 | load | Rename from context | 15 min | ✅ |
 
-**All P0 and P1 fixes implemented!**
+**All P0 and P1 fixes implemented! Tool renames complete!**
 
 ---
 
@@ -205,10 +214,11 @@ After implementing:
 
 - [ ] `spawner_plan({ idea: "a todo app" })` - works without config
 - [ ] `spawner_remember({ update: { decision: {...} } })` - works without project_id
-- [ ] `spawner_sharp_edge({})` - returns common gotchas
+- [ ] `spawner_watch_out({})` - returns common gotchas (renamed from sharp_edge)
 - [ ] `spawner_skills({})` - defaults to search
 - [ ] `spawner_unstick({ task_description: "I'm stuck on auth" })` - works without arrays
 - [ ] `spawner_templates({})` - references spawner_plan, not spawner_create
+- [ ] `spawner_load({})` - loads context (renamed from context)
 - [ ] All error messages include what_to_do and example
 
 ---

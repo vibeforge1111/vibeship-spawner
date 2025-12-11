@@ -2,7 +2,7 @@
  * Tools Module Index
  *
  * V2 Original Tools:
- * - context, validate, remember, sharp-edge, unstick
+ * - load (was: context), validate, remember, watch-out (was: sharp-edge), unstick
  *
  * V1 Ported Tools:
  * - templates (list project templates)

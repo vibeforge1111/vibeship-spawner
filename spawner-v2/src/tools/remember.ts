@@ -224,7 +224,7 @@ export async function executeRemember(
     what_this_means: "I'll remember this across sessions and reference it when relevant",
     next_steps: [
       'Continue building - I\'ll use this context when it\'s relevant',
-      `Load full context with: spawner_context({ project_id: "${projectId}" })`,
+      `Load full context with: spawner_load({ project_id: "${projectId}" })`,
       'Use spawner_remember again to save more decisions or progress',
     ],
     message: saved.length > 0

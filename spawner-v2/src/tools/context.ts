@@ -1,5 +1,5 @@
 /**
- * spawner_context Tool
+ * spawner_load Tool (was: spawner_context)
  *
  * Load project context and relevant skills for this session.
  * This is the primary entry point for establishing session context.
@@ -19,9 +19,9 @@ import { loadRelevantSkills, loadSkillEdges, type Skill } from '../skills/loader
 import { emitEvent } from '../telemetry/events';
 
 /**
- * Input schema for spawner_context
+ * Input schema for spawner_load
  */
-export const contextInputSchema = z.object({
+export const loadInputSchema = z.object({
   project_id: z.string().optional().describe(
     'Existing project ID to load context for'
   ),
@@ -36,8 +36,8 @@ export const contextInputSchema = z.object({
 /**
  * Tool definition for MCP
  */
-export const contextToolDefinition = {
-  name: 'spawner_context',
+export const loadToolDefinition = {
+  name: 'spawner_load',
   description: 'Load project context and relevant skills for this session. Use this at the start of a session or when switching contexts.',
   inputSchema: {
     type: 'object' as const,
@@ -60,15 +60,15 @@ export const contextToolDefinition = {
 };
 
 /**
- * Execute the spawner_context tool
+ * Execute the spawner_load tool
  */
-export async function executeContext(
+export async function executeLoad(
   env: Env,
   input: ContextInput,
   userId: string
 ): Promise<ContextOutput | { message: string; error?: boolean }> {
   // Validate input
-  const parsed = contextInputSchema.safeParse(input);
+  const parsed = loadInputSchema.safeParse(input);
   if (!parsed.success) {
     return {
       message: `Invalid input: ${parsed.error.message}`,
@@ -220,7 +220,7 @@ function buildInstruction(
   lines.push('');
   lines.push('Available tools:');
   lines.push('- spawner_validate: Check code before marking tasks complete');
-  lines.push('- spawner_sharp_edge: Query gotchas for your current situation');
+  lines.push('- spawner_watch_out: Query gotchas for your current situation');
   lines.push('- spawner_remember: Save decisions or session progress');
   lines.push('- spawner_unstick: Get help when stuck on a problem');
 
@@ -230,10 +230,10 @@ function buildInstruction(
 /**
  * Create the tool handler
  */
-export function contextTool(env: Env) {
+export function loadTool(env: Env) {
   return {
-    definition: contextToolDefinition,
+    definition: loadToolDefinition,
     execute: (input: ContextInput, userId: string) =>
-      executeContext(env, input, userId),
+      executeLoad(env, input, userId),
   };
 }
