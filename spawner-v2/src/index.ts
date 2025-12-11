@@ -19,30 +19,8 @@
  * - spawner_analyze: Codebase analysis for stack/skill recommendations
  */
 
-import type { Env } from './types';
-import {
-  // V2 Original
-  loadToolDefinition,
-  executeLoad,
-  validateToolDefinition,
-  executeValidate,
-  rememberToolDefinition,
-  executeRemember,
-  watchOutToolDefinition,
-  executeWatchOut,
-  unstickToolDefinition,
-  executeUnstick,
-  // V1 Ported
-  templatesToolDefinition,
-  executeTemplates,
-  skillsToolDefinition,
-  executeSkills,
-  // Planning & Analysis Tools
-  planToolDefinition,
-  executePlan,
-  analyzeToolDefinition,
-  executeAnalyze,
-} from './tools';
+import type { Env } from './types.js';
+import { getToolDefinitions, executeTool, hasTool } from './tools/index.js';
 
 /**
  * MCP Protocol types
@@ -64,24 +42,6 @@ interface McpResponse {
     data?: unknown;
   };
 }
-
-/**
- * Tool definitions for MCP
- */
-const TOOLS = [
-  // V2 Original
-  loadToolDefinition,
-  validateToolDefinition,
-  rememberToolDefinition,
-  watchOutToolDefinition,
-  unstickToolDefinition,
-  // V1 Ported
-  templatesToolDefinition,
-  skillsToolDefinition,
-  // Planning & Analysis
-  planToolDefinition,
-  analyzeToolDefinition,
-];
 
 /**
  * Main worker entry point
@@ -205,11 +165,12 @@ function handleInitialize(id: string | number): McpResponse {
  * Handle tools/list request
  */
 function handleListTools(id: string | number): McpResponse {
+  const definitions = getToolDefinitions();
   return {
     jsonrpc: '2.0',
     id,
     result: {
-      tools: TOOLS.map(t => ({
+      tools: definitions.map(t => ({
         name: t.name,
         description: t.description,
         inputSchema: t.inputSchema,
@@ -238,138 +199,18 @@ async function handleCallTool(
   const toolName = params.name;
   const toolArgs = (params.arguments ?? {}) as Record<string, unknown>;
 
+  // Check if tool exists
+  if (!hasTool(toolName)) {
+    return {
+      jsonrpc: '2.0',
+      id,
+      error: { code: -32602, message: `Unknown tool: ${toolName}` },
+    };
+  }
+
   try {
-    let result: unknown;
-
-    switch (toolName) {
-      case 'spawner_load':
-        result = await executeLoad(
-          env,
-          {
-            project_id: toolArgs.project_id as string | undefined,
-            project_description: toolArgs.project_description as string | undefined,
-            stack_hints: toolArgs.stack_hints as string[] | undefined,
-          },
-          userId
-        );
-        break;
-
-      case 'spawner_validate':
-        result = await executeValidate(
-          env,
-          {
-            code: toolArgs.code as string,
-            file_path: toolArgs.file_path as string,
-            check_types: toolArgs.check_types as ('security' | 'patterns' | 'production')[] | undefined,
-          },
-          userId
-        );
-        break;
-
-      case 'spawner_remember':
-        result = await executeRemember(
-          env,
-          {
-            project_id: toolArgs.project_id as string,
-            update: toolArgs.update as {
-              decision?: { what: string; why: string };
-              issue?: { description: string; status: 'open' | 'resolved' };
-              session_summary?: string;
-              validated?: string[];
-            },
-          },
-          userId
-        );
-        break;
-
-      case 'spawner_watch_out':
-        result = await executeWatchOut(
-          env,
-          {
-            stack: toolArgs.stack as string[],
-            situation: toolArgs.situation as string | undefined,
-            code_context: toolArgs.code_context as string | undefined,
-          }
-        );
-        break;
-
-      case 'spawner_unstick':
-        result = await executeUnstick(
-          env,
-          {
-            task_description: toolArgs.task_description as string,
-            attempts: toolArgs.attempts as string[],
-            errors: toolArgs.errors as string[],
-            current_code: toolArgs.current_code as string | undefined,
-          }
-        );
-        break;
-
-      // V1 Ported Tools
-      case 'spawner_templates':
-        result = await executeTemplates(
-          env,
-          {
-            filter: toolArgs.filter as string | undefined,
-          }
-        );
-        break;
-
-      case 'spawner_skills':
-        result = await executeSkills(
-          env,
-          {
-            action: toolArgs.action as 'search' | 'list' | 'get' | 'squad',
-            query: toolArgs.query as string | undefined,
-            name: toolArgs.name as string | undefined,
-            tag: toolArgs.tag as string | undefined,
-            layer: toolArgs.layer as number | undefined,
-            squad: toolArgs.squad as string | undefined,
-            source: toolArgs.source as 'all' | 'v1' | 'v2' | undefined,
-          }
-        );
-        break;
-
-      // Planning & Analysis Tools
-      case 'spawner_plan':
-        result = await executePlan(
-          env,
-          {
-            action: (toolArgs.action as 'discover' | 'recommend' | 'create') ?? 'discover',
-            idea: toolArgs.idea as string | undefined,
-            project_name: toolArgs.project_name as string | undefined,
-            template: toolArgs.template as 'saas' | 'marketplace' | 'ai-app' | 'web3' | 'tool' | undefined,
-            context: toolArgs.context as {
-              previous_questions?: string[];
-              answers?: Record<string, string>;
-              detected_skill_level?: 'vibe-coder' | 'builder' | 'developer' | 'expert';
-              detected_template?: 'saas' | 'marketplace' | 'ai-app' | 'web3' | 'tool';
-            } | undefined,
-            user_signals: toolArgs.user_signals as string[] | undefined,
-          },
-          userId
-        );
-        break;
-
-      case 'spawner_analyze':
-        result = await executeAnalyze(
-          env,
-          {
-            files: toolArgs.files as string[] | undefined,
-            code_samples: toolArgs.code_samples as { path: string; content: string }[] | undefined,
-            dependencies: toolArgs.dependencies as Record<string, string> | undefined,
-            question: toolArgs.question as string | undefined,
-          }
-        );
-        break;
-
-      default:
-        return {
-          jsonrpc: '2.0',
-          id,
-          error: { code: -32602, message: `Unknown tool: ${toolName}` },
-        };
-    }
+    // Execute tool via registry
+    const result = await executeTool(toolName, env, toolArgs, userId);
 
     return {
       jsonrpc: '2.0',
