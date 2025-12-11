@@ -11,9 +11,12 @@
  * - spawner_unstick: Get help when stuck
  *
  * V1 Ported Tools:
- * - spawner_create: Create new project with scaffolding
  * - spawner_templates: List available project templates
  * - spawner_skills: Search and retrieve skills (V1 markdown + V2 YAML)
+ *
+ * Planning & Analysis Tools:
+ * - spawner_plan: Unified project planning (discover + recommend + create)
+ * - spawner_analyze: Codebase analysis for stack/skill recommendations
  */
 
 import type { Env } from './types';
@@ -30,12 +33,15 @@ import {
   unstickToolDefinition,
   executeUnstick,
   // V1 Ported
-  createToolDefinition,
-  executeCreate,
   templatesToolDefinition,
   executeTemplates,
   skillsToolDefinition,
   executeSkills,
+  // Planning & Analysis Tools
+  planToolDefinition,
+  executePlan,
+  analyzeToolDefinition,
+  executeAnalyze,
 } from './tools';
 
 /**
@@ -70,9 +76,11 @@ const TOOLS = [
   sharpEdgeToolDefinition,
   unstickToolDefinition,
   // V1 Ported
-  createToolDefinition,
   templatesToolDefinition,
   skillsToolDefinition,
+  // Planning & Analysis
+  planToolDefinition,
+  analyzeToolDefinition,
 ];
 
 /**
@@ -298,19 +306,6 @@ async function handleCallTool(
         break;
 
       // V1 Ported Tools
-      case 'spawner_create':
-        result = await executeCreate(
-          env,
-          {
-            template: toolArgs.template as 'saas' | 'marketplace' | 'ai-app' | 'web3' | 'tool',
-            project_name: toolArgs.project_name as string,
-            description: toolArgs.description as string | undefined,
-            stack_overrides: toolArgs.stack_overrides as string[] | undefined,
-          },
-          userId
-        );
-        break;
-
       case 'spawner_templates':
         result = await executeTemplates(
           env,
@@ -331,6 +326,39 @@ async function handleCallTool(
             layer: toolArgs.layer as number | undefined,
             squad: toolArgs.squad as string | undefined,
             source: toolArgs.source as 'all' | 'v1' | 'v2' | undefined,
+          }
+        );
+        break;
+
+      // Planning & Analysis Tools
+      case 'spawner_plan':
+        result = await executePlan(
+          env,
+          {
+            action: (toolArgs.action as 'discover' | 'recommend' | 'create') ?? 'discover',
+            idea: toolArgs.idea as string | undefined,
+            project_name: toolArgs.project_name as string | undefined,
+            template: toolArgs.template as 'saas' | 'marketplace' | 'ai-app' | 'web3' | 'tool' | undefined,
+            context: toolArgs.context as {
+              previous_questions?: string[];
+              answers?: Record<string, string>;
+              detected_skill_level?: 'vibe-coder' | 'builder' | 'developer' | 'expert';
+              detected_template?: 'saas' | 'marketplace' | 'ai-app' | 'web3' | 'tool';
+            } | undefined,
+            user_signals: toolArgs.user_signals as string[] | undefined,
+          },
+          userId
+        );
+        break;
+
+      case 'spawner_analyze':
+        result = await executeAnalyze(
+          env,
+          {
+            files: toolArgs.files as string[] | undefined,
+            code_samples: toolArgs.code_samples as { path: string; content: string }[] | undefined,
+            dependencies: toolArgs.dependencies as Record<string, string> | undefined,
+            question: toolArgs.question as string | undefined,
           }
         );
         break;

@@ -5,9 +5,12 @@
  * - context, validate, remember, sharp-edge, unstick
  *
  * V1 Ported Tools:
- * - create (project creation + D1 init)
  * - templates (list project templates)
  * - skills (unified skill search)
+ *
+ * Planning & Analysis Tools:
+ * - plan (unified: discover + recommend + create)
+ * - analyze (codebase analysis for existing projects)
  */
 
 // V2 Original Tools
@@ -18,6 +21,9 @@ export * from './sharp-edge';
 export * from './unstick';
 
 // V1 Ported Tools
-export * from './create';
 export * from './templates';
 export * from './skills';
+
+// Planning & Analysis Tools
+export * from './plan';
+export * from './analyze';
