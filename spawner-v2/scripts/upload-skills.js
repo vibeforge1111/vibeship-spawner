@@ -37,16 +37,21 @@ const SKILL_LAYERS = ['core', 'integration', 'pattern'];
 /**
  * Upload a key-value pair to KV
  */
-async function uploadToKV(namespace, key, value) {
+async function uploadToKV(binding, key, value) {
   const valueStr = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-  const localFlag = isLocal ? '--local' : '';
 
   // Write value to temp file to handle escaping
   const tempFile = path.join(__dirname, '.temp-kv-value');
   await fs.writeFile(tempFile, valueStr);
 
   try {
-    const cmd = `wrangler kv:key put --namespace-id=${namespace} "${key}" --path="${tempFile}" ${localFlag}`;
+    // For local dev, use --binding flag; for production, use --namespace-id
+    const namespaceArg = isLocal
+      ? `--binding=${binding}`
+      : `--namespace-id=${process.env[`${binding}_KV_ID`] || binding}`;
+    const localFlag = isLocal ? '--local' : '';
+
+    const cmd = `npx wrangler kv:key put ${namespaceArg} "${key}" --path="${tempFile}" ${localFlag}`;
     await execAsync(cmd, { cwd: path.join(__dirname, '..') });
     console.log(`  ✓ ${key}`);
   } finally {
