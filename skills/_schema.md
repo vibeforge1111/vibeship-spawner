@@ -401,23 +401,30 @@ The planner assembles squads based on task requirements:
 ```json
 {
   "squad": {
-    "lead": "layer3-specialist",      // Pattern specialist owns the task
+    "lead": "auth-flow",              // Primary specialist for the feature
     "support": [
-      "layer1-specialist",            // Core domain knowledge
-      "layer2-specialist"             // Integration knowledge
+      "supabase-backend",             // Supporting specialists
+      "nextjs-supabase-auth"
     ],
-    "on_call": ["standalone"]         // Available if needed
+    "on_call": ["security-audit"]     // Available if needed
   }
 }
 ```
 
-### Layer Responsibilities
+### Specialist Selection
 
-| Layer | Responsibility | Example |
-|-------|---------------|---------|
-| **Core** | Deep domain expertise | `nextjs-app-router` knows RSC patterns cold |
-| **Integration** | Cross-cutting integration | `nextjs-supabase-auth` knows SSR auth flow |
-| **Pattern** | Pattern implementation | `auth-flow` implements login/signup/reset |
+Match feature requirements to specialist tags. Each specialist has tags in their Identity section:
+
+```markdown
+## Identity
+- **Tags**: `auth`, `login`, `signup`, `oauth`
+- **Domain**: Login, signup, password reset
+- **Use when**: Auth features, protected routes
+```
+
+Example matching:
+- User needs "payments" → find specialists with `payments`, `stripe` tags
+- User needs "auth" → find specialists with `auth`, `login`, `session` tags
 
 ---
 

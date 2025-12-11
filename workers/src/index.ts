@@ -35,155 +35,128 @@ interface DiscoverySession {
   isCreative?: boolean;  // Skip usefulness for creative/fun projects
 }
 
-// Specialist definitions
+// Specialist definitions - flat structure with tags
 interface Specialist {
   name: string;
-  layer: 1 | 2 | 3 | 'standalone';
+  tags: string[];
   description: string;
-  expertise: string[];
   requiredFor: string[];
 }
 
-// All available specialists
+// All available specialists - flat structure with tags
 const SPECIALISTS: Record<string, Specialist> = {
-  // Layer 1: Core Specialists
   'nextjs-app-router': {
     name: 'Next.js App Router',
-    layer: 1,
+    tags: ['nextjs', 'routing', 'rsc', 'app-router', 'layouts', 'loading-states'],
     description: 'App Router patterns, server/client components, routing',
-    expertise: ['app-router', 'rsc', 'routing', 'layouts', 'loading-states'],
     requiredFor: ['saas', 'marketplace', 'ai-app', 'web-app']
   },
   'supabase-backend': {
     name: 'Supabase Backend',
-    layer: 1,
+    tags: ['supabase', 'database', 'auth', 'rls', 'edge-functions', 'realtime', 'postgres'],
     description: 'Auth, RLS, Edge Functions, Realtime',
-    expertise: ['auth', 'database', 'rls', 'edge-functions', 'realtime'],
     requiredFor: ['saas', 'marketplace', 'ai-app']
   },
   'tailwind-ui': {
     name: 'Tailwind UI',
-    layer: 1,
+    tags: ['tailwind', 'css', 'styling', 'responsive', 'dark-mode', 'components', 'ui'],
     description: 'Component patterns, responsive design, dark mode',
-    expertise: ['styling', 'responsive', 'dark-mode', 'components'],
     requiredFor: ['saas', 'marketplace', 'ai-app', 'web-app', 'web3']
   },
   'typescript-strict': {
     name: 'TypeScript Strict',
-    layer: 1,
+    tags: ['typescript', 'types', 'generics', 'validation', 'zod', 'type-guards'],
     description: 'Types, generics, inference, strict mode',
-    expertise: ['types', 'generics', 'inference', 'type-guards'],
     requiredFor: ['saas', 'marketplace', 'ai-app', 'tool']
   },
   'react-patterns': {
     name: 'React Patterns',
-    layer: 1,
+    tags: ['react', 'hooks', 'state', 'performance', 'memoization', 'context'],
     description: 'Hooks, state management, performance optimization',
-    expertise: ['hooks', 'state', 'performance', 'memoization'],
     requiredFor: ['saas', 'marketplace', 'ai-app', 'web-app']
   },
-
-  // Layer 2: Integration Specialists
   'nextjs-supabase-auth': {
     name: 'Next.js + Supabase Auth',
-    layer: 2,
+    tags: ['nextjs', 'supabase', 'auth', 'ssr-auth', 'middleware', 'session', 'protected-routes'],
     description: 'Full auth flow across both systems',
-    expertise: ['ssr-auth', 'middleware', 'session-handling', 'protected-routes'],
     requiredFor: ['saas', 'marketplace', 'ai-app']
   },
   'server-client-boundary': {
     name: 'Server/Client Boundary',
-    layer: 2,
+    tags: ['nextjs', 'rsc', 'hydration', 'use-client', 'data-fetching', 'server-components'],
     description: 'What runs where, hydration, "use client"',
-    expertise: ['rsc-boundaries', 'hydration', 'data-fetching'],
     requiredFor: ['saas', 'marketplace', 'ai-app', 'web-app']
   },
   'api-design': {
     name: 'API Design',
-    layer: 2,
+    tags: ['api', 'rest', 'validation', 'error-handling', 'versioning', 'endpoints'],
     description: 'REST patterns, error handling, validation',
-    expertise: ['rest', 'validation', 'error-handling', 'versioning'],
     requiredFor: ['saas', 'marketplace', 'ai-app', 'tool']
   },
   'state-sync': {
     name: 'State Sync',
-    layer: 2,
+    tags: ['state', 'sync', 'optimistic-updates', 'cache', 'realtime', 'invalidation'],
     description: 'Client/server state coordination',
-    expertise: ['optimistic-updates', 'cache-invalidation', 'realtime-sync'],
     requiredFor: ['marketplace', 'ai-app']
   },
-
-  // Layer 3: Pattern Specialists
   'crud-builder': {
     name: 'CRUD Builder',
-    layer: 3,
+    tags: ['crud', 'forms', 'validation', 'list-views', 'tables', 'data-management'],
     description: 'Generate full CRUD with proper patterns',
-    expertise: ['crud', 'forms', 'validation', 'list-views'],
     requiredFor: ['saas', 'marketplace', 'tool']
   },
   'realtime-sync': {
     name: 'Realtime Sync',
-    layer: 3,
+    tags: ['realtime', 'websockets', 'subscriptions', 'presence', 'live-updates'],
     description: 'WebSockets, optimistic updates, conflict resolution',
-    expertise: ['websockets', 'subscriptions', 'presence'],
     requiredFor: ['marketplace', 'ai-app']
   },
   'file-upload': {
     name: 'File Upload',
-    layer: 3,
+    tags: ['upload', 'storage', 'files', 'images', 'presigned-urls', 's3'],
     description: 'Client → storage → DB reference flow',
-    expertise: ['upload', 'storage', 'presigned-urls', 'image-processing'],
     requiredFor: ['saas', 'marketplace']
   },
   'payments-flow': {
     name: 'Payments Flow',
-    layer: 3,
+    tags: ['payments', 'stripe', 'checkout', 'webhooks', 'subscriptions', 'billing'],
     description: 'Stripe checkout, webhooks, subscription management',
-    expertise: ['stripe', 'checkout', 'webhooks', 'subscriptions'],
     requiredFor: ['saas', 'marketplace']
   },
   'auth-flow': {
     name: 'Auth Flow',
-    layer: 3,
+    tags: ['auth', 'login', 'signup', 'password-reset', 'oauth', 'session'],
     description: 'Login, signup, password reset, sessions',
-    expertise: ['login', 'signup', 'password-reset', 'oauth'],
     requiredFor: ['saas', 'marketplace', 'ai-app']
   },
   'ai-integration': {
     name: 'AI Integration',
-    layer: 3,
+    tags: ['ai', 'llm', 'streaming', 'prompts', 'embeddings', 'openai', 'anthropic'],
     description: 'LLM APIs, streaming, prompt management',
-    expertise: ['llm', 'streaming', 'prompts', 'embeddings'],
     requiredFor: ['ai-app']
   },
-
-  // Standalone Specialists
   'brand-identity': {
     name: 'Brand Identity',
-    layer: 'standalone',
+    tags: ['brand', 'colors', 'typography', 'voice', 'visual-identity', 'design-system'],
     description: 'Colors, typography, voice & tone',
-    expertise: ['colors', 'typography', 'voice', 'visual-identity'],
     requiredFor: []
   },
   'ux-research': {
     name: 'UX Research',
-    layer: 'standalone',
+    tags: ['ux', 'user-flows', 'wireframes', 'navigation', 'accessibility', 'usability'],
     description: 'User flows, information architecture',
-    expertise: ['user-flows', 'ia', 'wireframes', 'usability'],
     requiredFor: []
   },
   'security-audit': {
     name: 'Security Audit',
-    layer: 'standalone',
+    tags: ['security', 'audit', 'vulnerabilities', 'owasp', 'hardening', 'pen-testing'],
     description: 'Vulnerability checks, best practices',
-    expertise: ['security', 'vulnerabilities', 'owasp', 'hardening'],
     requiredFor: []
   },
   'copywriting': {
     name: 'Copywriting',
-    layer: 'standalone',
+    tags: ['copy', 'landing-pages', 'onboarding', 'microcopy', 'cta', 'content'],
     description: 'Landing pages, onboarding, microcopy',
-    expertise: ['landing-pages', 'onboarding', 'microcopy', 'cta'],
     requiredFor: []
   }
 };
@@ -292,7 +265,7 @@ const TOOLS = [
   },
   {
     name: 'recommend_squad',
-    description: 'Recommend a squad of specialists based on project type and requirements. Returns layer-organized specialists with explanations.',
+    description: 'Recommend a squad of specialists based on project type and requirements. Returns tag-matched specialists with explanations.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -364,14 +337,13 @@ const TOOLS = [
   },
   {
     name: 'list_specialists',
-    description: 'List all available specialists organized by layer',
+    description: 'List all available specialists with their tags',
     inputSchema: {
       type: 'object',
       properties: {
-        layer: {
-          type: 'number',
-          enum: [1, 2, 3],
-          description: 'Filter by layer (optional)'
+        tag: {
+          type: 'string',
+          description: 'Filter by tag (optional, e.g., "auth", "payments", "ai")'
         },
         project_type: {
           type: 'string',
@@ -794,6 +766,7 @@ ${JSON.stringify({
 
 /**
  * Recommend a squad of specialists based on project requirements
+ * Uses tag-based matching for flat specialist structure
  */
 function recommendSquad(args: Record<string, unknown>): unknown {
   const { project_type, features, skill_level } = args as {
@@ -802,53 +775,60 @@ function recommendSquad(args: Record<string, unknown>): unknown {
     skill_level?: SkillLevel;
   };
 
-  // Find specialists for this project type
-  const layer1: string[] = [];
-  const layer2: string[] = [];
-  const layer3: string[] = [];
-  const standalone: string[] = [];
+  // Find specialists for this project type using tag matching
+  const recommended: string[] = [];
+  const onDemand: string[] = [];
+
+  // Feature-to-tag mapping for better matching
+  const featureTagMap: Record<string, string[]> = {
+    'auth': ['auth', 'login', 'signup', 'session', 'oauth'],
+    'payments': ['payments', 'stripe', 'checkout', 'billing', 'subscriptions'],
+    'realtime': ['realtime', 'websockets', 'subscriptions', 'live-updates'],
+    'file-upload': ['upload', 'storage', 'files', 'images', 's3'],
+    'ai': ['ai', 'llm', 'streaming', 'prompts', 'embeddings', 'openai', 'anthropic'],
+    'database': ['database', 'supabase', 'postgres', 'rls'],
+    'api': ['api', 'rest', 'endpoints', 'validation'],
+    'forms': ['forms', 'crud', 'validation', 'data-management'],
+    'ui': ['ui', 'components', 'tailwind', 'styling', 'responsive'],
+    'ux': ['ux', 'user-flows', 'wireframes', 'accessibility'],
+    'security': ['security', 'audit', 'vulnerabilities', 'owasp'],
+    'branding': ['brand', 'colors', 'typography', 'design-system'],
+    'copy': ['copy', 'landing-pages', 'microcopy', 'content']
+  };
+
+  // Expand features to tags
+  const expandedTags = new Set<string>();
+  features?.forEach(feature => {
+    const featureLower = feature.toLowerCase();
+    // Add the feature itself
+    expandedTags.add(featureLower);
+    // Add mapped tags if available
+    const mappedTags = featureTagMap[featureLower];
+    if (mappedTags) {
+      mappedTags.forEach(t => expandedTags.add(t));
+    }
+  });
 
   for (const [id, specialist] of Object.entries(SPECIALISTS)) {
     const isRequiredForProject = specialist.requiredFor.includes(project_type);
-    const matchesFeature = features?.some(f =>
-      specialist.expertise.some(e => e.includes(f) || f.includes(e))
-    );
+    const matchesFeature = specialist.tags.some(tag => expandedTags.has(tag));
 
     if (isRequiredForProject || matchesFeature) {
-      switch (specialist.layer) {
-        case 1: layer1.push(id); break;
-        case 2: layer2.push(id); break;
-        case 3: layer3.push(id); break;
-        case 'standalone': standalone.push(id); break;
-      }
+      recommended.push(id);
+    } else if (specialist.requiredFor.length === 0) {
+      // On-demand specialists (no requiredFor = available when needed)
+      onDemand.push(id);
     }
-  }
-
-  // Add feature-specific specialists
-  if (features?.includes('auth') && !layer3.includes('auth-flow')) {
-    layer3.push('auth-flow');
-  }
-  if (features?.includes('payments') && !layer3.includes('payments-flow')) {
-    layer3.push('payments-flow');
-  }
-  if (features?.includes('realtime') && !layer3.includes('realtime-sync')) {
-    layer3.push('realtime-sync');
-  }
-  if (features?.includes('file-upload') && !layer3.includes('file-upload')) {
-    layer3.push('file-upload');
-  }
-  if (features?.includes('ai') && !layer3.includes('ai-integration')) {
-    layer3.push('ai-integration');
   }
 
   // Build the recommendation
   const formatSpecialist = (id: string) => {
     const s = SPECIALISTS[id];
-    return `- **${s.name}**: ${s.description}`;
+    return `- **${s.name}**: ${s.description}\n  Tags: \`${s.tags.slice(0, 4).join('`, `')}\``;
   };
 
   const guidanceNote = skill_level === 'vibe-coder'
-    ? '\n> 💡 Don\'t worry about understanding all these - I\'ll load the right one for each task automatically.\n'
+    ? '\n> Don\'t worry about understanding all these - I\'ll load the right one for each task automatically.\n'
     : skill_level === 'expert'
     ? '\n> These are the specialists I\'ll pull from. Override any if you have preferences.\n'
     : '';
@@ -861,26 +841,16 @@ function recommendSquad(args: Record<string, unknown>): unknown {
 
 ${guidanceNote}
 
-## Layer 1: Core Specialists
-*Deep expertise in their domain*
+## Recommended Specialists
+*Matched to your project type and features*
 
-${layer1.length > 0 ? layer1.map(formatSpecialist).join('\n') : '- None required'}
+${recommended.length > 0 ? recommended.map(formatSpecialist).join('\n\n') : '- None matched'}
 
-## Layer 2: Integration Specialists
-*Know how things connect*
+${onDemand.length > 0 ? `
+## On-Demand Specialists
+*Available when needed*
 
-${layer2.length > 0 ? layer2.map(formatSpecialist).join('\n') : '- None required'}
-
-## Layer 3: Pattern Specialists
-*Solve specific problems*
-
-${layer3.length > 0 ? layer3.map(formatSpecialist).join('\n') : '- None required'}
-
-${standalone.length > 0 ? `
-## Standalone Specialists
-*On-demand expertise*
-
-${standalone.map(formatSpecialist).join('\n')}
+${onDemand.map(formatSpecialist).join('\n\n')}
 ` : ''}
 
 ---
@@ -890,12 +860,11 @@ ${standalone.map(formatSpecialist).join('\n')}
 ${JSON.stringify({
   projectType: project_type,
   features: features || [],
+  expandedTags: Array.from(expandedTags),
   skillLevel: skill_level,
   squad: {
-    layer1,
-    layer2,
-    layer3,
-    standalone
+    recommended,
+    onDemand
   }
 }, null, 2)}
 \`\`\`
@@ -905,48 +874,40 @@ ${JSON.stringify({
 }
 
 /**
- * List all available specialists
+ * List all available specialists with their tags
  */
 function listSpecialists(args: Record<string, unknown>): unknown {
-  const { layer, project_type } = args as { layer?: number; project_type?: string };
+  const { tag, project_type } = args as { tag?: string; project_type?: string };
 
   let filtered = Object.entries(SPECIALISTS);
 
-  if (layer) {
-    filtered = filtered.filter(([_, s]) => s.layer === layer);
+  // Filter by tag if provided
+  if (tag) {
+    const tagLower = tag.toLowerCase();
+    filtered = filtered.filter(([_, s]) =>
+      s.tags.some(t => t.includes(tagLower) || tagLower.includes(t))
+    );
   }
 
+  // Filter by project type if provided
   if (project_type) {
     filtered = filtered.filter(([_, s]) =>
       s.requiredFor.includes(project_type) || s.requiredFor.length === 0
     );
   }
 
-  const byLayer: Record<string, Array<{ id: string; name: string; description: string; expertise: string[] }>> = {
-    'Layer 1 - Core': [],
-    'Layer 2 - Integration': [],
-    'Layer 3 - Pattern': [],
-    'Standalone': []
-  };
-
-  for (const [id, specialist] of filtered) {
-    const layerKey = specialist.layer === 1 ? 'Layer 1 - Core'
-      : specialist.layer === 2 ? 'Layer 2 - Integration'
-      : specialist.layer === 3 ? 'Layer 3 - Pattern'
-      : 'Standalone';
-
-    byLayer[layerKey].push({
-      id,
-      name: specialist.name,
-      description: specialist.description,
-      expertise: specialist.expertise
-    });
-  }
+  const specialists = filtered.map(([id, s]) => ({
+    id,
+    name: s.name,
+    description: s.description,
+    tags: s.tags,
+    requiredFor: s.requiredFor
+  }));
 
   return {
     content: [{
       type: 'text',
-      text: JSON.stringify({ specialists: byLayer }, null, 2)
+      text: JSON.stringify({ specialists, total: specialists.length }, null, 2)
     }]
   };
 }
@@ -1066,9 +1027,10 @@ ${stateJson}
 
 function checkEnvironment(): unknown {
   const specialistCount = Object.keys(SPECIALISTS).length;
-  const layer1Count = Object.values(SPECIALISTS).filter(s => s.layer === 1).length;
-  const layer2Count = Object.values(SPECIALISTS).filter(s => s.layer === 2).length;
-  const layer3Count = Object.values(SPECIALISTS).filter(s => s.layer === 3).length;
+
+  // Collect all unique tags
+  const allTags = new Set<string>();
+  Object.values(SPECIALISTS).forEach(s => s.tags.forEach(t => allTags.add(t)));
 
   return {
     content: [{
@@ -1085,12 +1047,12 @@ Version: 2.0.0
 - start_discovery: Begin usefulness framework conversation
 - continue_discovery: Progress through WHO → PROBLEM → EDGE → MINIMUM
 - assess_skill_level: Detect user skill level without interrogation
-- recommend_squad: Suggest specialists based on project needs
+- recommend_squad: Suggest specialists based on project needs (tag-matched)
 
 ## Specialists Available: ${specialistCount}
-- Layer 1 (Core): ${layer1Count} specialists
-- Layer 2 (Integration): ${layer2Count} specialists
-- Layer 3 (Pattern): ${layer3Count} specialists
+Total unique tags: ${allTags.size}
+
+Common tags: auth, payments, ai, realtime, database, api, ui, forms
 
 ## Templates
 ${Object.entries(TEMPLATES).map(([name, config]) =>

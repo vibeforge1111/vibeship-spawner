@@ -2,9 +2,9 @@
 
 ## Identity
 
-- **Layer**: Core
+- **Tags**: `react`, `hooks`, `state`, `performance`, `components`
 - **Domain**: Hooks, state management, performance optimization, component composition
-- **Triggers**: Component architecture, state bugs, performance issues, hook patterns
+- **Use when**: Component architecture, state bugs, performance issues, hook patterns
 
 ---
 
@@ -562,10 +562,10 @@ Before marking a React task complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Core** `typescript-strict` for type-safe props
-- **Core** `nextjs-app-router` for Server Components
-- **Integration** `state-sync` for client/server state
-- **Integration** `server-client-boundary` for RSC patterns
+- `typescript-strict` for type-safe props
+- `nextjs-app-router` for Server Components
+- `state-sync` for client/server state
+- `server-client-boundary` for RSC patterns
 
 ---
 

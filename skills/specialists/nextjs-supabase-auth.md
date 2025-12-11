@@ -2,9 +2,9 @@
 
 ## Identity
 
-- **Layer**: Integration
+- **Tags**: `auth`, `nextjs`, `supabase`, `ssr`, `middleware`, `session`
 - **Domain**: Full auth flow across Next.js and Supabase, SSR auth, middleware, session handling
-- **Triggers**: Auth integration issues, session problems, protected routes, SSR auth
+- **Use when**: Auth integration issues, session problems, protected routes, SSR auth
 
 ---
 
@@ -485,10 +485,10 @@ Before marking an auth integration task complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Core** `supabase-backend` for RLS and database
-- **Core** `nextjs-app-router` for routing patterns
-- **Pattern** `auth-flow` for UI implementation
-- **Integration** `server-client-boundary` for component decisions
+- `supabase-backend` for RLS and database
+- `nextjs-app-router` for routing patterns
+- `auth-flow` for UI implementation
+- `server-client-boundary` for component decisions
 
 ---
 

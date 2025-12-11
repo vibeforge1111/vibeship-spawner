@@ -2,9 +2,9 @@
 
 ## Identity
 
-- **Layer**: Standalone (Cross-cutting concern)
+- **Tags**: `security`, `owasp`, `validation`, `rls`, `secrets`, `audit`
 - **Domain**: OWASP top 10, input validation, authentication, authorization, secrets management
-- **Triggers**: Security reviews, before deployment, handling sensitive data, auth implementation
+- **Use when**: Security reviews, before deployment, handling sensitive data, auth implementation
 
 ---
 
@@ -518,10 +518,10 @@ Before marking security complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Integration** `nextjs-supabase-auth` for auth implementation
-- **Core** `supabase-backend` for RLS
-- **Integration** `api-design` for secure endpoints
-- **Pattern** `payments-flow` for payment security
+- `nextjs-supabase-auth` for auth implementation
+- `supabase-backend` for RLS
+- `api-design` for secure endpoints
+- `payments-flow` for payment security
 
 ---
 

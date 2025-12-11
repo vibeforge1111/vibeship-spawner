@@ -2,9 +2,9 @@
 
 ## Identity
 
-- **Layer**: Pattern
+- **Tags**: `crud`, `forms`, `tables`, `validation`, `admin`, `list-view`
 - **Domain**: Complete CRUD patterns with forms, validation, tables, pagination
-- **Triggers**: Building data management features, admin panels, list/detail views
+- **Use when**: Building data management features, admin panels, list/detail views
 
 ---
 
@@ -690,10 +690,10 @@ Before marking a CRUD feature complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Core** `supabase-backend` for database setup
-- **Core** `typescript-strict` for type safety
-- **Integration** `api-design` for REST endpoints
-- **Integration** `server-client-boundary` for component split
+- `supabase-backend` for database setup
+- `typescript-strict` for type safety
+- `api-design` for REST endpoints
+- `server-client-boundary` for component split
 
 ---
 

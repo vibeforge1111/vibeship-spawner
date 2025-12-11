@@ -2,9 +2,9 @@
 
 ## Identity
 
-- **Layer**: Standalone (No technical dependencies)
+- **Tags**: `ux`, `user-flows`, `wireframes`, `navigation`, `accessibility`
 - **Domain**: User flows, wireframes, usability patterns, information architecture
-- **Triggers**: Feature planning, user flow design, navigation structure, UX decisions
+- **Use when**: Feature planning, user flow design, navigation structure, UX decisions
 
 ---
 
@@ -408,10 +408,10 @@ Before marking UX design complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Standalone**: `brand-identity` for visual consistency
-- **Standalone**: `copywriting` for microcopy
-- **Core** `tailwind-ui` for implementation
-- **Pattern** `auth-flow` for login UX
+- `brand-identity` for visual consistency
+- `copywriting` for microcopy
+- `tailwind-ui` for implementation
+- `auth-flow` for login UX
 
 ---
 

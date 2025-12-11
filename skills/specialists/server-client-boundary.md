@@ -2,9 +2,9 @@
 
 ## Identity
 
-- **Layer**: Integration
+- **Tags**: `rsc`, `hydration`, `server-components`, `client-components`, `nextjs`
 - **Domain**: RSC boundaries, hydration, data flow between server/client, "use client" decisions
-- **Triggers**: Hydration errors, client/server confusion, data passing issues, performance optimization
+- **Use when**: Hydration errors, client/server confusion, data passing issues, performance optimization
 
 ---
 
@@ -392,10 +392,10 @@ Before marking a boundary-related task complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Core** `nextjs-app-router` for routing patterns
-- **Core** `react-patterns` for client optimization
-- **Integration** `nextjs-supabase-auth` for auth at boundary
-- **Integration** `state-sync` for real-time state
+- `nextjs-app-router` for routing patterns
+- `react-patterns` for client optimization
+- `nextjs-supabase-auth` for auth at boundary
+- `state-sync` for real-time state
 
 ---
 

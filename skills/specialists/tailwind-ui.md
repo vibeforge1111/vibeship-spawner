@@ -2,9 +2,9 @@
 
 ## Identity
 
-- **Layer**: Core
+- **Tags**: `tailwind`, `css`, `ui`, `responsive`, `dark-mode`, `components`
 - **Domain**: Component patterns, responsive design, dark mode, design systems
-- **Triggers**: UI components, styling tasks, responsive layouts, theme implementation
+- **Use when**: UI components, styling tasks, responsive layouts, theme implementation
 
 ---
 
@@ -431,10 +431,10 @@ Before marking a Tailwind UI task complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Core** `react-patterns` for component logic
-- **Core** `nextjs-app-router` for layouts
-- **Standalone**: `brand-identity` for color/typography decisions
-- **Pattern** `crud-builder` for consistent form styling
+- `react-patterns` for component logic
+- `nextjs-app-router` for layouts
+- `brand-identity` for color/typography decisions
+- `crud-builder` for consistent form styling
 
 ---
 

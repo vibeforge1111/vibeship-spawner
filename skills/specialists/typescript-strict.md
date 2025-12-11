@@ -2,9 +2,9 @@
 
 ## Identity
 
-- **Layer**: Core
+- **Tags**: `typescript`, `types`, `generics`, `validation`, `zod`
 - **Domain**: Type safety, generics, type inference, strict mode, type guards
-- **Triggers**: Type errors, generic functions, complex type definitions, type-safe APIs
+- **Use when**: Type errors, generic functions, complex type definitions, type-safe APIs
 
 ---
 
@@ -434,10 +434,10 @@ const result = weirdLibraryFunction();
 ## Squad Dependencies
 
 Often paired with:
-- **Core** `supabase-backend` for database types
-- **Integration** `api-design` for API type contracts
-- **Pattern** `crud-builder` for form types
-- **Core** `react-patterns` for component props
+- `supabase-backend` for database types
+- `api-design` for API type contracts
+- `crud-builder` for form types
+- `react-patterns` for component props
 
 ---
 

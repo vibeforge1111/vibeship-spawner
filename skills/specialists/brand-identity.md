@@ -2,9 +2,9 @@
 
 ## Identity
 
-- **Layer**: Standalone (No technical dependencies)
+- **Tags**: `brand`, `colors`, `typography`, `design-system`, `theming`
 - **Domain**: Color palettes, typography, visual language, brand guidelines
-- **Triggers**: New project styling, brand decisions, design system setup
+- **Use when**: New project styling, brand decisions, design system setup
 
 ---
 
@@ -383,9 +383,9 @@ Before marking brand setup complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Core** `tailwind-ui` for implementation
-- **Pattern** `crud-builder` for consistent forms
-- **Standalone**: `copywriting` for voice consistency
+- `tailwind-ui` for implementation
+- `crud-builder` for consistent forms
+- `copywriting` for voice consistency
 
 ---
 

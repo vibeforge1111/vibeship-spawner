@@ -630,45 +630,39 @@ Next session: Run 'continue' to pick up from dashboard UI
 
 ## Specialist Squad Assembly
 
-For each task, assemble the right specialists from three layers.
+For each task, assemble the right specialists based on feature tags.
 
 ### Available Specialists
 
-**Core:**
-- `nextjs-app-router` - App Router patterns, RSC, routing
-- `supabase-backend` - Auth, RLS, Edge Functions, Realtime
-- `tailwind-ui` - Component patterns, responsive, dark mode
-- `typescript-strict` - Types, generics, inference
-- `react-patterns` - Hooks, state, performance
-
-**Integration:**
-- `nextjs-supabase-auth` - Full auth flow across systems
-- `server-client-boundary` - RSC boundaries, hydration
-- `api-design` - REST patterns, validation, errors
-- `state-sync` - Client/server state coordination
-
-**Pattern:**
-- `auth-flow` - Login, signup, password reset, OAuth
-- `crud-builder` - Full CRUD with proper patterns
-- `payments-flow` - Stripe checkout, webhooks, subscriptions
-- `file-upload` - Storage flow, presigned URLs
-- `realtime-sync` - WebSockets, optimistic updates
-- `ai-integration` - LLM APIs, streaming, prompts
-
-**Standalone:**
-- `brand-identity` - Colors, typography, voice
-- `ux-research` - User flows, information architecture
-- `security-audit` - Vulnerability checks, best practices
-- `copywriting` - Landing pages, onboarding, microcopy
+| Specialist | Tags | Description |
+|------------|------|-------------|
+| `nextjs-app-router` | nextjs, routing, rsc | App Router patterns, RSC, routing |
+| `supabase-backend` | supabase, database, rls | Auth, RLS, Edge Functions, Realtime |
+| `tailwind-ui` | tailwind, css, ui | Component patterns, responsive, dark mode |
+| `typescript-strict` | typescript, types, validation | Types, generics, inference |
+| `react-patterns` | react, hooks, state | Hooks, state, performance |
+| `nextjs-supabase-auth` | auth, nextjs, supabase | Full auth flow across systems |
+| `server-client-boundary` | rsc, hydration, nextjs | RSC boundaries, hydration |
+| `api-design` | api, rest, endpoints | REST patterns, validation, errors |
+| `state-sync` | state, react-query, cache | Client/server state coordination |
+| `auth-flow` | auth, login, signup | Login, signup, password reset, OAuth |
+| `crud-builder` | crud, forms, tables | Full CRUD with proper patterns |
+| `payments-flow` | payments, stripe, webhooks | Stripe checkout, webhooks, subscriptions |
+| `file-upload` | upload, files, storage | Storage flow, presigned URLs |
+| `realtime-sync` | realtime, websockets, presence | WebSockets, optimistic updates |
+| `ai-integration` | ai, llm, streaming | LLM APIs, streaming, prompts |
+| `brand-identity` | brand, colors, typography | Colors, typography, voice |
+| `ux-research` | ux, user-flows, wireframes | User flows, information architecture |
+| `security-audit` | security, owasp, validation | Vulnerability checks, best practices |
+| `copywriting` | copy, microcopy, cta | Landing pages, onboarding, microcopy |
 
 ### Squad Formation
 
-For each task:
+For each task, match feature requirements to specialist tags:
 
-1. **Identify the pattern** (Pattern) - What specific pattern does this implement?
-2. **Add core expertise** (Core) - What domain knowledge is needed?
-3. **Add integration knowledge** (Integration) - What cross-cutting concerns apply?
-4. **Keep standalone on-call** - Available if needed during execution
+1. **What feature is being built?** → Find specialists with matching tags
+2. **What technologies are involved?** → Add specialists for each tech
+3. **Any cross-cutting concerns?** → Add security-audit, ux-research as needed
 
 Example: "Implement user login"
 ```json

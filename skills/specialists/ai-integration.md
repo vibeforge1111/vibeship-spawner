@@ -2,9 +2,9 @@
 
 ## Identity
 
-- **Layer**: Pattern
+- **Tags**: `ai`, `llm`, `openai`, `anthropic`, `streaming`, `rag`, `embeddings`
 - **Domain**: OpenAI/Anthropic APIs, streaming responses, token management, prompt engineering
-- **Triggers**: AI features, chat interfaces, text generation, embeddings, RAG
+- **Use when**: AI features, chat interfaces, text generation, embeddings, RAG
 
 ---
 
@@ -542,10 +542,10 @@ Before marking AI integration complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Core** `supabase-backend` for RAG storage
-- **Integration** `api-design` for API structure
-- **Pattern** `payments-flow` for usage billing
-- **Core** `react-patterns` for chat UI
+- `supabase-backend` for RAG storage
+- `api-design` for API structure
+- `payments-flow` for usage billing
+- `react-patterns` for chat UI
 
 ---
 

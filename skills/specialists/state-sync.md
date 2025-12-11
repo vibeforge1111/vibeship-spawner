@@ -2,9 +2,9 @@
 
 ## Identity
 
-- **Layer**: Integration
+- **Tags**: `state`, `react-query`, `cache`, `optimistic-updates`, `zustand`
 - **Domain**: Client/server state coordination, optimistic updates, cache invalidation
-- **Triggers**: State synchronization issues, stale data, optimistic UI, cache management
+- **Use when**: State synchronization issues, stale data, optimistic UI, cache management
 
 ---
 
@@ -591,10 +591,10 @@ Before marking a state sync task complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Core** `react-patterns` for hooks and state patterns
-- **Integration** `api-design` for API calls
-- **Integration** `server-client-boundary` for RSC patterns
-- **Pattern** `realtime-sync` for live updates
+- `react-patterns` for hooks and state patterns
+- `api-design` for API calls
+- `server-client-boundary` for RSC patterns
+- `realtime-sync` for live updates
 
 ---
 

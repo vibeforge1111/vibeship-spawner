@@ -2,9 +2,9 @@
 
 ## Identity
 
-- **Layer**: Standalone (No technical dependencies)
+- **Tags**: `copy`, `microcopy`, `cta`, `error-messages`, `onboarding`
 - **Domain**: Microcopy, CTAs, error messages, onboarding flows, marketing copy
-- **Triggers**: UI text, form labels, buttons, notifications, landing page copy
+- **Use when**: UI text, form labels, buttons, notifications, landing page copy
 
 ---
 
@@ -406,10 +406,10 @@ Before marking copy complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Standalone**: `brand-identity` for voice
-- **Standalone**: `ux-research` for user flows
-- **Pattern** `auth-flow` for login copy
-- **Core** `tailwind-ui` for implementation
+- `brand-identity` for voice
+- `ux-research` for user flows
+- `auth-flow` for login copy
+- `tailwind-ui` for implementation
 
 ---
 
