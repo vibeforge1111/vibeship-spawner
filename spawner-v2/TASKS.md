@@ -1,6 +1,6 @@
 # Spawner V2 - Task Tracker
 
-> Last updated: 2024-12-11 (7 skills complete!)
+> Last updated: 2024-12-11 (Skill loader V2 complete!)
 
 ## Phase 1: Foundation ✅ COMPLETE
 
@@ -40,13 +40,14 @@
 
 ---
 
-## Phase 2: Intelligence 🟡 IN PROGRESS
+## Phase 2: Intelligence ✅ COMPLETE
 
 ### 2.1 Skill Format ✅
 - [x] Define skill.yaml schema (`skills/schema.yaml`)
 - [x] Create skill parser (in upload-skills.js)
 - [x] Load skills from KV on demand
-- [ ] Match skills to project stack (needs testing)
+- [x] Refactored loader.ts for V2 YAML format
+- [x] Updated tools to use new loader API
 
 ### 2.2 First Skill: nextjs-app-router ✅
 - [x] Create skill.yaml (identity, patterns, anti-patterns)
@@ -80,19 +81,20 @@
 
 ---
 
-## Phase 3: Experience ⬜ NOT STARTED
+## Phase 3: Experience 🟡 IN PROGRESS
 
 ### 3.1 Session Summaries
-- [ ] Create spawner_remember tool (basic version done)
+- [x] Create spawner_remember tool (basic version done)
 - [ ] Store decisions with reasoning
 - [ ] Store session summaries
 - [ ] Track open/resolved issues
 
 ### 3.2 Sharp Edges Database
 - [x] Define sharp edge schema
-- [x] Create sharp edge loader
-- [ ] Implement situation matching (needs testing)
+- [x] Create sharp edge loader (V2 format)
+- [x] Situation/keyword matching implemented
 - [x] Create spawner_sharp_edge tool
+- [x] Code pattern detection via regex
 
 ### 3.3 The Save Moment
 - [ ] Integrate validation into workflow
@@ -207,7 +209,7 @@
 |-------|--------|----------|
 | Phase 1: Foundation | ✅ Complete | 100% |
 | Phase 2: Intelligence | ✅ Complete | 100% |
-| Phase 3: Experience | ⬜ Not Started | 30% |
+| Phase 3: Experience | 🟡 In Progress | 40% |
 | Phase 4: Polish | 🟡 In Progress | 70% |
 
 ### Stats
@@ -216,4 +218,13 @@
 - **57 Validations:** Machine-runnable checks
 - **5 MCP Tools:** context, validate, remember, sharp-edge, unstick
 
-**Next Priority:** Test with Claude Desktop, then deploy to production
+### Recent Updates
+- ✅ Refactored skill loader for V2 YAML format
+- ✅ Updated context.ts and sharp-edge.ts to use new loader API
+- ✅ Added Validation interface to types.ts
+- ✅ TypeScript compiles cleanly
+
+### Next Priority
+1. Test MCP tools with Claude Desktop locally
+2. Upload skills to KV (run upload-skills.js)
+3. Deploy to production
