@@ -4,6 +4,8 @@
  * Remote MCP server running on Cloudflare Workers.
  * Implements SSE transport for Claude Desktop's mcp-remote proxy.
  *
+ * "Claude on Nitro" - Smarter Discovery, Specialized Agents, Guardrails
+ *
  * Note: This server returns project scaffolding as content (not files),
  * since remote servers can't write to the user's filesystem directly.
  * Users use the CLI (`npx vibeship-spawner create`) for actual file creation.
@@ -12,6 +14,179 @@
 interface Env {
   ENVIRONMENT: string;
 }
+
+// Skill levels for user assessment
+type SkillLevel = 'vibe-coder' | 'builder' | 'developer' | 'expert';
+
+// Discovery stages following the Usefulness Framework
+type DiscoveryStage = 'intro' | 'who' | 'problem' | 'edge' | 'minimum' | 'complete' | 'skill-assessment';
+
+// Discovery session state
+interface DiscoverySession {
+  stage: DiscoveryStage;
+  skillLevel?: SkillLevel;
+  responses: {
+    who?: string;        // WHO has this problem?
+    problem?: string;    // WHAT's broken about current solutions?
+    edge?: string;       // WHY would they switch to yours?
+    minimum?: string;    // WHAT's the minimum to prove that value?
+  };
+  projectType?: string;
+  isCreative?: boolean;  // Skip usefulness for creative/fun projects
+}
+
+// Specialist definitions
+interface Specialist {
+  name: string;
+  layer: 1 | 2 | 3 | 'standalone';
+  description: string;
+  expertise: string[];
+  requiredFor: string[];
+}
+
+// All available specialists
+const SPECIALISTS: Record<string, Specialist> = {
+  // Layer 1: Core Specialists
+  'nextjs-app-router': {
+    name: 'Next.js App Router',
+    layer: 1,
+    description: 'App Router patterns, server/client components, routing',
+    expertise: ['app-router', 'rsc', 'routing', 'layouts', 'loading-states'],
+    requiredFor: ['saas', 'marketplace', 'ai-app', 'web-app']
+  },
+  'supabase-backend': {
+    name: 'Supabase Backend',
+    layer: 1,
+    description: 'Auth, RLS, Edge Functions, Realtime',
+    expertise: ['auth', 'database', 'rls', 'edge-functions', 'realtime'],
+    requiredFor: ['saas', 'marketplace', 'ai-app']
+  },
+  'tailwind-ui': {
+    name: 'Tailwind UI',
+    layer: 1,
+    description: 'Component patterns, responsive design, dark mode',
+    expertise: ['styling', 'responsive', 'dark-mode', 'components'],
+    requiredFor: ['saas', 'marketplace', 'ai-app', 'web-app', 'web3']
+  },
+  'typescript-strict': {
+    name: 'TypeScript Strict',
+    layer: 1,
+    description: 'Types, generics, inference, strict mode',
+    expertise: ['types', 'generics', 'inference', 'type-guards'],
+    requiredFor: ['saas', 'marketplace', 'ai-app', 'tool']
+  },
+  'react-patterns': {
+    name: 'React Patterns',
+    layer: 1,
+    description: 'Hooks, state management, performance optimization',
+    expertise: ['hooks', 'state', 'performance', 'memoization'],
+    requiredFor: ['saas', 'marketplace', 'ai-app', 'web-app']
+  },
+
+  // Layer 2: Integration Specialists
+  'nextjs-supabase-auth': {
+    name: 'Next.js + Supabase Auth',
+    layer: 2,
+    description: 'Full auth flow across both systems',
+    expertise: ['ssr-auth', 'middleware', 'session-handling', 'protected-routes'],
+    requiredFor: ['saas', 'marketplace', 'ai-app']
+  },
+  'server-client-boundary': {
+    name: 'Server/Client Boundary',
+    layer: 2,
+    description: 'What runs where, hydration, "use client"',
+    expertise: ['rsc-boundaries', 'hydration', 'data-fetching'],
+    requiredFor: ['saas', 'marketplace', 'ai-app', 'web-app']
+  },
+  'api-design': {
+    name: 'API Design',
+    layer: 2,
+    description: 'REST patterns, error handling, validation',
+    expertise: ['rest', 'validation', 'error-handling', 'versioning'],
+    requiredFor: ['saas', 'marketplace', 'ai-app', 'tool']
+  },
+  'state-sync': {
+    name: 'State Sync',
+    layer: 2,
+    description: 'Client/server state coordination',
+    expertise: ['optimistic-updates', 'cache-invalidation', 'realtime-sync'],
+    requiredFor: ['marketplace', 'ai-app']
+  },
+
+  // Layer 3: Pattern Specialists
+  'crud-builder': {
+    name: 'CRUD Builder',
+    layer: 3,
+    description: 'Generate full CRUD with proper patterns',
+    expertise: ['crud', 'forms', 'validation', 'list-views'],
+    requiredFor: ['saas', 'marketplace', 'tool']
+  },
+  'realtime-sync': {
+    name: 'Realtime Sync',
+    layer: 3,
+    description: 'WebSockets, optimistic updates, conflict resolution',
+    expertise: ['websockets', 'subscriptions', 'presence'],
+    requiredFor: ['marketplace', 'ai-app']
+  },
+  'file-upload': {
+    name: 'File Upload',
+    layer: 3,
+    description: 'Client → storage → DB reference flow',
+    expertise: ['upload', 'storage', 'presigned-urls', 'image-processing'],
+    requiredFor: ['saas', 'marketplace']
+  },
+  'payments-flow': {
+    name: 'Payments Flow',
+    layer: 3,
+    description: 'Stripe checkout, webhooks, subscription management',
+    expertise: ['stripe', 'checkout', 'webhooks', 'subscriptions'],
+    requiredFor: ['saas', 'marketplace']
+  },
+  'auth-flow': {
+    name: 'Auth Flow',
+    layer: 3,
+    description: 'Login, signup, password reset, sessions',
+    expertise: ['login', 'signup', 'password-reset', 'oauth'],
+    requiredFor: ['saas', 'marketplace', 'ai-app']
+  },
+  'ai-integration': {
+    name: 'AI Integration',
+    layer: 3,
+    description: 'LLM APIs, streaming, prompt management',
+    expertise: ['llm', 'streaming', 'prompts', 'embeddings'],
+    requiredFor: ['ai-app']
+  },
+
+  // Standalone Specialists
+  'brand-identity': {
+    name: 'Brand Identity',
+    layer: 'standalone',
+    description: 'Colors, typography, voice & tone',
+    expertise: ['colors', 'typography', 'voice', 'visual-identity'],
+    requiredFor: []
+  },
+  'ux-research': {
+    name: 'UX Research',
+    layer: 'standalone',
+    description: 'User flows, information architecture',
+    expertise: ['user-flows', 'ia', 'wireframes', 'usability'],
+    requiredFor: []
+  },
+  'security-audit': {
+    name: 'Security Audit',
+    layer: 'standalone',
+    description: 'Vulnerability checks, best practices',
+    expertise: ['security', 'vulnerabilities', 'owasp', 'hardening'],
+    requiredFor: []
+  },
+  'copywriting': {
+    name: 'Copywriting',
+    layer: 'standalone',
+    description: 'Landing pages, onboarding, microcopy',
+    expertise: ['landing-pages', 'onboarding', 'microcopy', 'cta'],
+    requiredFor: []
+  }
+};
 
 // Templates with their default agents and MCPs
 const TEMPLATES: Record<string, { agents: string[]; mcps: string[] }> = {
@@ -55,6 +230,92 @@ interface JsonRpcResponse {
 // Tool definitions
 const TOOLS = [
   {
+    name: 'start_discovery',
+    description: 'Begin the discovery process for a new project. Uses the Usefulness Framework to understand value before suggesting tech. Returns questions to guide the conversation.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        idea: {
+          type: 'string',
+          description: 'The user\'s initial project idea or description'
+        },
+        is_creative: {
+          type: 'boolean',
+          description: 'Set to true if this is a creative/fun project (skips usefulness questions)'
+        }
+      },
+      required: ['idea']
+    }
+  },
+  {
+    name: 'continue_discovery',
+    description: 'Continue the discovery process with user\'s response. Progresses through WHO -> PROBLEM -> EDGE -> MINIMUM stages.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        stage: {
+          type: 'string',
+          enum: ['who', 'problem', 'edge', 'minimum'],
+          description: 'Current stage of discovery'
+        },
+        response: {
+          type: 'string',
+          description: 'User\'s response to the previous question'
+        },
+        session: {
+          type: 'object',
+          description: 'Current discovery session state'
+        }
+      },
+      required: ['stage', 'response']
+    }
+  },
+  {
+    name: 'assess_skill_level',
+    description: 'Assess user skill level without interrogation. Uses a simple choice-based approach.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        choice: {
+          type: 'string',
+          enum: ['handle-tech', 'learn-as-build', 'move-fast'],
+          description: 'User\'s self-selected approach: "handle-tech" (vibe-coder), "learn-as-build" (builder), "move-fast" (developer/expert)'
+        },
+        context_clues: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional: technical terms or patterns noticed in user\'s messages'
+        }
+      },
+      required: ['choice']
+    }
+  },
+  {
+    name: 'recommend_squad',
+    description: 'Recommend a squad of specialists based on project type and requirements. Returns layer-organized specialists with explanations.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_type: {
+          type: 'string',
+          enum: ['saas', 'marketplace', 'ai-app', 'web3', 'tool', 'web-app', 'custom'],
+          description: 'Type of project being built'
+        },
+        features: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Key features needed (e.g., "auth", "payments", "realtime", "file-upload")'
+        },
+        skill_level: {
+          type: 'string',
+          enum: ['vibe-coder', 'builder', 'developer', 'expert'],
+          description: 'User\'s skill level (affects specialist recommendations)'
+        }
+      },
+      required: ['project_type']
+    }
+  },
+  {
     name: 'create_project',
     description: 'Spawn a new vibeship project with agents and MCPs. Returns project scaffolding content.',
     inputSchema: {
@@ -72,13 +333,22 @@ const TOOLS = [
         project_name: {
           type: 'string',
           description: 'Project name (required with template)'
+        },
+        skill_level: {
+          type: 'string',
+          enum: ['vibe-coder', 'builder', 'developer', 'expert'],
+          description: 'User skill level (affects guidance level)'
+        },
+        discovery_session: {
+          type: 'object',
+          description: 'Completed discovery session with usefulness insights'
         }
       }
     }
   },
   {
     name: 'check_environment',
-    description: 'Check remote MCP status and available templates',
+    description: 'Check remote MCP status, available templates, and specialists',
     inputSchema: {
       type: 'object',
       properties: {}
@@ -90,6 +360,24 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {}
+    }
+  },
+  {
+    name: 'list_specialists',
+    description: 'List all available specialists organized by layer',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        layer: {
+          type: 'number',
+          enum: [1, 2, 3],
+          description: 'Filter by layer (optional)'
+        },
+        project_type: {
+          type: 'string',
+          description: 'Filter specialists relevant to a project type (optional)'
+        }
+      }
     }
   }
 ];
@@ -105,7 +393,7 @@ async function handleMethod(method: string, params: Record<string, unknown> = {}
         },
         serverInfo: {
           name: 'vibeship-spawner',
-          version: '1.0.0'
+          version: '2.0.0'
         }
       };
 
@@ -137,23 +425,544 @@ async function handleMethod(method: string, params: Record<string, unknown> = {}
 // Handle tool calls
 async function handleToolCall(name: string, args: Record<string, unknown>): Promise<unknown> {
   switch (name) {
+    case 'start_discovery':
+      return startDiscovery(args);
+    case 'continue_discovery':
+      return continueDiscovery(args);
+    case 'assess_skill_level':
+      return assessSkillLevel(args);
+    case 'recommend_squad':
+      return recommendSquad(args);
     case 'create_project':
       return createProject(args);
     case 'check_environment':
       return checkEnvironment();
     case 'list_templates':
       return listTemplates();
+    case 'list_specialists':
+      return listSpecialists(args);
     default:
       throw { code: -32602, message: `Unknown tool: ${name}` };
   }
 }
 
+// ============================================================================
+// DISCOVERY FLOW - Usefulness Framework Implementation
+// ============================================================================
+
+/**
+ * Start the discovery process for a new project
+ * Uses the Usefulness Framework: WHO -> PROBLEM -> EDGE -> MINIMUM
+ */
+function startDiscovery(args: Record<string, unknown>): unknown {
+  const { idea, is_creative } = args as { idea: string; is_creative?: boolean };
+
+  // For creative/fun projects, skip the usefulness questions
+  if (is_creative) {
+    return {
+      content: [{
+        type: 'text',
+        text: `
+# Let's Build Something Fun! 🎨
+
+I love it: "${idea}"
+
+Since this is a creative project, let's skip the business questions and dive straight into building.
+
+**Quick question before we start - which sounds more like you?**
+
+A) "I have the idea, you handle the tech stuff"
+B) "I know some coding, want to learn as we build"
+C) "I'm technical, let's move fast"
+
+Pick one and I'll tailor my approach accordingly.
+
+---
+
+*Session State:*
+\`\`\`json
+${JSON.stringify({
+  stage: 'skill-assessment',
+  isCreative: true,
+  idea: idea,
+  responses: {}
+} as DiscoverySession, null, 2)}
+\`\`\`
+`
+      }]
+    };
+  }
+
+  // Start with the WHO question - but first, a gentle check
+  return {
+    content: [{
+      type: 'text',
+      text: `
+# Let's Make Something Useful
+
+"${idea}" - interesting!
+
+Before we dive into the tech, let me ask a few questions to make sure we build something people actually want.
+
+**Who specifically has this problem?**
+
+Not "everyone" or "people who..." - think of ONE real person you know (or could describe in detail) who would use this.
+
+Example: "My friend Sarah who runs a small bakery and spends 3 hours every Sunday manually calculating ingredient orders"
+
+---
+
+*Discovery Progress: WHO → problem → edge → minimum*
+
+*Session State:*
+\`\`\`json
+${JSON.stringify({
+  stage: 'who',
+  isCreative: false,
+  idea: idea,
+  responses: {}
+} as DiscoverySession, null, 2)}
+\`\`\`
+`
+    }]
+  };
+}
+
+/**
+ * Continue the discovery process with user's response
+ */
+function continueDiscovery(args: Record<string, unknown>): unknown {
+  const { stage, response, session } = args as {
+    stage: DiscoveryStage;
+    response: string;
+    session?: DiscoverySession;
+  };
+
+  const currentSession: DiscoverySession = session || {
+    stage: 'who',
+    responses: {},
+    isCreative: false
+  };
+
+  // Update session with response
+  currentSession.responses[stage as keyof typeof currentSession.responses] = response;
+
+  // Progress to next stage
+  switch (stage) {
+    case 'who':
+      currentSession.stage = 'problem';
+      return {
+        content: [{
+          type: 'text',
+          text: `
+Got it: "${response}"
+
+**What's broken about how they handle this today?**
+
+What's the pain they feel? The time they waste? The frustration that makes them say "there has to be a better way"?
+
+---
+
+*Discovery Progress: ✓ who → PROBLEM → edge → minimum*
+
+*Session State:*
+\`\`\`json
+${JSON.stringify(currentSession, null, 2)}
+\`\`\`
+`
+        }]
+      };
+
+    case 'problem':
+      currentSession.stage = 'edge';
+      return {
+        content: [{
+          type: 'text',
+          text: `
+The pain point: "${response}"
+
+**Why would they switch to YOUR solution?**
+
+There are probably other tools out there. What's the ONE thing you'll do better that makes switching worth it?
+
+Think about it this way: "Unlike [existing solutions], mine will..."
+
+---
+
+*Discovery Progress: ✓ who → ✓ problem → EDGE → minimum*
+
+*Session State:*
+\`\`\`json
+${JSON.stringify(currentSession, null, 2)}
+\`\`\`
+`
+        }]
+      };
+
+    case 'edge':
+      currentSession.stage = 'minimum';
+      return {
+        content: [{
+          type: 'text',
+          text: `
+Your edge: "${response}"
+
+**What's the absolute minimum to prove that value?**
+
+If you could only ship ONE feature that proves your edge, what is it?
+
+Not a "minimum viable product" with 10 features - the ONE thing that, if it works, proves your idea has legs.
+
+---
+
+*Discovery Progress: ✓ who → ✓ problem → ✓ edge → MINIMUM*
+
+*Session State:*
+\`\`\`json
+${JSON.stringify(currentSession, null, 2)}
+\`\`\`
+`
+        }]
+      };
+
+    case 'minimum':
+      currentSession.stage = 'complete';
+      return {
+        content: [{
+          type: 'text',
+          text: `
+# Discovery Complete ✓
+
+Here's what we uncovered:
+
+| Question | Your Answer |
+|----------|-------------|
+| **WHO** has this problem? | ${currentSession.responses.who} |
+| **WHAT's** broken today? | ${currentSession.responses.problem} |
+| **WHY** switch to yours? | ${currentSession.responses.edge} |
+| **MINIMUM** to prove it? | ${response} |
+
+---
+
+## The Unlock Test
+
+Imagine this is live and someone tweets about it:
+
+> "Just found [your product] - finally something that ${currentSession.responses.edge?.toLowerCase()}. Been looking for this forever."
+
+Does that sound like something they'd actually say? If yes, we're on the right track.
+
+---
+
+**Quick question before we start building - which sounds more like you?**
+
+A) "I have the idea, you handle the tech stuff"
+B) "I know some coding, want to learn as we build"
+C) "I'm technical, let's move fast"
+
+---
+
+*Session State:*
+\`\`\`json
+${JSON.stringify({ ...currentSession, responses: { ...currentSession.responses, minimum: response } }, null, 2)}
+\`\`\`
+`
+        }]
+      };
+
+    default:
+      return {
+        content: [{
+          type: 'text',
+          text: `Discovery stage "${stage}" not recognized. Please start a new discovery session.`
+        }],
+        isError: true
+      };
+  }
+}
+
+/**
+ * Assess user skill level without interrogation
+ */
+function assessSkillLevel(args: Record<string, unknown>): unknown {
+  const { choice, context_clues } = args as {
+    choice: 'handle-tech' | 'learn-as-build' | 'move-fast';
+    context_clues?: string[];
+  };
+
+  let skillLevel: SkillLevel;
+  let guidance: string;
+  let approach: string;
+
+  switch (choice) {
+    case 'handle-tech':
+      skillLevel = 'vibe-coder';
+      guidance = 'maximum';
+      approach = `
+**Got it - I'll handle the tech, you focus on the vision.**
+
+Here's how we'll work:
+- I'll explain key decisions in plain English
+- I'll make all technical choices (you can always ask "why")
+- I'll tell you what to run, you tell me if it works
+- We'll build in small steps so you can see progress
+
+You don't need to understand HOW it works - just WHAT it does.
+`;
+      break;
+
+    case 'learn-as-build':
+      skillLevel = 'builder';
+      guidance = 'moderate';
+      approach = `
+**Perfect - we'll build AND learn together.**
+
+Here's how we'll work:
+- I'll explain the "why" behind important decisions
+- You make some choices, I'll guide when needed
+- I'll point out patterns you can reuse later
+- Feel free to ask "what does this do?" anytime
+
+By the end, you'll understand not just WHAT we built, but HOW it works.
+`;
+      break;
+
+    case 'move-fast':
+      // Check context clues to distinguish developer from expert
+      const expertSignals = ['architecture', 'rsc', 'hydration', 'rls', 'edge functions', 'webhooks'];
+      const hasExpertClues = context_clues?.some(clue =>
+        expertSignals.some(signal => clue.toLowerCase().includes(signal))
+      );
+
+      if (hasExpertClues) {
+        skillLevel = 'expert';
+        guidance = 'minimal';
+        approach = `
+**Expert mode - let's ship fast.**
+
+Here's how we'll work:
+- Minimal explanation, maximum output
+- I'll offer options, you decide
+- I'll challenge questionable decisions
+- Tell me what you want, I'll make it happen
+
+Let's build.
+`;
+      } else {
+        skillLevel = 'developer';
+        guidance = 'low';
+        approach = `
+**Developer mode - efficient and focused.**
+
+Here's how we'll work:
+- Skip the basics, focus on the interesting parts
+- I'll offer options with tradeoffs
+- You make the calls, I'll execute
+- Ask if you want more detail on anything
+
+Ready when you are.
+`;
+      }
+      break;
+
+    default:
+      skillLevel = 'builder';
+      guidance = 'moderate';
+      approach = 'I\'ll adapt as we go.';
+  }
+
+  return {
+    content: [{
+      type: 'text',
+      text: `
+${approach}
+
+---
+
+*Skill Assessment:*
+\`\`\`json
+${JSON.stringify({
+  skillLevel,
+  guidanceLevel: guidance,
+  contextClues: context_clues || []
+}, null, 2)}
+\`\`\`
+`
+    }]
+  };
+}
+
+/**
+ * Recommend a squad of specialists based on project requirements
+ */
+function recommendSquad(args: Record<string, unknown>): unknown {
+  const { project_type, features, skill_level } = args as {
+    project_type: string;
+    features?: string[];
+    skill_level?: SkillLevel;
+  };
+
+  // Find specialists for this project type
+  const layer1: string[] = [];
+  const layer2: string[] = [];
+  const layer3: string[] = [];
+  const standalone: string[] = [];
+
+  for (const [id, specialist] of Object.entries(SPECIALISTS)) {
+    const isRequiredForProject = specialist.requiredFor.includes(project_type);
+    const matchesFeature = features?.some(f =>
+      specialist.expertise.some(e => e.includes(f) || f.includes(e))
+    );
+
+    if (isRequiredForProject || matchesFeature) {
+      switch (specialist.layer) {
+        case 1: layer1.push(id); break;
+        case 2: layer2.push(id); break;
+        case 3: layer3.push(id); break;
+        case 'standalone': standalone.push(id); break;
+      }
+    }
+  }
+
+  // Add feature-specific specialists
+  if (features?.includes('auth') && !layer3.includes('auth-flow')) {
+    layer3.push('auth-flow');
+  }
+  if (features?.includes('payments') && !layer3.includes('payments-flow')) {
+    layer3.push('payments-flow');
+  }
+  if (features?.includes('realtime') && !layer3.includes('realtime-sync')) {
+    layer3.push('realtime-sync');
+  }
+  if (features?.includes('file-upload') && !layer3.includes('file-upload')) {
+    layer3.push('file-upload');
+  }
+  if (features?.includes('ai') && !layer3.includes('ai-integration')) {
+    layer3.push('ai-integration');
+  }
+
+  // Build the recommendation
+  const formatSpecialist = (id: string) => {
+    const s = SPECIALISTS[id];
+    return `- **${s.name}**: ${s.description}`;
+  };
+
+  const guidanceNote = skill_level === 'vibe-coder'
+    ? '\n> 💡 Don\'t worry about understanding all these - I\'ll load the right one for each task automatically.\n'
+    : skill_level === 'expert'
+    ? '\n> These are the specialists I\'ll pull from. Override any if you have preferences.\n'
+    : '';
+
+  return {
+    content: [{
+      type: 'text',
+      text: `
+# Recommended Squad for ${project_type.toUpperCase()}
+
+${guidanceNote}
+
+## Layer 1: Core Specialists
+*Deep expertise in their domain*
+
+${layer1.length > 0 ? layer1.map(formatSpecialist).join('\n') : '- None required'}
+
+## Layer 2: Integration Specialists
+*Know how things connect*
+
+${layer2.length > 0 ? layer2.map(formatSpecialist).join('\n') : '- None required'}
+
+## Layer 3: Pattern Specialists
+*Solve specific problems*
+
+${layer3.length > 0 ? layer3.map(formatSpecialist).join('\n') : '- None required'}
+
+${standalone.length > 0 ? `
+## Standalone Specialists
+*On-demand expertise*
+
+${standalone.map(formatSpecialist).join('\n')}
+` : ''}
+
+---
+
+*Squad Configuration:*
+\`\`\`json
+${JSON.stringify({
+  projectType: project_type,
+  features: features || [],
+  skillLevel: skill_level,
+  squad: {
+    layer1,
+    layer2,
+    layer3,
+    standalone
+  }
+}, null, 2)}
+\`\`\`
+`
+    }]
+  };
+}
+
+/**
+ * List all available specialists
+ */
+function listSpecialists(args: Record<string, unknown>): unknown {
+  const { layer, project_type } = args as { layer?: number; project_type?: string };
+
+  let filtered = Object.entries(SPECIALISTS);
+
+  if (layer) {
+    filtered = filtered.filter(([_, s]) => s.layer === layer);
+  }
+
+  if (project_type) {
+    filtered = filtered.filter(([_, s]) =>
+      s.requiredFor.includes(project_type) || s.requiredFor.length === 0
+    );
+  }
+
+  const byLayer: Record<string, Array<{ id: string; name: string; description: string; expertise: string[] }>> = {
+    'Layer 1 - Core': [],
+    'Layer 2 - Integration': [],
+    'Layer 3 - Pattern': [],
+    'Standalone': []
+  };
+
+  for (const [id, specialist] of filtered) {
+    const layerKey = specialist.layer === 1 ? 'Layer 1 - Core'
+      : specialist.layer === 2 ? 'Layer 2 - Integration'
+      : specialist.layer === 3 ? 'Layer 3 - Pattern'
+      : 'Standalone';
+
+    byLayer[layerKey].push({
+      id,
+      name: specialist.name,
+      description: specialist.description,
+      expertise: specialist.expertise
+    });
+  }
+
+  return {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({ specialists: byLayer }, null, 2)
+    }]
+  };
+}
+
+// ============================================================================
+// PROJECT CREATION
+// ============================================================================
+
 // Create project - returns content instead of writing files
 async function createProject(args: Record<string, unknown>): Promise<unknown> {
-  const { gist_id, template, project_name } = args as {
+  const { gist_id, template, project_name, skill_level, discovery_session } = args as {
     gist_id?: string;
     template?: string;
     project_name?: string;
+    skill_level?: SkillLevel;
+    discovery_session?: DiscoverySession;
   };
 
   let config: {
@@ -167,10 +976,10 @@ async function createProject(args: Record<string, unknown>): Promise<unknown> {
     // Fetch config from gist
     const gistConfig = await fetchGist(gist_id);
     config = {
-      project_name: gistConfig.project_name || 'my-project',
-      agents: gistConfig.agents || ['planner'],
-      mcps: gistConfig.mcps || ['filesystem'],
-      behaviors: gistConfig.behaviors || {
+      project_name: (gistConfig.project_name as string) || 'my-project',
+      agents: (gistConfig.agents as string[]) || ['planner'],
+      mcps: (gistConfig.mcps as string[]) || ['filesystem'],
+      behaviors: (gistConfig.behaviors as { mandatory: string[]; selected: string[] }) || {
         mandatory: ['verify-before-complete', 'follow-architecture'],
         selected: ['tdd-mode']
       }
@@ -256,17 +1065,34 @@ ${stateJson}
 }
 
 function checkEnvironment(): unknown {
+  const specialistCount = Object.keys(SPECIALISTS).length;
+  const layer1Count = Object.values(SPECIALISTS).filter(s => s.layer === 1).length;
+  const layer2Count = Object.values(SPECIALISTS).filter(s => s.layer === 2).length;
+  const layer3Count = Object.values(SPECIALISTS).filter(s => s.layer === 3).length;
+
   return {
     content: [{
       type: 'text',
       text: `
 vibeship-spawner MCP (Remote)
+"Claude on Nitro" - Smarter Discovery, Specialized Agents, Guardrails
 
 Status: Connected
 Transport: SSE (Cloudflare Workers)
-Version: 1.0.0
+Version: 2.0.0
 
-Available Templates:
+## Discovery Tools
+- start_discovery: Begin usefulness framework conversation
+- continue_discovery: Progress through WHO → PROBLEM → EDGE → MINIMUM
+- assess_skill_level: Detect user skill level without interrogation
+- recommend_squad: Suggest specialists based on project needs
+
+## Specialists Available: ${specialistCount}
+- Layer 1 (Core): ${layer1Count} specialists
+- Layer 2 (Integration): ${layer2Count} specialists
+- Layer 3 (Pattern): ${layer3Count} specialists
+
+## Templates
 ${Object.entries(TEMPLATES).map(([name, config]) =>
   `- ${name}: ${config.agents.length} agents, ${config.mcps.length} MCPs`
 ).join('\n')}
@@ -389,7 +1215,8 @@ export default {
       return new Response(JSON.stringify({
         status: 'ok',
         service: 'vibeship-spawner-mcp',
-        version: '1.0.0'
+        version: '2.0.0',
+        features: ['discovery', 'skill-assessment', 'specialist-squads', 'guardrails']
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
