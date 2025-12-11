@@ -203,8 +203,30 @@ interface JsonRpcResponse {
 // Tool definitions
 const TOOLS = [
   {
+    name: 'get_started',
+    description: 'ALWAYS CALL THIS FIRST when user mentions vibeship-spawner or wants to create/work on a project. Detects whether this is a new project (needs discovery) or existing codebase (needs analysis). Returns the right next step.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        has_existing_codebase: {
+          type: 'boolean',
+          description: 'True if user has an existing project/codebase they want help with'
+        },
+        codebase_summary: {
+          type: 'string',
+          description: 'If existing codebase: brief description of what you found (tech stack, main files, etc.)'
+        },
+        idea: {
+          type: 'string',
+          description: 'If new project: the user\'s project idea or description'
+        }
+      },
+      required: []
+    }
+  },
+  {
     name: 'start_discovery',
-    description: 'Begin the discovery process for a new project. Uses the Usefulness Framework to understand value before suggesting tech. Returns questions to guide the conversation.',
+    description: 'Begin discovery for a NEW project idea. Guides through WHO/PROBLEM/EDGE/MINIMUM framework. Use when get_started indicates new project.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -222,7 +244,7 @@ const TOOLS = [
   },
   {
     name: 'continue_discovery',
-    description: 'Continue the discovery process with user\'s response. Progresses through WHO -> PROBLEM -> EDGE -> MINIMUM stages.',
+    description: 'Continue the discovery process with user\'s response. Progresses through WHO -> PROBLEM -> EDGE -> MINIMUM stages. Use after start_discovery.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -245,7 +267,7 @@ const TOOLS = [
   },
   {
     name: 'assess_skill_level',
-    description: 'Assess user skill level without interrogation. Uses a simple choice-based approach.',
+    description: 'Assess user skill level. Called after discovery is complete (user answered WHO/PROBLEM/EDGE/MINIMUM or chose creative project).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -265,7 +287,7 @@ const TOOLS = [
   },
   {
     name: 'recommend_squad',
-    description: 'Recommend a squad of specialists based on project type and requirements. Returns tag-matched specialists with explanations.',
+    description: 'Recommend specialists AFTER discovery and skill assessment are complete. Requires project_type which should be determined from discovery answers.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -290,7 +312,7 @@ const TOOLS = [
   },
   {
     name: 'create_project',
-    description: 'Spawn a new vibeship project with agents and MCPs. Returns project scaffolding content.',
+    description: 'FINAL STEP - Create project scaffolding AFTER completing: 1) start_discovery, 2) continue_discovery (all stages), 3) assess_skill_level, 4) recommend_squad. Do NOT call this first.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -321,7 +343,7 @@ const TOOLS = [
   },
   {
     name: 'check_environment',
-    description: 'Check remote MCP status, available templates, and specialists',
+    description: 'Check MCP server status. Use for debugging or when user asks about vibeship-spawner capabilities.',
     inputSchema: {
       type: 'object',
       properties: {}
@@ -329,7 +351,7 @@ const TOOLS = [
   },
   {
     name: 'list_templates',
-    description: 'List available project templates with their agents and MCPs',
+    description: 'List available templates. Only use if user specifically asks "what templates are available" - do NOT use this when starting a new project (use start_discovery instead).',
     inputSchema: {
       type: 'object',
       properties: {}
@@ -337,7 +359,7 @@ const TOOLS = [
   },
   {
     name: 'list_specialists',
-    description: 'List all available specialists with their tags',
+    description: 'List all specialists. Only use if user asks about specialists specifically - do NOT use when starting a new project.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -397,6 +419,8 @@ async function handleMethod(method: string, params: Record<string, unknown> = {}
 // Handle tool calls
 async function handleToolCall(name: string, args: Record<string, unknown>): Promise<unknown> {
   switch (name) {
+    case 'get_started':
+      return getStarted(args);
     case 'start_discovery':
       return startDiscovery(args);
     case 'continue_discovery':
@@ -416,6 +440,202 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
     default:
       throw { code: -32602, message: `Unknown tool: ${name}` };
   }
+}
+
+// ============================================================================
+// GET STARTED - Smart routing between new project and existing codebase
+// ============================================================================
+
+/**
+ * Smart entry point that detects whether user has:
+ * - New project idea → Routes to discovery flow
+ * - Existing codebase → Analyzes and recommends specialists directly
+ */
+function getStarted(args: Record<string, unknown>): unknown {
+  const { has_existing_codebase, codebase_summary, idea } = args as {
+    has_existing_codebase?: boolean;
+    codebase_summary?: string;
+    idea?: string;
+  };
+
+  // CASE 1: Existing codebase - analyze and recommend specialists
+  if (has_existing_codebase && codebase_summary) {
+    // Detect tech stack and features from the summary
+    const detectedTags = detectTagsFromCodebase(codebase_summary);
+    const detectedProjectType = detectProjectType(codebase_summary);
+
+    return {
+      content: [{
+        type: 'text',
+        text: `
+# Existing Codebase Detected
+
+I've analyzed your project. Here's what I found:
+
+**Detected Stack:** ${detectedTags.slice(0, 6).join(', ') || 'Could not detect'}
+**Project Type:** ${detectedProjectType}
+
+---
+
+## Recommended Next Steps
+
+Based on your codebase, I recommend loading these specialists:
+
+${getTopSpecialistsForTags(detectedTags).map(s => `- **${s.name}**: ${s.description}`).join('\n')}
+
+---
+
+**Quick question - which sounds more like you?**
+
+A) "I have the idea, you handle the tech stuff"
+B) "I know some coding, want to learn as we build"
+C) "I'm technical, let's move fast"
+
+Once you pick, I'll tailor my guidance and we can start working on your project.
+
+---
+
+*Analysis:*
+\`\`\`json
+${JSON.stringify({
+  mode: 'existing-codebase',
+  detectedTags,
+  detectedProjectType,
+  nextStep: 'assess_skill_level'
+}, null, 2)}
+\`\`\`
+`
+      }]
+    };
+  }
+
+  // CASE 2: New project with idea - route to discovery
+  if (idea) {
+    return {
+      content: [{
+        type: 'text',
+        text: `
+# New Project: "${idea}"
+
+Great! Before we dive into tech decisions, let's make sure we build something people actually want.
+
+---
+
+**Is this a serious project or just for fun?**
+
+1. **Serious** - I want to build something useful (I'll ask a few questions first)
+2. **Creative/Fun** - Just vibing, skip the business questions
+
+---
+
+*Next step: Call \`start_discovery\` with the idea and is_creative flag based on user's answer*
+`
+      }]
+    };
+  }
+
+  // CASE 3: No context - ask what they want to do
+  return {
+    content: [{
+      type: 'text',
+      text: `
+# Welcome to vibeship-spawner! 🚀
+
+"You vibe. It ships."
+
+---
+
+**What would you like to do?**
+
+1. **Start a new project** - I'll help you discover what to build and set up the right stack
+2. **Work on existing code** - I'll analyze your codebase and recommend the right specialists
+
+---
+
+*Tip: If you have an existing project, share the folder path or describe the tech stack, and I'll analyze it.*
+`
+    }]
+  };
+}
+
+/**
+ * Detect relevant tags from a codebase description
+ */
+function detectTagsFromCodebase(summary: string): string[] {
+  const summaryLower = summary.toLowerCase();
+  const detected: string[] = [];
+
+  const tagPatterns: Record<string, string[]> = {
+    'nextjs': ['next.js', 'nextjs', 'next js', 'app router', 'pages router'],
+    'react': ['react', 'jsx', 'tsx', 'component'],
+    'typescript': ['typescript', '.ts', '.tsx', 'tsconfig'],
+    'supabase': ['supabase', '@supabase'],
+    'tailwind': ['tailwind', 'tailwindcss'],
+    'auth': ['auth', 'login', 'signup', 'authentication', 'session'],
+    'payments': ['stripe', 'payment', 'checkout', 'billing'],
+    'ai': ['openai', 'anthropic', 'llm', 'gpt', 'claude', 'ai'],
+    'database': ['prisma', 'drizzle', 'postgres', 'mysql', 'mongodb', 'database'],
+    'api': ['api', 'rest', 'endpoint', 'route handler'],
+    'realtime': ['realtime', 'websocket', 'socket.io', 'pusher'],
+    'forms': ['form', 'react-hook-form', 'formik', 'zod'],
+    'ui': ['shadcn', 'radix', 'headless ui', 'component library'],
+    'testing': ['jest', 'vitest', 'cypress', 'playwright', 'test']
+  };
+
+  for (const [tag, patterns] of Object.entries(tagPatterns)) {
+    if (patterns.some(p => summaryLower.includes(p))) {
+      detected.push(tag);
+    }
+  }
+
+  return detected;
+}
+
+/**
+ * Detect project type from codebase description
+ */
+function detectProjectType(summary: string): string {
+  const summaryLower = summary.toLowerCase();
+
+  if (summaryLower.includes('marketplace') || summaryLower.includes('e-commerce') || summaryLower.includes('shop')) {
+    return 'marketplace';
+  }
+  if (summaryLower.includes('saas') || summaryLower.includes('subscription') || summaryLower.includes('dashboard')) {
+    return 'saas';
+  }
+  if (summaryLower.includes('ai') || summaryLower.includes('llm') || summaryLower.includes('chat') || summaryLower.includes('gpt')) {
+    return 'ai-app';
+  }
+  if (summaryLower.includes('web3') || summaryLower.includes('blockchain') || summaryLower.includes('smart contract')) {
+    return 'web3';
+  }
+  if (summaryLower.includes('cli') || summaryLower.includes('tool') || summaryLower.includes('utility')) {
+    return 'tool';
+  }
+
+  return 'web-app';
+}
+
+/**
+ * Get top specialists matching detected tags
+ */
+function getTopSpecialistsForTags(tags: string[]): Specialist[] {
+  const matches: Array<{ specialist: Specialist; score: number }> = [];
+
+  for (const specialist of Object.values(SPECIALISTS)) {
+    const score = specialist.tags.filter(t =>
+      tags.some(detected => t.includes(detected) || detected.includes(t))
+    ).length;
+
+    if (score > 0) {
+      matches.push({ specialist, score });
+    }
+  }
+
+  return matches
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5)
+    .map(m => m.specialist);
 }
 
 // ============================================================================
