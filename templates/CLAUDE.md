@@ -87,3 +87,53 @@ Checkpoint: {checkpoint}
 | `!` | Warning |
 | `*` | Needs human input |
 | `x` | Error |
+
+---
+
+### MCP Server & Workers
+
+#### Local MCP Server
+
+The vibeship-spawner MCP server can be run locally:
+
+```bash
+# Location
+C:\Users\USER\Desktop\vibeship orchestrator\vibeship-orchestrator\mcp\src\index.js
+
+# Run directly
+node mcp/src/index.js
+
+# Or via npm
+cd mcp && npm start
+```
+
+**Configuration** (`.mcp.json`):
+```json
+{
+  "mcpServers": {
+    "vibeship-spawner": {
+      "command": "node",
+      "args": ["C:/Users/USER/Desktop/vibeship orchestrator/vibeship-orchestrator/mcp/src/index.js"]
+    }
+  }
+}
+```
+
+#### Cloudflare Workers (Production)
+
+**Endpoint:** `https://vibeship-spawner-mcp.spawner.workers.dev/`
+
+**Health Check:**
+```bash
+curl https://vibeship-spawner-mcp.spawner.workers.dev/
+# Returns: {"status":"ok","service":"vibeship-spawner-mcp","version":"1.0.0"}
+```
+
+**Available Tools:**
+| Tool | Description |
+|------|-------------|
+| `create_project` | Spawn a new project with agents and MCPs |
+| `check_environment` | Verify required dependencies |
+| `list_templates` | List available project templates |
+
+**Templates:** `saas`, `marketplace`, `ai-app`, `web3`, `tool`
