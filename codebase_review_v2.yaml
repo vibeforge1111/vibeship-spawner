@@ -1,0 +1,471 @@
+# Spawner V2 Architecture Review (V2 Format)
+# Reviewed Against: code-architecture-review skill (Spawner YAML format)
+# Date: 2025-12-12
+# Codebase: vibeship-orchestrator/spawner-v2
+
+metadata:
+  codebase: spawner-v2
+  language: TypeScript
+  runtime: Cloudflare Workers
+  total_files: 28
+  loc_estimate: ~2500
+
+summary:
+  overall_health: moderate
+  critical_findings: 1
+  high_findings: 3
+  medium_findings: 3
+  passes:
+    - No circular dependencies detected
+    - Database operations properly isolated in db/ module
+    - Validation system cleanly separated from business logic
+    - No utils.ts or helpers.ts dumping grounds
+
+# ============================================================================
+# FINDINGS - Structured by Sharp Edge Match
+# ============================================================================
+
+findings:
+
+  # --- CRITICAL ---
+
+  - id: finding-001
+    matched_edge: god-module-accumulation
+    severity: critical
+    file: src/index.ts
+    line_count: 425
+
+    situation: |
+      index.ts has grown to handle HTTP, CORS, JSON-RPC parsing, MCP protocol,
+      and tool routing via a 130+ line switch statement that knows about all 9 tools.
+
+    symptoms_matched:
+      - "File over 500 lines" # Approaching threshold at 425
+      - "Need to import 10 things from one module" # tools/index.ts imports everything
+      - "Where does this code go? Just put it in utils" # New tools go in switch
+
+    detection_pattern_match: 'export (function|const|class).*\n.*export.*\n.*export'
+    pattern_found_at: "lines 89-182 contain 6+ exported functions"
+
+    why_critical: |
+      Every new tool requires editing this file. The switch statement is a
+      maintenance bottleneck. Testing requires mocking the entire MCP flow.
+      This file will grow linearly with every new feature.
+
+    solution:
+      approach: Split by responsibility
+      files_to_create:
+        - src/http/cors.ts
+        - src/http/handler.ts
+        - src/mcp/router.ts
+        - src/mcp/protocol.ts
+      pattern: |
+        # Extract tool routing to registry pattern
+        // src/mcp/registry.ts
+        type ToolExecutor = (env: Env, args: unknown, userId: string) => Promise<unknown>;
+
+        const tools = new Map<string, { definition: ToolDefinition; execute: ToolExecutor }>();
+
+        export function registerTool(def: ToolDefinition, executor: ToolExecutor) {
+          tools.set(def.name, { definition: def, execute: executor });
+        }
+
+        export function getTools() {
+          return Array.from(tools.values()).map(t => t.definition);
+        }
+
+        export async function callTool(name: string, args: unknown, env: Env, userId: string) {
+          const tool = tools.get(name);
+          if (!tool) throw new Error(`Unknown tool: ${name}`);
+          return tool.execute(env, args, userId);
+        }
+
+  # --- HIGH ---
+
+  - id: finding-002
+    matched_edge: wrong-layer-responsibilities
+    severity: high
+    files:
+      - src/tools/context.ts
+      - src/tools/validate.ts
+      - src/tools/sharp-edge.ts
+      - src/tools/unstick.ts
+      - src/tools/plan.ts
+
+    situation: |
+      Tool output types include `_instruction` field that contains LLM-specific
+      guidance. This mixes presentation (Claude consumption) with domain data.
+
+    symptoms_matched:
+      - "Business logic in useEffect" # Analogous: LLM instruction in domain output
+      - "Can't reuse logic in different UI" # Can't consume tools without Claude
+
+    code_example:
+      file: src/types.ts
+      line: 228
+      content: |
+        export interface ContextOutput {
+          project: { ... };
+          skills: { ... }[];
+          _instruction: string;  // <-- Presentation concern in domain type
+        }
+
+    why_high: |
+      If Spawner tools need to be consumed by something other than Claude
+      (API, different LLM, programmatic access), the `_instruction` field
+      becomes noise or misleading. Domain data should be pure.
+
+    solution:
+      approach: Add instruction at MCP response layer
+      pattern: |
+        // In index.ts handleCallTool, wrap result:
+        const result = await executeContext(env, args, userId);
+        return {
+          content: [
+            { type: 'text', text: JSON.stringify(result, null, 2) },
+            { type: 'text', text: generateInstruction(toolName, result) }
+          ]
+        };
+
+        // Remove _instruction from all domain output types
+
+  - id: finding-003
+    matched_edge: abstraction-before-duplication
+    severity: high
+    status: NOT_VIOLATED
+
+    situation: |
+      Checked for premature interfaces. The codebase does NOT have interfaces
+      with single implementations. This is GOOD for current stage.
+
+    note: |
+      While this edge is not violated, the OPPOSITE problem exists: no interfaces
+      at all. Database operations and KV access are concrete. This blocks:
+      - Unit testing without real D1/KV
+      - Swapping implementations
+      - Mocking in tests
+
+      The codebase has reached the point where interfaces WOULD be valuable
+      (multiple places consuming db operations, KV accessed from multiple tools).
+
+    recommendation: |
+      Define interfaces for:
+      - ProjectRepository (db/projects.ts operations)
+      - SkillLoader (skills/loader.ts operations)
+      - SharpEdgeLoader (skills/sharp-edges.ts operations)
+
+      This is NOT premature - there are concrete implementations and test needs.
+
+  - id: finding-004
+    matched_edge: leaky-database-abstraction
+    severity: high
+    status: PARTIALLY_VIOLATED
+
+    situation: |
+      Database operations are properly isolated in db/ module. Tools do NOT
+      contain raw SQL. However, D1Database type leaks into function signatures.
+
+    symptoms_matched:
+      - "Tests need database to run" # True - no interface to mock
+      - "We can't change databases because..." # D1Database hardcoded
+
+    code_example:
+      file: src/db/projects.ts
+      line: 31
+      content: |
+        export async function loadProject(
+          db: D1Database,  // <-- Concrete type, not interface
+          projectId: string,
+          userId: string
+        ): Promise<Project | null>
+
+    why_high: |
+      While SQL is contained, the D1Database dependency is not abstracted.
+      Testing requires actual D1 instance or complex mocking.
+
+    solution:
+      approach: Introduce repository interface
+      pattern: |
+        interface ProjectRepository {
+          load(projectId: string, userId: string): Promise<Project | null>;
+          create(userId: string, name: string, description?: string): Promise<Project>;
+          findByDescription(userId: string, description: string): Promise<Project | null>;
+        }
+
+        // Implement concrete version
+        class D1ProjectRepository implements ProjectRepository { ... }
+
+  # --- MEDIUM ---
+
+  - id: finding-005
+    matched_edge: string-typing-everywhere
+    severity: medium
+
+    situation: |
+      Several places use string literals that could be union types.
+
+    symptoms_matched:
+      - "Comparing strings with ===" # Found in validation runner
+      - "Magic strings scattered in code"
+
+    occurrences:
+      - location: src/tools/plan.ts
+        pattern: "action: 'discover' | 'recommend' | 'create'"
+        status: GOOD - already typed
+
+      - location: src/tools/skills.ts
+        pattern: "action: 'search' | 'list' | 'get' | 'squad'"
+        status: GOOD - already typed
+
+      - location: src/validation/runner.ts
+        pattern: "check.type === 'regex'"
+        status: OK - limited scope
+
+      - location: src/index.ts
+        pattern: "case 'spawner_context':"
+        status: COULD_IMPROVE
+        suggestion: |
+          Define tool names as const enum or union type:
+          type ToolName = 'spawner_context' | 'spawner_validate' | ...
+
+  - id: finding-006
+    matched_edge: implicit-coupling-through-globals
+    severity: medium
+
+    situation: |
+      The Env object is passed everywhere but contains ALL bindings.
+      Tools receive full access to DB, SKILLS, SHARP_EDGES, CACHE, AI
+      even if they only use one.
+
+    symptoms_matched:
+      - "Functions that 'just work' without visible inputs" # Env hides what's used
+
+    code_example:
+      file: src/tools/validate.ts
+      content: |
+        export async function executeValidate(
+          env: Env,  // Gets access to DB, CACHE, AI... but only uses SKILLS
+          input: ValidateInput,
+          userId: string
+        )
+
+    why_medium: |
+      Not critical because Env is passed explicitly (not global).
+      But function signatures don't communicate actual dependencies.
+      Makes it harder to reason about what each tool touches.
+
+    solution:
+      approach: Typed environment subsets
+      pattern: |
+        interface ValidateEnv {
+          SKILLS: KVNamespace;
+        }
+
+        export async function executeValidate(
+          env: ValidateEnv,  // Now it's clear what's used
+          input: ValidateInput,
+          userId: string
+        )
+
+  - id: finding-007
+    matched_edge: test-coupling-to-implementation
+    severity: medium
+    status: CANNOT_ASSESS
+
+    situation: |
+      No test files found in codebase. Unable to evaluate test quality.
+
+    recommendation: |
+      When adding tests, ensure they test behavior not implementation:
+      - Test: "creating a project returns valid project object"
+      - Avoid: "createProject calls db.prepare with specific query"
+
+# ============================================================================
+# POSITIVE PATTERNS DETECTED
+# ============================================================================
+
+positive_patterns:
+
+  - id: good-001
+    pattern: "Layered Architecture"
+    assessment: IMPLEMENTED
+    evidence:
+      - "db/ layer handles all persistence"
+      - "validation/ layer handles all code checking"
+      - "skills/ layer handles all skill loading"
+      - "tools/ layer orchestrates use cases"
+
+  - id: good-002
+    pattern: "Single Responsibility (db/ module)"
+    assessment: IMPLEMENTED
+    evidence:
+      - "db/projects.ts - only Project CRUD"
+      - "db/sessions.ts - only Session CRUD"
+      - "db/decisions.ts - only Decision CRUD"
+      - "db/issues.ts - only Issue CRUD"
+
+  - id: good-003
+    pattern: "No Circular Dependencies"
+    assessment: IMPLEMENTED
+    dependency_graph: |
+      index.ts
+        -> tools/* -> db/*, skills/*, validation/*
+        -> No cycles detected
+
+  - id: good-004
+    pattern: "Explicit Error Handling"
+    assessment: IMPLEMENTED
+    evidence:
+      - "try/catch on all async operations"
+      - "Errors include context (tool name, operation)"
+      - "JSON-RPC error codes properly used"
+
+  - id: good-005
+    pattern: "No Utils Dumping Ground"
+    assessment: IMPLEMENTED
+    evidence:
+      - "No utils.ts or helpers.ts files"
+      - "Each module has specific purpose"
+
+# ============================================================================
+# DEPENDENCY ANALYSIS
+# ============================================================================
+
+dependency_analysis:
+
+  circular_dependencies: none
+
+  stability_ranking:
+    most_stable:
+      - src/types.ts (everything depends on this)
+      - src/db/*.ts (persistence layer)
+      - src/validation/checks/*.ts (pure check definitions)
+
+    moderately_stable:
+      - src/validation/runner.ts
+      - src/skills/loader.ts
+      - src/skills/sharp-edges.ts
+
+    volatile:
+      - src/tools/*.ts (business logic, changes often)
+      - src/index.ts (routing, changes with every new tool)
+
+  coupling_matrix:
+    index.ts:
+      imports_from: [tools/]
+      imported_by: []
+      coupling_level: high (knows all tools)
+
+    tools/*:
+      imports_from: [types, db/, validation/, skills/]
+      imported_by: [index.ts]
+      coupling_level: acceptable
+
+    db/*:
+      imports_from: [types]
+      imported_by: [tools/]
+      coupling_level: low (well isolated)
+
+# ============================================================================
+# ACTIONABLE RECOMMENDATIONS
+# ============================================================================
+
+recommendations:
+
+  immediate:
+    - id: rec-001
+      priority: P0
+      effort: medium
+      description: Split index.ts using registry pattern
+      impact: Reduces change cost for adding tools from 3 files to 1 file
+      files_affected:
+        - src/index.ts (modify)
+        - src/mcp/registry.ts (create)
+        - src/mcp/router.ts (create)
+
+  short_term:
+    - id: rec-002
+      priority: P1
+      effort: low
+      description: Move _instruction to MCP response layer
+      impact: Clean separation of domain and presentation
+
+    - id: rec-003
+      priority: P1
+      effort: medium
+      description: Split types.ts by domain
+      impact: Reduces blast radius of type changes
+
+  medium_term:
+    - id: rec-004
+      priority: P2
+      effort: medium
+      description: Define repository interfaces for db/ and skills/
+      impact: Enables unit testing without real D1/KV
+
+    - id: rec-005
+      priority: P2
+      effort: low
+      description: Add typed environment subsets per tool
+      impact: Explicit dependencies, easier reasoning
+
+# ============================================================================
+# VERIFICATION CHECKLIST
+# ============================================================================
+
+verification_checklist:
+  - check: "Can each module be tested in isolation?"
+    status: partial
+    notes: "db/* and validation/* can. tools/* need full Env."
+
+  - check: "Are dependencies explicit?"
+    status: partial
+    notes: "Env passed explicitly but hides what's actually used."
+
+  - check: "Dependency direction toward stability?"
+    status: mostly
+    notes: "types.ts is too monolithic, creates wide blast radius."
+
+  - check: "Clear layer separation?"
+    status: partial
+    notes: "_instruction mixes domain and presentation."
+
+  - check: "Each module one sentence purpose?"
+    status: mostly
+    notes: "index.ts has 4+ responsibilities."
+
+  - check: "No circular dependencies?"
+    status: pass
+    notes: "Clean dependency graph."
+
+  - check: "Change blast radius contained?"
+    status: fail
+    notes: "index.ts and types.ts are change magnets."
+
+# ============================================================================
+# CONCLUSION
+# ============================================================================
+
+conclusion:
+  health_score: 65/100
+
+  strengths:
+    - Clean db/ module isolation
+    - No circular dependencies
+    - Good validation layer separation
+    - No utils dumping grounds
+
+  weaknesses:
+    - God module in index.ts
+    - Presentation mixed with domain (_instruction)
+    - No interfaces for testability
+    - Monolithic types.ts
+
+  trajectory: |
+    Current architecture will become increasingly painful as tools are added.
+    The switch statement in index.ts is the primary bottleneck. Addressing
+    finding-001 (god module) should be done before adding tools 10+.
+
+  recommendation: |
+    Ship as-is for MVP. Schedule refactoring sprint before scaling past
+    10 tools. Priority: registry pattern, then type splitting, then interfaces.

@@ -1,0 +1,338 @@
+# MCP Product Sharp Edges (V2 Format)
+# Machine-parsable gotchas that render to V1-quality prose
+
+sharp_edges:
+
+  # ============================================================================
+  # CRITICAL - Will cause user abandonment
+  # ============================================================================
+
+  - id: first-call-id-requirement
+    summary: Requiring IDs on first tool call blocks all new users
+    severity: critical
+    context:
+      when:
+        - Tool schema has required project_id, user_id, or session_id
+        - First-time user calls tool without existing state
+        - User is exploring, not managing existing data
+      symptoms:
+        - "Missing required parameter: project_id"
+        - User asks Claude "how do I get a project_id?"
+        - Zero adoption despite working implementation
+    why:
+      - Vibe coders don't have IDs because they haven't started yet
+      - First block = permanent abandonment (they think it's broken)
+      - This is the #1 reason MCP tools fail to get adoption
+    solution:
+      approach: Make IDs optional and auto-generate when missing
+      steps:
+        - Remove ID from required array in schema
+        - Generate temp ID in handler if not provided
+        - Return generated ID in response for future calls
+        - Persist only when user explicitly saves
+      code_before: |
+        inputSchema: {
+          required: ["project_id", "action"],
+          properties: { ... }
+        }
+      code_after: |
+        inputSchema: {
+          required: [],  // Nothing required!
+          properties: {
+            project_id: { description: "Optional - will create new if not provided" }
+          }
+        }
+
+        // In handler:
+        const projectId = args.project_id || await createTempProject();
+    detection:
+      pattern: 'required.*\[.*"(project_id|user_id|session_id)"'
+      file_types: ['*.ts', '*.js']
+
+  - id: silent-success-dead-end
+    summary: Returning { ok: true } leaves users stranded
+    severity: critical
+    context:
+      when:
+        - Tool successfully completes operation
+        - Response contains only status confirmation
+        - No context about what happened or what to do next
+      symptoms:
+        - "It said success but nothing happened"
+        - User asks Claude "what do I do now?"
+        - User doesn't know if it actually worked
+    why:
+      - Vibe coders are learning through usage
+      - No context = no learning = no progress
+      - Every dead end erodes trust in the tool
+    solution:
+      approach: Every success response teaches and guides
+      steps:
+        - Add what_happened field explaining the action
+        - Add next_steps array with 2-3 concrete actions
+        - Include relevant IDs and data for follow-up
+        - Consider why_this_way for educational context
+      code_before: |
+        return { success: true, id: "abc123" };
+      code_after: |
+        return {
+          success: true,
+          id: "abc123",
+          what_happened: "Created your project with Next.js and Supabase",
+          next_steps: [
+            "Run: npm install",
+            "Copy .env.example to .env.local",
+            "Run: npm run dev"
+          ]
+        };
+    detection:
+      pattern: 'return\s*\{\s*(success|ok):\s*true\s*\}'
+      file_types: ['*.ts', '*.js']
+
+  # ============================================================================
+  # HIGH - Will cause significant friction
+  # ============================================================================
+
+  - id: raw-technical-errors
+    summary: Exposing Zod/validation errors kills user confidence
+    severity: high
+    context:
+      when:
+        - Input validation fails
+        - Error is thrown with technical message
+        - No human-readable explanation provided
+      symptoms:
+        - "Zod validation failed: expected string at path 'code'"
+        - "-32602: Invalid params"
+        - User copy-pastes error asking Claude to explain
+    why:
+      - Technical errors make users feel stupid
+      - They don't know what "params" or "Zod" means
+      - Confusion → frustration → abandonment
+    solution:
+      approach: Wrap every technical error with human explanation
+      steps:
+        - Catch validation errors before they propagate
+        - Translate to plain language
+        - Include what_to_do with specific action
+        - Provide example of correct usage
+      code_before: |
+        // Let Zod error propagate
+        const input = schema.parse(args);
+      code_after: |
+        try {
+          const input = schema.parse(args);
+        } catch (e) {
+          return {
+            error: "I need to know what code you want me to check",
+            what_to_do: "Pass the code content and tell me where it lives",
+            example: 'spawner_validate({ code: "...", file_path: "src/app.tsx" })'
+          };
+        }
+    detection:
+      pattern: 'throw.*Error|\.parse\(.*\)(?!.*catch)'
+      file_types: ['*.ts', '*.js']
+
+  - id: crud-naming-confusion
+    summary: Database-style names confuse users about tool purpose
+    severity: high
+    context:
+      when:
+        - Tool named with create/read/update/delete/get/set/fetch
+        - Name describes database operation, not user goal
+        - Multiple tools have similar CRUD names
+      symptoms:
+        - User asks "what's the difference between get and fetch?"
+        - Claude picks wrong tool because names are ambiguous
+        - Users avoid tools they don't understand
+    why:
+      - Users think in goals ("I want to plan") not operations ("create project")
+      - CRUD names require understanding the data model
+      - Vibe coders don't know your data model
+    solution:
+      approach: Name tools by what users accomplish
+      steps:
+        - Identify the user goal behind each tool
+        - Choose verb that describes the outcome
+        - Test by completing "I want to ___"
+        - Avoid technical jargon in names
+      code_before: |
+        spawner_create_project
+        spawner_get_skills
+        spawner_update_memory
+        spawner_fetch_context
+      code_after: |
+        spawner_plan      // "I want to plan my project"
+        spawner_skills    // "I want to see what skills help"
+        spawner_remember  // "I want to remember this decision"
+        spawner_context   // "I want to load my project context"
+    detection:
+      pattern: 'name:\s*["\'].*_(create|get|update|delete|fetch|set)_'
+      file_types: ['*.ts', '*.js', '*.yaml']
+
+  - id: jargon-without-explanation
+    summary: Technical terms block understanding for vibe coders
+    severity: high
+    context:
+      when:
+        - Tool output uses terms like RLS, hydration, SSR, ISR
+        - No plain-language explanation provided
+        - User needs to Google to understand the message
+      symptoms:
+        - "What are RLS policies?"
+        - User stops and asks Claude to explain the term
+        - Context switch breaks their flow
+    why:
+      - Vibe coders started coding last week
+      - Every jargon word is a speed bump
+      - Accumulated jargon = user gives up
+    solution:
+      approach: Plain language first, technical term in parentheses
+      steps:
+        - Identify all technical terms in output
+        - Write plain-language equivalent
+        - Include technical term only if needed for search
+        - Test with non-developer reader
+      code_before: |
+        "Enable RLS policies on your Supabase tables"
+      code_after: |
+        "Add security rules that control who can see what data (called RLS policies in Supabase)"
+    detection:
+      pattern: '\b(RLS|SSR|ISR|hydration|revalidate|RSC)\b(?!\s*\()'
+      file_types: ['*.ts', '*.js']
+
+  # ============================================================================
+  # MEDIUM - Should fix for better UX
+  # ============================================================================
+
+  - id: too-many-required-params
+    summary: Long required params list overwhelms users
+    severity: medium
+    context:
+      when:
+        - Tool schema has 3+ required parameters
+        - Many params have obvious defaults
+        - First-time users must provide everything
+      symptoms:
+        - Claude asks user for multiple values before calling tool
+        - Users abandon before completing the call
+        - "This is too complicated"
+    why:
+      - More required params = more friction
+      - Most params have sensible 80% defaults
+      - Power users can override later
+    solution:
+      approach: Minimal required, smart defaults for rest
+      steps:
+        - Review each required param - is it TRULY required?
+        - Identify the 80% default for each optional param
+        - Move non-essential params to optional with defaults
+        - Document advanced options separately
+      code_before: |
+        required: ["code", "file_path", "check_types", "severity_threshold"]
+      code_after: |
+        required: ["code"],  // Only truly required
+        properties: {
+          code: { ... },
+          file_path: { default: "unknown" },
+          check_types: { default: ["all"] },
+          severity_threshold: { default: "warning" }
+        }
+    detection:
+      pattern: 'required:\s*\[.*,.*,.*,'
+      file_types: ['*.ts', '*.js', '*.yaml']
+
+  - id: missing-next-steps
+    summary: Success without guidance leaves users uncertain
+    severity: medium
+    context:
+      when:
+        - Tool completes successfully
+        - Response doesn't include next_steps
+        - User must figure out what to do next
+      symptoms:
+        - "What do I do now?"
+        - User hesitates before proceeding
+        - Flow is interrupted by uncertainty
+    why:
+      - Vibe coders don't know the typical workflow
+      - Uncertainty creates hesitation
+      - Hesitation breaks momentum
+    solution:
+      approach: Every success suggests 2-3 concrete next actions
+      steps:
+        - Identify 2-3 most common follow-up actions
+        - Write them as specific commands or steps
+        - Order by likelihood (most common first)
+        - Include any required values from current response
+      code_before: |
+        return {
+          success: true,
+          project: { id: "abc", name: "My App" }
+        };
+      code_after: |
+        return {
+          success: true,
+          project: { id: "abc", name: "My App" },
+          next_steps: [
+            "Start building with: spawner_context({ project_id: 'abc' })",
+            "Or add your tech stack: spawner_plan({ project_id: 'abc', stack: ['next', 'supabase'] })"
+          ]
+        };
+    detection:
+      pattern: 'return\s*\{[^}]*success[^}]*\}(?!.*next_steps)'
+      file_types: ['*.ts', '*.js']
+
+  - id: inconsistent-response-shapes
+    summary: Different tools return data in different shapes
+    severity: medium
+    context:
+      when:
+        - One tool returns { data: ... }
+        - Another returns { result: ... }
+        - Another returns { project: ... }
+      symptoms:
+        - Claude has to special-case each tool response
+        - Users can't predict response shape
+        - Harder to build automation on top
+    why:
+      - Inconsistency increases cognitive load
+      - Users must remember each tool's quirks
+      - Harder to compose tools together
+    solution:
+      approach: Standard response envelope for all tools
+      steps:
+        - Define standard success shape
+        - Define standard error shape
+        - Apply to all tools
+        - Document the envelope
+      code_before: |
+        // Tool A
+        return { project: {...} }
+        // Tool B
+        return { data: {...} }
+        // Tool C
+        return { result: {...} }
+      code_after: |
+        // All tools
+        return {
+          success: true,
+          data: { ... },           // The actual payload
+          what_happened: "...",    // Human explanation
+          next_steps: [...]        // Guidance
+        }
+    detection:
+      pattern: 'return\s*\{\s*(project|result|data|output):'
+      file_types: ['*.ts', '*.js']
+
+# ============================================================================
+# CONFIG
+# ============================================================================
+config:
+  always_check:
+    - first-call-id-requirement
+    - silent-success-dead-end
+  exclude_paths:
+    - '**/node_modules/**'
+    - '**/*.test.*'
+    - '**/*.spec.*'
