@@ -80,15 +80,21 @@ Types: regex patterns, AST checks (ts-morph), file existence checks.
 D1 stores: project manifest, decisions, session summaries, known issues.
 KV caches: hot session data, active project context.
 
-## MCP Tools
+## MCP Tools (9 total)
 
 | Tool | Purpose |
 |------|---------|
+| `spawner_plan` | Plan and create projects (discover → recommend → create) |
+| `spawner_analyze` | Analyze existing codebase for stack/skill recommendations |
 | `spawner_context` | Load project + skills for session |
 | `spawner_validate` | Run checks on code |
 | `spawner_remember` | Save decisions/progress |
 | `spawner_sharp_edge` | Query relevant gotchas |
 | `spawner_unstick` | Analyze stuck state, offer alternatives |
+| `spawner_templates` | List available project templates |
+| `spawner_skills` | Search and retrieve skills |
+
+**Production endpoint:** https://mcp.vibeship.co/mcp
 
 ## Environment Variables
 
