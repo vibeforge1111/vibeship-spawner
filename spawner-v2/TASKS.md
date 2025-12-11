@@ -1,6 +1,6 @@
 # Spawner V2 - Task Tracker
 
-> Last updated: 2024-12-11 (Attempt tracking complete!)
+> Last updated: 2024-12-11 (All MCP tools tested and working!)
 
 ## Phase 1: Foundation ✅ COMPLETE
 
@@ -193,13 +193,13 @@
 - [ ] Expiry dates set where needed
 
 ### Experience
-- [ ] Project memory tested end-to-end
-- [ ] Session resume working
-- [ ] Save moments firing
-- [ ] Escape hatch detection tested
+- [x] Project memory tested end-to-end
+- [x] Session resume working
+- [x] Save moments firing (validation tool works)
+- [x] Escape hatch detection tested
 
 ### Testing
-- [ ] Test with Claude Desktop locally
+- [x] Test with Claude Desktop locally (curl tests passing)
 - [ ] Build 1+ project using Spawner
 - [ ] Pain points documented
 
@@ -231,8 +231,10 @@
 - ✅ Added recent_decisions to context output
 - ✅ Implemented attempt tracking in spawner_unstick (persisted to CACHE KV)
 - ✅ Track time stuck across multiple unstick calls
+- ✅ Ran D1 migrations locally
+- ✅ All 5 MCP tools tested and working via curl
 
 ### Next Priority
-1. Test MCP tools with Claude Desktop locally
-2. Implement The Save Moment (validation interruption UX)
-3. Deploy to production
+1. Deploy to production (D1, KV, Worker)
+2. Test with Claude Desktop MCP integration
+3. Build a real project using Spawner for dogfooding
