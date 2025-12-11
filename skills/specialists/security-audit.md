@@ -1,85 +1,161 @@
+---
+name: security-audit
+description: Use when reviewing code for security vulnerabilities - enforces OWASP Top 10 compliance, proper input validation, secrets management, and RLS verification
+tags: [security, owasp, validation, rls, secrets, audit]
+---
+
 # Security Audit Specialist
 
-## Identity
+## Overview
 
-- **Tags**: `security`, `owasp`, `validation`, `rls`, `secrets`, `audit`
-- **Domain**: OWASP top 10, input validation, authentication, authorization, secrets management
-- **Use when**: Security reviews, before deployment, handling sensitive data, auth implementation
+Security vulnerabilities compound. One SQL injection, one exposed secret, one missing RLS policy can compromise your entire application and user data. Security is not a feature you add later.
 
----
+**Core principle:** Assume all input is malicious. Verify authorization server-side. Never expose secrets to clients.
+
+## The Iron Law
+
+```
+NO USER INPUT PROCESSED WITHOUT VALIDATION AND SANITIZATION
+```
+
+Every piece of user input - form fields, URL params, headers, file uploads - must be validated and sanitized before use. Trust nothing from the client.
+
+## When to Use
+
+**Always:**
+- Before deploying any feature
+- When handling user authentication
+- When processing user input
+- When accessing database with user-provided data
+- When integrating third-party services
+
+**Don't:**
+- Internal-only tools with no user input (but still consider it)
+- Static sites with no backend
+- Read-only public data displays
+
+Thinking "it's just an internal tool"? Stop. Internal tools get exposed. Bake security in from day one.
+
+## The Process
+
+### Step 1: Input Validation Audit
+
+Every endpoint must validate all inputs:
+
+```typescript
+import { z } from 'zod';
+
+const inputSchema = z.object({
+  email: z.string().email().max(254),
+  name: z.string().min(1).max(100).trim(),
+  url: z.string().url().refine(u => ['http:', 'https:'].includes(new URL(u).protocol)),
+});
+
+// In handler
+const validated = inputSchema.safeParse(input);
+if (!validated.success) {
+  return { error: 'Invalid input' };
+}
+```
+
+### Step 2: Authorization Check Audit
+
+Every protected resource verified server-side:
+
+```typescript
+export default async function ProtectedPage({ params }) {
+  const user = await requireAuth();
+  const resource = await getResource(params.id);
+
+  if (resource.user_id !== user.id) {
+    redirect('/unauthorized');
+  }
+
+  return <Resource data={resource} />;
+}
+```
+
+### Step 3: RLS Policy Audit
+
+Every table must have RLS enabled with appropriate policies.
 
 ## Patterns
 
 ### OWASP Top 10 Checklist
 
-```
-1. Broken Access Control
-   ☐ RLS enabled on all tables
-   ☐ Authorization checked server-side
-   ☐ No direct object reference vulnerabilities
-   ☐ Rate limiting on sensitive endpoints
-
-2. Cryptographic Failures
-   ☐ HTTPS everywhere
-   ☐ Sensitive data encrypted at rest
-   ☐ No secrets in code/logs
-   ☐ Strong password hashing (bcrypt/argon2)
-
-3. Injection
-   ☐ Parameterized queries (Supabase handles this)
-   ☐ Input validation on all user data
-   ☐ Output encoding
-
-4. Insecure Design
-   ☐ Threat modeling done
-   ☐ Defense in depth
-   ☐ Fail securely
-
-5. Security Misconfiguration
-   ☐ Security headers set
-   ☐ No default credentials
-   ☐ Error messages don't leak info
-   ☐ Unnecessary features disabled
-
-6. Vulnerable Components
-   ☐ Dependencies up to date
-   ☐ No known vulnerabilities (npm audit)
-   ☐ Minimal dependencies
-
-7. Authentication Failures
-   ☐ Strong password requirements
-   ☐ Account lockout after failures
-   ☐ Session management secure
-   ☐ MFA available
-
-8. Software/Data Integrity
-   ☐ Webhook signatures verified
-   ☐ Dependencies from trusted sources
-   ☐ CI/CD pipeline secured
-
-9. Logging/Monitoring Failures
-   ☐ Security events logged
-   ☐ Logs don't contain sensitive data
-   ☐ Alerting configured
-
-10. Server-Side Request Forgery
-    ☐ URL validation on user-supplied URLs
-    ☐ Allowlist for external requests
-```
-
-### Input Validation
-
+<Good>
 ```typescript
-// Always validate on SERVER, display errors on client
+// 1. Broken Access Control - Server-side auth
+export default async function DashboardPage() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect('/login');
+  // ...
+}
 
+// 2. Cryptographic Failures - Secrets in env
+const apiKey = process.env.API_SECRET_KEY; // Never NEXT_PUBLIC_
+
+// 3. Injection - Parameterized queries
+await supabase.from('users').select().eq('id', userId); // Safe
+
+// 4. Insecure Design - Defense in depth
+// RLS + server auth + input validation
+
+// 5. Security Misconfiguration - Headers set
+// next.config.js with security headers
+
+// 6. Vulnerable Components - Regular audits
+// npm audit --production
+
+// 7. Auth Failures - Proper session handling
+await supabase.auth.getUser(); // Not getSession()
+
+// 8. Data Integrity - Webhook signature verification
+stripe.webhooks.constructEvent(body, sig, secret);
+
+// 9. Logging Failures - Sanitized logs
+console.log('User action:', { userId, action }); // Not passwords
+
+// 10. SSRF - URL allowlists
+const ALLOWED_HOSTS = ['api.example.com'];
+if (!ALLOWED_HOSTS.includes(new URL(url).host)) throw new Error('Invalid URL');
+```
+Systematic security at every layer. No single point of failure.
+</Good>
+
+<Bad>
+```typescript
+// Client-side auth check
+if (!user) return <Redirect />; // Bypassable!
+
+// Secret in client code
+const key = process.env.NEXT_PUBLIC_SECRET; // Exposed!
+
+// String concatenation in query
+db.query(`SELECT * FROM users WHERE id = '${userId}'`); // SQL injection!
+
+// No webhook verification
+const event = await request.json(); // Fake events accepted!
+
+// Logging sensitive data
+console.log('Login attempt:', { email, password }); // Password in logs!
+```
+Every line is a security vulnerability waiting to be exploited.
+</Bad>
+
+### Input Validation Schema Library
+
+<Good>
+```typescript
 // lib/validation.ts
 import { z } from 'zod';
 
-// Sanitize strings
-export const safeString = z.string()
+// Safe string - trimmed, limited length, XSS prevention
+export const safeString = (max = 1000) => z.string()
   .trim()
-  .max(10000) // Reasonable limit
-  .transform((str) => str.replace(/[<>]/g, '')); // Basic XSS prevention
+  .max(max)
+  .transform(s => s.replace(/[<>]/g, ''));
 
 // Email validation
 export const emailSchema = z.string()
@@ -87,442 +163,264 @@ export const emailSchema = z.string()
   .toLowerCase()
   .max(254);
 
-// Password requirements
+// Strong password
 export const passwordSchema = z.string()
-  .min(8, 'Password must be at least 8 characters')
+  .min(8, 'At least 8 characters')
   .max(128)
-  .regex(/[a-z]/, 'Must contain lowercase letter')
-  .regex(/[A-Z]/, 'Must contain uppercase letter')
-  .regex(/[0-9]/, 'Must contain number');
+  .regex(/[a-z]/, 'Need lowercase')
+  .regex(/[A-Z]/, 'Need uppercase')
+  .regex(/[0-9]/, 'Need number');
 
-// URL validation
+// Safe URL
 export const urlSchema = z.string()
   .url()
-  .refine((url) => {
-    const parsed = new URL(url);
-    return ['http:', 'https:'].includes(parsed.protocol);
-  }, 'Must be HTTP or HTTPS');
+  .refine(url => {
+    const { protocol, host } = new URL(url);
+    return ['http:', 'https:'].includes(protocol) && !host.includes('localhost');
+  }, 'Must be valid HTTP(S) URL');
 
-// File validation
-export const fileSchema = z.object({
-  name: z.string().max(255),
-  type: z.enum(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']),
-  size: z.number().max(5 * 1024 * 1024), // 5MB
+// UUID validation
+export const uuidSchema = z.string().uuid();
+
+// Usage
+const CreateUserSchema = z.object({
+  email: emailSchema,
+  password: passwordSchema,
+  name: safeString(100),
 });
 ```
+Reusable, consistent validation across the entire application.
+</Good>
 
-### Authorization Patterns
-
+<Bad>
 ```typescript
-// lib/auth.ts
-import { createClient } from '@/lib/supabase/server';
-import { redirect } from 'next/navigation';
+// Trust user input directly
+const { email, password, name } = await request.json();
+await db.users.create({ email, password, name }); // No validation!
 
-// Get authenticated user
-export async function getUser() {
-  const supabase = await createClient();
-  const { data: { user }, error } = await supabase.auth.getUser();
+// Weak validation
+if (email.includes('@')) { /* good enough? */ } // Not good enough!
 
-  if (error || !user) {
-    return null;
-  }
-
-  return user;
-}
-
-// Require authentication
-export async function requireAuth() {
-  const user = await getUser();
-  if (!user) {
-    redirect('/login');
-  }
-  return user;
-}
-
-// Require specific role
-export async function requireRole(role: 'admin' | 'member') {
-  const user = await requireAuth();
-  const supabase = await createClient();
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .single();
-
-  if (profile?.role !== role && profile?.role !== 'admin') {
-    redirect('/unauthorized');
-  }
-
-  return user;
-}
-
-// Check resource ownership
-export async function requireOwnership(resourceTable: string, resourceId: string) {
-  const user = await requireAuth();
-  const supabase = await createClient();
-
-  const { data: resource } = await supabase
-    .from(resourceTable)
-    .select('user_id')
-    .eq('id', resourceId)
-    .single();
-
-  if (!resource || resource.user_id !== user.id) {
-    redirect('/unauthorized');
-  }
-
-  return user;
-}
+// No length limits
+const bio = formData.get('bio'); // Could be 10GB of text!
 ```
+No validation means attackers control your data.
+</Bad>
 
-### RLS Policy Patterns
+### RLS Policy Verification
 
+<Good>
 ```sql
--- Authenticated users only
-CREATE POLICY "Authenticated users can read"
-ON public.posts FOR SELECT
-TO authenticated
-USING (true);
+-- Verify RLS is enabled
+SELECT tablename, rowsecurity
+FROM pg_tables
+WHERE schemaname = 'public';
+-- All should show rowsecurity = true
 
--- Owner only
-CREATE POLICY "Users can update own posts"
-ON public.posts FOR UPDATE
-USING (auth.uid() = user_id);
+-- User owns their data
+CREATE POLICY "Users own their data"
+ON public.todos
+FOR ALL
+USING (auth.uid() = user_id)
+WITH CHECK (auth.uid() = user_id);
 
--- Role-based
-CREATE POLICY "Admins can delete any post"
-ON public.posts FOR DELETE
-USING (
-  EXISTS (
-    SELECT 1 FROM profiles
-    WHERE id = auth.uid()
-    AND role = 'admin'
-  )
-);
-
--- Team-based
-CREATE POLICY "Team members can view team posts"
-ON public.posts FOR SELECT
+-- Team-based access
+CREATE POLICY "Team members can access"
+ON public.projects
+FOR SELECT
 USING (
   team_id IN (
     SELECT team_id FROM team_members
     WHERE user_id = auth.uid()
   )
 );
+
+-- Admin override
+CREATE POLICY "Admins can do anything"
+ON public.posts
+FOR ALL
+USING (
+  EXISTS (
+    SELECT 1 FROM profiles
+    WHERE id = auth.uid() AND role = 'admin'
+  )
+);
 ```
+Explicit policies for every operation. No gaps.
+</Good>
 
-### Security Headers
+<Bad>
+```sql
+-- RLS disabled!
+ALTER TABLE todos DISABLE ROW LEVEL SECURITY;
 
+-- Overly permissive
+CREATE POLICY "Anyone can do anything"
+ON public.todos
+FOR ALL
+USING (true); -- Everyone sees everything!
+
+-- Missing WITH CHECK
+CREATE POLICY "Select only"
+ON public.todos
+FOR SELECT
+USING (auth.uid() = user_id);
+-- No INSERT/UPDATE/DELETE policies = blocked or open?
+```
+Missing or weak RLS policies = data breach waiting to happen.
+</Bad>
+
+### Security Headers Configuration
+
+<Good>
 ```typescript
 // next.config.js
 const securityHeaders = [
-  {
-    key: 'X-DNS-Prefetch-Control',
-    value: 'on'
-  },
-  {
-    key: 'Strict-Transport-Security',
-    value: 'max-age=63072000; includeSubDomains; preload'
-  },
-  {
-    key: 'X-Frame-Options',
-    value: 'SAMEORIGIN'
-  },
-  {
-    key: 'X-Content-Type-Options',
-    value: 'nosniff'
-  },
-  {
-    key: 'Referrer-Policy',
-    value: 'origin-when-cross-origin'
-  },
-  {
-    key: 'Permissions-Policy',
-    value: 'camera=(), microphone=(), geolocation=()'
-  },
+  { key: 'X-DNS-Prefetch-Control', value: 'on' },
+  { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
+  { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+  { key: 'X-Content-Type-Options', value: 'nosniff' },
+  { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+  { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+  { key: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self' 'unsafe-inline'" },
 ];
 
 module.exports = {
   async headers() {
-    return [
-      {
-        source: '/:path*',
-        headers: securityHeaders,
-      },
-    ];
+    return [{ source: '/:path*', headers: securityHeaders }];
   },
 };
 ```
+Defense in depth. Browser enforces security policies.
+</Good>
 
-### Secrets Management
-
-```bash
-# .env.local - NEVER commit
-SUPABASE_SERVICE_ROLE_KEY=your-key
-STRIPE_SECRET_KEY=sk_live_xxx
-OPENAI_API_KEY=sk-xxx
-
-# .env.example - Commit this template
-SUPABASE_SERVICE_ROLE_KEY=
-STRIPE_SECRET_KEY=
-OPENAI_API_KEY=
-
-# .gitignore
-.env
-.env.local
-.env.*.local
-```
-
+<Bad>
 ```typescript
-// Access secrets only in server code
-// lib/secrets.ts
-export function getSecret(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
-  return value;
-}
+// No security headers at all
+module.exports = {};
 
-// Never expose to client
-// BAD: process.env.STRIPE_SECRET_KEY in client component
-// GOOD: Use in API routes only
+// Or disabled for "convenience"
+// "CSP breaks my inline scripts" -> Fix the scripts, don't disable security
 ```
+Missing headers means browsers can't help protect users.
+</Bad>
 
-### Rate Limiting
+## Anti-Patterns
 
-```typescript
-// middleware.ts
-import { Ratelimit } from '@upstash/ratelimit';
-import { Redis } from '@upstash/redis';
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
+| Anti-Pattern | Why It Fails | What To Do Instead |
+|--------------|--------------|-------------------|
+| Client-side only validation | Bypassed with dev tools | Server validates everything |
+| `getSession()` for auth | Can be spoofed | Use `getUser()` always |
+| Secrets in NEXT_PUBLIC_ | Exposed to browser | Keep in server-only env |
+| String concatenation in SQL | SQL injection | Use parameterized queries |
+| Generic error messages internally | Can't debug | Log details server-side, generic to client |
 
-const ratelimit = new Ratelimit({
-  redis: Redis.fromEnv(),
-  limiter: Ratelimit.slidingWindow(10, '10 s'),
-});
+## Red Flags - STOP
 
-export async function middleware(request: NextRequest) {
-  // Rate limit API routes
-  if (request.nextUrl.pathname.startsWith('/api')) {
-    const ip = request.headers.get('x-forwarded-for') ?? '127.0.0.1';
-    const { success, limit, reset, remaining } = await ratelimit.limit(ip);
+If you catch yourself:
+- Using string concatenation anywhere near a database query
+- Checking auth only on the client side
+- Putting secrets in environment variables starting with NEXT_PUBLIC_
+- Skipping RLS "because the API handles it"
+- Logging user passwords, tokens, or API keys
+- Trusting the `origin` or `referer` header
 
-    if (!success) {
-      return NextResponse.json(
-        { error: 'Too many requests' },
-        {
-          status: 429,
-          headers: {
-            'X-RateLimit-Limit': limit.toString(),
-            'X-RateLimit-Remaining': remaining.toString(),
-            'X-RateLimit-Reset': reset.toString(),
-          },
-        }
-      );
-    }
-  }
+**ALL of these mean: STOP. You have a security vulnerability. Fix it before shipping.**
 
-  return NextResponse.next();
-}
-```
+## Common Rationalizations
 
-### Webhook Security
-
-```typescript
-// app/api/webhooks/stripe/route.ts
-import { stripe } from '@/lib/stripe';
-import { headers } from 'next/headers';
-
-export async function POST(request: Request) {
-  const body = await request.text();
-  const headersList = await headers();
-  const signature = headersList.get('stripe-signature');
-
-  if (!signature) {
-    return new Response('Missing signature', { status: 400 });
-  }
-
-  try {
-    // Verify webhook signature
-    const event = stripe.webhooks.constructEvent(
-      body,
-      signature,
-      process.env.STRIPE_WEBHOOK_SECRET!
-    );
-
-    // Process verified event
-    // ...
-
-  } catch (err) {
-    console.error('Webhook signature verification failed');
-    return new Response('Invalid signature', { status: 400 });
-  }
-}
-```
-
-### Logging Without Secrets
-
-```typescript
-// lib/logger.ts
-const SENSITIVE_KEYS = [
-  'password',
-  'token',
-  'secret',
-  'key',
-  'authorization',
-  'cookie',
-  'credit_card',
-  'ssn',
-];
-
-function sanitize(obj: unknown): unknown {
-  if (typeof obj !== 'object' || obj === null) {
-    return obj;
-  }
-
-  const sanitized: Record<string, unknown> = {};
-
-  for (const [key, value] of Object.entries(obj)) {
-    const lowerKey = key.toLowerCase();
-    if (SENSITIVE_KEYS.some(k => lowerKey.includes(k))) {
-      sanitized[key] = '[REDACTED]';
-    } else if (typeof value === 'object') {
-      sanitized[key] = sanitize(value);
-    } else {
-      sanitized[key] = value;
-    }
-  }
-
-  return sanitized;
-}
-
-export function log(message: string, data?: unknown) {
-  console.log(message, data ? sanitize(data) : '');
-}
-```
-
----
-
-## Anti-patterns
-
-### Client-Side Authorization
-
-```typescript
-// BAD - Authorization on client
-'use client';
-if (user.role === 'admin') {
-  // Show admin panel - easily bypassed!
-}
-
-// GOOD - Server-side check
-export default async function AdminPage() {
-  await requireRole('admin');
-  return <AdminPanel />;
-}
-```
-
-### Trusting Client Data
-
-```typescript
-// BAD - Trust user input
-const { userId, amount } = await request.json();
-await transferFunds(userId, amount);
-
-// GOOD - Use authenticated user
-const user = await getUser();
-const { amount } = await request.json();
-await transferFunds(user.id, amount);
-```
-
-### Secrets in Client Code
-
-```typescript
-// BAD - Secret exposed
-'use client';
-const response = await fetch('https://api.openai.com/v1/...', {
-  headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } // Visible!
-});
-
-// GOOD - Call your API
-const response = await fetch('/api/ai', { body: prompt });
-```
-
----
+| Excuse | Reality |
+|--------|---------|
+| "It's behind authentication" | Auth can be bypassed. Add RLS anyway. |
+| "No one knows this endpoint" | Attackers scan everything. Secure it. |
+| "We'll add security later" | You won't. And you'll ship vulnerabilities. |
+| "It's just for internal use" | Internal tools get exposed. Secure them. |
+| "The framework handles it" | Frameworks have defaults. Verify they're secure. |
+| "We've never had an incident" | You haven't detected one. Different thing. |
 
 ## Gotchas
 
-### 1. NEXT_PUBLIC_ Variables Are Public
+### getSession() vs getUser()
 
-Any variable prefixed with `NEXT_PUBLIC_` is exposed to the browser.
+`getSession()` reads from cookies and can be tampered. Always use `getUser()`:
 
-### 2. getSession() vs getUser()
-
-`getSession()` reads from storage and can be tampered. Always use `getUser()` for authorization.
-
-### 3. RLS Off By Default
-
-New Supabase tables have RLS disabled. Always enable it.
-
-### 4. SQL Injection in Raw Queries
-
-Supabase client is safe, but raw SQL needs parameterization:
 ```typescript
-// BAD
-supabase.rpc('my_function', { query: userInput })
+// BAD - session can be forged
+const { data: { session } } = await supabase.auth.getSession();
 
-// GOOD - use parameterized queries
-supabase.from('table').select().eq('id', userInput)
+// GOOD - server validates the token
+const { data: { user } } = await supabase.auth.getUser();
 ```
 
+### NEXT_PUBLIC_ Means Public
+
+Any env var with NEXT_PUBLIC_ prefix is sent to the browser:
+
+```bash
+# Secret - server only
+STRIPE_SECRET_KEY=sk_live_xxx
+
+# Public - visible to everyone
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_xxx
+```
+
+### RLS is Off by Default
+
+New Supabase tables have RLS disabled. First thing after creating a table:
+
+```sql
+ALTER TABLE new_table ENABLE ROW LEVEL SECURITY;
+-- Then add policies!
+```
+
+### Error Messages Leak Information
+
+```typescript
+// BAD - reveals internal state
+return { error: error.message }; // "relation 'users' does not exist"
+
+// GOOD - generic external, detailed internal
+console.error('DB error:', error);
+return { error: 'Something went wrong' };
+```
+
+## Verification Checklist
+
+Before marking security audit complete:
+
+- [ ] RLS enabled on ALL tables (check with SQL query)
+- [ ] All inputs validated with Zod on server
+- [ ] `getUser()` used everywhere (not `getSession()`)
+- [ ] No secrets in NEXT_PUBLIC_ variables
+- [ ] Security headers configured in next.config.js
+- [ ] Webhook signatures verified before processing
+- [ ] `npm audit` shows no critical/high vulnerabilities
+- [ ] Error messages don't leak internal details
+- [ ] Rate limiting on authentication endpoints
+- [ ] File uploads validate type AND size server-side
+
+Can't check all boxes? You have security gaps. Fix them before deployment.
+
+## Integration
+
+**Pairs well with:**
+- `nextjs-supabase-auth` - Auth implementation
+- `supabase-backend` - RLS configuration
+- `api-design` - Secure endpoint patterns
+- `file-upload` - Secure file handling
+
+**Requires:**
+- Zod for validation
+- Supabase with RLS configured
+- Security headers in next.config.js
+
+## References
+
+- [OWASP Top 10](https://owasp.org/www-project-top-ten/)
+- [Supabase RLS Guide](https://supabase.com/docs/guides/auth/row-level-security)
+- [Next.js Security Headers](https://nextjs.org/docs/advanced-features/security-headers)
+- [OWASP Cheat Sheets](https://cheatsheetseries.owasp.org/)
+
 ---
 
-## Checkpoints
-
-Before marking security complete:
-
-- [ ] RLS enabled on all tables with appropriate policies
-- [ ] All inputs validated server-side
-- [ ] Authentication required on protected routes
-- [ ] Authorization checked for resource access
-- [ ] No secrets in client code
-- [ ] Security headers configured
-- [ ] Rate limiting on sensitive endpoints
-- [ ] Webhook signatures verified
-- [ ] `npm audit` shows no critical vulnerabilities
-- [ ] Error messages don't leak sensitive info
-
----
-
-## Escape Hatches
-
-### When RLS is too complex
-- Start with simple owner-based policies
-- Add complexity incrementally
-- Use service role key for admin operations (carefully)
-
-### When performance is critical
-- Cache authorization decisions
-- Use database roles for read-heavy operations
-- Consider moving checks to database level
-
-### When you need to debug production
-- Use structured logging
-- Never log raw user data
-- Use request IDs for tracing
-
----
-
-## Squad Dependencies
-
-Often paired with:
-- `nextjs-supabase-auth` for auth implementation
-- `supabase-backend` for RLS
-- `api-design` for secure endpoints
-- `payments-flow` for payment security
-
----
-
-*Last updated: 2025-12-11*
+*This specialist follows the world-class skill pattern.*

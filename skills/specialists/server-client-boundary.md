@@ -1,114 +1,193 @@
+---
+name: server-client-boundary
+description: Use when deciding between Server and Client Components - enforces minimal "use client" usage, proper data flow, and composition patterns to avoid hydration errors
+tags: [rsc, hydration, server-components, client-components, nextjs]
+---
+
 # Server/Client Boundary Specialist
 
-## Identity
+## Overview
 
-- **Tags**: `rsc`, `hydration`, `server-components`, `client-components`, `nextjs`
-- **Domain**: RSC boundaries, hydration, data flow between server/client, "use client" decisions
-- **Use when**: Hydration errors, client/server confusion, data passing issues, performance optimization
+Server Components are the default in Next.js App Router. They run on the server, have zero JavaScript bundle impact, and can directly access databases. Client Components are for interactivity. Most components should be Server Components.
 
----
+**Core principle:** Start with Server Components. Add "use client" only where you need interactivity. Push client boundaries as low as possible in the tree.
+
+## The Iron Law
+
+```
+NO "USE CLIENT" WITHOUT GENUINE BROWSER INTERACTIVITY REQUIREMENT
+```
+
+"use client" is a one-way door. Everything imported into a client component becomes client-side code. Adding it "just in case" bloats your bundle and defeats the purpose of Server Components.
+
+## When to Use
+
+**Needs "use client":**
+- useState, useEffect, useRef
+- onClick, onChange, onSubmit handlers
+- Browser APIs (window, document, localStorage)
+- Context providers
+
+**Keep as Server Component:**
+- Data fetching
+- Database queries
+- Environment variables (non-NEXT_PUBLIC_)
+- Heavy dependencies that don't need interactivity
+- Static content
+
+Thinking "I'll just add use client to be safe"? Stop. That's bundle bloat. Only add it when you have a genuine need.
+
+## The Process
+
+### Step 1: Start with Server Component
+
+Every component is a Server Component by default. Don't add "use client" until you hit a wall.
+
+### Step 2: Identify the Interactive Part
+
+When you need interactivity, ask: does the WHOLE component need it, or just a small part?
+
+### Step 3: Extract the Client Boundary
+
+Move only the interactive part to a Client Component. Keep data fetching and static content in Server Components.
 
 ## Patterns
 
-### The Boundary Mental Model
+### Minimal Client Boundaries
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                         SERVER                              │
-│  - Direct database access                                   │
-│  - Environment variables (all)                              │
-│  - No hooks, no events, no browser APIs                     │
-│  - Can await async data                                     │
-│  - Renders to HTML string                                   │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              │ Serializable props only
-                              │ (JSON-compatible)
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                         CLIENT                              │
-│  - useState, useEffect, useRef                              │
-│  - onClick, onChange, onSubmit                              │
-│  - window, document, localStorage                           │
-│  - NEXT_PUBLIC_ env vars only                               │
-│  - Hydrates from server HTML                                │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Props Crossing the Boundary
-
-Only JSON-serializable data can cross:
-
+<Good>
 ```tsx
-// SERVER
-async function ProductPage() {
-  const product = await db.products.findUnique({ id: 1 });
-
-  // GOOD - Serializable
-  return <ProductActions product={product} />;
-
-  // BAD - Functions can't serialize
-  return <ProductActions onSave={async () => db.save()} />;
-}
-
-// CLIENT
-"use client";
-function ProductActions({ product }: { product: Product }) {
-  // Has the serialized product data
-}
-```
-
-### Composition Pattern: Server in Client Slots
-
-```tsx
-// SERVER - Parent component
-async function Dashboard() {
-  const user = await getUser();
+// page.tsx (Server Component - fetches data)
+export default async function ProductsPage() {
+  const products = await db.products.findMany();
 
   return (
-    <DashboardShell
-      // Pass server content as props
-      sidebar={<ServerSidebar user={user} />}
-      header={<ServerHeader user={user} />}
-    >
-      <DashboardContent />
-    </DashboardShell>
+    <div>
+      <h1>Products</h1>
+      {products.map((product) => (
+        <ProductCard key={product.id} product={product}>
+          <AddToCartButton productId={product.id} />
+        </ProductCard>
+      ))}
+    </div>
   );
 }
 
-// CLIENT - Shell component
-"use client";
-function DashboardShell({
-  sidebar,
-  header,
-  children,
-}: {
-  sidebar: React.ReactNode;
-  header: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+// ProductCard.tsx (Server Component - just displays data)
+function ProductCard({ product, children }) {
+  return (
+    <div>
+      <h2>{product.name}</h2>
+      <p>{product.description}</p>
+      {children}
+    </div>
+  );
+}
+
+// AddToCartButton.tsx (Client Component - needs onClick)
+'use client';
+
+export function AddToCartButton({ productId }: { productId: string }) {
+  const [loading, setLoading] = useState(false);
+
+  async function handleClick() {
+    setLoading(true);
+    await addToCart(productId);
+    setLoading(false);
+  }
 
   return (
-    <div className="flex">
-      {sidebarOpen && <aside>{sidebar}</aside>}
-      <main>
-        {header}
-        {children}
-      </main>
+    <button onClick={handleClick} disabled={loading}>
+      {loading ? 'Adding...' : 'Add to cart'}
+    </button>
+  );
+}
+```
+Only the button is a Client Component. Data fetching and display stay on server.
+</Good>
+
+<Bad>
+```tsx
+// BAD - Entire page becomes client
+'use client';
+
+export default function ProductsPage() {
+  const [products, setProducts] = useState([]);
+
+  useEffect(() => {
+    fetch('/api/products').then(r => r.json()).then(setProducts);
+  }, []);
+
+  return (
+    <div>
+      {products.map((product) => (
+        <div key={product.id}>
+          <h2>{product.name}</h2>
+          <button onClick={() => addToCart(product.id)}>Add to cart</button>
+        </div>
+      ))}
     </div>
   );
 }
 ```
+Entire page is client-side. No SSR, loading flash, larger bundle.
+</Bad>
+
+### Composition: Server Children in Client Parent
+
+<Good>
+```tsx
+// page.tsx (Server)
+export default async function Dashboard() {
+  const user = await getUser();
+  const stats = await getStats();
+
+  return (
+    <DashboardShell>
+      <ServerStats stats={stats} />
+      <ServerUserInfo user={user} />
+    </DashboardShell>
+  );
+}
+
+// DashboardShell.tsx (Client - manages sidebar state)
+'use client';
+
+export function DashboardShell({ children }: { children: React.ReactNode }) {
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  return (
+    <div className="flex">
+      <button onClick={() => setSidebarOpen(!sidebarOpen)}>Toggle</button>
+      {sidebarOpen && <Sidebar />}
+      <main>{children}</main>
+    </div>
+  );
+}
+```
+Children passed to Client Component can still be Server Components!
+</Good>
+
+<Bad>
+```tsx
+// BAD - Prop drilling server data through client components
+<ClientA user={user}>
+  <ClientB user={user}>
+    <ClientC user={user} />
+  </ClientB>
+</ClientA>
+```
+Passing server data through many client layers. Use composition instead.
+</Bad>
 
 ### Server Actions for Mutations
 
+<Good>
 ```tsx
 // actions.ts
-"use server";
+'use server';
 
 import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
 
 export async function createPost(formData: FormData) {
   const title = formData.get('title') as string;
@@ -116,67 +195,62 @@ export async function createPost(formData: FormData) {
   await db.posts.create({ data: { title } });
 
   revalidatePath('/posts');
-  redirect('/posts');
 }
 
-// CLIENT - Using the action
-"use client";
+// Client Component using the action
+'use client';
+
 import { createPost } from './actions';
 
-function CreatePostForm() {
+export function CreatePostForm() {
   return (
     <form action={createPost}>
-      <input name="title" />
-      <button type="submit">Create</button>
+      <input name="title" required />
+      <button type="submit">Create post</button>
     </form>
   );
 }
 ```
+Server Action handles mutation. Form works without JavaScript.
+</Good>
 
-### Optimistic Updates with useOptimistic
-
+<Bad>
 ```tsx
-"use client";
-import { useOptimistic } from 'react';
+// BAD - API route for simple mutation
+// app/api/posts/route.ts
+export async function POST(request: Request) {
+  const { title } = await request.json();
+  await db.posts.create({ data: { title } });
+  return Response.json({ success: true });
+}
 
-function TodoList({ todos, addTodo }) {
-  const [optimisticTodos, addOptimisticTodo] = useOptimistic(
-    todos,
-    (state, newTodo) => [...state, { ...newTodo, pending: true }]
-  );
+// Client component with fetch
+'use client';
 
-  async function handleSubmit(formData: FormData) {
-    const title = formData.get('title') as string;
-    addOptimisticTodo({ id: Date.now(), title });
-    await addTodo(formData);
-  }
-
-  return (
-    <form action={handleSubmit}>
-      <input name="title" />
-      <button type="submit">Add</button>
-      <ul>
-        {optimisticTodos.map(todo => (
-          <li key={todo.id} style={{ opacity: todo.pending ? 0.5 : 1 }}>
-            {todo.title}
-          </li>
-        ))}
-      </ul>
-    </form>
-  );
+async function handleSubmit(e) {
+  e.preventDefault();
+  await fetch('/api/posts', {
+    method: 'POST',
+    body: JSON.stringify({ title }),
+  });
 }
 ```
+API route is unnecessary. Server Actions are simpler and more type-safe.
+</Bad>
 
-### Context Providers at the Boundary
+### Context Providers at Root
 
+<Good>
 ```tsx
 // providers.tsx
-"use client";
+'use client';
 
 import { ThemeProvider } from 'next-themes';
 import { QueryClientProvider } from '@tanstack/react-query';
 
 export function Providers({ children }: { children: React.ReactNode }) {
+  const [queryClient] = useState(() => new QueryClient());
+
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
@@ -186,217 +260,186 @@ export function Providers({ children }: { children: React.ReactNode }) {
   );
 }
 
-// app/layout.tsx (SERVER)
+// app/layout.tsx (Server Component)
+import { Providers } from './providers';
+
 export default function RootLayout({ children }) {
   return (
     <html>
       <body>
-        <Providers>
-          {children}
-        </Providers>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );
 }
 ```
+Providers are client, but children can still be Server Components.
+</Good>
 
----
-
-## Anti-patterns
-
-### Wrapping Everything in "use client"
-
+<Bad>
 ```tsx
-// BAD - Entire page becomes client
-"use client";
+// BAD - Making layout a client component
+'use client';
 
-export default function ProductsPage() {
-  const [products, setProducts] = useState([]);
-  useEffect(() => {
-    fetch('/api/products').then(r => r.json()).then(setProducts);
-  }, []);
-  // ...
-}
-
-// GOOD - Server page, client interactions
-// page.tsx (SERVER)
-export default async function ProductsPage() {
-  const products = await db.products.findMany();
-  return <ProductList products={products} />;
-}
-
-// ProductList.tsx (CLIENT - only the interactive part)
-"use client";
-export function ProductList({ products }) {
-  const [selected, setSelected] = useState(null);
-  // ...
-}
-```
-
-### Prop Drilling Server Data Through Many Client Components
-
-```tsx
-// BAD - Passing user through every component
-<ClientA user={user}>
-  <ClientB user={user}>
-    <ClientC user={user} />
-  </ClientB>
-</ClientA>
-
-// GOOD - Use composition
-<ClientA
-  content={
-    <ServerContent user={user}>
-      <ClientInteraction />
-    </ServerContent>
-  }
-/>
-```
-
-### Using useEffect for Data That Could Be Server-Fetched
-
-```tsx
-// BAD
-"use client";
-export function Profile({ userId }) {
-  const [profile, setProfile] = useState(null);
-  useEffect(() => {
-    fetch(`/api/users/${userId}`).then(r => r.json()).then(setProfile);
-  }, [userId]);
-}
-
-// GOOD - If this needs to be client, use useSWR/React Query for caching
-// Or better, make it a Server Component
-export async function Profile({ userId }) {
-  const profile = await db.users.findUnique({ where: { id: userId } });
-  return <ProfileDisplay profile={profile} />;
-}
-```
-
----
-
-## Gotchas
-
-### 1. Children of Client Components Aren't Automatically Client
-
-```tsx
-// ClientComponent.tsx
-"use client";
-export function ClientComponent({ children }) {
-  return <div>{children}</div>; // children can be Server Components!
-}
-
-// page.tsx (SERVER)
-export default async function Page() {
-  const data = await getData();
+export default function RootLayout({ children }) {
   return (
-    <ClientComponent>
-      <ServerContent data={data} /> {/* This is still server! */}
-    </ClientComponent>
+    <QueryClientProvider>
+      <ThemeProvider>
+        {children}
+      </ThemeProvider>
+    </QueryClientProvider>
   );
 }
 ```
+Layout becomes client, affecting all children. Extract providers instead.
+</Bad>
 
-### 2. "use client" Creates a Boundary, Not a Component Type
+## Anti-Patterns
 
-Files with "use client" mark the entry point to client territory. Everything imported INTO that file becomes part of the client bundle.
+| Anti-Pattern | Why It Fails | What To Do Instead |
+|--------------|--------------|-------------------|
+| "use client" on page components | No SSR, loading flash | Keep pages as Server Components |
+| Fetching in useEffect | Extra round trip | Use Server Components for data |
+| API routes for simple mutations | Unnecessary complexity | Use Server Actions |
+| Heavy libraries in client boundary | Bloats bundle | Dynamic import with ssr: false |
+| Prop drilling server data | Verbose, fragile | Use composition pattern |
+
+## Red Flags - STOP
+
+If you catch yourself:
+- Adding "use client" to a page or layout
+- Using useEffect to fetch data
+- Creating an API route for a form submission
+- Importing a heavy library in a client component
+- Passing props through 3+ levels of client components
+
+**ALL of these mean: STOP. Re-think the boundary. Push client code down the tree.**
+
+## Common Rationalizations
+
+| Excuse | Reality |
+|--------|---------|
+| "use client is easier" | Easier now, slower app later. Start server-side. |
+| "I might need interactivity later" | Add it later when you actually need it. |
+| "Everything is client in my old app" | That's why this approach exists. Server Components are better. |
+| "Server Components are confusing" | They're simpler once you understand the boundary. |
+| "I need this hook" | Only the component using the hook needs "use client". |
+| "The data needs to update" | Use Server Actions + revalidatePath, not client state. |
+
+## Gotchas
+
+### Children of Client Components Can Be Server Components
+
+```tsx
+// ClientWrapper.tsx
+'use client';
+export function ClientWrapper({ children }) {
+  return <div onClick={handleClick}>{children}</div>;
+}
+
+// page.tsx (Server)
+<ClientWrapper>
+  <ServerContent /> {/* Still runs on server! */}
+</ClientWrapper>
+```
+
+### "use client" Creates a Boundary, Not a Type
+
+Everything IMPORTED into a "use client" file becomes client-side code:
 
 ```tsx
 // BAD - Heavy library in client boundary
-"use client";
-import { heavyChart } from 'heavy-chart-lib'; // All in client bundle!
+'use client';
+import { heavyChart } from 'heavy-chart-lib'; // All 500KB in client bundle!
 
 // GOOD - Dynamic import
-"use client";
+'use client';
 import dynamic from 'next/dynamic';
 const HeavyChart = dynamic(() => import('heavy-chart-lib'), { ssr: false });
 ```
 
-### 3. Server Components Can't Use Client Hooks
+### Async Components Must Be Server Components
 
 ```tsx
-// This will error
-async function ServerComponent() {
-  const [state, setState] = useState(); // Error! No hooks in Server Components
-}
-```
-
-### 4. Async Components Must Be Server Components
-
-```tsx
-// GOOD - Server Components can be async
-async function ServerComponent() {
+// GOOD - Server Component
+async function ServerData() {
   const data = await getData();
   return <div>{data}</div>;
 }
 
-// BAD - Client Components cannot be async
-"use client";
-async function ClientComponent() { // Error!
+// BAD - Can't be async
+'use client';
+async function ClientData() { // Error!
   const data = await getData();
 }
 ```
 
-### 5. Forms Work Differently
+### Forms Work Differently
 
 ```tsx
-// SERVER - Native form with Server Action
+// Server Component - action attribute
 <form action={serverAction}>
   <button type="submit">Submit</button>
 </form>
 
-// CLIENT - Need onSubmit handler
-"use client";
+// Client Component - onSubmit handler
+'use client';
 <form onSubmit={(e) => {
   e.preventDefault();
-  // handle submission
+  // handle
 }}>
 ```
 
----
+### Hydration Mismatches
 
-## Checkpoints
+```tsx
+// BAD - Different on server and client
+function Timestamp() {
+  return <span>{new Date().toLocaleString()}</span>; // Different on server!
+}
 
-Before marking a boundary-related task complete:
+// GOOD - Consistent or client-only
+'use client';
+function Timestamp() {
+  const [time, setTime] = useState<string>();
+  useEffect(() => setTime(new Date().toLocaleString()), []);
+  return <span>{time ?? 'Loading...'}</span>;
+}
+```
 
-- [ ] "use client" only where necessary (interactive components)
+## Verification Checklist
+
+Before marking boundary-related task complete:
+
+- [ ] "use client" only on components that need interactivity
 - [ ] No hydration warnings in browser console
 - [ ] Data fetched on server where possible
-- [ ] Server Actions used for mutations (not API routes)
+- [ ] Server Actions used for form mutations
 - [ ] Heavy libraries dynamically imported
-- [ ] Props between server/client are serializable
-- [ ] No useState/useEffect for static data
+- [ ] Props between server/client are serializable (JSON-compatible)
+- [ ] No useState/useEffect for data that could be server-fetched
+- [ ] Providers extracted to separate client file
+
+Can't check all boxes? You have boundary issues. Fix them.
+
+## Integration
+
+**Pairs well with:**
+- `nextjs-app-router` - Routing patterns
+- `react-patterns` - Client component optimization
+- `state-sync` - React Query hydration
+- `supabase-backend` - Server-side data fetching
+
+**Requires:**
+- Next.js 13+ with App Router
+- Understanding of React Server Components
+
+## References
+
+- [Next.js Server Components](https://nextjs.org/docs/app/building-your-application/rendering/server-components)
+- [React Server Components RFC](https://github.com/reactjs/rfcs/blob/main/text/0188-server-components.md)
+- [Patterns for Server Components](https://nextjs.org/docs/app/building-your-application/rendering/composition-patterns)
 
 ---
 
-## Escape Hatches
-
-### When hydration errors won't resolve
-1. Check for browser-only values (Date, Math.random)
-2. Look for conditional rendering differences
-3. Use `suppressHydrationWarning` as last resort
-4. Move to `dynamic(..., { ssr: false })`
-
-### When client-only is simpler
-- Real-time collaboration features
-- Complex drag-and-drop
-- Canvas/WebGL rendering
-
-### When to use API routes instead of Server Actions
-- Need to call from non-React client
-- Complex streaming responses
-- Third-party webhooks
-
----
-
-## Squad Dependencies
-
-Often paired with:
-- `nextjs-app-router` for routing patterns
-- `react-patterns` for client optimization
-- `nextjs-supabase-auth` for auth at boundary
-- `state-sync` for real-time state
-
----
-
-*Last updated: 2025-12-11*
+*This specialist follows the world-class skill pattern.*

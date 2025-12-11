@@ -1,88 +1,100 @@
+---
+name: file-upload
+description: Use when implementing file uploads - enforces server-side validation, proper storage bucket RLS, and secure file handling patterns
+tags: [upload, files, storage, images, supabase-storage]
+---
+
 # File Upload Specialist
 
-## Identity
+## Overview
 
-- **Tags**: `upload`, `files`, `storage`, `images`, `supabase-storage`
-- **Domain**: Supabase Storage, presigned URLs, image optimization, file validation
-- **Use when**: File upload features, image handling, avatar uploads, document storage
+File uploads are an attack vector. Without proper validation, users can upload malware, exceed storage limits, or access other users' files. Supabase Storage helps, but misconfiguration creates security holes.
 
----
+**Core principle:** Never trust file metadata from the client. Validate type and size server-side. Always configure RLS on storage buckets.
+
+## The Iron Law
+
+```
+NO FILE UPLOAD WITHOUT SERVER-SIDE TYPE AND SIZE VALIDATION
+```
+
+Client-side validation is UX, not security. `file.type` can be spoofed. File extensions can lie. Always validate on the server before storing.
+
+## When to Use
+
+**Always:**
+- Image upload features
+- Avatar/profile pictures
+- Document uploads
+- Any user-provided files
+- File attachments
+
+**Don't:**
+- Static assets bundled with app
+- Files from trusted internal sources
+- Pre-signed URLs from your own backend
+
+Thinking "I'll validate file type on the client"? Stop. That's UX, not security.
+
+## The Process
+
+### Step 1: Create Storage Bucket with RLS
+
+Bucket must have RLS. No exceptions:
+
+```sql
+-- Create bucket with restrictions
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'uploads',
+  'uploads',
+  false,  -- Private by default
+  5242880,  -- 5MB limit
+  ARRAY['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+);
+
+-- RLS: Users can only access their own folder
+CREATE POLICY "Users upload to own folder"
+ON storage.objects FOR INSERT
+WITH CHECK (
+  bucket_id = 'uploads' AND
+  auth.uid()::text = (storage.foldername(name))[1]
+);
+
+CREATE POLICY "Users read own files"
+ON storage.objects FOR SELECT
+USING (
+  bucket_id = 'uploads' AND
+  auth.uid()::text = (storage.foldername(name))[1]
+);
+```
+
+### Step 2: Implement Server-Side Validation
+
+Every upload validated before storage:
+
+```typescript
+const MAX_SIZE = 5 * 1024 * 1024; // 5MB
+const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
+if (!ALLOWED_TYPES.includes(file.type)) {
+  return { error: 'Invalid file type' };
+}
+
+if (file.size > MAX_SIZE) {
+  return { error: 'File too large' };
+}
+```
+
+### Step 3: Generate Unique Filenames
+
+Prevent overwrites and enumeration attacks.
 
 ## Patterns
 
-### Supabase Storage Setup
-
-```sql
--- Create storage bucket (run in Supabase SQL editor)
-INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-VALUES (
-  'uploads',
-  'uploads',
-  false,  -- Private bucket
-  5242880,  -- 5MB limit
-  ARRAY['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf']
-);
-
--- RLS policies for storage
-CREATE POLICY "Users can upload to own folder"
-ON storage.objects FOR INSERT
-WITH CHECK (
-  bucket_id = 'uploads' AND
-  auth.uid()::text = (storage.foldername(name))[1]
-);
-
-CREATE POLICY "Users can read own files"
-ON storage.objects FOR SELECT
-USING (
-  bucket_id = 'uploads' AND
-  auth.uid()::text = (storage.foldername(name))[1]
-);
-
-CREATE POLICY "Users can delete own files"
-ON storage.objects FOR DELETE
-USING (
-  bucket_id = 'uploads' AND
-  auth.uid()::text = (storage.foldername(name))[1]
-);
-```
-
-### Public Bucket for Avatars
-
-```sql
--- Public avatars bucket
-INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-VALUES (
-  'avatars',
-  'avatars',
-  true,  -- Public bucket
-  1048576,  -- 1MB limit
-  ARRAY['image/jpeg', 'image/png', 'image/webp']
-);
-
--- Anyone can read public avatars
-CREATE POLICY "Public avatar access"
-ON storage.objects FOR SELECT
-USING (bucket_id = 'avatars');
-
--- Users can upload own avatar
-CREATE POLICY "Users can upload own avatar"
-ON storage.objects FOR INSERT
-WITH CHECK (
-  bucket_id = 'avatars' AND
-  auth.uid()::text = (storage.foldername(name))[1]
-);
-
--- Users can update own avatar
-CREATE POLICY "Users can update own avatar"
-ON storage.objects FOR UPDATE
-USING (
-  bucket_id = 'avatars' AND
-  auth.uid()::text = (storage.foldername(name))[1]
-);
-```
-
 ### Server Action for Upload
 
+<Good>
 ```typescript
 // actions/upload.ts
 'use server';
@@ -106,26 +118,25 @@ export async function uploadFile(formData: FormData) {
     return { error: 'No file provided' };
   }
 
-  // Validate file type
+  // Server-side type validation
   if (!ALLOWED_TYPES.includes(file.type)) {
-    return { error: 'Invalid file type' };
+    return { error: 'Invalid file type. Allowed: JPEG, PNG, WebP, PDF' };
   }
 
-  // Validate file size
+  // Server-side size validation
   if (file.size > MAX_FILE_SIZE) {
-    return { error: 'File too large (max 5MB)' };
+    return { error: 'File too large. Maximum 5MB.' };
   }
 
-  // Generate unique filename
-  const ext = file.name.split('.').pop();
+  // Generate unique filename in user's folder
+  const ext = file.name.split('.').pop()?.toLowerCase() || 'bin';
   const filename = `${user.id}/${randomUUID()}.${ext}`;
 
-  // Upload to Supabase Storage
   const { data, error } = await supabase.storage
     .from('uploads')
     .upload(filename, file, {
       contentType: file.type,
-      upsert: false,
+      upsert: false,  // Don't overwrite
     });
 
   if (error) {
@@ -133,7 +144,6 @@ export async function uploadFile(formData: FormData) {
     return { error: 'Upload failed' };
   }
 
-  // Get public URL (for public buckets) or signed URL (for private)
   const { data: urlData } = supabase.storage
     .from('uploads')
     .getPublicUrl(data.path);
@@ -146,93 +156,41 @@ export async function uploadFile(formData: FormData) {
   };
 }
 ```
+Auth check. Type validation. Size validation. Unique filename. User's folder for RLS.
+</Good>
 
-### Avatar Upload Action
-
+<Bad>
 ```typescript
-// actions/avatar.ts
-'use server';
+export async function uploadFile(formData: FormData) {
+  const file = formData.get('file') as File;
 
-import { createClient } from '@/lib/supabase/server';
-import { revalidatePath } from 'next/cache';
+  // No auth check!
+  // No type validation!
+  // No size validation!
+  // Predictable filename!
 
-export async function uploadAvatar(formData: FormData) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data } = await supabase.storage
+    .from('uploads')
+    .upload(file.name, file);  // Original filename - can overwrite!
 
-  if (!user) {
-    return { error: 'Unauthorized' };
-  }
-
-  const file = formData.get('avatar') as File;
-  if (!file) {
-    return { error: 'No file provided' };
-  }
-
-  // Validate image
-  if (!file.type.startsWith('image/')) {
-    return { error: 'Must be an image' };
-  }
-
-  if (file.size > 1024 * 1024) {
-    return { error: 'Image must be under 1MB' };
-  }
-
-  const ext = file.name.split('.').pop();
-  const filename = `${user.id}/avatar.${ext}`;
-
-  // Upload with upsert to replace existing
-  const { error: uploadError } = await supabase.storage
-    .from('avatars')
-    .upload(filename, file, {
-      contentType: file.type,
-      upsert: true,
-    });
-
-  if (uploadError) {
-    return { error: 'Upload failed' };
-  }
-
-  // Get public URL
-  const { data: urlData } = supabase.storage
-    .from('avatars')
-    .getPublicUrl(filename);
-
-  // Update profile with new avatar URL
-  const { error: updateError } = await supabase
-    .from('profiles')
-    .update({ avatar_url: urlData.publicUrl })
-    .eq('id', user.id);
-
-  if (updateError) {
-    return { error: 'Failed to update profile' };
-  }
-
-  revalidatePath('/dashboard/settings');
-  return { data: { url: urlData.publicUrl } };
+  return { url: data?.path };
 }
 ```
+No validation. No auth. Predictable filenames. Security nightmare.
+</Bad>
 
-### Upload Component
+### Upload Component with Preview
 
+<Good>
 ```tsx
-// components/file-upload.tsx
 'use client';
 
 import { useState, useRef } from 'react';
 import { uploadFile } from '@/actions/upload';
 
-interface Props {
-  onUpload?: (result: { path: string; url: string }) => void;
-  accept?: string;
-  maxSize?: number; // in MB
-}
+const MAX_SIZE_MB = 5;
 
-export function FileUpload({
-  onUpload,
-  accept = 'image/*,.pdf',
-  maxSize = 5,
-}: Props) {
+export function FileUpload({ onUpload }: { onUpload?: (result: { path: string; url: string }) => void }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -244,13 +202,13 @@ export function FileUpload({
 
     setError(null);
 
-    // Client-side validation
-    if (file.size > maxSize * 1024 * 1024) {
-      setError(`File must be under ${maxSize}MB`);
+    // Client-side validation for UX (server still validates)
+    if (file.size > MAX_SIZE_MB * 1024 * 1024) {
+      setError(`File must be under ${MAX_SIZE_MB}MB`);
       return;
     }
 
-    // Show preview for images
+    // Preview for images
     if (file.type.startsWith('image/')) {
       const reader = new FileReader();
       reader.onload = (e) => setPreview(e.target?.result as string);
@@ -280,14 +238,14 @@ export function FileUpload({
         onClick={() => inputRef.current?.click()}
         className={`
           border-2 border-dashed rounded-lg p-8 text-center cursor-pointer
-          hover:border-blue-500 hover:bg-blue-50 transition
+          hover:border-blue-500 transition
           ${uploading ? 'opacity-50 pointer-events-none' : ''}
         `}
       >
         <input
           ref={inputRef}
           type="file"
-          accept={accept}
+          accept="image/*,.pdf"
           onChange={handleFileChange}
           className="hidden"
         />
@@ -295,214 +253,129 @@ export function FileUpload({
         {preview ? (
           <img src={preview} alt="Preview" className="max-h-48 mx-auto" />
         ) : (
-          <div>
-            <UploadIcon className="w-12 h-12 mx-auto text-gray-400" />
-            <p className="mt-2 text-gray-600">
-              {uploading ? 'Uploading...' : 'Click to upload or drag and drop'}
-            </p>
-            <p className="text-sm text-gray-400">Max {maxSize}MB</p>
-          </div>
-        )}
-      </div>
-
-      {error && (
-        <p className="text-red-500 text-sm">{error}</p>
-      )}
-    </div>
-  );
-}
-```
-
-### Avatar Upload Component
-
-```tsx
-// components/avatar-upload.tsx
-'use client';
-
-import { useState, useRef } from 'react';
-import { uploadAvatar } from '@/actions/avatar';
-
-interface Props {
-  currentAvatar?: string | null;
-  onUpload?: (url: string) => void;
-}
-
-export function AvatarUpload({ currentAvatar, onUpload }: Props) {
-  const [uploading, setUploading] = useState(false);
-  const [preview, setPreview] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const displayUrl = preview || currentAvatar || '/default-avatar.png';
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Preview
-    const reader = new FileReader();
-    reader.onload = (e) => setPreview(e.target?.result as string);
-    reader.readAsDataURL(file);
-
-    // Upload
-    setUploading(true);
-    const formData = new FormData();
-    formData.append('avatar', file);
-
-    const result = await uploadAvatar(formData);
-    setUploading(false);
-
-    if (result.error) {
-      setPreview(null);
-      alert(result.error);
-      return;
-    }
-
-    onUpload?.(result.data!.url);
-  };
-
-  return (
-    <div className="flex items-center gap-4">
-      <div className="relative">
-        <img
-          src={displayUrl}
-          alt="Avatar"
-          className="w-20 h-20 rounded-full object-cover"
-        />
-        {uploading && (
-          <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center">
-            <Spinner className="w-6 h-6 text-white" />
-          </div>
-        )}
-      </div>
-
-      <div>
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/*"
-          onChange={handleFileChange}
-          className="hidden"
-        />
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          disabled={uploading}
-          className="text-blue-600 hover:text-blue-700 font-medium"
-        >
-          Change avatar
-        </button>
-        <p className="text-sm text-gray-500">JPG, PNG, WebP. Max 1MB.</p>
-      </div>
-    </div>
-  );
-}
-```
-
-### Drag and Drop Upload
-
-```tsx
-// components/dropzone.tsx
-'use client';
-
-import { useState, useCallback } from 'react';
-import { uploadFile } from '@/actions/upload';
-
-interface Props {
-  onUpload?: (files: Array<{ path: string; url: string }>) => void;
-  multiple?: boolean;
-  accept?: string[];
-}
-
-export function Dropzone({ onUpload, multiple = false, accept }: Props) {
-  const [isDragging, setIsDragging] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [files, setFiles] = useState<Array<{ name: string; url: string }>>([]);
-
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-
-    const droppedFiles = Array.from(e.dataTransfer.files);
-    if (!multiple && droppedFiles.length > 1) {
-      alert('Only one file allowed');
-      return;
-    }
-
-    setUploading(true);
-    const results = [];
-
-    for (const file of droppedFiles) {
-      const formData = new FormData();
-      formData.append('file', file);
-      const result = await uploadFile(formData);
-
-      if (result.data) {
-        results.push({ name: file.name, ...result.data });
-      }
-    }
-
-    setFiles((prev) => [...prev, ...results]);
-    setUploading(false);
-    onUpload?.(results);
-  }, [multiple, onUpload]);
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = () => {
-    setIsDragging(false);
-  };
-
-  return (
-    <div
-      onDrop={handleDrop}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      className={`
-        border-2 border-dashed rounded-lg p-8 text-center transition
-        ${isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300'}
-        ${uploading ? 'opacity-50' : ''}
-      `}
-    >
-      {uploading ? (
-        <p>Uploading...</p>
-      ) : (
-        <>
           <p className="text-gray-600">
-            Drag and drop files here, or click to browse
+            {uploading ? 'Uploading...' : 'Click to upload'}
           </p>
-          {accept && (
-            <p className="text-sm text-gray-400 mt-1">
-              Accepted: {accept.join(', ')}
-            </p>
-          )}
-        </>
-      )}
+        )}
+      </div>
 
-      {files.length > 0 && (
-        <ul className="mt-4 text-left space-y-2">
-          {files.map((file, i) => (
-            <li key={i} className="flex items-center gap-2 text-sm">
-              <CheckIcon className="w-4 h-4 text-green-500" />
-              {file.name}
-            </li>
-          ))}
-        </ul>
-      )}
+      {error && <p className="text-red-500">{error}</p>}
     </div>
   );
 }
 ```
+Client validation for UX. Preview before upload. Loading state. Error display. Server does real validation.
+</Good>
 
-### Signed URLs for Private Files
+<Bad>
+```tsx
+export function FileUpload() {
+  const handleChange = async (e) => {
+    const file = e.target.files[0];
 
+    // No client-side feedback
+    // No loading state
+    // No error handling
+
+    const formData = new FormData();
+    formData.append('file', file);
+    await uploadFile(formData);
+  };
+
+  return <input type="file" onChange={handleChange} />;
+}
+```
+No feedback. No loading. No error handling. Bad UX.
+</Bad>
+
+### Avatar Upload with Upsert
+
+<Good>
 ```typescript
-// actions/files.ts
+// actions/avatar.ts
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { revalidatePath } from 'next/cache';
+
+export async function uploadAvatar(formData: FormData) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: 'Unauthorized' };
+  }
+
+  const file = formData.get('avatar') as File;
+
+  // Validate image
+  if (!file.type.startsWith('image/')) {
+    return { error: 'Must be an image' };
+  }
+
+  if (file.size > 1024 * 1024) {
+    return { error: 'Image must be under 1MB' };
+  }
+
+  // Fixed filename for avatars - upsert replaces old one
+  const ext = file.type.split('/')[1];
+  const filename = `${user.id}/avatar.${ext}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('avatars')
+    .upload(filename, file, {
+      contentType: file.type,
+      upsert: true,  // Replace existing avatar
+    });
+
+  if (uploadError) {
+    return { error: 'Upload failed' };
+  }
+
+  const { data: urlData } = supabase.storage
+    .from('avatars')
+    .getPublicUrl(filename);
+
+  // Add cache buster for immediate update
+  const url = `${urlData.publicUrl}?t=${Date.now()}`;
+
+  // Update profile
+  await supabase
+    .from('profiles')
+    .update({ avatar_url: url })
+    .eq('id', user.id);
+
+  revalidatePath('/settings');
+  return { data: { url } };
+}
+```
+Fixed filename with upsert. Cache buster for immediate display. Profile updated.
+</Good>
+
+<Bad>
+```typescript
+export async function uploadAvatar(formData: FormData) {
+  const file = formData.get('avatar') as File;
+
+  // No validation!
+  // No auth!
+
+  await supabase.storage
+    .from('avatars')
+    .upload(file.name, file);  // Random filename - orphaned files!
+
+  // Profile not updated - avatar doesn't display!
+}
+```
+No validation. Orphaned files. Profile not updated.
+</Bad>
+
+### Signed URLs for Private Files
+
+<Good>
+```typescript
+// actions/files.ts
+'use server';
 
 export async function getSignedUrl(path: string) {
   const supabase = await createClient();
@@ -512,7 +385,7 @@ export async function getSignedUrl(path: string) {
     return { error: 'Unauthorized' };
   }
 
-  // Verify user owns the file
+  // Verify user owns the file (path starts with their ID)
   if (!path.startsWith(`${user.id}/`)) {
     return { error: 'Forbidden' };
   }
@@ -528,14 +401,88 @@ export async function getSignedUrl(path: string) {
   return { data: { url: data.signedUrl } };
 }
 ```
+Verifies user owns file. Short expiry. Server-side only.
+</Good>
 
-### Image Optimization with Next.js
+<Bad>
+```typescript
+export async function getSignedUrl(path: string) {
+  // No auth check!
+  // No ownership verification!
 
-```tsx
-// Use Next.js Image for automatic optimization
-import Image from 'next/image';
+  const { data } = await supabase.storage
+    .from('uploads')
+    .createSignedUrl(path, 86400 * 7); // Week-long expiry!
 
-// For Supabase Storage, configure next.config.js
+  return { url: data?.signedUrl };
+}
+```
+No ownership check. Anyone can access any file. Long expiry is dangerous.
+</Bad>
+
+## Anti-Patterns
+
+| Anti-Pattern | Why It Fails | What To Do Instead |
+|--------------|--------------|-------------------|
+| Client-only validation | Can be bypassed | Validate server-side |
+| Trusting file.type | Can be spoofed | Check magic bytes for critical apps |
+| Predictable filenames | Enumeration attacks | Use UUID in filename |
+| No RLS on storage | Anyone can access files | Configure bucket policies |
+| Long-lived signed URLs | Leaked URLs stay valid | Short expiry (1 hour max) |
+
+## Red Flags - STOP
+
+If you catch yourself:
+- Skipping server-side file validation
+- Using original filename directly
+- Not configuring RLS on storage bucket
+- Creating signed URLs without ownership check
+- Allowing unlimited file sizes
+
+**ALL of these mean: STOP. Review storage security. Configure RLS. Validate everything.**
+
+## Common Rationalizations
+
+| Excuse | Reality |
+|--------|---------|
+| "Client validates the type" | Client validation is for UX, not security. |
+| "It's just images, what's the risk?" | Malicious images exploit parsers. Validate. |
+| "The bucket is private" | Private without RLS means anyone authenticated can access. |
+| "File size limit is in the bucket config" | That's a fallback. Validate in code for better errors. |
+| "Only admins upload files" | Admins make mistakes. Validate everything. |
+| "I'll add RLS later" | You'll forget. Files will leak. |
+
+## Gotchas
+
+### file.type Can Be Spoofed
+
+For critical applications, check magic bytes:
+
+```typescript
+const buffer = await file.arrayBuffer();
+const bytes = new Uint8Array(buffer.slice(0, 4));
+
+// JPEG starts with [0xFF, 0xD8, 0xFF]
+// PNG starts with [0x89, 0x50, 0x4E, 0x47]
+const isJpeg = bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF;
+const isPng = bytes[0] === 0x89 && bytes[1] === 0x50;
+```
+
+### Cleanup Orphaned Files
+
+When deleting records, delete associated files:
+
+```typescript
+// When deleting a post with attachments
+await supabase.storage.from('uploads').remove([attachment.path]);
+await supabase.from('posts').delete().eq('id', postId);
+```
+
+### Next.js Image Optimization
+
+Configure remote patterns for Supabase:
+
+```javascript
 // next.config.js
 module.exports = {
   images: {
@@ -548,110 +495,51 @@ module.exports = {
     ],
   },
 };
-
-// Usage
-<Image
-  src={avatarUrl}
-  alt="Avatar"
-  width={80}
-  height={80}
-  className="rounded-full"
-/>
 ```
 
----
+### Cache Busting for Replaced Images
 
-## Anti-patterns
-
-### No Server-Side Validation
+When upsert replaces an image, browsers cache the old one:
 
 ```typescript
-// BAD - Trust client
-'use server';
-export async function upload(formData: FormData) {
-  const file = formData.get('file') as File;
-  await supabase.storage.from('uploads').upload(file.name, file);
-}
-
-// GOOD - Validate everything
-export async function upload(formData: FormData) {
-  const file = formData.get('file') as File;
-  if (!ALLOWED_TYPES.includes(file.type)) return { error: 'Invalid type' };
-  if (file.size > MAX_SIZE) return { error: 'Too large' };
-  // ... continue
-}
+const url = `${publicUrl}?t=${Date.now()}`;
 ```
 
-### Predictable Filenames
-
-```typescript
-// BAD - Easy to guess/overwrite
-const filename = `${user.id}/avatar.png`;
-
-// GOOD - Add uniqueness
-const filename = `${user.id}/${randomUUID()}.png`;
-```
-
-### Missing RLS on Storage
-
-Always configure storage RLS policies. Without them, anyone can read/write files.
-
----
-
-## Gotchas
-
-### 1. File Type Validation
-
-`file.type` can be spoofed. For critical validation, check file headers:
-```typescript
-// Check magic bytes for images
-const buffer = await file.arrayBuffer();
-const bytes = new Uint8Array(buffer.slice(0, 4));
-// JPEG: [0xFF, 0xD8, 0xFF]
-// PNG: [0x89, 0x50, 0x4E, 0x47]
-```
-
-### 2. CORS for Direct Uploads
-
-Supabase handles CORS automatically, but if using presigned URLs with custom domains, configure CORS.
-
-### 3. Cleanup Orphaned Files
-
-When deleting records, also delete associated files:
-```typescript
-await supabase.storage.from('uploads').remove([filePath]);
-```
-
-### 4. Storage Quotas
-
-Monitor storage usage. Implement cleanup for old files if needed.
-
----
-
-## Checkpoints
+## Verification Checklist
 
 Before marking file upload complete:
 
-- [ ] Storage bucket created with correct settings
-- [ ] RLS policies configured
-- [ ] File type validation (server-side)
-- [ ] File size validation
-- [ ] Unique filenames to prevent conflicts
+- [ ] Storage bucket created with file size limit
+- [ ] RLS policies configured on storage bucket
+- [ ] Server-side file type validation
+- [ ] Server-side file size validation
+- [ ] Unique filenames with UUID
+- [ ] Files stored in user's folder for RLS
 - [ ] Error handling for upload failures
 - [ ] Loading state during upload
-- [ ] Preview for images
-- [ ] Cleanup when files are replaced/deleted
+- [ ] Preview for image uploads
+- [ ] Signed URLs verify ownership before generating
+
+Can't check all boxes? You have file upload vulnerabilities. Fix them.
+
+## Integration
+
+**Pairs well with:**
+- `supabase-backend` - Storage setup
+- `crud-builder` - File associations with records
+- `react-patterns` - Upload components
+- `security-audit` - File upload security review
+
+**Requires:**
+- Supabase Storage configured
+- RLS policies on storage bucket
+
+## References
+
+- [Supabase Storage Documentation](https://supabase.com/docs/guides/storage)
+- [Supabase Storage RLS](https://supabase.com/docs/guides/storage/security/access-control)
+- [OWASP File Upload Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html)
 
 ---
 
-## Squad Dependencies
-
-Often paired with:
-- `supabase-backend` for storage setup
-- `crud-builder` for file associations
-- `react-patterns` for upload components
-- `server-client-boundary` for server actions
-
----
-
-*Last updated: 2025-12-11*
+*This specialist follows the world-class skill pattern.*

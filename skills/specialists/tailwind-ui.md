@@ -1,17 +1,70 @@
+---
+name: tailwind-ui
+description: Use when building UI components with Tailwind CSS - enforces consistent spacing, proper class merging, responsive patterns, and dark mode implementation
+tags: [tailwind, css, ui, responsive, dark-mode, components]
+---
+
 # Tailwind UI Specialist
 
-## Identity
+## Overview
 
-- **Tags**: `tailwind`, `css`, `ui`, `responsive`, `dark-mode`, `components`
-- **Domain**: Component patterns, responsive design, dark mode, design systems
-- **Use when**: UI components, styling tasks, responsive layouts, theme implementation
+Tailwind's utility classes become chaos without discipline. Inconsistent spacing, broken dark mode, purged classes, and specificity wars create UIs that are painful to maintain.
 
----
+**Core principle:** Use consistent spacing scales, cn() for class merging, and mobile-first responsive design. No arbitrary values without justification.
+
+## The Iron Law
+
+```
+NO DYNAMIC CLASS NAMES WITHOUT SAFELIST OR FULL CLASS MAPPING
+```
+
+Tailwind purges unused classes in production. `bg-${color}-500` won't work because the full class name isn't in your source code. Always use complete class names or safelist them.
+
+## When to Use
+
+**Always:**
+- Building UI components
+- Implementing responsive layouts
+- Adding dark mode support
+- Creating design system components
+- Styling forms and interactive elements
+
+**Don't:**
+- Complex animations (use CSS/Framer Motion)
+- Highly dynamic styles (use CSS variables)
+- Third-party component libraries with their own styling
+
+Thinking "I'll add arbitrary values for speed"? Stop. Use the spacing scale. Consistency matters.
+
+## The Process
+
+### Step 1: Set Up cn() Utility
+
+Essential for merging classes without conflicts:
+
+```typescript
+// lib/utils.ts
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+```
+
+### Step 2: Use Consistent Spacing Scale
+
+Stick to Tailwind's scale: 0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 40, 48, 64
+
+### Step 3: Mobile-First Responsive
+
+Start with mobile styles, add breakpoints for larger screens.
 
 ## Patterns
 
-### Component Structure
+### Component with Variants
 
+<Good>
 ```tsx
 // components/ui/Button.tsx
 import { cn } from '@/lib/utils';
@@ -32,19 +85,15 @@ export function Button({
     <button
       className={cn(
         // Base styles
-        'inline-flex items-center justify-center rounded-md font-medium transition-colors',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
+        'inline-flex items-center justify-center rounded-md font-medium',
+        'transition-colors focus-visible:outline-none focus-visible:ring-2',
         'disabled:pointer-events-none disabled:opacity-50',
         // Variants
         {
-          'bg-blue-600 text-white hover:bg-blue-700 focus-visible:ring-blue-500':
-            variant === 'primary',
-          'bg-gray-100 text-gray-900 hover:bg-gray-200 focus-visible:ring-gray-500':
-            variant === 'secondary',
-          'hover:bg-gray-100 focus-visible:ring-gray-500':
-            variant === 'ghost',
-          'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500':
-            variant === 'danger',
+          'bg-blue-600 text-white hover:bg-blue-700': variant === 'primary',
+          'bg-gray-100 text-gray-900 hover:bg-gray-200': variant === 'secondary',
+          'hover:bg-gray-100 text-gray-700': variant === 'ghost',
+          'bg-red-600 text-white hover:bg-red-700': variant === 'danger',
         },
         // Sizes
         {
@@ -52,7 +101,7 @@ export function Button({
           'h-10 px-4 text-sm': size === 'md',
           'h-12 px-6 text-base': size === 'lg',
         },
-        className
+        className // Allow overrides
       )}
       {...props}
     >
@@ -61,33 +110,49 @@ export function Button({
   );
 }
 ```
+Uses cn() for merging. Variant objects for clarity. Accepts className for customization.
+</Good>
 
-### cn Utility (Class Merging)
-
-```typescript
-// lib/utils.ts
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
+<Bad>
+```tsx
+export function Button({ variant, className, ...props }) {
+  return (
+    <button
+      className={`
+        inline-flex items-center justify-center rounded-md
+        ${variant === 'primary' ? 'bg-blue-600' : ''}
+        ${variant === 'secondary' ? 'bg-gray-100' : ''}
+        ${className}
+      `}
+      {...props}
+    />
+  );
 }
 ```
+Template literals don't handle conflicts. Missing base styles. Inconsistent.
+</Bad>
 
-### Card Component
+### Dark Mode Implementation
 
+<Good>
 ```tsx
-// components/ui/Card.tsx
-import { cn } from '@/lib/utils';
+// tailwind.config.ts
+export default {
+  darkMode: 'class',
+  // ...
+}
 
-interface CardProps extends React.HTMLAttributes<HTMLDivElement> {}
-
+// Component with dark mode
 export function Card({ className, ...props }: CardProps) {
   return (
     <div
       className={cn(
-        'rounded-lg border bg-white shadow-sm',
-        'dark:border-gray-800 dark:bg-gray-950',
+        // Light mode
+        'bg-white border-gray-200 text-gray-900',
+        // Dark mode
+        'dark:bg-gray-950 dark:border-gray-800 dark:text-gray-100',
+        // Shared
+        'rounded-lg border shadow-sm',
         className
       )}
       {...props}
@@ -95,259 +160,187 @@ export function Card({ className, ...props }: CardProps) {
   );
 }
 
-export function CardHeader({ className, ...props }: CardProps) {
-  return (
-    <div
-      className={cn('flex flex-col space-y-1.5 p-6', className)}
-      {...props}
-    />
-  );
-}
-
-export function CardTitle({ className, ...props }: CardProps) {
-  return (
-    <h3
-      className={cn('text-lg font-semibold leading-none tracking-tight', className)}
-      {...props}
-    />
-  );
-}
-
-export function CardContent({ className, ...props }: CardProps) {
-  return <div className={cn('p-6 pt-0', className)} {...props} />;
-}
+// Prevent flash with script in layout
+<html suppressHydrationWarning>
+  <head>
+    <script dangerouslySetInnerHTML={{
+      __html: `
+        if (localStorage.theme === 'dark' ||
+            (!localStorage.theme && matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark')
+        }
+      `
+    }} />
+  </head>
 ```
+Dark mode classes paired with light. Flash prevention script.
+</Good>
 
-### Input Component
-
+<Bad>
 ```tsx
-// components/ui/Input.tsx
-import { cn } from '@/lib/utils';
+// Missing dark mode variants
+<div className="bg-white text-gray-900">
+  {/* Broken in dark mode! */}
+</div>
 
-interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
-  error?: string;
-}
-
-export function Input({ className, error, ...props }: InputProps) {
-  return (
-    <div className="space-y-1">
-      <input
-        className={cn(
-          'flex h-10 w-full rounded-md border px-3 py-2 text-sm',
-          'bg-white ring-offset-white',
-          'file:border-0 file:bg-transparent file:text-sm file:font-medium',
-          'placeholder:text-gray-500',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
-          'disabled:cursor-not-allowed disabled:opacity-50',
-          'dark:border-gray-800 dark:bg-gray-950 dark:ring-offset-gray-950',
-          error
-            ? 'border-red-500 focus-visible:ring-red-500'
-            : 'border-gray-200 focus-visible:ring-blue-500',
-          className
-        )}
-        {...props}
-      />
-      {error && <p className="text-sm text-red-500">{error}</p>}
-    </div>
-  );
-}
+// Using opacity for dark mode
+<div className="bg-black/10 dark:bg-white/10">
+  {/* Inconsistent, hard to maintain */}
+</div>
 ```
+Missing dark variants. Opacity tricks are fragile.
+</Bad>
 
-### Responsive Patterns
+### Responsive Layout
 
+<Good>
 ```tsx
-// Mobile-first responsive design
+// Mobile-first grid
 <div className="
   grid
-  grid-cols-1      // Mobile: 1 column
-  sm:grid-cols-2   // Small: 2 columns
-  lg:grid-cols-3   // Large: 3 columns
-  xl:grid-cols-4   // XL: 4 columns
+  grid-cols-1
+  sm:grid-cols-2
+  lg:grid-cols-3
+  xl:grid-cols-4
   gap-4
+  sm:gap-6
 ">
   {items.map(item => <Card key={item.id} />)}
 </div>
 
 // Responsive text
 <h1 className="
-  text-2xl         // Mobile
-  sm:text-3xl      // Small
-  lg:text-4xl      // Large
+  text-2xl
+  sm:text-3xl
+  lg:text-4xl
   font-bold
+  tracking-tight
 ">
   Title
 </h1>
 
-// Responsive spacing
-<section className="
-  px-4             // Mobile padding
-  sm:px-6          // Small
-  lg:px-8          // Large
-  py-12
-  sm:py-16
-  lg:py-24
-">
-```
-
-### Dark Mode
-
-```tsx
-// tailwind.config.ts
-export default {
-  darkMode: 'class', // or 'media' for system preference
-  // ...
-}
-
-// Component with dark mode
+// Responsive container
 <div className="
-  bg-white dark:bg-gray-900
-  text-gray-900 dark:text-gray-100
-  border-gray-200 dark:border-gray-800
+  mx-auto
+  max-w-7xl
+  px-4 sm:px-6 lg:px-8
+  py-8 sm:py-12 lg:py-16
 ">
-  Content
-</div>
-
-// Dark mode toggle (with next-themes)
-"use client";
-import { useTheme } from 'next-themes';
-
-export function ThemeToggle() {
-  const { theme, setTheme } = useTheme();
-
-  return (
-    <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-      {theme === 'dark' ? '☀️' : '🌙'}
-    </button>
-  );
-}
-```
-
-### Layout Patterns
-
-```tsx
-// Sidebar layout
-<div className="flex min-h-screen">
-  <aside className="w-64 border-r bg-gray-50 dark:bg-gray-900">
-    <nav className="p-4">...</nav>
-  </aside>
-  <main className="flex-1 p-6">
-    {children}
-  </main>
-</div>
-
-// Sticky header
-<header className="sticky top-0 z-50 w-full border-b bg-white/95 backdrop-blur dark:bg-gray-950/95">
-  <div className="container flex h-16 items-center">
-    ...
-  </div>
-</header>
-
-// Centered content with max-width
-<div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
   {children}
 </div>
 ```
+Mobile first. Progressive enhancement. Consistent breakpoints.
+</Good>
 
-### Animation Classes
-
+<Bad>
 ```tsx
-// Hover effects
-<button className="transition-colors hover:bg-gray-100">
+// Desktop-first (overriding down)
+<div className="grid-cols-4 md:grid-cols-3 sm:grid-cols-2 max-sm:grid-cols-1">
+  {/* Confusing, error-prone */}
+</div>
 
-// Scale on hover
-<div className="transition-transform hover:scale-105">
-
-// Fade in
-<div className="animate-in fade-in duration-500">
-
-// Custom animation in tailwind.config.ts
-theme: {
-  extend: {
-    animation: {
-      'spin-slow': 'spin 3s linear infinite',
-      'bounce-slow': 'bounce 2s infinite',
-    },
-  },
-}
+// Arbitrary breakpoints
+<div className="grid-cols-1 min-[847px]:grid-cols-2 min-[1123px]:grid-cols-3">
+  {/* Non-standard, hard to maintain */}
+</div>
 ```
+Desktop-first is confusing. Arbitrary breakpoints are unmaintainable.
+</Bad>
 
----
+### Consistent Spacing
 
-## Anti-patterns
-
-### Using @apply Excessively
-
-```css
-/* BAD - Defeats Tailwind's purpose */
-.btn {
-  @apply px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600;
-}
-
-/* GOOD - Use component with className */
-// Create a Button component instead
-```
-
-### Inconsistent Spacing
-
+<Good>
 ```tsx
-// BAD - Random spacing values
-<div className="p-3 mt-7 mb-5 gap-9">
-
-// GOOD - Use consistent scale (4, 8, 12, 16, 24, 32, 48)
-<div className="p-4 mt-8 mb-4 gap-8">
+// Using Tailwind's spacing scale consistently
+<section className="py-12 sm:py-16 lg:py-24">
+  <div className="space-y-8">
+    <header className="space-y-4">
+      <h2 className="text-3xl font-bold">Title</h2>
+      <p className="text-lg text-gray-600">Description</p>
+    </header>
+    <div className="grid gap-6">
+      {/* Cards */}
+    </div>
+  </div>
+</section>
 ```
+Consistent scale (4, 6, 8, 12, 16, 24). Predictable spacing.
+</Good>
 
-### Not Using Container
-
+<Bad>
 ```tsx
-// BAD - Content spans full width
-<main className="px-4">
-
-// GOOD - Consistent container
-<main className="container mx-auto px-4">
+// Random spacing values
+<section className="py-[47px] mb-[13px]">
+  <div className="mt-7 gap-9 p-[22px]">
+    {/* No consistency */}
+  </div>
+</section>
 ```
+Arbitrary values create visual inconsistency.
+</Bad>
 
-### Overriding with !important
+## Anti-Patterns
 
-```tsx
-// BAD
-<div className="!p-0">
+| Anti-Pattern | Why It Fails | What To Do Instead |
+|--------------|--------------|-------------------|
+| Dynamic class names | Purged in production | Use full class names or safelist |
+| @apply everywhere | Defeats Tailwind's purpose | Create components instead |
+| Arbitrary values | Breaks design consistency | Stick to spacing scale |
+| !important overrides | Specificity wars | Fix at source with cn() |
+| Missing dark mode | Broken appearance | Add dark: variants to everything |
 
-// GOOD - Fix specificity at source or use cn()
-<div className={cn('p-4', nopadding && 'p-0')}>
-```
+## Red Flags - STOP
 
----
+If you catch yourself:
+- Using template literals for dynamic class names like `bg-${color}-500`
+- Adding arbitrary values like `p-[17px]` without strong justification
+- Using @apply to create utility classes
+- Adding !important to force styles
+- Skipping dark mode variants on any color/background
+
+**ALL of these mean: STOP. Reconsider the approach. Follow the patterns.**
+
+## Common Rationalizations
+
+| Excuse | Reality |
+|--------|---------|
+| "Arbitrary values are faster" | They create tech debt. Use the scale. |
+| "@apply keeps code clean" | It defeats the purpose of utilities. Use components. |
+| "Dark mode can wait" | It's 10x harder to add later. Do it now. |
+| "This spacing is close enough" | Close enough creates visual inconsistency. |
+| "The class name is obvious" | Future you won't remember. Use cn(). |
+| "I'll safelist it later" | You'll forget. Use complete class names now. |
 
 ## Gotchas
 
-### 1. Class Order Matters (Sometimes)
+### Class Names Are Purged
+
+Tailwind purges classes not found as complete strings:
 
 ```tsx
-// Tailwind processes left-to-right, but twMerge fixes conflicts
-// Using cn() handles this:
-cn('p-4', 'p-2') // Results in 'p-2'
-cn('text-red-500', props.className) // Props override base
-```
-
-### 2. Purging in Production
-
-Tailwind purges unused classes. Dynamic classes won't be included:
-
-```tsx
-// BAD - Class won't be in production bundle
+// BAD - purged in production
 const color = 'red';
-<div className={`bg-${color}-500`}> // Purged!
+<div className={`bg-${color}-500`} /> // Class doesn't exist!
 
-// GOOD - Full class name
+// GOOD - complete class names
 const bgColors = {
   red: 'bg-red-500',
   blue: 'bg-blue-500',
-};
-<div className={bgColors[color]}>
+  green: 'bg-green-500',
+} as const;
+<div className={bgColors[color]} />
 ```
 
-### 3. Custom Colors Need Full Definition
+### Class Order with cn()
+
+cn() (tailwind-merge) resolves conflicts by keeping the last one:
+
+```tsx
+cn('p-4', 'p-2'); // Results in 'p-2'
+cn('text-red-500', className); // Props override base
+```
+
+### Custom Colors Need All Shades
 
 ```typescript
 // tailwind.config.ts
@@ -357,85 +350,65 @@ theme: {
       brand: {
         50: '#f0f9ff',
         100: '#e0f2fe',
-        // ... all shades needed
+        // ... need ALL shades you'll use
         500: '#0ea5e9',
         600: '#0284c7',
-        // ...
       },
     },
   },
 }
 ```
 
-### 4. Dark Mode Flash
+### Focus States for Accessibility
 
-On page load, there can be a flash of wrong theme:
-
-```tsx
-// Add to html tag to prevent flash
-<html suppressHydrationWarning>
-  <head>
-    <script dangerouslySetInnerHTML={{
-      __html: `
-        if (localStorage.theme === 'dark' || (!localStorage.theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-          document.documentElement.classList.add('dark')
-        }
-      `
-    }} />
-  </head>
-```
-
-### 5. Prose for Markdown Content
+Always include focus-visible styles:
 
 ```tsx
-// For rendered markdown/HTML content
-<article className="prose dark:prose-invert max-w-none">
-  {markdownContent}
-</article>
+<button className="
+  focus-visible:outline-none
+  focus-visible:ring-2
+  focus-visible:ring-blue-500
+  focus-visible:ring-offset-2
+">
 ```
 
----
+## Verification Checklist
 
-## Checkpoints
+Before marking Tailwind UI work complete:
 
-Before marking a Tailwind UI task complete:
-
-- [ ] Components use cn() for class merging
+- [ ] cn() used for class merging in components
+- [ ] Dark mode variants on all colors/backgrounds
 - [ ] Responsive design tested on mobile, tablet, desktop
-- [ ] Dark mode implemented and tested
-- [ ] Interactive states work (hover, focus, disabled)
-- [ ] No hardcoded colors (use theme colors)
-- [ ] Consistent spacing scale used
-- [ ] Accessibility: focus states visible, sufficient contrast
+- [ ] Spacing uses Tailwind scale (no arbitrary unless justified)
+- [ ] No dynamic class names without complete strings
+- [ ] Focus states visible on interactive elements
+- [ ] Contrast ratios meet WCAG 4.5:1 for text
+- [ ] No @apply in component styles
+- [ ] Consistent variant patterns across similar components
+- [ ] Flash of unstyled content handled for dark mode
+
+Can't check all boxes? You have Tailwind anti-patterns. Fix them.
+
+## Integration
+
+**Pairs well with:**
+- `react-patterns` - Component logic
+- `brand-identity` - Color/typography decisions
+- `ux-research` - Layout patterns
+- `crud-builder` - Form styling
+
+**Requires:**
+- clsx and tailwind-merge installed
+- tailwind.config.ts configured
+- Dark mode strategy decided (class or media)
+
+## References
+
+- [Tailwind CSS Documentation](https://tailwindcss.com/docs)
+- [tailwind-merge](https://github.com/dcastil/tailwind-merge)
+- [shadcn/ui Components](https://ui.shadcn.com/)
+- [Heroicons](https://heroicons.com/)
 
 ---
 
-## Escape Hatches
-
-### When Tailwind is fighting you
-- Custom CSS for complex animations
-- CSS modules for highly specific overrides
-- Inline styles for truly dynamic values (e.g., `style={{ width: `${percent}%` }}`)
-
-### When you need a design system
-- Consider shadcn/ui (copy-paste Tailwind components)
-- Radix UI + Tailwind for accessible primitives
-- Headless UI for complex interactions
-
-### When dark mode is too complex
-- Use CSS variables for theming
-- Consider `prefers-color-scheme` media query only
-
----
-
-## Squad Dependencies
-
-Often paired with:
-- `react-patterns` for component logic
-- `nextjs-app-router` for layouts
-- `brand-identity` for color/typography decisions
-- `crud-builder` for consistent form styling
-
----
-
-*Last updated: 2025-12-11*
+*This specialist follows the world-class skill pattern.*

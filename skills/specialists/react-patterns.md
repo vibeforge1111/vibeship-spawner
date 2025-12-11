@@ -1,501 +1,271 @@
+---
+name: react-patterns
+description: Use when building React components or debugging state/render issues - enforces proper hook usage, prevents unnecessary re-renders, and guides component composition patterns
+tags: [react, hooks, state, performance, components]
+---
+
 # React Patterns Specialist
 
-## Identity
+## Overview
 
-- **Tags**: `react`, `hooks`, `state`, `performance`, `components`
-- **Domain**: Hooks, state management, performance optimization, component composition
-- **Use when**: Component architecture, state bugs, performance issues, hook patterns
+React's power comes from its simple model: state changes trigger renders. Fighting this model with useEffect hacks, prop drilling, and premature memoization creates bugs and performance issues.
 
----
+**Core principle:** Work with React's model, not against it. Derive state during render, lift state up, push effects down.
+
+## The Iron Law
+
+```
+NO USEEFFECT FOR DERIVED STATE - COMPUTE DURING RENDER
+```
+
+If a value can be calculated from props or state, calculate it during render. useEffect for derivation causes extra renders, race conditions, and stale data.
+
+## When to Use
+
+**Always:**
+- Building new components
+- Debugging re-render issues
+- Extracting custom hooks
+- Optimizing performance
+- Fixing stale closure bugs
+
+**Don't:**
+- Server Components (different patterns)
+- Simple static components (don't over-engineer)
+- One-off scripts (not React)
+
+Thinking "useEffect will sync this data"? Stop. That's almost always wrong.
+
+## The Process
+
+### Step 1: Identify State Ownership
+
+Before writing a component, ask: who owns this state?
+- Parent owns → controlled component (value + onChange props)
+- Component owns → internal state
+- Multiple components need it → lift to common ancestor or context
+
+### Step 2: Derive What You Can
+
+For any value, ask: can this be calculated from existing state/props?
+- Yes → compute during render (with useMemo if expensive)
+- No → it's actual state
+
+### Step 3: Push Effects Down
+
+If you need useEffect, push it to the smallest component possible. This isolates re-renders.
 
 ## Patterns
 
-### Custom Hooks for Logic Extraction
+### Derived State
 
+<Good>
 ```tsx
-// hooks/useLocalStorage.ts
-import { useState, useEffect } from 'react';
+function ProductList({ products, filter }) {
+  // Derive during render - always in sync
+  const filteredProducts = products.filter(p => p.category === filter);
 
-export function useLocalStorage<T>(key: string, initialValue: T) {
-  const [storedValue, setStoredValue] = useState<T>(() => {
-    if (typeof window === 'undefined') return initialValue;
-    try {
-      const item = window.localStorage.getItem(key);
-      return item ? JSON.parse(item) : initialValue;
-    } catch {
-      return initialValue;
-    }
+  // Memoize only if filtering is expensive
+  const expensiveFiltered = useMemo(
+    () => products.filter(p => expensiveCheck(p, filter)),
+    [products, filter]
+  );
+
+  return <ul>{filteredProducts.map(p => <li key={p.id}>{p.name}</li>)}</ul>;
+}
+```
+Computed during render. Always up to date. No extra re-renders.
+</Good>
+
+<Bad>
+```tsx
+function ProductList({ products, filter }) {
+  const [filteredProducts, setFilteredProducts] = useState([]);
+
+  // BAD: useEffect for derived state
+  useEffect(() => {
+    setFilteredProducts(products.filter(p => p.category === filter));
+  }, [products, filter]);
+
+  return <ul>{filteredProducts.map(p => <li key={p.id}>{p.name}</li>)}</ul>;
+}
+```
+Extra state, extra render, potential stale data during first render.
+</Bad>
+
+### Custom Hooks for Logic
+
+<Good>
+```tsx
+// Extract reusable logic into hooks
+function useLocalStorage<T>(key: string, initial: T) {
+  const [value, setValue] = useState<T>(() => {
+    if (typeof window === 'undefined') return initial;
+    const stored = localStorage.getItem(key);
+    return stored ? JSON.parse(stored) : initial;
   });
 
-  const setValue = (value: T | ((val: T) => T)) => {
-    const valueToStore = value instanceof Function ? value(storedValue) : value;
-    setStoredValue(valueToStore);
-    window.localStorage.setItem(key, JSON.stringify(valueToStore));
+  const setStoredValue = (newValue: T | ((v: T) => T)) => {
+    setValue(prev => {
+      const resolved = newValue instanceof Function ? newValue(prev) : newValue;
+      localStorage.setItem(key, JSON.stringify(resolved));
+      return resolved;
+    });
   };
 
-  return [storedValue, setValue] as const;
+  return [value, setStoredValue] as const;
 }
 
 // Usage
 const [theme, setTheme] = useLocalStorage('theme', 'light');
 ```
+Reusable, testable, encapsulates complexity.
+</Good>
 
-### Data Fetching Hook
-
+<Bad>
 ```tsx
-// hooks/useFetch.ts
-import { useState, useEffect } from 'react';
-
-interface UseFetchResult<T> {
-  data: T | null;
-  loading: boolean;
-  error: Error | null;
-  refetch: () => void;
-}
-
-export function useFetch<T>(url: string): UseFetchResult<T> {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-
-  const fetchData = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const json = await response.json();
-      setData(json);
-    } catch (e) {
-      setError(e instanceof Error ? e : new Error('Unknown error'));
-    } finally {
-      setLoading(false);
-    }
-  };
+function Settings() {
+  const [theme, setTheme] = useState('light');
 
   useEffect(() => {
-    fetchData();
-  }, [url]);
+    const stored = localStorage.getItem('theme');
+    if (stored) setTheme(stored);
+  }, []);
 
-  return { data, loading, error, refetch: fetchData };
+  useEffect(() => {
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  // Duplicated in every component that needs localStorage
 }
 ```
-
-### Compound Components
-
-```tsx
-// components/Tabs.tsx
-import { createContext, useContext, useState, ReactNode } from 'react';
-
-interface TabsContextType {
-  activeTab: string;
-  setActiveTab: (tab: string) => void;
-}
-
-const TabsContext = createContext<TabsContextType | null>(null);
-
-function useTabs() {
-  const context = useContext(TabsContext);
-  if (!context) throw new Error('useTabs must be used within Tabs');
-  return context;
-}
-
-interface TabsProps {
-  defaultTab: string;
-  children: ReactNode;
-}
-
-export function Tabs({ defaultTab, children }: TabsProps) {
-  const [activeTab, setActiveTab] = useState(defaultTab);
-  return (
-    <TabsContext.Provider value={{ activeTab, setActiveTab }}>
-      {children}
-    </TabsContext.Provider>
-  );
-}
-
-export function TabList({ children }: { children: ReactNode }) {
-  return <div role="tablist" className="flex gap-2">{children}</div>;
-}
-
-export function Tab({ value, children }: { value: string; children: ReactNode }) {
-  const { activeTab, setActiveTab } = useTabs();
-  return (
-    <button
-      role="tab"
-      aria-selected={activeTab === value}
-      onClick={() => setActiveTab(value)}
-      className={activeTab === value ? 'font-bold' : ''}
-    >
-      {children}
-    </button>
-  );
-}
-
-export function TabPanel({ value, children }: { value: string; children: ReactNode }) {
-  const { activeTab } = useTabs();
-  if (activeTab !== value) return null;
-  return <div role="tabpanel">{children}</div>;
-}
-
-// Usage
-<Tabs defaultTab="account">
-  <TabList>
-    <Tab value="account">Account</Tab>
-    <Tab value="settings">Settings</Tab>
-  </TabList>
-  <TabPanel value="account">Account content</TabPanel>
-  <TabPanel value="settings">Settings content</TabPanel>
-</Tabs>
-```
-
-### Render Props
-
-```tsx
-// components/Toggle.tsx
-interface ToggleProps {
-  children: (props: { on: boolean; toggle: () => void }) => ReactNode;
-}
-
-export function Toggle({ children }: ToggleProps) {
-  const [on, setOn] = useState(false);
-  const toggle = () => setOn(!on);
-  return <>{children({ on, toggle })}</>;
-}
-
-// Usage
-<Toggle>
-  {({ on, toggle }) => (
-    <button onClick={toggle}>{on ? 'ON' : 'OFF'}</button>
-  )}
-</Toggle>
-```
+Logic scattered across component. Not reusable. Double effects.
+</Bad>
 
 ### Controlled vs Uncontrolled
 
+<Good>
 ```tsx
-// Controlled - parent owns state
-interface ControlledInputProps {
-  value: string;
-  onChange: (value: string) => void;
-}
-
-function ControlledInput({ value, onChange }: ControlledInputProps) {
-  return (
-    <input
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    />
-  );
-}
-
-// Uncontrolled - component owns state with optional external control
-interface InputProps {
-  defaultValue?: string;
-  value?: string;
-  onChange?: (value: string) => void;
-}
-
-function Input({ defaultValue, value, onChange }: InputProps) {
-  const [internalValue, setInternalValue] = useState(defaultValue ?? '');
+// Supports both controlled and uncontrolled usage
+function Input({ value, defaultValue, onChange }: InputProps) {
+  const [internal, setInternal] = useState(defaultValue ?? '');
   const isControlled = value !== undefined;
 
-  const currentValue = isControlled ? value : internalValue;
+  const currentValue = isControlled ? value : internal;
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newValue = e.target.value;
-    if (!isControlled) setInternalValue(newValue);
-    onChange?.(newValue);
+  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
+    if (!isControlled) setInternal(e.target.value);
+    onChange?.(e.target.value);
   };
 
   return <input value={currentValue} onChange={handleChange} />;
 }
 ```
+Works as controlled or uncontrolled. Flexible for consumers.
+</Good>
 
-### Memoization
-
+<Bad>
 ```tsx
-// Memoize expensive calculations
-const expensiveResult = useMemo(() => {
-  return heavyComputation(data);
-}, [data]); // Only recompute when data changes
+// Forces controlled-only usage
+function Input({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return <input value={value} onChange={e => onChange(e.target.value)} />;
+}
 
-// Memoize callbacks to prevent child re-renders
-const handleClick = useCallback(() => {
-  doSomething(id);
-}, [id]);
-
-// Memoize components
-const MemoizedComponent = memo(function Component({ data }: Props) {
-  return <div>{data.name}</div>;
-});
-
-// With custom comparison
-const MemoizedComponent = memo(
-  function Component({ data }: Props) {
-    return <div>{data.name}</div>;
-  },
-  (prevProps, nextProps) => prevProps.data.id === nextProps.data.id
-);
+// Consumer MUST manage state, even for simple cases
+const [value, setValue] = useState('');
+<Input value={value} onChange={setValue} />
 ```
+Inflexible. Consumers can't use defaultValue pattern.
+</Bad>
 
-### useReducer for Complex State
+### Context for Cross-Cutting State
 
+<Good>
 ```tsx
-interface State {
-  items: Item[];
-  loading: boolean;
-  error: string | null;
+// Create focused context
+const ThemeContext = createContext<{ theme: string; toggle: () => void } | null>(null);
+
+function useTheme() {
+  const context = useContext(ThemeContext);
+  if (!context) throw new Error('useTheme must be used within ThemeProvider');
+  return context;
 }
 
-type Action =
-  | { type: 'FETCH_START' }
-  | { type: 'FETCH_SUCCESS'; payload: Item[] }
-  | { type: 'FETCH_ERROR'; payload: string }
-  | { type: 'ADD_ITEM'; payload: Item }
-  | { type: 'REMOVE_ITEM'; payload: string };
-
-function reducer(state: State, action: Action): State {
-  switch (action.type) {
-    case 'FETCH_START':
-      return { ...state, loading: true, error: null };
-    case 'FETCH_SUCCESS':
-      return { ...state, loading: false, items: action.payload };
-    case 'FETCH_ERROR':
-      return { ...state, loading: false, error: action.payload };
-    case 'ADD_ITEM':
-      return { ...state, items: [...state.items, action.payload] };
-    case 'REMOVE_ITEM':
-      return { ...state, items: state.items.filter(i => i.id !== action.payload) };
-    default:
-      return state;
-  }
-}
-
-function ItemList() {
-  const [state, dispatch] = useReducer(reducer, {
-    items: [],
-    loading: false,
-    error: null,
-  });
-
-  // dispatch({ type: 'ADD_ITEM', payload: newItem });
-}
-```
-
-### Refs for DOM Access
-
-```tsx
-function TextInput() {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const focusInput = () => {
-    inputRef.current?.focus();
-  };
+// Provider at appropriate level
+function ThemeProvider({ children }: { children: ReactNode }) {
+  const [theme, setTheme] = useState('light');
+  const toggle = () => setTheme(t => t === 'light' ? 'dark' : 'light');
 
   return (
-    <>
-      <input ref={inputRef} />
-      <button onClick={focusInput}>Focus</button>
-    </>
+    <ThemeContext.Provider value={{ theme, toggle }}>
+      {children}
+    </ThemeContext.Provider>
   );
 }
-
-// Forward refs to child components
-const Input = forwardRef<HTMLInputElement, InputProps>((props, ref) => {
-  return <input ref={ref} {...props} />;
-});
-
-// Imperative handle for custom ref API
-const Input = forwardRef<{ focus: () => void }, InputProps>((props, ref) => {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useImperativeHandle(ref, () => ({
-    focus: () => inputRef.current?.focus(),
-  }));
-
-  return <input ref={inputRef} {...props} />;
-});
 ```
+Focused context. Throws helpful error if misused.
+</Good>
 
-### Error Boundaries
-
+<Bad>
 ```tsx
-// components/ErrorBoundary.tsx
-import { Component, ReactNode } from 'react';
-
-interface Props {
-  children: ReactNode;
-  fallback: ReactNode;
+// Prop drilling through many levels
+function App({ user }) {
+  return <Layout user={user}><Header user={user}><UserMenu user={user} /></Header></Layout>;
 }
-
-interface State {
-  hasError: boolean;
-}
-
-export class ErrorBoundary extends Component<Props, State> {
-  state = { hasError: false };
-
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error('Error caught:', error, errorInfo);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return this.props.fallback;
-    }
-    return this.props.children;
-  }
-}
-
-// Usage
-<ErrorBoundary fallback={<div>Something went wrong</div>}>
-  <RiskyComponent />
-</ErrorBoundary>
 ```
+Every intermediate component must accept and forward props.
+</Bad>
 
----
+## Anti-Patterns
 
-## Anti-patterns
+| Anti-Pattern | Why It Fails | What To Do Instead |
+|--------------|--------------|-------------------|
+| useEffect for derived state | Extra render, stale data | Compute during render |
+| Object/array in deps array | Creates new reference every render | useMemo or destructure |
+| Prop drilling 3+ levels | Fragile, verbose, hard to refactor | Use Context |
+| Memoizing everything | Overhead often exceeds benefit | Profile first, then optimize |
+| State for computed values | Out of sync, extra renders | Derive from source state |
 
-### useEffect for Derived State
+## Red Flags - STOP
 
-```tsx
-// BAD - useEffect for computation
-const [items, setItems] = useState([]);
-const [filteredItems, setFilteredItems] = useState([]);
+If you catch yourself:
+- Writing `useEffect` + `setState` for something computable
+- Creating state that mirrors props
+- Passing props through 3+ component levels
+- Adding `useMemo`/`useCallback` without measuring first
+- Fighting stale closures with refs
 
-useEffect(() => {
-  setFilteredItems(items.filter(i => i.active));
-}, [items]);
+**ALL of these mean: STOP. Re-think the component design. Usually state is in wrong place.**
 
-// GOOD - Compute during render
-const [items, setItems] = useState([]);
-const filteredItems = items.filter(i => i.active);
+## Common Rationalizations
 
-// Or useMemo for expensive computations
-const filteredItems = useMemo(
-  () => items.filter(i => i.active),
-  [items]
-);
-```
-
-### Props Drilling
-
-```tsx
-// BAD - Passing props through many levels
-<App user={user}>
-  <Layout user={user}>
-    <Header user={user}>
-      <UserMenu user={user} />
-    </Header>
-  </Layout>
-</App>
-
-// GOOD - Use context
-const UserContext = createContext<User | null>(null);
-
-<UserContext.Provider value={user}>
-  <App>
-    <Layout>
-      <Header>
-        <UserMenu /> {/* Uses useContext(UserContext) */}
-      </Header>
-    </Layout>
-  </App>
-</UserContext.Provider>
-```
-
-### Unnecessary State
-
-```tsx
-// BAD - State that's always derived
-const [firstName, setFirstName] = useState('');
-const [lastName, setLastName] = useState('');
-const [fullName, setFullName] = useState('');
-
-useEffect(() => {
-  setFullName(`${firstName} ${lastName}`);
-}, [firstName, lastName]);
-
-// GOOD - Just compute it
-const [firstName, setFirstName] = useState('');
-const [lastName, setLastName] = useState('');
-const fullName = `${firstName} ${lastName}`;
-```
-
-### Object/Array Dependencies
-
-```tsx
-// BAD - Creates new object every render
-useEffect(() => {
-  fetchData(options);
-}, [{ page: 1, limit: 10 }]); // Always triggers!
-
-// GOOD - Stable reference
-const options = useMemo(() => ({ page, limit }), [page, limit]);
-useEffect(() => {
-  fetchData(options);
-}, [options]);
-
-// Or destructure
-useEffect(() => {
-  fetchData({ page, limit });
-}, [page, limit]);
-```
-
----
+| Excuse | Reality |
+|--------|---------|
+| "useEffect keeps it in sync" | Computation during render IS in sync. useEffect adds delay. |
+| "useMemo/useCallback everywhere is safe" | It has overhead. Only use when measured benefit. |
+| "Prop drilling is simpler than Context" | For 2 levels, yes. For 3+, Context is simpler. |
+| "This component needs all this state" | Does it? Or should state be lifted/split? |
+| "I need useEffect for this fetch" | In App Router, use Server Components. In client, use React Query/SWR. |
+| "Refs avoid stale closures" | Refs are escape hatch. Fix the closure instead. |
 
 ## Gotchas
 
-### 1. Stale Closures
+### Stale Closures in Intervals
 
 ```tsx
-// BAD - count is stale in interval
-function Counter() {
-  const [count, setCount] = useState(0);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      setCount(count + 1); // Always uses initial count!
-    }, 1000);
-    return () => clearInterval(id);
-  }, []); // Empty deps = stale closure
-}
-
-// GOOD - Use functional update
-setCount(c => c + 1);
-
-// Or include in deps
+// BAD - count is stale
 useEffect(() => {
   const id = setInterval(() => {
-    setCount(count + 1);
+    setCount(count + 1); // Always uses initial count!
   }, 1000);
   return () => clearInterval(id);
-}, [count]); // But this resets interval every count change
+}, []); // Empty deps = stale closure
+
+// GOOD - functional update
+setCount(c => c + 1);
 ```
 
-### 2. useEffect Runs After Paint
-
-```tsx
-// useEffect runs after browser paints
-useEffect(() => {
-  // This causes a flash
-  setVisible(true);
-}, []);
-
-// useLayoutEffect runs before paint (use sparingly)
-useLayoutEffect(() => {
-  // Measure DOM before paint
-  const height = ref.current?.offsetHeight;
-}, []);
-```
-
-### 3. State Updates Are Batched
+### State Updates Are Batched
 
 ```tsx
 // React 18+ batches all updates
@@ -505,13 +275,9 @@ function handleClick() {
   setC(3);
   // Only ONE re-render, not three
 }
-
-// If you need immediate state, use flushSync (rarely needed)
-import { flushSync } from 'react-dom';
-flushSync(() => setCount(1));
 ```
 
-### 4. Keys Reset Component State
+### Keys Reset Component State
 
 ```tsx
 // Changing key resets component entirely
@@ -519,54 +285,38 @@ flushSync(() => setCount(1));
 // New userId = fresh component with fresh state
 ```
 
-### 5. Strict Mode Runs Effects Twice
+## Verification Checklist
 
-In development with React.StrictMode, effects run twice to catch bugs. This is intentional - make effects idempotent.
+Before marking React work complete:
 
----
-
-## Checkpoints
-
-Before marking a React task complete:
-
-- [ ] No unnecessary useEffect for derived state
+- [ ] No useEffect for derived/computed state
 - [ ] Custom hooks extracted for reusable logic
-- [ ] Expensive computations memoized
-- [ ] Context used instead of deep prop drilling
-- [ ] Keys are stable and unique
-- [ ] Error boundaries wrap risky components
-- [ ] No stale closure issues
-- [ ] Dependencies arrays accurate
+- [ ] Context used instead of 3+ level prop drilling
+- [ ] Keys are stable and unique (not array index for dynamic lists)
+- [ ] Dependencies arrays are accurate (no eslint-disable)
+- [ ] No stale closure issues in callbacks/effects
+- [ ] Memoization only where profiling showed benefit
+- [ ] Error boundaries wrap risky component subtrees
+
+Can't check all boxes? You have React anti-patterns. Fix them.
+
+## Integration
+
+**Pairs well with:**
+- `typescript-strict` - Type-safe props and hooks
+- `nextjs-app-router` - Server/Client component split
+- `state-sync` - Client/server state management
+
+**Requires:**
+- Understanding of React render cycle
+- React 18+ for automatic batching
+
+## References
+
+- [React Documentation](https://react.dev/)
+- [You Might Not Need an Effect](https://react.dev/learn/you-might-not-need-an-effect)
+- [Thinking in React](https://react.dev/learn/thinking-in-react)
 
 ---
 
-## Escape Hatches
-
-### When Context re-renders too much
-- Split context into smaller pieces
-- Use state management library (Zustand, Jotai)
-- Use React Query/SWR for server state
-
-### When memo/useMemo doesn't help
-- Check if parent is re-rendering unnecessarily
-- Consider component structure changes
-- Profile with React DevTools
-
-### When refs aren't enough
-- Use state for things that need re-renders
-- Consider uncontrolled form inputs
-- Use form libraries (react-hook-form)
-
----
-
-## Squad Dependencies
-
-Often paired with:
-- `typescript-strict` for type-safe props
-- `nextjs-app-router` for Server Components
-- `state-sync` for client/server state
-- `server-client-boundary` for RSC patterns
-
----
-
-*Last updated: 2025-12-11*
+*This specialist follows the world-class skill pattern.*

@@ -1,89 +1,170 @@
-# Supabase Backend Specialist
-
-## Identity
-
-- **Tags**: `supabase`, `database`, `rls`, `auth`, `storage`, `realtime`
-- **Domain**: Supabase Auth, Database, RLS, Edge Functions, Realtime, Storage
-- **Use when**: Any Supabase project, auth tasks, database schema, RLS policies
-
+---
+name: supabase-backend
+description: Use when working with Supabase database, auth, or storage - enforces RLS policies on all tables, proper client setup, and secure data access patterns
+tags: [supabase, database, rls, auth, storage, realtime]
 ---
 
-## Patterns
+# Supabase Backend Specialist
 
-### Database Schema with RLS
+## Overview
 
-```sql
--- Always enable RLS on user-facing tables
-CREATE TABLE profiles (
-  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  username TEXT UNIQUE NOT NULL,
-  avatar_url TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
+Supabase provides Postgres with Row Level Security (RLS). Without RLS, your database is open to any authenticated user. With bad RLS, it's open to attackers.
 
--- Enable RLS
-ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+**Core principle:** Every user-facing table MUST have RLS enabled with policies that restrict access to appropriate data.
 
--- Users can read all profiles
-CREATE POLICY "Profiles are viewable by everyone"
-  ON profiles FOR SELECT
-  USING (true);
+## The Iron Law
 
--- Users can only update their own profile
-CREATE POLICY "Users can update own profile"
-  ON profiles FOR UPDATE
-  USING (auth.uid() = id)
-  WITH CHECK (auth.uid() = id);
+```
+NO USER-FACING TABLE WITHOUT RLS ENABLED AND POLICIES DEFINED
 ```
 
-### RLS for Multi-tenant Data
+A table without RLS is a security vulnerability. A table with RLS but no policies blocks all access. Both are wrong. Enable RLS AND create appropriate policies.
+
+## When to Use
+
+**Always:**
+- Creating database tables
+- Setting up authentication
+- Implementing data access
+- Configuring storage buckets
+- Adding realtime subscriptions
+
+**Don't:**
+- Client-side only features (no backend)
+- Non-Supabase databases
+- Admin-only internal tools (but still consider RLS)
+
+Thinking "I'll add RLS later"? Stop. That's a security vulnerability waiting to be exploited.
+
+## The Process
+
+### Step 1: Create Table with RLS
+
+Every table creation includes RLS enablement:
 
 ```sql
 CREATE TABLE todos (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id) NOT NULL,
   title TEXT NOT NULL,
-  completed BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ALWAYS enable RLS immediately
 ALTER TABLE todos ENABLE ROW LEVEL SECURITY;
+```
 
--- Users can only see their own todos
-CREATE POLICY "Users can view own todos"
-  ON todos FOR SELECT
+### Step 2: Create Policies for Each Operation
+
+Define what users can SELECT, INSERT, UPDATE, DELETE:
+
+```sql
+CREATE POLICY "Users can view own todos" ON todos
+  FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can create own todos" ON todos
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+```
+
+### Step 3: Test Policies
+
+Query as different users to verify policies work correctly.
+
+## Patterns
+
+### RLS for User-Owned Data
+
+<Good>
+```sql
+-- Table with user ownership
+CREATE TABLE posts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id) NOT NULL,
+  title TEXT NOT NULL
+);
+
+ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
+
+-- Each operation explicitly tied to auth.uid()
+CREATE POLICY "Users can view own posts"
+  ON posts FOR SELECT
   USING (auth.uid() = user_id);
 
--- Users can only insert their own todos
-CREATE POLICY "Users can insert own todos"
-  ON todos FOR INSERT
+CREATE POLICY "Users can create own posts"
+  ON posts FOR INSERT
   WITH CHECK (auth.uid() = user_id);
 
--- Users can only update their own todos
-CREATE POLICY "Users can update own todos"
-  ON todos FOR UPDATE
-  USING (auth.uid() = user_id);
+CREATE POLICY "Users can update own posts"
+  ON posts FOR UPDATE
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
 
--- Users can only delete their own todos
-CREATE POLICY "Users can delete own todos"
-  ON todos FOR DELETE
+CREATE POLICY "Users can delete own posts"
+  ON posts FOR DELETE
   USING (auth.uid() = user_id);
 ```
+Explicit policy for each CRUD operation. auth.uid() ties to authenticated user.
+</Good>
 
-### Client Setup (Next.js)
+<Bad>
+```sql
+CREATE TABLE posts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id) NOT NULL,
+  title TEXT NOT NULL
+);
 
-```typescript
-// lib/supabase/client.ts
-import { createBrowserClient } from '@supabase/ssr';
-
-export function createClient() {
-  return createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-}
+-- RLS not enabled! Any authenticated user can access ALL posts!
+-- Or worse:
+ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
+-- No policies = NO ONE can access (including owner)
 ```
+Missing RLS = security hole. RLS without policies = broken app.
+</Bad>
 
+### Public Read, Private Write
+
+<Good>
+```sql
+-- Profiles visible to everyone, editable by owner
+CREATE TABLE profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id),
+  username TEXT UNIQUE NOT NULL,
+  avatar_url TEXT
+);
+
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+
+-- Anyone can read profiles
+CREATE POLICY "Profiles are publicly viewable"
+  ON profiles FOR SELECT
+  USING (true);
+
+-- Only owner can update
+CREATE POLICY "Users can update own profile"
+  ON profiles FOR UPDATE
+  USING (auth.uid() = id)
+  WITH CHECK (auth.uid() = id);
+```
+Public content uses `USING (true)`. Write operations check ownership.
+</Good>
+
+<Bad>
+```sql
+CREATE POLICY "Bad policy"
+  ON profiles FOR SELECT
+  USING (user_id IS NOT NULL); -- This allows ALL rows!
+
+CREATE POLICY "Another bad policy"
+  ON profiles FOR SELECT
+  USING (auth.uid() IS NOT NULL); -- Allows any authenticated user to see all!
+```
+These policies don't actually restrict anything meaningful.
+</Bad>
+
+### Server Client Setup (Next.js)
+
+<Good>
 ```typescript
 // lib/supabase/server.ts
 import { createServerClient } from '@supabase/ssr';
@@ -94,12 +175,10 @@ export async function createClient() {
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, // ANON key, not service role
     {
       cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
+        getAll() { return cookieStore.getAll(); },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) => {
             cookieStore.set(name, value, options);
@@ -110,298 +189,161 @@ export async function createClient() {
   );
 }
 ```
+Uses anon key. RLS applies. User context from cookies.
+</Good>
 
-### Middleware for Auth
-
+<Bad>
 ```typescript
-// middleware.ts
-import { createServerClient } from '@supabase/ssr';
-import { NextResponse, type NextRequest } from 'next/server';
+// NEVER do this in client-accessible code
+import { createClient } from '@supabase/supabase-js';
 
-export async function middleware(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request });
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY! // BYPASSES ALL RLS!
+);
+```
+Service role key bypasses RLS. Never expose to client or use in client-accessible routes.
+</Bad>
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          );
-          supabaseResponse = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          );
-        },
-      },
-    }
-  );
+### Error Handling
 
-  // Refresh session if expired
-  const { data: { user } } = await supabase.auth.getUser();
+<Good>
+```typescript
+const { data, error } = await supabase
+  .from('todos')
+  .select('*')
+  .eq('id', todoId)
+  .single();
 
-  // Protect routes
-  if (!user && request.nextUrl.pathname.startsWith('/dashboard')) {
-    return NextResponse.redirect(new URL('/login', request.url));
-  }
-
-  return supabaseResponse;
+if (error) {
+  console.error('Database error:', error);
+  throw new Error('Failed to fetch todo');
 }
 
-export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
-};
+if (!data) {
+  throw new Error('Todo not found');
+}
+
+return data;
 ```
+Always check error. Always check data exists. Log internally.
+</Good>
 
-### Edge Functions
-
+<Bad>
 ```typescript
-// supabase/functions/hello/index.ts
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-
-serve(async (req) => {
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  );
-
-  // Get auth header for user context
-  const authHeader = req.headers.get('Authorization');
-  if (authHeader) {
-    const { data: { user } } = await supabase.auth.getUser(
-      authHeader.replace('Bearer ', '')
-    );
-    // User is authenticated
-  }
-
-  return new Response(JSON.stringify({ message: 'Hello!' }), {
-    headers: { 'Content-Type': 'application/json' },
-  });
-});
-```
-
-### Realtime Subscriptions
-
-```typescript
-// Subscribe to changes
-const channel = supabase
-  .channel('todos')
-  .on(
-    'postgres_changes',
-    {
-      event: '*',
-      schema: 'public',
-      table: 'todos',
-      filter: `user_id=eq.${userId}`,
-    },
-    (payload) => {
-      if (payload.eventType === 'INSERT') {
-        setTodos(prev => [...prev, payload.new]);
-      } else if (payload.eventType === 'DELETE') {
-        setTodos(prev => prev.filter(t => t.id !== payload.old.id));
-      } else if (payload.eventType === 'UPDATE') {
-        setTodos(prev => prev.map(t =>
-          t.id === payload.new.id ? payload.new : t
-        ));
-      }
-    }
-  )
-  .subscribe();
-
-// Cleanup
-return () => supabase.removeChannel(channel);
-```
-
-### Storage with Policies
-
-```sql
--- Storage bucket policy
-CREATE POLICY "Users can upload own avatar"
-  ON storage.objects FOR INSERT
-  WITH CHECK (
-    bucket_id = 'avatars'
-    AND auth.uid()::text = (storage.foldername(name))[1]
-  );
-
-CREATE POLICY "Avatars are publicly viewable"
-  ON storage.objects FOR SELECT
-  USING (bucket_id = 'avatars');
-```
-
-```typescript
-// Upload avatar
-const { data, error } = await supabase.storage
-  .from('avatars')
-  .upload(`${userId}/${filename}`, file);
-
-// Get public URL
-const { data: { publicUrl } } = supabase.storage
-  .from('avatars')
-  .getPublicUrl(`${userId}/${filename}`);
-```
-
----
-
-## Anti-patterns
-
-### Bypassing RLS in Client Code
-
-```typescript
-// BAD - Using service role key in client
-const supabase = createClient(url, SERVICE_ROLE_KEY); // NEVER!
-
-// GOOD - Always use anon key in client
-const supabase = createClient(url, ANON_KEY);
-```
-
-### RLS Without auth.uid()
-
-```sql
--- BAD - This policy does nothing useful
-CREATE POLICY "Bad policy"
-  ON todos FOR SELECT
-  USING (user_id IS NOT NULL);
-
--- GOOD - Ties to authenticated user
-CREATE POLICY "Good policy"
-  ON todos FOR SELECT
-  USING (auth.uid() = user_id);
-```
-
-### Fetching in useEffect for Server-renderable Data
-
-```typescript
-// BAD
-"use client";
-useEffect(() => {
-  supabase.from('posts').select('*').then(setPosts);
-}, []);
-
-// GOOD - Use Server Component
-const { data: posts } = await supabase.from('posts').select('*');
-```
-
-### No Error Handling
-
-```typescript
-// BAD
 const { data } = await supabase.from('todos').select('*');
-
-// GOOD
-const { data, error } = await supabase.from('todos').select('*');
-if (error) throw new Error(`Failed to fetch todos: ${error.message}`);
+return data; // Could be null! Error ignored!
 ```
+Ignoring error. Not checking if data exists. Will crash downstream.
+</Bad>
 
----
+## Anti-Patterns
+
+| Anti-Pattern | Why It Fails | What To Do Instead |
+|--------------|--------------|-------------------|
+| Tables without RLS | Anyone can access all data | Enable RLS on every table |
+| Service role key in client | Bypasses all security | Use anon key, rely on RLS |
+| Policies with `USING (true)` for writes | Anyone can write anything | Check `auth.uid() = user_id` |
+| No error handling on queries | Silent failures, null crashes | Always check `error` and `data` |
+| Fetching in useEffect | Extra round trip, loading flash | Use Server Components |
+
+## Red Flags - STOP
+
+If you catch yourself:
+- Creating a table without immediately enabling RLS
+- Using service role key outside of admin scripts
+- Writing a policy without `auth.uid()` for user data
+- Ignoring the `error` return from Supabase queries
+- Storing service role key in NEXT_PUBLIC_ variable
+
+**ALL of these mean: STOP. You have a security vulnerability. Fix it before continuing.**
+
+## Common Rationalizations
+
+| Excuse | Reality |
+|--------|---------|
+| "It's just for development" | Dev habits become prod habits. Add RLS now. |
+| "Only admins use this table" | Add RLS anyway. Defense in depth. |
+| "I'll add policies after I test" | You'll forget. App will break or leak data. |
+| "Service role is faster" | Security > speed. Use anon key + RLS. |
+| "The error won't happen" | It will. In production. At 3am. Handle it. |
+| "RLS is too complex" | RLS is simpler than fixing a data breach. |
 
 ## Gotchas
 
-### 1. RLS Applies to Service Role Too (unless bypassed)
+### auth.uid() Returns NULL for Anon Users
 
 ```sql
--- Service role bypasses RLS by default
--- But if you want RLS even for service role:
-ALTER TABLE todos FORCE ROW LEVEL SECURITY;
-```
-
-### 2. auth.uid() Returns NULL for Anon Users
-
-```sql
--- This fails for unauthenticated users
-CREATE POLICY "..."
-  ON public_posts FOR SELECT
+-- This fails for unauthenticated requests
+CREATE POLICY "..." ON posts FOR SELECT
   USING (auth.uid() = author_id); -- NULL = author_id is always false!
 
 -- For public data, use:
 USING (true);
+
+-- Or for "public OR owner":
+USING (is_public = true OR auth.uid() = author_id);
 ```
 
-### 3. Triggers Run as Table Owner
+### Triggers Bypass RLS
 
 ```sql
--- Trigger functions bypass RLS!
--- Use security definer carefully
+-- Trigger functions run as table owner, bypassing RLS!
 CREATE FUNCTION update_timestamp()
 RETURNS TRIGGER AS $$
 BEGIN
   NEW.updated_at = NOW();
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER; -- Be careful with this
 ```
 
-### 4. Realtime Requires Table Replication
+### Realtime Requires Table Replication
 
-Enable in Dashboard: Database → Replication → Enable for table
+Enable in Supabase Dashboard: Database → Replication → Enable for table
 
-### 5. Foreign Keys Need RLS Too
+### Foreign Keys Need RLS Too
 
 ```sql
--- If todos has FK to projects, user needs SELECT on projects
+-- If todos references projects, user needs SELECT on projects
 CREATE POLICY "Users can view their projects"
   ON projects FOR SELECT
   USING (auth.uid() = owner_id);
 ```
 
-### 6. Email Templates Are Project-Wide
+## Verification Checklist
 
-Custom email templates affect all auth emails for the project.
+Before marking Supabase work complete:
 
----
+- [ ] RLS enabled on ALL user-facing tables
+- [ ] Policies exist for SELECT, INSERT, UPDATE, DELETE as needed
+- [ ] Service role key NOT used in client code
+- [ ] Error handling on every database operation
+- [ ] Foreign key tables also have appropriate RLS
+- [ ] Tested policies with different user contexts
+- [ ] Migration files created and version controlled
+- [ ] Environment variables properly configured
 
-## Checkpoints
+Can't check all boxes? You have security gaps. Fix them.
 
-Before marking a Supabase task complete:
+## Integration
 
-- [ ] RLS enabled on all user-facing tables
-- [ ] Policies cover SELECT, INSERT, UPDATE, DELETE as needed
-- [ ] Service role key NOT exposed to client
-- [ ] Error handling on all database operations
-- [ ] Indexes on frequently queried columns
-- [ ] Foreign key constraints in place
-- [ ] Migration files created and tested
-- [ ] Environment variables properly set
+**Pairs well with:**
+- `nextjs-supabase-auth` - Authentication flows
+- `typescript-strict` - Type generation from schema
+- `api-design` - API routes with Supabase
+- `realtime-sync` - Live subscriptions
 
----
+**Requires:**
+- Supabase project
+- @supabase/ssr for Next.js
 
-## Escape Hatches
+## References
 
-### When to use raw SQL instead of client
-- Complex joins or CTEs
-- Bulk operations
-- Performance-critical queries
-
-### When RLS is too complex
-- Consider database functions (security definer)
-- Move logic to Edge Functions
-- Denormalize for simpler policies
-
-### When Realtime isn't working
-- Check table replication is enabled
-- Verify RLS allows the subscription
-- Consider polling as fallback
-
-### When to consider alternatives
-- If you need full-text search: add pg_trgm or use Algolia
-- If you need complex caching: add Redis layer
-- If you need GraphQL: use PostGraphile or Hasura
+- [Supabase RLS Guide](https://supabase.com/docs/guides/auth/row-level-security)
+- [Supabase Auth Helpers](https://supabase.com/docs/guides/auth/auth-helpers)
+- [Postgres RLS Documentation](https://www.postgresql.org/docs/current/ddl-rowsecurity.html)
 
 ---
 
-## Squad Dependencies
-
-Often paired with:
-- `nextjs-supabase-auth` for auth integration
-- `typescript-strict` for type generation
-- `auth-flow` for login/signup patterns
-- `crud-builder` for data operations
-
----
-
-*Last updated: 2025-12-11*
+*This specialist follows the world-class skill pattern.*

@@ -1,418 +1,392 @@
+---
+name: ux-research
+description: Use when designing user flows or navigation structure - enforces clear information architecture, consistent patterns, and accessibility requirements
+tags: [ux, user-flows, wireframes, navigation, accessibility]
+---
+
 # UX Research Specialist
 
-## Identity
+## Overview
 
-- **Tags**: `ux`, `user-flows`, `wireframes`, `navigation`, `accessibility`
-- **Domain**: User flows, wireframes, usability patterns, information architecture
-- **Use when**: Feature planning, user flow design, navigation structure, UX decisions
+Good UX is invisible. Bad UX makes users think. Every unnecessary click, confusing label, or hidden action costs user trust and business metrics. Design for the user's mental model, not your data model.
 
----
+**Core principle:** Users have goals. Your job is to remove obstacles between them and those goals. Test with real users, not assumptions.
+
+## The Iron Law
+
+```
+NO USER FLOW WITHOUT CLEAR PATH FROM ENTRY TO GOAL
+```
+
+Every feature must have a documented path from entry point to completion. If you can't draw it, users can't follow it. Ambiguous flows create abandoned tasks.
+
+## When to Use
+
+**Always:**
+- Designing new features
+- Creating navigation structure
+- Building onboarding flows
+- Redesigning existing UX
+- Before implementing UI
+
+**Don't:**
+- Purely technical changes with no UI impact
+- Performance optimizations
+- Backend-only features
+
+Thinking "users will figure it out"? Stop. They won't. They'll leave.
+
+## The Process
+
+### Step 1: Map the User Goal
+
+Before wireframing, identify:
+- What is the user trying to accomplish?
+- What's the shortest path to that goal?
+- What might block them?
+
+### Step 2: Design the Happy Path
+
+Create the ideal flow without edge cases first:
+
+```
+Entry → Action 1 → Action 2 → Success
+```
+
+### Step 3: Add Error States and Edge Cases
+
+Then handle what goes wrong at each step.
 
 ## Patterns
 
-### User Flow Mapping
+### User Flow Documentation
 
+<Good>
 ```
-Flow Diagram Structure:
-┌─────────────────────────────────────────────────────────┐
-│                      ENTRY POINT                         │
-│                    (Landing Page)                        │
-└─────────────────────┬───────────────────────────────────┘
-                      │
-         ┌────────────┴────────────┐
-         ▼                         ▼
-    ┌─────────┐              ┌─────────┐
-    │ Sign Up │              │  Login  │
-    └────┬────┘              └────┬────┘
-         │                        │
-         ▼                        │
-    ┌─────────┐                   │
-    │ Verify  │                   │
-    │  Email  │                   │
-    └────┬────┘                   │
-         │                        │
-         └────────────┬───────────┘
-                      ▼
-              ┌──────────────┐
-              │  Dashboard   │
-              │   (Goal)     │
-              └──────────────┘
+GOAL: User creates first project
 
-Key Questions:
-- What's the user's goal?
-- What's the shortest path?
-- Where might they get stuck?
-- What are the error states?
+ENTRY: Dashboard (empty state)
+        │
+        ▼
+    ┌─────────────────────────────────┐
+    │       No projects yet           │
+    │                                 │
+    │   Create your first project     │
+    │   to get started                │
+    │                                 │
+    │       [Create Project]          │
+    └─────────────────────────────────┘
+        │
+        ▼
+    ┌─────────────────────────────────┐
+    │       Create Project            │
+    │                                 │
+    │   Name: [_______________]       │
+    │                                 │
+    │           [Cancel] [Create]     │
+    └─────────────────────────────────┘
+        │
+        ├─── Error: Name taken ───► Show inline error
+        │
+        ▼ Success
+    ┌─────────────────────────────────┐
+    │   Project created!              │
+    │   [Go to project]               │
+    └─────────────────────────────────┘
+
+ERROR STATES:
+- Empty name: Inline validation "Name is required"
+- Name too long: "Name must be under 50 characters"
+- Network error: Toast "Couldn't create project. Try again."
 ```
+Clear path. Error states documented. User always knows what to do.
+</Good>
 
-### Information Architecture
-
+<Bad>
 ```
-Sitemap Pattern (SaaS):
+User creates project:
+1. Click button
+2. Fill form
+3. Submit
+```
+No entry point. No error handling. No detail on what happens.
+</Bad>
 
-Home (/)
-├── Features (/features)
-├── Pricing (/pricing)
-├── Blog (/blog)
-│   └── [Post] (/blog/[slug])
-├── Login (/login)
-├── Sign Up (/signup)
-└── Dashboard (/dashboard) [Protected]
-    ├── Overview (/dashboard)
-    ├── Projects (/dashboard/projects)
-    │   ├── [Project] (/dashboard/projects/[id])
-    │   └── New (/dashboard/projects/new)
-    ├── Settings (/dashboard/settings)
-    │   ├── Profile (/dashboard/settings/profile)
-    │   ├── Billing (/dashboard/settings/billing)
-    │   └── Team (/dashboard/settings/team)
-    └── Help (/dashboard/help)
+### Navigation Architecture
 
-Principles:
+<Good>
+```
+Information Architecture (SaaS):
+
+PUBLIC (No auth required)
+├── / (Landing)
+├── /features
+├── /pricing
+├── /blog
+│   └── /blog/[slug]
+├── /login
+└── /signup
+
+PROTECTED (Auth required)
+└── /dashboard
+    ├── /dashboard (Overview)
+    ├── /dashboard/projects
+    │   ├── /dashboard/projects/[id]
+    │   └── /dashboard/projects/new
+    └── /dashboard/settings
+        ├── /dashboard/settings/profile
+        ├── /dashboard/settings/billing
+        └── /dashboard/settings/team
+
+RULES:
 - Max 3 levels deep
-- Consistent URL patterns
-- Group by user mental model
-- Clear naming (no jargon)
+- Consistent URL patterns (/dashboard/entity/action)
+- Group by user mental model, not technical structure
 ```
+Logical hierarchy. Predictable URLs. Clear public/protected boundary.
+</Good>
 
-### Navigation Patterns
-
+<Bad>
 ```
-Top Navigation (Marketing):
-┌──────────────────────────────────────────────────────────┐
-│ Logo    Features  Pricing  Blog     |  Login  Sign Up   │
-└──────────────────────────────────────────────────────────┘
-
-Dashboard Sidebar:
-┌────────────────────────────────────────────────────────────┐
-│ ┌──────────┐                                               │
-│ │          │                                               │
-│ │  Logo    │  Dashboard                                    │
-│ │          │  Projects                                     │
-│ │          │  Analytics                                    │
-│ │ Sidebar  │  ──────────                                   │
-│ │          │  Settings                                     │
-│ │          │  Help                                         │
-│ │          │                                               │
-│ │          │  ──────────                                   │
-│ │          │  [User Menu]                                  │
-│ └──────────┘                                               │
-└────────────────────────────────────────────────────────────┘
-
-Mobile: Hamburger menu or bottom navigation bar
+/home
+/main-features-page
+/price-list
+/user-dashboard/main
+/projects/all-projects/view
+/settings-and-preferences
 ```
+Inconsistent naming. Deep nesting. No clear pattern.
+</Bad>
 
-### Common UI Patterns
+### Empty State Design
 
+<Good>
+```tsx
+<EmptyState
+  icon={<FolderIcon />}
+  title="No projects yet"
+  description="Projects help you organize your work. Create your first one to get started."
+  action={
+    <Button onClick={openCreateModal}>Create project</Button>
+  }
+/>
+
+// Structure:
+// 1. Visual (icon/illustration)
+// 2. What's missing
+// 3. Why that's okay / value proposition
+// 4. Clear action
 ```
-Empty States:
-┌─────────────────────────────────────┐
-│                                     │
-│         [Illustration]              │
-│                                     │
-│     No projects yet                 │
-│                                     │
-│   Create your first project to     │
-│        get started                  │
-│                                     │
-│       [Create Project]              │
-│                                     │
-└─────────────────────────────────────┘
+Explains the empty state. Provides clear next step. Not a dead end.
+</Good>
 
-Loading States:
-- Skeleton screens (preferred)
-- Spinner for quick operations
-- Progress bar for long operations
-- Optimistic updates when safe
-
-Error States:
-- Inline validation (immediate)
-- Toast notifications (non-blocking)
-- Error pages (blocking)
-- Retry buttons when recoverable
+<Bad>
+```tsx
+<div className="text-gray-500 text-center">
+  No data
+</div>
 ```
+No context. No action. User stuck.
+</Bad>
 
-### Form UX Patterns
+### Form UX Pattern
 
+<Good>
+```tsx
+<form>
+  {/* Label ABOVE input, not placeholder-only */}
+  <label className="block text-sm font-medium">
+    Email address *
+  </label>
+  <input
+    type="email"
+    placeholder="jane@company.com"
+    aria-describedby="email-hint"
+  />
+  <p id="email-hint" className="text-sm text-gray-500">
+    We'll never share your email
+  </p>
+
+  {/* Inline validation on blur */}
+  {errors.email && (
+    <p className="text-sm text-red-500">{errors.email}</p>
+  )}
+
+  {/* Primary action right, secondary left */}
+  <div className="flex justify-end gap-3">
+    <Button variant="ghost">Cancel</Button>
+    <Button type="submit">Save changes</Button>
+  </div>
+</form>
 ```
-Form Layout:
-┌─────────────────────────────────────┐
-│ Create New Project                  │
-│                                     │
-│ Project Name *                      │
-│ ┌─────────────────────────────────┐ │
-│ │ My Awesome Project              │ │
-│ └─────────────────────────────────┘ │
-│                                     │
-│ Description                         │
-│ ┌─────────────────────────────────┐ │
-│ │                                 │ │
-│ │                                 │ │
-│ └─────────────────────────────────┘ │
-│ Optional - helps team understand    │
-│                                     │
-│ Visibility                          │
-│ ○ Public - Anyone can view          │
-│ ● Private - Only team members       │
-│                                     │
-│ ─────────────────────────────────── │
-│                                     │
-│              [Cancel]  [Create]     │
-└─────────────────────────────────────┘
+Labels visible. Help text available. Errors inline. Actions positioned correctly.
+</Good>
 
-Form Rules:
-- Label above input (not placeholder-only)
-- Required fields marked with *
-- Helper text below field
-- Inline validation on blur
-- Primary action on the right
-- One column for simple forms
+<Bad>
+```tsx
+<form>
+  <input placeholder="Enter your email" />
+  <input placeholder="Enter your name" />
+  <button>Submit</button>
+</form>
 ```
+Placeholder-only labels disappear. Generic button. No error handling.
+</Bad>
 
-### User Feedback Patterns
+### Loading State Strategy
 
+<Good>
+```tsx
+// Quick operations (< 1s): No indicator
+// Medium operations (1-3s): Spinner/skeleton
+// Long operations (> 3s): Progress + message
+
+// Skeleton for page content
+<div className="animate-pulse">
+  <div className="h-8 bg-gray-200 rounded w-1/4 mb-4" />
+  <div className="h-4 bg-gray-200 rounded w-3/4 mb-2" />
+  <div className="h-4 bg-gray-200 rounded w-1/2" />
+</div>
+
+// Button loading state
+<Button disabled={loading}>
+  {loading ? (
+    <>
+      <Spinner className="mr-2" />
+      Saving...
+    </>
+  ) : (
+    'Save changes'
+  )}
+</Button>
+
+// Long operation with progress
+<ProgressModal>
+  <p>Processing your data...</p>
+  <p className="text-sm text-gray-500">This may take a minute</p>
+  <ProgressBar value={progress} />
+</ProgressModal>
 ```
-Feedback Hierarchy (by urgency):
+Appropriate feedback for operation length. Users know something is happening.
+</Good>
 
-1. Inline/Contextual (immediate)
-   - Form validation
-   - Character counts
-   - Real-time previews
+<Bad>
+```tsx
+// No loading state
+<button onClick={save}>Save</button>
+// User clicks multiple times, no feedback
 
-2. Toast/Snackbar (temporary, 3-5 seconds)
-   - "Settings saved"
-   - "Message sent"
-   - Non-critical confirmations
-
-3. Modal (requires attention)
-   - Destructive confirmations
-   - Important choices
-   - Complex inputs
-
-4. Full-page (major state change)
-   - Onboarding
-   - Error pages
-   - Success/completion screens
-
-5. Email (asynchronous)
-   - Account changes
-   - Important notifications
-   - Receipts
+// Spinner everywhere
+{loading && <Spinner />} // Even for 50ms operations
 ```
+No feedback causes double-clicks. Over-feedback is distracting.
+</Bad>
 
-### Progressive Disclosure
+## Anti-Patterns
 
-```
-Show complexity gradually:
+| Anti-Pattern | Why It Fails | What To Do Instead |
+|--------------|--------------|-------------------|
+| Icon-only navigation | Users don't know what icons mean | Add labels or tooltips |
+| Modal inside modal | Confusing, lose context | Use pages for complex flows |
+| Hidden actions (hover-only) | Mobile can't hover | Always-visible or menu |
+| Placeholder-only labels | Disappear when typing | Label above, placeholder as example |
+| Generic buttons | "Submit", "OK" mean nothing | "Create project", "Send message" |
 
-Level 1 - Essential (visible by default)
-┌─────────────────────────────────────┐
-│ Email: [________________]           │
-│ Password: [________________]        │
-│                                     │
-│ ▼ Advanced options                  │
-│                                     │
-│              [Login]                │
-└─────────────────────────────────────┘
+## Red Flags - STOP
 
-Level 2 - Advanced (on demand)
-┌─────────────────────────────────────┐
-│ Email: [________________]           │
-│ Password: [________________]        │
-│                                     │
-│ ▲ Advanced options                  │
-│   ☐ Remember me                     │
-│   ☐ Use 2FA                         │
-│                                     │
-│              [Login]                │
-└─────────────────────────────────────┘
-```
+If you catch yourself:
+- Designing UI without documenting the user flow first
+- Using icon-only buttons without labels/tooltips
+- Nesting modals more than one level deep
+- Hiding essential actions behind hover states
+- Using placeholder text as the only label
 
-### Responsive Breakpoints
+**ALL of these mean: STOP. Document the flow. Test with a real person.**
 
-```
-Mobile First Approach:
+## Common Rationalizations
 
-Mobile (< 640px):
-- Single column
-- Bottom navigation
-- Full-width buttons
-- Collapsed menus
-
-Tablet (640px - 1024px):
-- Two columns max
-- Side navigation possible
-- Medium touch targets
-
-Desktop (> 1024px):
-- Multi-column layouts
-- Sidebar navigation
-- Hover states
-- Keyboard shortcuts
-```
-
-### Accessibility Checklist
-
-```
-WCAG 2.1 Level AA Minimum:
-
-Perceivable:
-☐ Color contrast 4.5:1 (text), 3:1 (large text)
-☐ Text resizable to 200%
-☐ Alt text for images
-☐ Captions for video
-
-Operable:
-☐ Keyboard navigable (Tab, Enter, Escape)
-☐ Focus indicators visible
-☐ No keyboard traps
-☐ Skip links for main content
-
-Understandable:
-☐ Clear labels
-☐ Error identification
-☐ Consistent navigation
-
-Robust:
-☐ Valid HTML
-☐ ARIA where needed
-☐ Works with screen readers
-```
-
-### User Testing Questions
-
-```
-Task-Based Testing:
-1. "Find [feature] and use it"
-2. "Complete [common task]"
-3. "What would you do if [scenario]?"
-
-Observation Points:
-- Where did they hesitate?
-- What did they click first?
-- Did they find what they expected?
-- What questions did they ask?
-
-Post-Task Questions:
-- "Was that what you expected?"
-- "What was confusing?"
-- "What would make this easier?"
-- "How would you rate the difficulty? (1-5)"
-```
-
----
-
-## Anti-patterns
-
-### Mystery Meat Navigation
-
-```
-// BAD - Icon-only navigation
-[🏠] [⚙️] [📊] [👤]
-// Users don't know what icons mean
-
-// GOOD - Labels or tooltips
-[🏠 Home] [⚙️ Settings] [📊 Analytics] [👤 Profile]
-```
-
-### Confirmation Fatigue
-
-```
-// BAD - Confirm everything
-"Are you sure you want to view this page?"
-"Are you sure you want to save?"
-
-// GOOD - Confirm only destructive actions
-"Delete project? This cannot be undone."
-```
-
-### Hidden Actions
-
-```
-// BAD - Actions only on hover
-// Mobile users can't hover!
-
-// GOOD - Visible actions or menu
-[Edit] [Delete] or [•••] → Menu
-```
-
-### Modal Overload
-
-```
-// BAD - Modal inside modal
-Modal → Click → Another Modal → Click → Another Modal
-
-// GOOD - One modal, or use pages
-Modal for quick action, page for complex flow
-```
-
----
+| Excuse | Reality |
+|--------|---------|
+| "Users will learn the icons" | No they won't. Add labels. |
+| "The flow is obvious" | Only to you who built it. Document and test. |
+| "Mobile is edge case" | Mobile is 50%+ of traffic. Design for it. |
+| "We'll fix UX after launch" | After launch is too late. Users already churned. |
+| "More features = better" | More features = more confusion. Simplify. |
+| "Power users will figure it out" | Power users are 5%. Design for the 95%. |
 
 ## Gotchas
 
-### 1. Mobile Touch Targets
+### Touch Target Sizes
 
-Minimum 44x44px tap target. Space interactive elements at least 8px apart.
+Minimum 44x44px for touch targets. 8px minimum spacing between.
 
-### 2. Form Autofill
+```tsx
+// Too small
+<button className="p-1">X</button>
 
-Design for browser autofill. Don't break it with custom inputs.
+// Correct
+<button className="p-3 min-w-[44px] min-h-[44px]">X</button>
+```
 
-### 3. Loading States
+### Form Autofill
 
-Users perceive no feedback after 100ms as slow. Show loading indicator.
+Don't break browser autofill with custom inputs:
 
-### 4. Infinite Scroll vs Pagination
+```tsx
+// Support autofill
+<input
+  type="email"
+  name="email"
+  autoComplete="email"
+/>
+```
 
-- Infinite scroll: Good for browsing (social feeds)
-- Pagination: Good for tasks (search results, tables)
+### Infinite Scroll vs Pagination
 
----
+- **Infinite scroll**: Good for browsing (social feeds, images)
+- **Pagination**: Good for tasks (search results, data tables)
 
-## Checkpoints
+### Loading Perception
+
+Users perceive no feedback after 100ms as slow. Show loading indicator for anything longer.
+
+## Verification Checklist
 
 Before marking UX design complete:
 
-- [ ] User flows mapped for key tasks
-- [ ] Information architecture documented
-- [ ] Navigation pattern chosen
-- [ ] Empty/loading/error states designed
-- [ ] Forms have proper validation UX
-- [ ] Responsive breakpoints planned
-- [ ] Accessibility requirements listed
-- [ ] Mobile interactions considered
-- [ ] Feedback patterns consistent
+- [ ] User flow documented from entry to goal
+- [ ] Empty states have illustration + explanation + action
+- [ ] Loading states for all async operations
+- [ ] Error states explain what happened + what to do
+- [ ] Form labels above inputs (not placeholder-only)
+- [ ] Touch targets minimum 44x44px
+- [ ] Navigation has text labels (not icon-only)
+- [ ] Modals don't nest more than one level
+- [ ] Primary action distinguishable from secondary
+- [ ] Tested on mobile viewport
+
+Can't check all boxes? You have UX issues. Fix them before building.
+
+## Integration
+
+**Pairs well with:**
+- `brand-identity` - Visual consistency
+- `copywriting` - UI text and microcopy
+- `tailwind-ui` - Implementation
+- `auth-flow` - Login/signup UX
+
+**Requires:**
+- User goals documented
+- Competitor analysis (optional but recommended)
+- Access to real users for testing
+
+## References
+
+- [Nielsen Norman Group](https://www.nngroup.com/)
+- [Laws of UX](https://lawsofux.com/)
+- [WCAG Guidelines](https://www.w3.org/WAI/standards-guidelines/wcag/)
+- [Refactoring UI](https://www.refactoringui.com/)
 
 ---
 
-## Escape Hatches
-
-### When stakeholder wants "innovative" UX
-- Use familiar patterns first
-- Innovate only where it adds clear value
-- A/B test unconventional choices
-
-### When you can't user test
-- Use established patterns
-- Check competitor implementations
-- Review ux.stackexchange.com
-- Test with team members
-
-### When scope is too big
-- Design the happy path first
-- Add edge cases iteratively
-- Ship simple, iterate based on feedback
-
----
-
-## Squad Dependencies
-
-Often paired with:
-- `brand-identity` for visual consistency
-- `copywriting` for microcopy
-- `tailwind-ui` for implementation
-- `auth-flow` for login UX
-
----
-
-*Last updated: 2025-12-11*
+*This specialist follows the world-class skill pattern.*
