@@ -1,6 +1,6 @@
 # Spawner V2 - Task Tracker
 
-> Last updated: 2024-12-11
+> Last updated: 2024-12-11 (Phase 2 skills complete)
 
 ## Phase 1: Foundation ✅ COMPLETE
 
@@ -133,14 +133,14 @@
 - [ ] Generate weekly summary
 
 ### 4.3 More Skills
-- [ ] tailwind-ui skill
-- [ ] typescript-strict skill
+- [x] tailwind-ui skill (8 edges, 8 checks)
+- [x] typescript-strict skill (8 edges, 8 checks)
 - [ ] deployment-vercel skill
 - [ ] react-patterns skill
 
 ### 4.4 More Sharp Edges
-- [x] Add 5+ edges per skill (done: 27 total)
-- [ ] Total 30+ edges across skills (need 3 more)
+- [x] Add 5+ edges per skill (done: 43 total)
+- [x] Total 30+ edges across skills (43 edges!)
 - [ ] Verify version ranges
 - [ ] Set expiry dates
 
@@ -170,19 +170,19 @@
 - [x] nextjs-app-router
 - [x] supabase-backend
 - [x] nextjs-supabase-auth
-- [ ] tailwind-ui
-- [ ] typescript-strict
+- [x] tailwind-ui
+- [x] typescript-strict
 
 ### Validation
 - [x] Hardcoded secrets check
 - [x] Async client component check
 - [x] Server import in client check
 - [x] Missing 'use server' check
-- [x] 10+ total checks (24 checks done)
+- [x] 10+ total checks (40 checks done!)
 
 ### Sharp Edges
-- [x] 27 edges documented
-- [ ] 30+ edges total
+- [x] 43 edges documented
+- [x] 30+ edges total
 - [ ] Version ranges verified
 - [ ] Expiry dates set where needed
 
@@ -204,8 +204,14 @@
 | Phase | Status | Progress |
 |-------|--------|----------|
 | Phase 1: Foundation | ✅ Complete | 100% |
-| Phase 2: Intelligence | 🟡 In Progress | 90% |
+| Phase 2: Intelligence | ✅ Complete | 100% |
 | Phase 3: Experience | ⬜ Not Started | 30% |
-| Phase 4: Polish | ⬜ Not Started | 20% |
+| Phase 4: Polish | 🟡 In Progress | 50% |
 
-**Next Priority:** Test with Claude Desktop, then build more skills
+### Stats
+- **5 Skills:** nextjs-app-router, supabase-backend, nextjs-supabase-auth, tailwind-ui, typescript-strict
+- **43 Sharp Edges:** Gotchas and pitfalls documented
+- **40 Validations:** Machine-runnable checks
+- **5 MCP Tools:** context, validate, remember, sharp-edge, unstick
+
+**Next Priority:** Test with Claude Desktop locally
