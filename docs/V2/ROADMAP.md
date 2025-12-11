@@ -65,7 +65,7 @@ Get the infrastructure running. MCP server with D1/KV persistence.
 ```
 □ Create main worker entry point
 □ Implement tool routing
-□ Add basic spawner_context tool (hardcoded response for now)
+□ Add basic spawner_load tool (hardcoded response for now)
 □ Test with Claude Desktop
 ```
 
@@ -73,14 +73,14 @@ Get the infrastructure running. MCP server with D1/KV persistence.
 - `src/index.ts`
 - `src/tools/context.ts`
 
-**Success:** Claude Desktop can call spawner_context and get response
+**Success:** Claude Desktop can call spawner_load and get response
 
 #### 1.5 Project Memory (Basic)
 ```
 □ Implement project creation/lookup
 □ Store project in D1
 □ Cache active project in KV
-□ Return project context in spawner_context
+□ Return project context in spawner_load
 ```
 
 **Success:** Create project, close Claude, reopen, project is remembered
@@ -209,7 +209,7 @@ Make it feel magical. Memory, saves, and expertise moments.
 □ Define sharp edge schema
 □ Create sharp edge loader
 □ Implement situation matching
-□ Create spawner_sharp_edge tool
+□ Create spawner_watch_out tool
 ```
 
 **Files:**

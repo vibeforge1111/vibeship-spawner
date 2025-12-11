@@ -224,10 +224,10 @@ See: `SKILL_SPEC.md` for full specification.
 │                  (Cloudflare Workers)                       │
 ├─────────────────────────────────────────────────────────────┤
 │  Tools:                                                     │
-│  - spawner_context    (load project + relevant skills)      │
+│  - spawner_load       (load project + relevant skills)      │
 │  - spawner_validate   (run guardrail checks)                │
 │  - spawner_remember   (store project state)                 │
-│  - spawner_sharp_edge (query sharp edges)                   │
+│  - spawner_watch_out  (query sharp edges)                   │
 │  - spawner_unstick    (escape hatch analysis)               │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -243,7 +243,7 @@ See: `SKILL_SPEC.md` for full specification.
 
 ### MCP Tools
 
-#### `spawner_context`
+#### `spawner_load`
 Load project context and relevant skills for current session.
 
 ```typescript
@@ -299,7 +299,7 @@ interface SpawnerRememberInput {
 }
 ```
 
-#### `spawner_sharp_edge`
+#### `spawner_watch_out`
 Query relevant sharp edges.
 
 ```typescript

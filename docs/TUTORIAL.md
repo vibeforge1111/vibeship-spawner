@@ -45,9 +45,9 @@ Spawner automatically:
 |------|-------------|
 | `spawner_plan` | Starting a new project |
 | `spawner_analyze` | Working with existing code |
-| `spawner_context` | Loading project for a session |
+| `spawner_load` | Loading project for a session |
 | `spawner_validate` | Checking code for issues |
-| `spawner_sharp_edge` | Learning gotchas for your stack |
+| `spawner_watch_out` | Learning gotchas for your stack |
 | `spawner_skills` | Finding relevant skills |
 | `spawner_templates` | Browsing project templates |
 | `spawner_remember` | Saving decisions for later |

@@ -24,10 +24,10 @@
 │   │                    SPAWNER MCP WORKER                       │  │
 │   │                                                             │  │
 │   │   Routes:                                                   │  │
-│   │   POST /mcp/tools/spawner_context                          │  │
+│   │   POST /mcp/tools/spawner_load                             │  │
 │   │   POST /mcp/tools/spawner_validate                         │  │
 │   │   POST /mcp/tools/spawner_remember                         │  │
-│   │   POST /mcp/tools/spawner_sharp_edge                       │  │
+│   │   POST /mcp/tools/spawner_watch_out                        │  │
 │   │   POST /mcp/tools/spawner_unstick                          │  │
 │   │                                                             │  │
 │   └─────────────────────────┬───────────────────────────────────┘  │
@@ -203,7 +203,7 @@ CACHE namespace:
 
 ## Tool Implementations
 
-### spawner_context
+### spawner_load
 
 Load project context and relevant skills.
 
@@ -218,9 +218,9 @@ const inputSchema = z.object({
   stack_hints: z.array(z.string()).optional(),
 })
 
-export function contextTool(env: Env) {
+export function loadTool(env: Env) {
   return {
-    name: 'spawner_context',
+    name: 'spawner_load',
     description: 'Load project context and relevant skills for this session',
     inputSchema,
     
@@ -296,7 +296,7 @@ export function contextTool(env: Env) {
           ${openIssues.length > 0 ? `- ${openIssues.length} open issues to address` : ''}
           
           Use spawner_validate to check code before marking tasks complete.
-          Use spawner_sharp_edge if you encounter issues matching known gotchas.
+          Use spawner_watch_out if you encounter issues matching known gotchas.
           Use spawner_remember to save important decisions or progress.
         `
       }
@@ -498,7 +498,7 @@ export function rememberTool(env: Env) {
 }
 ```
 
-### spawner_sharp_edge
+### spawner_watch_out
 
 Query relevant sharp edges.
 
@@ -513,9 +513,9 @@ const inputSchema = z.object({
   code_context: z.string().optional(),
 })
 
-export function sharpEdgeTool(env: Env) {
+export function watchOutTool(env: Env) {
   return {
-    name: 'spawner_sharp_edge',
+    name: 'spawner_watch_out',
     description: 'Query sharp edges (gotchas) relevant to current situation',
     inputSchema,
     
@@ -929,10 +929,10 @@ spawner-v2/
 │   ├── types.ts                 # Type definitions
 │   │
 │   ├── tools/
-│   │   ├── context.ts           # spawner_context
+│   │   ├── context.ts           # spawner_load
 │   │   ├── validate.ts          # spawner_validate
 │   │   ├── remember.ts          # spawner_remember
-│   │   ├── sharp-edge.ts        # spawner_sharp_edge
+│   │   ├── sharp-edge.ts        # spawner_watch_out
 │   │   └── unstick.ts           # spawner_unstick
 │   │
 │   ├── validation/

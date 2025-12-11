@@ -41,10 +41,10 @@ spawner-v2/
 │   ├── index.ts              # Main worker, MCP routing
 │   ├── types.ts              # Type definitions
 │   ├── tools/                # MCP tool implementations
-│   │   ├── context.ts        # spawner_context
+│   │   ├── context.ts        # spawner_load (renamed from spawner_context)
 │   │   ├── validate.ts       # spawner_validate
 │   │   ├── remember.ts       # spawner_remember
-│   │   ├── sharp-edge.ts     # spawner_sharp_edge
+│   │   ├── sharp-edge.ts     # spawner_watch_out (renamed from spawner_sharp_edge)
 │   │   └── unstick.ts        # spawner_unstick
 │   ├── validation/           # Code checking
 │   │   ├── runner.ts         # Runs checks on code
@@ -86,10 +86,10 @@ KV caches: hot session data, active project context.
 |------|---------|
 | `spawner_plan` | Plan and create projects (discover → recommend → create) |
 | `spawner_analyze` | Analyze existing codebase for stack/skill recommendations |
-| `spawner_context` | Load project + skills for session |
+| `spawner_load` | Load project + skills for session (was: spawner_context) |
 | `spawner_validate` | Run checks on code |
 | `spawner_remember` | Save decisions/progress |
-| `spawner_sharp_edge` | Query relevant gotchas |
+| `spawner_watch_out` | Query relevant gotchas (was: spawner_sharp_edge) |
 | `spawner_unstick` | Analyze stuck state, offer alternatives |
 | `spawner_templates` | List available project templates |
 | `spawner_skills` | Search and retrieve skills |
