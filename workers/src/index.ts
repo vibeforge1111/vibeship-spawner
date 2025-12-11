@@ -359,17 +359,18 @@ const TOOLS = [
   },
   {
     name: 'list_specialists',
-    description: 'List all specialists. Only use if user asks about specialists specifically - do NOT use when starting a new project.',
+    description: 'Show all available specialists with their tags, descriptions, and project types. Use when user asks "what specialists are available?", "show me the specialists", or wants to browse capabilities. Can filter by tag or project type.',
     inputSchema: {
       type: 'object',
       properties: {
         tag: {
           type: 'string',
-          description: 'Filter by tag (optional, e.g., "auth", "payments", "ai")'
+          description: 'Filter by tag (e.g., "auth", "payments", "ai", "nextjs", "supabase")'
         },
         project_type: {
           type: 'string',
-          description: 'Filter specialists relevant to a project type (optional)'
+          enum: ['saas', 'marketplace', 'ai-app', 'web3', 'tool', 'web-app'],
+          description: 'Filter specialists relevant to a project type'
         }
       }
     }
@@ -1116,18 +1117,54 @@ function listSpecialists(args: Record<string, unknown>): unknown {
     );
   }
 
-  const specialists = filtered.map(([id, s]) => ({
-    id,
-    name: s.name,
-    description: s.description,
-    tags: s.tags,
-    requiredFor: s.requiredFor
-  }));
+  // Build formatted output
+  const filterDescription = tag
+    ? `Filtered by tag: "${tag}"`
+    : project_type
+    ? `Filtered for: ${project_type}`
+    : 'All specialists';
+
+  const specialistList = filtered.map(([id, s]) => {
+    const projectTypes = s.requiredFor.length > 0
+      ? `Used in: ${s.requiredFor.join(', ')}`
+      : 'On-demand specialist';
+
+    return `### ${s.name}
+**ID:** \`${id}\`
+${s.description}
+
+**Tags:** \`${s.tags.join('\`, \`')}\`
+${projectTypes}`;
+  }).join('\n\n---\n\n');
 
   return {
     content: [{
       type: 'text',
-      text: JSON.stringify({ specialists, total: specialists.length }, null, 2)
+      text: `
+# Available Specialists
+
+${filterDescription} (${filtered.length} total)
+
+---
+
+${specialistList}
+
+---
+
+## Quick Reference
+
+| Specialist | Tags | Project Types |
+|------------|------|---------------|
+${filtered.map(([id, s]) =>
+  `| ${s.name} | ${s.tags.slice(0, 3).join(', ')} | ${s.requiredFor.length > 0 ? s.requiredFor.join(', ') : 'on-demand'} |`
+).join('\n')}
+
+---
+
+*Filter options:*
+- By tag: \`list_specialists({ tag: "auth" })\`
+- By project: \`list_specialists({ project_type: "saas" })\`
+`
     }]
   };
 }
