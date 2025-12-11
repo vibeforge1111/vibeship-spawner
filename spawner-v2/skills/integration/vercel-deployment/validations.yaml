@@ -1,0 +1,109 @@
+# Vercel Deployment Validations
+# Checks that run on code to catch issues
+
+validations:
+  - id: vercel-secret-public
+    name: Secret in NEXT_PUBLIC Variable
+    severity: critical
+    type: regex
+    pattern:
+      - 'NEXT_PUBLIC_.*SECRET'
+      - 'NEXT_PUBLIC_.*PRIVATE'
+      - 'NEXT_PUBLIC_.*SERVICE_ROLE'
+      - 'NEXT_PUBLIC_.*DATABASE_URL'
+      - 'NEXT_PUBLIC_.*PASSWORD'
+    message: "Secret exposed via NEXT_PUBLIC_ prefix. This will be visible in browser."
+    fix_action: "Remove NEXT_PUBLIC_ prefix and access only in server-side code"
+    applies_to:
+      - ".env*"
+      - "*.ts"
+      - "*.tsx"
+
+  - id: vercel-hardcoded-url
+    name: Hardcoded Vercel URL
+    severity: warning
+    type: regex
+    pattern:
+      - 'https://[a-z0-9-]+\.vercel\.app'
+      - 'https://[a-z0-9-]+-[a-z0-9]+\.vercel\.app'
+    message: "Hardcoded Vercel URL. Use VERCEL_URL environment variable instead."
+    fix_action: "Use process.env.VERCEL_URL or NEXT_PUBLIC_VERCEL_URL"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+
+  - id: vercel-node-in-edge
+    name: Node.js API in Edge Runtime
+    severity: error
+    type: regex
+    pattern:
+      - "runtime.*['\"]edge['\"][\\s\\S]*?import.*from\\s*['\"]fs['\"]"
+      - "runtime.*['\"]edge['\"][\\s\\S]*?import.*from\\s*['\"]path['\"]"
+      - "runtime.*['\"]edge['\"][\\s\\S]*?require\\(['\"]fs['\"]\\)"
+    message: "Node.js module used in Edge runtime. fs/path not available in Edge."
+    fix_action: "Use runtime = 'nodejs' or remove Node.js dependencies"
+    applies_to:
+      - "app/api/**/*.ts"
+      - "middleware.ts"
+
+  - id: vercel-missing-cors
+    name: API Route Without CORS Headers
+    severity: warning
+    type: regex
+    pattern:
+      - 'export async function (GET|POST|PUT|DELETE)(?![\\s\\S]*Access-Control-Allow)'
+    message: "API route without CORS headers may fail cross-origin requests."
+    fix_action: "Add Access-Control-Allow-Origin header if API is called from other domains"
+    applies_to:
+      - "app/api/**/*.ts"
+      - "pages/api/**/*.ts"
+
+  - id: vercel-no-error-handling
+    name: API Route Without Error Handling
+    severity: warning
+    type: regex
+    pattern:
+      - 'export async function (GET|POST)(?![\\s\\S]*try[\\s\\S]*catch)'
+    message: "API route without try/catch. Unhandled errors return 500 without details."
+    fix_action: "Wrap in try/catch and return appropriate error responses"
+    applies_to:
+      - "app/api/**/*.ts"
+
+  - id: vercel-static-secret-read
+    name: Secret Read in Static Context
+    severity: warning
+    type: regex
+    pattern:
+      - "generateStaticParams[\\s\\S]*process\\.env\\.(?!NEXT_PUBLIC)"
+      - "generateMetadata[\\s\\S]*process\\.env\\.(?!NEXT_PUBLIC)"
+    message: "Server secret accessed in static generation. Value baked into build."
+    fix_action: "Move secret access to runtime code or use NEXT_PUBLIC_ for public values"
+    applies_to:
+      - "app/**/page.tsx"
+      - "app/**/layout.tsx"
+
+  - id: vercel-large-import
+    name: Large Package Import
+    severity: warning
+    type: regex
+    pattern:
+      - "import.*from\\s*['\"]lodash['\"]"
+      - "import.*from\\s*['\"]moment['\"]"
+      - "import.*from\\s*['\"]aws-sdk['\"]"
+    message: "Large package imported. May cause slow cold starts. Consider alternatives."
+    fix_action: "Use lodash-es with tree shaking, date-fns instead of moment, @aws-sdk/client-* instead of aws-sdk"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+
+  - id: vercel-missing-revalidate
+    name: Dynamic Page Without Revalidation Config
+    severity: warning
+    type: regex
+    pattern:
+      - "export const dynamic\\s*=\\s*['\"]force-dynamic['\"](?![\\s\\S]*revalidate)"
+    message: "Dynamic page without revalidation config. Consider setting revalidation strategy."
+    fix_action: "Add export const revalidate = 60 for ISR, or 0 for no cache"
+    applies_to:
+      - "app/**/page.tsx"

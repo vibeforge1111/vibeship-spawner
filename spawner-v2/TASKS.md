@@ -1,6 +1,6 @@
 # Spawner V2 - Task Tracker
 
-> Last updated: 2024-12-11 (Phase 2 skills complete)
+> Last updated: 2024-12-11 (7 skills complete!)
 
 ## Phase 1: Foundation ✅ COMPLETE
 
@@ -135,12 +135,12 @@
 ### 4.3 More Skills
 - [x] tailwind-ui skill (8 edges, 8 checks)
 - [x] typescript-strict skill (8 edges, 8 checks)
-- [ ] deployment-vercel skill
-- [ ] react-patterns skill
+- [x] vercel-deployment skill (8 edges, 8 checks)
+- [x] react-patterns skill (8 edges, 9 checks)
 
 ### 4.4 More Sharp Edges
-- [x] Add 5+ edges per skill (done: 43 total)
-- [x] Total 30+ edges across skills (43 edges!)
+- [x] Add 5+ edges per skill (done: 59 total)
+- [x] Total 30+ edges across skills (59 edges!)
 - [ ] Verify version ranges
 - [ ] Set expiry dates
 
@@ -166,22 +166,24 @@
 - [ ] Worker deployed to production
 - [ ] Custom domain configured (mcp.vibeship.co)
 
-### Skills (5 required for launch)
+### Skills (5 required for launch) - 7 DONE!
 - [x] nextjs-app-router
 - [x] supabase-backend
 - [x] nextjs-supabase-auth
 - [x] tailwind-ui
 - [x] typescript-strict
+- [x] react-patterns (bonus)
+- [x] vercel-deployment (bonus)
 
 ### Validation
 - [x] Hardcoded secrets check
 - [x] Async client component check
 - [x] Server import in client check
 - [x] Missing 'use server' check
-- [x] 10+ total checks (40 checks done!)
+- [x] 10+ total checks (57 checks done!)
 
 ### Sharp Edges
-- [x] 43 edges documented
+- [x] 59 edges documented
 - [x] 30+ edges total
 - [ ] Version ranges verified
 - [ ] Expiry dates set where needed
@@ -206,12 +208,12 @@
 | Phase 1: Foundation | ✅ Complete | 100% |
 | Phase 2: Intelligence | ✅ Complete | 100% |
 | Phase 3: Experience | ⬜ Not Started | 30% |
-| Phase 4: Polish | 🟡 In Progress | 50% |
+| Phase 4: Polish | 🟡 In Progress | 70% |
 
 ### Stats
-- **5 Skills:** nextjs-app-router, supabase-backend, nextjs-supabase-auth, tailwind-ui, typescript-strict
-- **43 Sharp Edges:** Gotchas and pitfalls documented
-- **40 Validations:** Machine-runnable checks
+- **7 Skills:** nextjs-app-router, supabase-backend, nextjs-supabase-auth, tailwind-ui, typescript-strict, react-patterns, vercel-deployment
+- **59 Sharp Edges:** Gotchas and pitfalls documented
+- **57 Validations:** Machine-runnable checks
 - **5 MCP Tools:** context, validate, remember, sharp-edge, unstick
 
-**Next Priority:** Test with Claude Desktop locally
+**Next Priority:** Test with Claude Desktop, then deploy to production

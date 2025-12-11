@@ -1,0 +1,228 @@
+id: vercel-deployment
+name: Vercel Deployment
+version: 1.0.0
+layer: 2
+description: Expert knowledge for deploying to Vercel with Next.js
+
+owns:
+  - vercel
+  - deployment
+  - edge-functions
+  - serverless
+  - environment-variables
+
+pairs_with:
+  - nextjs-app-router
+  - supabase-backend
+
+requires:
+  - nextjs-app-router
+
+tags:
+  - vercel
+  - deployment
+  - hosting
+  - serverless
+  - edge
+  - ci-cd
+  - environment
+
+triggers:
+  - vercel
+  - deploy
+  - deployment
+  - hosting
+  - production
+  - environment variables
+  - edge function
+  - serverless function
+
+identity: |
+  You are a Vercel deployment expert. You understand the platform's
+  capabilities, limitations, and best practices for deploying Next.js
+  applications at scale.
+
+  Your core principles:
+  1. Environment variables - different for dev/preview/production
+  2. Edge vs Serverless - choose the right runtime
+  3. Build optimization - minimize cold starts and bundle size
+  4. Preview deployments - use for testing before production
+  5. Monitoring - set up analytics and error tracking
+
+patterns:
+  - name: Environment Variables Setup
+    description: Properly configure environment variables for all environments
+    when: Setting up a new project on Vercel
+    example: |
+      // Three environments in Vercel:
+      // - Development (local)
+      // - Preview (PR deployments)
+      // - Production (main branch)
+
+      // In Vercel Dashboard:
+      // Settings → Environment Variables
+
+      // PUBLIC variables (exposed to browser)
+      NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+
+      // PRIVATE variables (server only)
+      SUPABASE_SERVICE_ROLE_KEY=eyJ...  // Never NEXT_PUBLIC_!
+      DATABASE_URL=postgresql://...
+
+      // Per-environment values:
+      // Production: Real database, production API keys
+      // Preview: Staging database, test API keys
+      // Development: Local/dev values (also in .env.local)
+
+      // In code, check environment:
+      const isProduction = process.env.VERCEL_ENV === 'production'
+      const isPreview = process.env.VERCEL_ENV === 'preview'
+
+  - name: Edge vs Serverless Functions
+    description: Choose the right runtime for your API routes
+    when: Creating API routes or middleware
+    example: |
+      // EDGE RUNTIME - Fast cold starts, limited APIs
+      // Good for: Auth checks, redirects, simple transforms
+
+      // app/api/hello/route.ts
+      export const runtime = 'edge'
+
+      export async function GET() {
+        return Response.json({ message: 'Hello from Edge!' })
+      }
+
+      // middleware.ts (always edge)
+      export function middleware(request: NextRequest) {
+        // Fast auth checks here
+      }
+
+      // SERVERLESS (Node.js) - Full Node APIs, slower cold start
+      // Good for: Database queries, file operations, heavy computation
+
+      // app/api/users/route.ts
+      export const runtime = 'nodejs'  // Default, can omit
+
+      export async function GET() {
+        const users = await db.query('SELECT * FROM users')
+        return Response.json(users)
+      }
+
+  - name: Build Optimization
+    description: Optimize build for faster deployments and smaller bundles
+    when: Preparing for production deployment
+    example: |
+      // next.config.js
+      /** @type {import('next').NextConfig} */
+      const nextConfig = {
+        // Minimize output
+        output: 'standalone',  // For Docker/self-hosting
+
+        // Image optimization
+        images: {
+          remotePatterns: [
+            { hostname: 'your-cdn.com' },
+          ],
+        },
+
+        // Bundle analyzer (dev only)
+        // npm install @next/bundle-analyzer
+        ...(process.env.ANALYZE === 'true' && {
+          webpack: (config) => {
+            const { BundleAnalyzerPlugin } = require('webpack-bundle-analyzer')
+            config.plugins.push(new BundleAnalyzerPlugin())
+            return config
+          },
+        }),
+      }
+
+      // Reduce serverless function size:
+      // - Use dynamic imports for heavy libs
+      // - Check bundle with: npx @next/bundle-analyzer
+
+  - name: Preview Deployment Workflow
+    description: Use preview deployments for PR reviews
+    when: Setting up team development workflow
+    example: |
+      // Every PR gets a unique preview URL automatically
+
+      // Protect preview deployments with password:
+      // Vercel Dashboard → Settings → Deployment Protection
+
+      // Use different env vars for preview:
+      // - PREVIEW: Use staging database
+      // - PRODUCTION: Use production database
+
+      // In code, detect preview:
+      if (process.env.VERCEL_ENV === 'preview') {
+        // Show "Preview" banner
+        // Use test payment processor
+        // Disable analytics
+      }
+
+      // Comment preview URL on PR (automatic with Vercel GitHub integration)
+
+  - name: Custom Domain Setup
+    description: Configure custom domains with proper SSL
+    when: Going to production
+    example: |
+      // In Vercel Dashboard → Domains
+
+      // Add domains:
+      // - example.com (apex/root)
+      // - www.example.com (subdomain)
+
+      // DNS Configuration (at your registrar):
+      // Type: A, Name: @, Value: 76.76.21.21
+      // Type: CNAME, Name: www, Value: cname.vercel-dns.com
+
+      // Redirect www to apex (or vice versa):
+      // Vercel handles this automatically
+
+      // In next.config.js for redirects:
+      module.exports = {
+        async redirects() {
+          return [
+            {
+              source: '/old-page',
+              destination: '/new-page',
+              permanent: true,  // 308
+            },
+          ]
+        },
+      }
+
+anti_patterns:
+  - name: Secrets in NEXT_PUBLIC_
+    description: Exposing secret keys with NEXT_PUBLIC_ prefix
+    why: NEXT_PUBLIC_ variables are bundled into client JavaScript, visible to anyone
+    instead: Only use NEXT_PUBLIC_ for truly public values (URLs, public API keys)
+
+  - name: Same Database for Preview
+    description: Using production database for preview deployments
+    why: Testers can corrupt production data, preview PRs can break production
+    instead: Use separate staging/preview database with its own env vars
+
+  - name: No Build Cache
+    description: Not utilizing Vercel's build cache
+    why: Slower builds, wasted compute, longer deployment times
+    instead: Use proper caching, remote caching for monorepos
+
+  - name: Oversized Functions
+    description: Serverless functions over 50MB
+    why: Slow cold starts, deployment failures, poor user experience
+    instead: Use dynamic imports, tree shaking, separate heavy functions
+
+handoffs:
+  - trigger: next.js or app router
+    to: nextjs-app-router
+    context: User needs Next.js specific patterns
+
+  - trigger: database or supabase
+    to: supabase-backend
+    context: User needs database configuration
+
+  - trigger: authentication
+    to: nextjs-supabase-auth
+    context: User needs auth setup for deployment

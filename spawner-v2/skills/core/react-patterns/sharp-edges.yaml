@@ -1,0 +1,346 @@
+# React Patterns Sharp Edges
+# These are the gotchas that catch developers off guard
+
+sharp_edges:
+  - id: react-useeffect-object-dep
+    summary: Object/array in useEffect deps causes infinite loop
+    severity: critical
+    situation: Passing object or array literal to useEffect dependency array
+    why: |
+      Objects and arrays are compared by reference, not value.
+      A new object literal {} is created every render, so the dependency
+      is "always different", triggering the effect infinitely.
+    solution: |
+      Options to fix:
+
+      // WRONG - infinite loop
+      useEffect(() => {
+        fetchData(options)
+      }, [{ page: 1, limit: 10 }])  // New object every render!
+
+      // RIGHT - useMemo the object
+      const options = useMemo(() => ({ page: 1, limit: 10 }), [])
+      useEffect(() => {
+        fetchData(options)
+      }, [options])
+
+      // RIGHT - use primitive deps
+      useEffect(() => {
+        fetchData({ page, limit })
+      }, [page, limit])
+
+      // RIGHT - stringify if needed (last resort)
+      const optionsKey = JSON.stringify(options)
+      useEffect(() => {
+        fetchData(options)
+      }, [optionsKey])
+    symptoms:
+      - Maximum update depth exceeded
+      - Component keeps re-rendering
+      - API called infinitely
+      - Browser freezes/crashes
+    detection_pattern: 'useEffect\\([^)]+,\\s*\\[[^\\]]*\\{[^}]*\\}[^\\]]*\\]'
+    version_range: ">=16.8.0"
+
+  - id: react-stale-closure
+    summary: Event handler or effect uses stale state/props
+    severity: high
+    situation: Callback references old value instead of current
+    why: |
+      Closures capture values at creation time. If a callback is created
+      once (empty deps) but references state, it will always see the
+      initial state value, not updates.
+    solution: |
+      // WRONG - stale closure
+      const [count, setCount] = useState(0)
+      useEffect(() => {
+        const interval = setInterval(() => {
+          console.log(count)  // Always 0!
+          setCount(count + 1)  // Always sets to 1!
+        }, 1000)
+        return () => clearInterval(interval)
+      }, [])  // Empty deps = created once
+
+      // RIGHT - use functional update
+      useEffect(() => {
+        const interval = setInterval(() => {
+          setCount(prev => prev + 1)  // Uses current value
+        }, 1000)
+        return () => clearInterval(interval)
+      }, [])
+
+      // RIGHT - use ref for read-only access
+      const countRef = useRef(count)
+      useEffect(() => {
+        countRef.current = count
+      }, [count])
+
+      useEffect(() => {
+        const interval = setInterval(() => {
+          console.log(countRef.current)  // Current value
+        }, 1000)
+        return () => clearInterval(interval)
+      }, [])
+    symptoms:
+      - Value doesn't update in callback
+      - Console.log shows old value
+      - Increment only works once
+      - setTimeout/setInterval uses stale data
+    detection_pattern: 'useEffect\\([^)]+,\\s*\\[\\s*\\]\\)'
+    version_range: ">=16.8.0"
+
+  - id: react-setstate-in-render
+    summary: setState called during render causes infinite loop
+    severity: critical
+    situation: Calling setState unconditionally in component body
+    why: |
+      setState triggers a re-render. If called during render without
+      conditions, it creates an infinite loop: render → setState →
+      render → setState → ...
+    solution: |
+      // WRONG - infinite loop
+      function Component({ data }) {
+        const [processed, setProcessed] = useState(null)
+        setProcessed(transform(data))  // Called every render!
+        return <div>{processed}</div>
+      }
+
+      // RIGHT - use initial state function
+      function Component({ data }) {
+        const [processed] = useState(() => transform(data))
+        return <div>{processed}</div>
+      }
+
+      // RIGHT - use useMemo for derived state
+      function Component({ data }) {
+        const processed = useMemo(() => transform(data), [data])
+        return <div>{processed}</div>
+      }
+
+      // RIGHT - useEffect if truly needed
+      function Component({ data }) {
+        const [processed, setProcessed] = useState(null)
+        useEffect(() => {
+          setProcessed(transform(data))
+        }, [data])
+        return <div>{processed}</div>
+      }
+    symptoms:
+      - Too many re-renders error
+      - Maximum update depth exceeded
+      - Component freezes
+      - DevTools shows rapid re-renders
+    detection_pattern: 'function \\w+\\([^)]*\\)\\s*\\{[^}]*set\\w+\\([^)]+\\)[^}]*return'
+    version_range: ">=16.8.0"
+
+  - id: react-missing-key-prop
+    summary: Missing or incorrect key in list causes bugs
+    severity: high
+    situation: Rendering arrays without proper key props
+    why: |
+      React uses keys to track which items changed. Without keys (or with
+      index as key for dynamic lists), React can't correctly match items,
+      causing wrong items to update or state to attach to wrong elements.
+    solution: |
+      // WRONG - no key
+      items.map(item => <Item {...item} />)
+
+      // WRONG - index as key for dynamic list
+      items.map((item, index) => <Item key={index} {...item} />)
+
+      // RIGHT - stable unique ID
+      items.map(item => <Item key={item.id} {...item} />)
+
+      // When items truly have no ID, generate one:
+      const itemsWithIds = useMemo(
+        () => items.map(item => ({ ...item, _id: crypto.randomUUID() })),
+        [items]  // Only regenerate when items change
+      )
+
+      // Index is OK for static lists that never reorder:
+      const staticItems = ['Home', 'About', 'Contact']
+      staticItems.map((item, i) => <NavLink key={i}>{item}</NavLink>)
+    symptoms:
+      - Wrong item updates when list changes
+      - Input values jump between items
+      - Animations play on wrong elements
+      - State attached to wrong component
+    detection_pattern: '\\.map\\([^)]+=>\\s*<[A-Z](?![^>]*key=)'
+    version_range: ">=0.14.0"
+
+  - id: react-useeffect-cleanup
+    summary: Missing cleanup causes memory leaks
+    severity: high
+    situation: useEffect subscribes/adds listeners without cleanup
+    why: |
+      Without cleanup, subscriptions and listeners accumulate.
+      When component unmounts, old listeners still fire, causing
+      "setState on unmounted component" warnings and memory leaks.
+    solution: |
+      // WRONG - no cleanup
+      useEffect(() => {
+        window.addEventListener('resize', handleResize)
+        const subscription = api.subscribe(handleData)
+      }, [])
+
+      // RIGHT - cleanup function
+      useEffect(() => {
+        window.addEventListener('resize', handleResize)
+        const subscription = api.subscribe(handleData)
+
+        return () => {
+          window.removeEventListener('resize', handleResize)
+          subscription.unsubscribe()
+        }
+      }, [])
+
+      // For async effects, use abort controller
+      useEffect(() => {
+        const controller = new AbortController()
+
+        async function fetchData() {
+          try {
+            const res = await fetch(url, { signal: controller.signal })
+            const data = await res.json()
+            setData(data)
+          } catch (e) {
+            if (e.name !== 'AbortError') throw e
+          }
+        }
+        fetchData()
+
+        return () => controller.abort()
+      }, [url])
+    symptoms:
+      - "Can't perform state update on unmounted component"
+      - Memory usage grows over time
+      - Event handlers fire after navigation
+      - Subscriptions receive data after unmount
+    detection_pattern: 'useEffect\\([^)]+addEventListener|subscribe[^)]+(?!return)'
+    version_range: ">=16.8.0"
+
+  - id: react-context-default-value
+    summary: Context default value used when Provider missing
+    severity: medium
+    situation: Using context but forgetting to wrap with Provider
+    why: |
+      createContext default value is used when there's no Provider above
+      in the tree. Components may silently use defaults instead of
+      erroring, hiding the missing Provider bug.
+    solution: |
+      // Default that will hide bugs
+      const ThemeContext = createContext('light')
+
+      // BETTER - default that will error
+      const ThemeContext = createContext<Theme | null>(null)
+
+      function useTheme() {
+        const context = useContext(ThemeContext)
+        if (context === null) {
+          throw new Error('useTheme must be used within ThemeProvider')
+        }
+        return context
+      }
+
+      // BEST - create a custom provider hook
+      const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
+
+      function ThemeProvider({ children }: { children: React.ReactNode }) {
+        const [theme, setTheme] = useState<Theme>('light')
+        return (
+          <ThemeContext.Provider value={{ theme, setTheme }}>
+            {children}
+          </ThemeContext.Provider>
+        )
+      }
+
+      function useTheme() {
+        const context = useContext(ThemeContext)
+        if (!context) {
+          throw new Error('useTheme must be used within ThemeProvider')
+        }
+        return context
+      }
+    symptoms:
+      - Context value is always default
+      - setContext function is undefined
+      - Component works alone, breaks in app
+      - Silent failures instead of errors
+    detection_pattern: 'createContext\\([^)]*\\)'
+    version_range: ">=16.3.0"
+
+  - id: react-usememo-reference
+    summary: useMemo returning same reference when deps change
+    severity: medium
+    situation: useMemo doesn't recalculate when expected
+    why: |
+      If useMemo's deps don't change according to reference equality,
+      it returns the memoized value. Primitives compare by value,
+      objects by reference. Stale deps mean stale results.
+    solution: |
+      // WRONG - object dep always "same" because created outside
+      const config = { page: 1 }  // Same reference every render
+      const data = useMemo(() => process(config), [config])
+
+      // RIGHT - primitive deps
+      const data = useMemo(() => process({ page }), [page])
+
+      // WRONG - missing dep
+      const data = useMemo(() => items.filter(i => i.type === filter), [items])
+      // filter is missing!
+
+      // RIGHT - all deps included
+      const data = useMemo(() => items.filter(i => i.type === filter), [items, filter])
+
+      // Use ESLint rule to catch:
+      // "react-hooks/exhaustive-deps": "warn"
+    symptoms:
+      - Memoized value is stale
+      - Child components don't re-render
+      - Computed value doesn't update
+      - Filter/sort seems broken
+    detection_pattern: 'useMemo\\('
+    version_range: ">=16.8.0"
+
+  - id: react-forward-ref-missing
+    summary: Ref not forwarded to DOM element in custom component
+    severity: medium
+    situation: Parent passes ref to custom component, but it's not received
+    why: |
+      Regular function components don't receive refs as props.
+      Without forwardRef, the ref prop is ignored, and parent's ref
+      is always null.
+    solution: |
+      // WRONG - ref is ignored
+      function Input({ ref, ...props }) {
+        return <input ref={ref} {...props} />  // ref is undefined!
+      }
+
+      // RIGHT - forwardRef
+      const Input = forwardRef<HTMLInputElement, InputProps>((props, ref) => {
+        return <input ref={ref} {...props} />
+      })
+
+      // RIGHT - React 19+ can use ref as prop
+      function Input({ ref, ...props }: InputProps & { ref?: Ref<HTMLInputElement> }) {
+        return <input ref={ref} {...props} />
+      }
+
+      // With useImperativeHandle for custom methods
+      const Input = forwardRef<InputHandle, InputProps>((props, ref) => {
+        const inputRef = useRef<HTMLInputElement>(null)
+
+        useImperativeHandle(ref, () => ({
+          focus: () => inputRef.current?.focus(),
+          clear: () => { if (inputRef.current) inputRef.current.value = '' },
+        }))
+
+        return <input ref={inputRef} {...props} />
+      })
+    symptoms:
+      - ref.current is always null
+      - focus() doesn't work
+      - Form libraries can't access input
+      - Animation libraries can't measure element
+    detection_pattern: 'function \\w+\\([^)]*ref[^)]*\\)'
+    version_range: ">=16.3.0"

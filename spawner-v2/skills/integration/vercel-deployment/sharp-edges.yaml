@@ -1,0 +1,362 @@
+# Vercel Deployment Sharp Edges
+# These are the gotchas that catch developers off guard
+
+sharp_edges:
+  - id: vercel-env-var-prefix
+    summary: NEXT_PUBLIC_ exposes secrets to the browser
+    severity: critical
+    situation: Using NEXT_PUBLIC_ prefix for sensitive API keys
+    why: |
+      Variables prefixed with NEXT_PUBLIC_ are inlined into the JavaScript
+      bundle at build time. Anyone can view them in browser DevTools.
+      This includes all your users and potential attackers.
+    solution: |
+      Only use NEXT_PUBLIC_ for truly public values:
+
+      // SAFE to use NEXT_PUBLIC_
+      NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...  // Anon key is designed to be public
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_...
+      NEXT_PUBLIC_GA_ID=G-XXXXXXX
+
+      // NEVER use NEXT_PUBLIC_
+      SUPABASE_SERVICE_ROLE_KEY=eyJ...     // Full database access!
+      STRIPE_SECRET_KEY=sk_live_...         // Can charge cards!
+      DATABASE_URL=postgresql://...          // Direct DB access!
+      JWT_SECRET=...                         // Can forge tokens!
+
+      // Access server-only vars in:
+      // - Server Components (app router)
+      // - API Routes
+      // - Server Actions ('use server')
+      // - getServerSideProps (pages router)
+    symptoms:
+      - Secrets visible in browser DevTools → Sources
+      - Security audit finds exposed keys
+      - Unexpected API access from unknown sources
+    detection_pattern: 'NEXT_PUBLIC_.*(?:SECRET|PRIVATE|SERVICE_ROLE|DATABASE_URL)'
+    version_range: ">=1.0.0"
+
+  - id: vercel-preview-prod-db
+    summary: Preview deployments using production database
+    severity: high
+    situation: Not configuring separate environment variables for preview
+    why: |
+      Preview deployments run untested code. If they use production database,
+      a bug in a PR can corrupt production data. Also, testers might create
+      test data that shows up in production.
+    solution: |
+      Set up separate databases for each environment:
+
+      // In Vercel Dashboard → Settings → Environment Variables
+
+      // Production (production env only):
+      DATABASE_URL=postgresql://prod-host/prod-db
+
+      // Preview (preview env only):
+      DATABASE_URL=postgresql://staging-host/staging-db
+
+      // Or use Vercel's branching databases:
+      // - Neon, PlanetScale, Supabase all support branch databases
+      // - Auto-create preview DB for each PR
+
+      // For Supabase, create a staging project:
+      // Production:
+      NEXT_PUBLIC_SUPABASE_URL=https://prod-xxx.supabase.co
+
+      // Preview:
+      NEXT_PUBLIC_SUPABASE_URL=https://staging-xxx.supabase.co
+    symptoms:
+      - Test data appearing in production
+      - Production data corrupted after PR merge
+      - Users seeing test accounts/content
+    detection_pattern: null
+    version_range: ">=1.0.0"
+
+  - id: vercel-function-size
+    summary: Serverless function too large, slow cold starts
+    severity: high
+    situation: API route or server component has slow initial load
+    why: |
+      Vercel serverless functions have a 50MB limit (compressed).
+      Large functions mean slow cold starts (1-5+ seconds).
+      Heavy dependencies like puppeteer, sharp can cause this.
+    solution: |
+      Reduce function size:
+
+      // 1. Use dynamic imports for heavy libs
+      export async function GET() {
+        const sharp = await import('sharp')  // Only loads when needed
+        // ...
+      }
+
+      // 2. Move heavy processing to edge or external service
+      export const runtime = 'edge'  // Much smaller, faster cold start
+
+      // 3. Check bundle size
+      // npx @next/bundle-analyzer
+      // Look for large dependencies
+
+      // 4. Use external services for heavy tasks
+      // - Image processing: Cloudinary, imgix
+      // - PDF generation: API service
+      // - Puppeteer: Browserless.io
+
+      // 5. Split into multiple functions
+      // /api/heavy-task/start - Queue the job
+      // /api/heavy-task/status - Check progress
+    symptoms:
+      - First request takes 3-10+ seconds
+      - Subsequent requests are fast
+      - "Function size limit exceeded" error
+      - Deployment fails with size error
+    detection_pattern: null
+    version_range: ">=1.0.0"
+
+  - id: vercel-edge-limitations
+    summary: Edge runtime missing Node.js APIs
+    severity: high
+    situation: Using Node.js APIs in edge runtime functions
+    why: |
+      Edge runtime runs on V8, not Node.js. Many Node APIs are missing:
+      fs, path, crypto (partial), child_process, and most native modules.
+      Your code will fail at runtime with "X is not defined".
+    solution: |
+      Check API compatibility before using edge:
+
+      // SUPPORTED in Edge:
+      // - fetch, Request, Response
+      // - crypto.subtle (Web Crypto)
+      // - TextEncoder, TextDecoder
+      // - URL, URLSearchParams
+      // - Headers, FormData
+      // - setTimeout, setInterval
+
+      // NOT SUPPORTED in Edge:
+      // - fs, path, os
+      // - Buffer (use Uint8Array)
+      // - crypto.createHash (use crypto.subtle)
+      // - Most npm packages with native deps
+
+      // If you need Node.js APIs:
+      export const runtime = 'nodejs'  // Use Node runtime instead
+
+      // For crypto hashing in edge:
+      // WRONG
+      import { createHash } from 'crypto'  // Fails in edge
+
+      // RIGHT
+      async function hash(message: string) {
+        const encoder = new TextEncoder()
+        const data = encoder.encode(message)
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+        return Array.from(new Uint8Array(hashBuffer))
+          .map(b => b.toString(16).padStart(2, '0'))
+          .join('')
+      }
+    symptoms:
+      - "X is not defined" at runtime
+      - "Cannot find module 'fs'"
+      - Works locally, fails deployed
+      - Middleware crashes
+    detection_pattern: "runtime.*edge[\\s\\S]*import.*(?:fs|path|crypto)"
+    version_range: ">=1.0.0"
+
+  - id: vercel-timeout-limits
+    summary: Function timeout causes incomplete operations
+    severity: medium
+    situation: Long-running operations timing out
+    why: |
+      Vercel has timeout limits:
+      - Hobby: 10 seconds
+      - Pro: 60 seconds (can increase to 300)
+      - Enterprise: 900 seconds
+
+      Operations exceeding this are killed mid-execution.
+    solution: |
+      Handle long operations properly:
+
+      // 1. Return early, process async
+      export async function POST(request: Request) {
+        const data = await request.json()
+
+        // Queue for background processing
+        await queue.add('process-data', data)
+
+        // Return immediately
+        return Response.json({ status: 'queued' })
+      }
+
+      // 2. Use streaming for long responses
+      export async function GET() {
+        const stream = new ReadableStream({
+          async start(controller) {
+            for (const chunk of generateChunks()) {
+              controller.enqueue(chunk)
+              await sleep(100)  // Prevents timeout
+            }
+            controller.close()
+          }
+        })
+        return new Response(stream)
+      }
+
+      // 3. Use external services for heavy processing
+      // - Trigger serverless function, return job ID
+      // - Process in background (Inngest, Trigger.dev)
+      // - Client polls for completion
+
+      // 4. Increase timeout (Pro plan)
+      // vercel.json:
+      {
+        "functions": {
+          "app/api/slow/route.ts": {
+            "maxDuration": 60
+          }
+        }
+      }
+    symptoms:
+      - "Task timed out after X seconds"
+      - Incomplete database operations
+      - Partial file uploads
+      - Function killed mid-execution
+    detection_pattern: null
+    version_range: ">=1.0.0"
+
+  - id: vercel-build-env-runtime
+    summary: Environment variable missing at runtime but present at build
+    severity: medium
+    situation: Environment variable works in build but undefined at runtime
+    why: |
+      Some env vars are only available at build time (hardcoded into bundle).
+      If you expect a runtime value but it was baked in at build, you get
+      the build-time value or undefined.
+    solution: |
+      Understand when env vars are read:
+
+      // BUILD TIME (baked into bundle):
+      // - NEXT_PUBLIC_* variables
+      // - next.config.js
+      // - generateStaticParams
+      // - Static pages
+
+      // RUNTIME (read on each request):
+      // - Server Components (without cache)
+      // - API Routes
+      // - Server Actions
+      // - Middleware
+
+      // To force runtime reading:
+      export const dynamic = 'force-dynamic'
+
+      // For config that must be runtime:
+      // Don't use NEXT_PUBLIC_, read on server and pass to client
+
+      // Check which env vars you need:
+      // Build: URLs, public keys, feature flags (if static)
+      // Runtime: Secrets, database URLs, user-specific config
+    symptoms:
+      - Env var is undefined in production
+      - Value doesn't change after updating in dashboard
+      - Works in dev, wrong value in production
+      - Requires redeploy to update value
+    detection_pattern: null
+    version_range: ">=1.0.0"
+
+  - id: vercel-cors-api-routes
+    summary: CORS errors calling API routes from different domain
+    severity: medium
+    situation: Frontend on different domain can't call API routes
+    why: |
+      By default, browsers block cross-origin requests. Vercel doesn't
+      automatically add CORS headers. If your frontend is on a different
+      domain (or localhost in dev), requests fail.
+    solution: |
+      Add CORS headers to API routes:
+
+      // app/api/data/route.ts
+      export async function GET(request: Request) {
+        const data = await fetchData()
+
+        return Response.json(data, {
+          headers: {
+            'Access-Control-Allow-Origin': '*',  // Or specific domain
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          },
+        })
+      }
+
+      // Handle preflight requests
+      export async function OPTIONS() {
+        return new Response(null, {
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          },
+        })
+      }
+
+      // Or use next.config.js for all routes:
+      module.exports = {
+        async headers() {
+          return [
+            {
+              source: '/api/:path*',
+              headers: [
+                { key: 'Access-Control-Allow-Origin', value: '*' },
+              ],
+            },
+          ]
+        },
+      }
+    symptoms:
+      - "CORS policy" error in browser console
+      - "No 'Access-Control-Allow-Origin' header"
+      - Requests work in Postman but not browser
+      - Works same-origin, fails cross-origin
+    detection_pattern: null
+    version_range: ">=1.0.0"
+
+  - id: vercel-caching-confusion
+    summary: Page shows stale data after deployment
+    severity: medium
+    situation: Updated data not appearing after new deployment
+    why: |
+      Vercel caches aggressively. Static pages are cached at the edge.
+      Even dynamic pages may be cached if not configured properly.
+      Old cached versions served until cache expires or is purged.
+    solution: |
+      Control caching behavior:
+
+      // Force no caching (always fresh)
+      export const dynamic = 'force-dynamic'
+      export const revalidate = 0
+
+      // ISR - revalidate every 60 seconds
+      export const revalidate = 60
+
+      // On-demand revalidation (after mutation)
+      import { revalidatePath, revalidateTag } from 'next/cache'
+
+      // In Server Action:
+      async function updatePost(id: string) {
+        await db.post.update({ ... })
+        revalidatePath(`/posts/${id}`)  // Purge this page
+        revalidateTag('posts')          // Purge all with this tag
+      }
+
+      // Purge via API (deployment hook):
+      // POST https://your-site.vercel.app/api/revalidate?path=/posts
+
+      // Check caching in response headers:
+      // x-vercel-cache: HIT = served from cache
+      // x-vercel-cache: MISS = freshly generated
+    symptoms:
+      - Old content shows after deploy
+      - Changes not visible immediately
+      - Different users see different versions
+      - Data updates but page doesn't
+    detection_pattern: null
+    version_range: ">=1.0.0"
