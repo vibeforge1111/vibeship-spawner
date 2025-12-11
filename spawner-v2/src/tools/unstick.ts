@@ -2,11 +2,102 @@
  * spawner_unstick Tool
  *
  * Analyze stuck situation and provide alternative approaches.
+ * Tracks attempts across calls for better pattern detection.
  */
 
 import { z } from 'zod';
 import type { Env, UnstickInput, UnstickOutput, AttemptPattern } from '../types';
 import { emitEvent } from '../telemetry/events';
+
+/**
+ * Cached attempt history (stored per project)
+ */
+interface AttemptHistory {
+  task: string;
+  attempts: { description: string; timestamp: string }[];
+  errors: string[];
+  first_attempt: string;
+  last_attempt: string;
+}
+
+/**
+ * Cache key prefix for attempt history
+ */
+const ATTEMPT_CACHE_PREFIX = 'attempts:';
+
+/**
+ * Load attempt history from cache
+ */
+async function loadAttemptHistory(
+  cache: KVNamespace,
+  projectId: string,
+  taskDescription: string
+): Promise<AttemptHistory | null> {
+  const key = `${ATTEMPT_CACHE_PREFIX}${projectId}:${hashTask(taskDescription)}`;
+  return cache.get<AttemptHistory>(key, 'json');
+}
+
+/**
+ * Save attempt history to cache
+ */
+async function saveAttemptHistory(
+  cache: KVNamespace,
+  projectId: string,
+  history: AttemptHistory
+): Promise<void> {
+  const key = `${ATTEMPT_CACHE_PREFIX}${projectId}:${hashTask(history.task)}`;
+  await cache.put(key, JSON.stringify(history), {
+    expirationTtl: 86400, // 24 hours
+  });
+}
+
+/**
+ * Simple hash for task description (for cache key)
+ */
+function hashTask(task: string): string {
+  // Simple hash - first 32 chars of normalized task
+  return task.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 32);
+}
+
+/**
+ * Merge current attempts with historical attempts
+ */
+function mergeAttemptHistory(
+  existing: AttemptHistory | null,
+  task: string,
+  newAttempts: string[],
+  newErrors: string[]
+): AttemptHistory {
+  const now = new Date().toISOString();
+
+  if (!existing) {
+    return {
+      task,
+      attempts: newAttempts.map(desc => ({ description: desc, timestamp: now })),
+      errors: newErrors,
+      first_attempt: now,
+      last_attempt: now,
+    };
+  }
+
+  // Dedupe attempts by description
+  const existingDescriptions = new Set(existing.attempts.map(a => a.description));
+  const newUniqueAttempts = newAttempts
+    .filter(desc => !existingDescriptions.has(desc))
+    .map(desc => ({ description: desc, timestamp: now }));
+
+  // Dedupe errors
+  const existingErrors = new Set(existing.errors);
+  const newUniqueErrors = newErrors.filter(err => !existingErrors.has(err));
+
+  return {
+    task,
+    attempts: [...existing.attempts, ...newUniqueAttempts],
+    errors: [...existing.errors, ...newUniqueErrors],
+    first_attempt: existing.first_attempt,
+    last_attempt: now,
+  };
+}
 
 /**
  * Input schema for spawner_unstick
@@ -81,38 +172,87 @@ export async function executeUnstick(
 
   const { task_description, attempts, errors } = parsed.data;
 
-  // 1. Analyze the pattern of attempts
-  const attemptPatterns = analyzeAttempts(attempts);
+  // 1. Load and merge attempt history (if project context available)
+  let allAttempts = attempts;
+  let allErrors = errors;
+  let attemptHistory: AttemptHistory | null = null;
+  let timeStuck: string | null = null;
 
-  // 2. Generate diagnosis
-  const diagnosis = generateDiagnosis(task_description, attemptPatterns, errors);
+  if (projectId) {
+    // Load existing attempt history for this task
+    const existingHistory = await loadAttemptHistory(
+      env.CACHE,
+      projectId,
+      task_description
+    );
 
-  // 3. Generate alternatives based on the situation
-  const alternatives = generateAlternatives(task_description, attempts, errors);
+    // Merge with current attempts
+    attemptHistory = mergeAttemptHistory(
+      existingHistory,
+      task_description,
+      attempts,
+      errors
+    );
 
-  // 4. Determine if reset is recommended
-  const shouldReset = attempts.length >= 3 && attemptPatterns.circular;
+    // Use merged attempts for analysis
+    allAttempts = attemptHistory.attempts.map(a => a.description);
+    allErrors = attemptHistory.errors;
 
-  // 5. Emit telemetry
+    // Calculate time stuck
+    if (attemptHistory.first_attempt !== attemptHistory.last_attempt) {
+      const firstTime = new Date(attemptHistory.first_attempt).getTime();
+      const lastTime = new Date(attemptHistory.last_attempt).getTime();
+      const durationMs = lastTime - firstTime;
+      const durationMins = Math.round(durationMs / 60000);
+      if (durationMins >= 1) {
+        timeStuck = `${durationMins} minute${durationMins !== 1 ? 's' : ''}`;
+      }
+    }
+
+    // Save updated history
+    await saveAttemptHistory(env.CACHE, projectId, attemptHistory);
+  }
+
+  // 2. Analyze the pattern of attempts (using merged history)
+  const attemptPatterns = analyzeAttempts(allAttempts);
+
+  // 3. Generate diagnosis
+  const diagnosis = generateDiagnosis(task_description, attemptPatterns, allErrors);
+
+  // 4. Generate alternatives based on the situation
+  const alternatives = generateAlternatives(task_description, allAttempts, allErrors);
+
+  // 5. Determine if reset is recommended (based on total attempts)
+  const shouldReset = allAttempts.length >= 3 && attemptPatterns.circular;
+
+  // 6. Emit telemetry
   await emitEvent(
     env.DB,
     'escape_hatch_trigger',
     {
       task: task_description,
-      attempt_count: attempts.length,
+      attempt_count: allAttempts.length,
       pattern: attemptPatterns.type,
       circular: attemptPatterns.circular,
+      time_stuck: timeStuck,
+      has_history: !!attemptHistory,
     },
     projectId
   );
 
-  // 6. Build instruction
-  const instruction = buildInstruction(diagnosis, alternatives.length, shouldReset);
+  // 7. Build instruction (with time stuck context)
+  const instruction = buildInstruction(
+    diagnosis,
+    alternatives.length,
+    shouldReset,
+    timeStuck,
+    allAttempts.length
+  );
 
   return {
     diagnosis,
     attempts_analyzed: {
-      count: attempts.length,
+      count: allAttempts.length,
       pattern: attemptPatterns.type,
       circular: attemptPatterns.circular,
     },
@@ -302,18 +442,27 @@ function generateAlternatives(
 function buildInstruction(
   diagnosis: string,
   alternativeCount: number,
-  shouldReset: boolean
+  shouldReset: boolean,
+  timeStuck: string | null,
+  totalAttempts: number
 ): string {
-  const lines = [
-    'We\'ve detected a stuck pattern. Here\'s the situation:',
-    '',
-    diagnosis,
-    '',
-    `${alternativeCount} alternative approaches available.`,
-  ];
+  const lines: string[] = [];
+
+  // Add time context if available
+  if (timeStuck && totalAttempts > 1) {
+    lines.push(`⏱️ You've been working on this for ${timeStuck} with ${totalAttempts} attempts tracked.`);
+    lines.push('');
+  }
+
+  lines.push('We\'ve detected a stuck pattern. Here\'s the situation:');
+  lines.push('');
+  lines.push(diagnosis);
+  lines.push('');
+  lines.push(`${alternativeCount} alternative approaches available.`);
 
   if (shouldReset) {
-    lines.push('Recommend starting fresh after choosing an approach.');
+    lines.push('');
+    lines.push('⚠️ Recommend starting fresh after choosing an approach.');
   }
 
   lines.push('');

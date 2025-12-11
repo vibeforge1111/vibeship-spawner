@@ -1,6 +1,6 @@
 # Spawner V2 - Task Tracker
 
-> Last updated: 2024-12-11 (Skill loader V2 complete!)
+> Last updated: 2024-12-11 (Attempt tracking complete!)
 
 ## Phase 1: Foundation ✅ COMPLETE
 
@@ -103,16 +103,18 @@
 - [ ] Test with real code scenarios
 
 ### 3.4 The Memory Moment
-- [ ] Implement session resume flow
-- [ ] Generate "picking up where we left off" context
-- [ ] Include open issues in resume
-- [ ] Cache hot session data
+- [x] Implement session resume flow
+- [x] Generate "picking up where we left off" context
+- [x] Include open issues in resume
+- [x] Include recent decisions in resume
+- [x] Cache hot session data
 
 ### 3.5 Escape Hatch Detection
 - [x] Define stuck patterns (retry, circular, complexity growth)
 - [x] Create spawner_unstick tool (basic version)
-- [ ] Implement attempt tracking
-- [ ] Generate alternatives
+- [x] Implement attempt tracking (persisted to KV CACHE)
+- [x] Generate alternatives
+- [x] Track time stuck
 
 ### 3.6 Skill Handoffs
 - [x] Define handoff triggers in skills
@@ -209,7 +211,7 @@
 |-------|--------|----------|
 | Phase 1: Foundation | ✅ Complete | 100% |
 | Phase 2: Intelligence | ✅ Complete | 100% |
-| Phase 3: Experience | 🟡 In Progress | 40% |
+| Phase 3: Experience | 🟡 In Progress | 75% |
 | Phase 4: Polish | 🟡 In Progress | 70% |
 
 ### Stats
@@ -223,8 +225,14 @@
 - ✅ Updated context.ts and sharp-edge.ts to use new loader API
 - ✅ Added Validation interface to types.ts
 - ✅ TypeScript compiles cleanly
+- ✅ Fixed YAML parsing errors (quoting colons and @ symbols)
+- ✅ Uploaded all 7 skills (59 edges, 57 validations) to KV
+- ✅ Enhanced session resume with "Picking up where we left off" header
+- ✅ Added recent_decisions to context output
+- ✅ Implemented attempt tracking in spawner_unstick (persisted to CACHE KV)
+- ✅ Track time stuck across multiple unstick calls
 
 ### Next Priority
 1. Test MCP tools with Claude Desktop locally
-2. Upload skills to KV (run upload-skills.js)
+2. Implement The Save Moment (validation interruption UX)
 3. Deploy to production
