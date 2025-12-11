@@ -1,0 +1,112 @@
+# Supabase Backend Validations
+# Checks that run on code to catch issues
+
+validations:
+  - id: supabase-service-role-client
+    name: Service Role in Client Code
+    severity: critical
+    type: regex
+    pattern:
+      - 'SUPABASE_SERVICE_ROLE'
+      - 'service_role_key'
+      - 'serviceRoleKey'
+    message: "Service role key detected. This MUST NOT be used in client-side code."
+    fix_action: "Move to Server Action or API route, use anon key for client"
+    applies_to:
+      - "*.tsx"
+      - "*.jsx"
+      - "*.ts"
+      - "*.js"
+    exclude:
+      - "app/actions*.ts"
+      - "app/api/**"
+      - "lib/supabase-admin.ts"
+
+  - id: supabase-missing-rls
+    name: Table Without RLS
+    severity: critical
+    type: regex
+    pattern:
+      - 'create table[^;]+;(?![\\s\\S]{0,200}?enable row level security)'
+    message: "Table created without enabling RLS. All data is exposed."
+    fix_action: "Add 'alter table X enable row level security;' immediately after"
+    applies_to:
+      - "*.sql"
+      - "migrations/*.sql"
+
+  - id: supabase-anon-key-hardcoded
+    name: Hardcoded Supabase Key
+    severity: error
+    type: regex
+    pattern:
+      - 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+'
+      - 'sb-[a-z]+-[a-z]+\\.supabase\\.co'
+    message: "Hardcoded Supabase credentials. Use environment variables."
+    fix_action: "Move to .env and use process.env.NEXT_PUBLIC_SUPABASE_*"
+    applies_to:
+      - "*.tsx"
+      - "*.jsx"
+      - "*.ts"
+      - "*.js"
+
+  - id: supabase-from-without-select
+    name: Query Without Select
+    severity: warning
+    type: regex
+    pattern:
+      - '\\.from\\([^)]+\\)(?!\\.select)'
+    message: "Supabase query without .select(). Returns all columns unnecessarily."
+    fix_action: "Add .select('column1, column2') to fetch only needed columns"
+    applies_to:
+      - "*.tsx"
+      - "*.ts"
+
+  - id: supabase-no-error-handling
+    name: Supabase Call Without Error Check
+    severity: warning
+    type: regex
+    pattern:
+      - 'await supabase\\.[^}]+(?!error)'
+      - 'const\\s*{\\s*data\\s*}\\s*=\\s*await\\s*supabase'
+    message: "Supabase call without error handling. Always destructure { data, error }."
+    fix_action: "Use const { data, error } = await supabase... and handle error"
+    applies_to:
+      - "*.tsx"
+      - "*.ts"
+
+  - id: supabase-realtime-no-cleanup
+    name: Realtime Subscription Without Cleanup
+    severity: warning
+    type: regex
+    pattern:
+      - '\\.subscribe\\(\\)(?![\\s\\S]{0,500}?removeChannel|unsubscribe)'
+    message: "Realtime subscription without cleanup. Memory leak risk."
+    fix_action: "Add cleanup in useEffect return: supabase.removeChannel(channel)"
+    applies_to:
+      - "*.tsx"
+      - "*.jsx"
+
+  - id: supabase-public-bucket-sensitive
+    name: Public Bucket for User Data
+    severity: warning
+    type: regex
+    pattern:
+      - "buckets.*?public.*?true.*?(?:user|avatar|document|private|upload)"
+      - "createBucket.*?public.*?true"
+    message: "Consider if this bucket should be public. User data should be private."
+    fix_action: "Set public: false and use RLS policies for access control"
+    applies_to:
+      - "*.sql"
+      - "*.ts"
+
+  - id: supabase-delete-no-cascade
+    name: Foreign Key Without Cascade
+    severity: warning
+    type: regex
+    pattern:
+      - 'references\\s+\\w+\\([^)]+\\)(?!\\s+on\\s+delete)'
+    message: "Foreign key without ON DELETE clause. Consider cascade behavior."
+    fix_action: "Add 'on delete cascade' or 'on delete set null' as appropriate"
+    applies_to:
+      - "*.sql"
+      - "migrations/*.sql"

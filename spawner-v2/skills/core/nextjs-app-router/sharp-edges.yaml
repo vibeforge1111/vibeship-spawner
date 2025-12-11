@@ -1,0 +1,184 @@
+# Next.js App Router Sharp Edges
+# These are the gotchas that catch developers off guard
+
+sharp_edges:
+  - id: nextjs-async-client-component
+    summary: Client Components cannot be async
+    severity: critical
+    situation: You add async to a component that has 'use client' directive
+    why: |
+      Client Components run in the browser. While top-level await exists,
+      React components need to return JSX synchronously. The async keyword
+      on a component means it returns a Promise, not JSX.
+    solution: |
+      Move data fetching to:
+      1. A Server Component parent that passes data as props
+      2. useEffect with useState for client-side fetching
+      3. A data fetching library like SWR or React Query
+    symptoms:
+      - "Cannot use keyword 'await' outside an async function"
+      - Component returns Promise instead of JSX
+      - Hydration mismatch errors
+    detection_pattern: '["'']use client["''][\\s\\S]*?async\\s+function'
+    version_range: ">=13.0.0"
+
+  - id: nextjs-server-import-in-client
+    summary: Server-only imports in Client Components fail
+    severity: critical
+    situation: You import fs, path, database clients, or 'server-only' in a 'use client' file
+    why: |
+      Client Components are bundled for the browser. Node.js modules and
+      server-only packages don't exist in the browser environment.
+    solution: |
+      1. Move the import to a Server Component
+      2. Create a Server Action for the server-side logic
+      3. Create an API route if you need an endpoint
+    symptoms:
+      - "Module not found: Can't resolve 'fs'"
+      - "Module not found: Can't resolve 'server-only'"
+      - Build fails with "can't be imported from a Client Component"
+    detection_pattern: '["'']use client["''][\\s\\S]*?import.*from\\s*["''](?:fs|path|crypto|server-only|next/headers)'
+    version_range: ">=13.0.0"
+
+  - id: nextjs-hydration-mismatch
+    summary: Hydration errors from browser-only APIs
+    severity: high
+    situation: Using window, document, localStorage, or Date during initial render
+    why: |
+      Server Components render on the server where browser APIs don't exist.
+      If the server renders different content than the client, React throws
+      a hydration mismatch error.
+    solution: |
+      1. Use useEffect for browser-only code (runs only on client)
+      2. Use dynamic import with { ssr: false }
+      3. Check typeof window !== 'undefined' before accessing
+      4. Use the 'use client' directive and useEffect
+    symptoms:
+      - "Text content did not match"
+      - "Hydration failed because the initial UI does not match"
+      - "There was an error while hydrating"
+    detection_pattern: '(?<!typeof\\s)(?:window\\.|document\\.|localStorage)'
+    version_range: ">=13.0.0"
+
+  - id: nextjs-missing-use-server
+    summary: Server Action without 'use server' directive
+    severity: high
+    situation: Creating a function meant to run on the server but forgetting the directive
+    why: |
+      Without 'use server', the function is just a regular function. If called
+      from a Client Component, it will try to run in the browser, failing or
+      exposing server logic.
+    solution: |
+      Add 'use server' either:
+      1. At the top of a file containing only server actions
+      2. At the top of the individual function body
+    symptoms:
+      - Function runs on client instead of server
+      - Database operations fail in browser
+      - Secrets exposed to client
+    detection_pattern: 'export\\s+async\\s+function\\s+\\w+Action'
+    version_range: ">=14.0.0"
+
+  - id: nextjs-cookies-in-client
+    summary: Using cookies() in Client Components
+    severity: critical
+    situation: Calling cookies() from next/headers in a Client Component
+    why: |
+      cookies() is a server-only function that reads request headers.
+      It doesn't exist in the browser context.
+    solution: |
+      1. Read cookies in a Server Component and pass values as props
+      2. Use document.cookie for client-side cookie access
+      3. Use a Server Action to get cookie values
+    symptoms:
+      - "cookies is not a function"
+      - "headers is not a function"
+      - Build error about server-only imports
+    detection_pattern: '["'']use client["''][\\s\\S]*?cookies\\(\\)'
+    version_range: ">=13.0.0"
+
+  - id: nextjs-use-client-boundary
+    summary: Forgetting that 'use client' creates a boundary
+    severity: medium
+    situation: |
+      Expecting child components of a Client Component to be Server Components
+    why: |
+      When you mark a component with 'use client', all its children are also
+      Client Components by default (unless passed as children props).
+    solution: |
+      To use Server Components inside Client Components:
+      1. Pass them as children props
+      2. Pass them as any prop (composition pattern)
+
+      // This works:
+      <ClientComponent>
+        <ServerComponent /> {/* Still a Server Component */}
+      </ClientComponent>
+    symptoms:
+      - Server-only imports failing in child components
+      - Larger bundle than expected
+      - Database queries in components that should be server
+    detection_pattern: null
+    version_range: ">=13.0.0"
+
+  - id: nextjs-revalidate-confusion
+    summary: Not understanding revalidatePath vs revalidateTag
+    severity: medium
+    situation: Cache not invalidating after mutations
+    why: |
+      revalidatePath invalidates a specific URL path's cache.
+      revalidateTag invalidates all fetches tagged with that tag.
+      Using the wrong one means stale data.
+    solution: |
+      Use revalidatePath when:
+      - You know the exact page that needs refreshing
+      - Single page affected by the mutation
+
+      Use revalidateTag when:
+      - Multiple pages show the same data
+      - You want granular cache control
+      - Data is fetched with fetch() and tagged
+    symptoms:
+      - Data not updating after Server Action
+      - Need to hard refresh to see changes
+      - Some pages update, others don't
+    detection_pattern: 'revalidate(?:Path|Tag)\\('
+    version_range: ">=13.0.0"
+
+  - id: nextjs-middleware-cold-start
+    summary: Middleware redirects flash on cold start
+    severity: medium
+    situation: Users see a flash of the wrong page before redirect kicks in
+    why: |
+      Next.js middleware runs at the edge. On cold starts, there can be a
+      delay before the middleware executes, causing the original page to
+      briefly render.
+    solution: |
+      1. Use loading.tsx to show a loading state
+      2. Check auth state in the page component as backup
+      3. Use cookies for instant auth checks
+      4. Consider using layout-level auth checks
+    symptoms:
+      - Brief flash of protected content
+      - Redirect happens after page starts rendering
+      - Inconsistent behavior between hot and cold loads
+    detection_pattern: 'middleware\\.ts'
+    version_range: ">=13.0.0"
+
+  - id: nextjs-dynamic-metadata-streaming
+    summary: Dynamic metadata blocks streaming
+    severity: low
+    situation: Using generateMetadata with slow data fetches
+    why: |
+      generateMetadata must complete before the page starts streaming.
+      If it does slow database queries, the entire page is delayed.
+    solution: |
+      1. Cache metadata queries aggressively
+      2. Keep metadata fetches fast and simple
+      3. Consider static metadata for pages that don't need dynamic titles
+    symptoms:
+      - Slow Time to First Byte (TTFB)
+      - Page takes long to start showing content
+      - Streaming benefits lost
+    detection_pattern: 'generateMetadata'
+    version_range: ">=13.0.0"

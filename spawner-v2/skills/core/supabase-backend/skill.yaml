@@ -1,0 +1,173 @@
+id: supabase-backend
+name: Supabase Backend
+version: 1.0.0
+layer: 1
+description: Expert knowledge for Supabase database, RLS, and backend patterns
+
+owns:
+  - supabase
+  - rls
+  - row-level-security
+  - postgres
+  - supabase-storage
+  - supabase-realtime
+
+pairs_with:
+  - nextjs-app-router
+  - nextjs-supabase-auth
+  - typescript-strict
+
+requires: []
+
+tags:
+  - supabase
+  - postgres
+  - rls
+  - database
+  - backend
+  - storage
+  - realtime
+
+triggers:
+  - supabase
+  - row level security
+  - rls
+  - postgres
+  - database policy
+  - supabase storage
+  - supabase realtime
+
+identity: |
+  You are a Supabase backend expert. You understand the nuances of Row Level
+  Security (RLS), when to use it, how to write performant policies, and how
+  to avoid the security and performance pitfalls that catch developers.
+
+  Your core principles:
+  1. RLS is your first line of defense - enable it on every table
+  2. Policies should be simple and use indexed columns
+  3. Service role bypasses RLS - use sparingly and never on client
+  4. Use database functions for complex logic
+  5. Understand the auth.uid() and auth.jwt() functions
+
+patterns:
+  - name: Basic RLS Policy
+    description: Enable RLS and create policies for authenticated access
+    when: Creating any table that users will access
+    example: |
+      -- Enable RLS (do this on EVERY table)
+      alter table posts enable row level security;
+
+      -- Users can only see their own posts
+      create policy "Users view own posts"
+        on posts for select
+        using (auth.uid() = user_id);
+
+      -- Users can only insert their own posts
+      create policy "Users insert own posts"
+        on posts for insert
+        with check (auth.uid() = user_id);
+
+  - name: Public Read, Auth Write
+    description: Anyone can read, only authenticated users can write
+    when: Public content like blog posts or product listings
+    example: |
+      -- Anyone can view
+      create policy "Public read"
+        on posts for select
+        using (true);
+
+      -- Only authenticated users can insert
+      create policy "Auth users insert"
+        on posts for insert
+        to authenticated
+        with check (auth.uid() = author_id);
+
+  - name: Server Action with Service Role
+    description: Use service role for admin operations in Server Actions
+    when: You need to bypass RLS for admin functionality
+    example: |
+      // app/actions.ts
+      'use server'
+      import { createClient } from '@supabase/supabase-js'
+
+      const supabaseAdmin = createClient(
+        process.env.SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+      )
+
+      export async function adminDeleteUser(userId: string) {
+        // This bypasses RLS - use carefully
+        await supabaseAdmin.from('users').delete().eq('id', userId)
+      }
+
+  - name: Realtime with RLS
+    description: Set up realtime subscriptions that respect RLS
+    when: Building real-time features like chat or notifications
+    example: |
+      // Client side - RLS filters what you receive
+      const channel = supabase
+        .channel('messages')
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'messages' },
+          (payload) => {
+            // You'll only receive messages your RLS policy allows
+            setMessages(prev => [...prev, payload.new])
+          }
+        )
+        .subscribe()
+
+  - name: Storage with RLS
+    description: Protect storage buckets with RLS policies
+    when: Users upload files that should be private or restricted
+    example: |
+      -- Create bucket with RLS
+      insert into storage.buckets (id, name, public)
+      values ('avatars', 'avatars', false);
+
+      -- Users can upload to their own folder
+      create policy "Users upload own avatar"
+        on storage.objects for insert
+        with check (
+          bucket_id = 'avatars' and
+          auth.uid()::text = (storage.foldername(name))[1]
+        );
+
+anti_patterns:
+  - name: Disabled RLS
+    description: Leaving RLS disabled on tables with user data
+    why: Anyone with the anon key can read/write all data
+    instead: Always enable RLS, even if policy is permissive
+
+  - name: Service Role on Client
+    description: Using SUPABASE_SERVICE_ROLE_KEY in client code
+    why: Exposes full database access to anyone who views page source
+    instead: Only use service role in server-side code (Server Actions, API routes)
+
+  - name: Complex Policy Logic
+    description: Writing complex business logic in RLS policies
+    why: Policies run on every query - complex logic kills performance
+    instead: Use database functions for complex checks, call from simple policies
+
+  - name: Missing Index on Policy Column
+    description: RLS policy filters on non-indexed column
+    why: Every query does a full table scan - gets slow fast
+    instead: Add index on columns used in policies (especially user_id)
+
+  - name: Trusting Client Data
+    description: Using client-provided data in RLS decisions
+    why: Clients can send any data - only trust auth.uid() and auth.jwt()
+    instead: Always use auth.uid() for user identity, not request data
+
+handoffs:
+  - trigger: authentication or auth login
+    to: nextjs-supabase-auth
+    context: User is working on authentication flow
+
+  - trigger: next.js or app router
+    to: nextjs-app-router
+    context: User is working on Next.js integration
+
+  - trigger: edge function or serverless
+    to: supabase-edge-functions
+    context: User is working on Edge Functions

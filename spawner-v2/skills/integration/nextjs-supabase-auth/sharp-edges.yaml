@@ -1,0 +1,280 @@
+# Next.js + Supabase Auth Sharp Edges
+# These are the gotchas that catch developers off guard
+
+sharp_edges:
+  - id: auth-getsession-vs-getuser
+    summary: getSession() is not secure for auth checks
+    severity: critical
+    situation: Using getSession() to verify user authentication in Server Components
+    why: |
+      getSession() reads the JWT from cookies but DOES NOT validate it.
+      An attacker could forge a JWT, and getSession() would trust it.
+      getUser() makes a request to Supabase to verify the token.
+    solution: |
+      Always use getUser() for security-critical operations:
+
+      // WRONG - trusts unverified JWT
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.user) { /* could be spoofed */ }
+
+      // RIGHT - verifies with Supabase
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) { /* actually authenticated */ }
+    symptoms:
+      - Security vulnerability in auth
+      - User spoofing possible
+      - Auth seems to work but is not secure
+    detection_pattern: 'getSession\\(\\)(?![\\s\\S]{0,100}?getUser)'
+    version_range: ">=2.0.0"
+
+  - id: auth-middleware-order
+    summary: Middleware not refreshing session before route protection
+    severity: high
+    situation: Checking auth in middleware without refreshing the session first
+    why: |
+      JWT tokens expire. If you check auth before refreshing, expired
+      tokens cause spurious redirects. The session might be valid but
+      the token just needs a refresh.
+    solution: |
+      Always refresh session first in middleware:
+
+      export async function middleware(request: NextRequest) {
+        const response = NextResponse.next({ request })
+        const supabase = createServerClient(...)
+
+        // Refresh FIRST - this updates cookies if needed
+        const { data: { user } } = await supabase.auth.getUser()
+
+        // THEN check auth
+        if (!user && request.nextUrl.pathname.startsWith('/dashboard')) {
+          return NextResponse.redirect(new URL('/login', request.url))
+        }
+
+        return response
+      }
+    symptoms:
+      - Users randomly logged out
+      - Auth works sometimes, fails other times
+      - Session seems to expire early
+    detection_pattern: 'middleware[\\s\\S]*?pathname[\\s\\S]*?getUser'
+    version_range: ">=1.0.0"
+
+  - id: auth-callback-missing
+    summary: Missing auth callback route for OAuth
+    severity: high
+    situation: Setting up OAuth providers without the callback handler
+    why: |
+      OAuth providers redirect back to your app with a code.
+      Without the callback route, there's nowhere to exchange
+      this code for a session, so login appears to fail.
+    solution: |
+      Create the callback route handler:
+
+      // app/auth/callback/route.ts
+      import { createClient } from '@/lib/supabase/server'
+      import { NextResponse } from 'next/server'
+
+      export async function GET(request: Request) {
+        const { searchParams, origin } = new URL(request.url)
+        const code = searchParams.get('code')
+        const next = searchParams.get('next') ?? '/'
+
+        if (code) {
+          const supabase = await createClient()
+          const { error } = await supabase.auth.exchangeCodeForSession(code)
+          if (!error) {
+            return NextResponse.redirect(`${origin}${next}`)
+          }
+        }
+
+        return NextResponse.redirect(`${origin}/auth/error`)
+      }
+
+      // In Supabase dashboard, set redirect URL to:
+      // https://yoursite.com/auth/callback
+    symptoms:
+      - OAuth login "fails" after provider redirect
+      - User lands on 404 after OAuth
+      - "code" parameter in URL but not logged in
+    detection_pattern: null
+    version_range: ">=1.0.0"
+
+  - id: auth-client-server-mismatch
+    summary: Using wrong Supabase client for the context
+    severity: high
+    situation: Using browser client in Server Component or vice versa
+    why: |
+      Browser client (createBrowserClient) can't access server-only
+      cookies. Server client (createServerClient) doesn't work in
+      browser. Using the wrong one means auth state is lost.
+    solution: |
+      Use the right client for each context:
+
+      // In Server Components, Server Actions, Route Handlers:
+      import { createClient } from '@/lib/supabase/server'
+
+      // In Client Components:
+      import { createClient } from '@/lib/supabase/client'
+
+      // In middleware.ts - create inline with request/response cookies
+
+      // Separate files make it clear:
+      // lib/supabase/client.ts - 'use client', createBrowserClient
+      // lib/supabase/server.ts - createServerClient with cookies()
+    symptoms:
+      - Auth works on server but not client
+      - User appears logged out after refresh
+      - getUser returns null when user is logged in
+    detection_pattern: "createBrowserClient.*cookies\\(\\)|createServerClient.*'use client'"
+    version_range: ">=1.0.0"
+
+  - id: auth-no-listener
+    summary: Client Component doesn't listen for auth changes
+    severity: medium
+    situation: Checking auth once without onAuthStateChange listener
+    why: |
+      Auth state can change at any time: user logs out in another tab,
+      token refreshes, session expires. Without a listener, your UI
+      gets out of sync with reality.
+    solution: |
+      Use onAuthStateChange in Client Components:
+
+      'use client'
+      import { useEffect, useState } from 'react'
+      import { createClient } from '@/lib/supabase/client'
+
+      export function AuthProvider({ children }) {
+        const [user, setUser] = useState(null)
+        const supabase = createClient()
+
+        useEffect(() => {
+          const { data: { subscription } } = supabase.auth.onAuthStateChange(
+            (event, session) => {
+              setUser(session?.user ?? null)
+            }
+          )
+
+          return () => subscription.unsubscribe()
+        }, [])
+
+        return <AuthContext.Provider value={user}>{children}</AuthContext.Provider>
+      }
+    symptoms:
+      - UI shows logged in after logout
+      - Auth state stuck until refresh
+      - Multiple tabs get out of sync
+    detection_pattern: 'createClient\\(\\)(?![\\s\\S]{0,500}?onAuthStateChange)'
+    version_range: ">=1.0.0"
+
+  - id: auth-redirect-loop
+    summary: Redirect loop between login and protected route
+    severity: medium
+    situation: Middleware redirects to login, but login also gets redirected
+    why: |
+      If your middleware matcher is too broad, it catches the login page
+      itself. User gets redirected to login, which redirects to login,
+      infinite loop.
+    solution: |
+      Exclude auth routes from middleware, or handle them explicitly:
+
+      // Option 1: Matcher excludes auth routes
+      export const config = {
+        matcher: ['/((?!_next/static|_next/image|favicon.ico|login|auth).*)'],
+      }
+
+      // Option 2: Explicit handling in middleware
+      export async function middleware(request: NextRequest) {
+        const { pathname } = request.nextUrl
+
+        // Skip auth-related routes
+        if (pathname.startsWith('/login') || pathname.startsWith('/auth')) {
+          return NextResponse.next()
+        }
+
+        // ... rest of auth check
+      }
+    symptoms:
+      - Browser shows "too many redirects"
+      - Login page never loads
+      - Infinite loading
+    detection_pattern: 'matcher.*(?!.*login|auth)'
+    version_range: ">=1.0.0"
+
+  - id: auth-pkce-cors
+    summary: CORS issues with PKCE flow
+    severity: medium
+    situation: Using signInWithOAuth and getting CORS errors
+    why: |
+      OAuth with PKCE requires specific redirect URL configuration.
+      If the redirect URL in Supabase dashboard doesn't match your
+      actual callback URL exactly, you get CORS errors.
+    solution: |
+      1. In Supabase Dashboard > Authentication > URL Configuration:
+         - Site URL: https://yoursite.com
+         - Redirect URLs: https://yoursite.com/auth/callback
+
+      2. For local development, add:
+         - http://localhost:3000/auth/callback
+
+      3. In your OAuth call:
+         await supabase.auth.signInWithOAuth({
+           provider: 'google',
+           options: {
+             redirectTo: `${window.location.origin}/auth/callback`,
+           },
+         })
+
+      4. Make sure the callback route exists at that path
+    symptoms:
+      - CORS error in console
+      - OAuth popup closes but login fails
+      - "Invalid redirect URL" error
+    detection_pattern: 'signInWithOAuth(?![\\s\\S]{0,100}?redirectTo)'
+    version_range: ">=1.0.0"
+
+  - id: auth-server-action-cookies
+    summary: Cookies not being set in Server Actions
+    severity: medium
+    situation: Login works but session doesn't persist
+    why: |
+      Server Actions can set cookies, but only if you use the right
+      pattern. The createServerClient needs the cookies() function
+      with both getAll and setAll implemented.
+    solution: |
+      Make sure your server client sets cookies:
+
+      // lib/supabase/server.ts
+      import { createServerClient } from '@supabase/ssr'
+      import { cookies } from 'next/headers'
+
+      export async function createClient() {
+        const cookieStore = await cookies()
+
+        return createServerClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          {
+            cookies: {
+              getAll() {
+                return cookieStore.getAll()
+              },
+              setAll(cookiesToSet) {
+                // This is critical for Server Actions!
+                try {
+                  cookiesToSet.forEach(({ name, value, options }) =>
+                    cookieStore.set(name, value, options)
+                  )
+                } catch {
+                  // Called from Server Component - can't set cookies
+                }
+              },
+            },
+          }
+        )
+      }
+    symptoms:
+      - Login succeeds but immediately logged out
+      - getUser() returns null after signIn
+      - Works in API routes but not Server Actions
+    detection_pattern: 'createServerClient(?![\\s\\S]{0,200}?setAll)'
+    version_range: ">=1.0.0"

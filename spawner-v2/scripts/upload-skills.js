@@ -1,10 +1,18 @@
 #!/usr/bin/env node
 
 /**
- * Upload Skills to KV
+ * Upload Skills to KV (V2)
  *
- * This script reads the skill registry from the V1 skills directory
- * and uploads it to Cloudflare KV for V2 to consume.
+ * Reads skills from the new YAML format structure:
+ *   skills/
+ *     core/
+ *       skill-id/
+ *         skill.yaml
+ *         sharp-edges.yaml
+ *         validations.yaml
+ *     integration/
+ *       skill-id/
+ *         ...
  *
  * Usage:
  *   node scripts/upload-skills.js --local  # Upload to local dev
@@ -16,20 +24,21 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { parse as parseYaml } from 'yaml';
 
 const execAsync = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isLocal = process.argv.includes('--local');
 
 // Paths
-const REGISTRY_PATH = path.join(__dirname, '..', '..', 'skills', 'registry.json');
-const SKILLS_DIR = path.join(__dirname, '..', '..', 'skills');
+const SKILLS_DIR = path.join(__dirname, '..', 'skills');
+const SKILL_LAYERS = ['core', 'integration', 'pattern'];
 
 /**
  * Upload a key-value pair to KV
  */
 async function uploadToKV(namespace, key, value) {
-  const valueStr = typeof value === 'string' ? value : JSON.stringify(value);
+  const valueStr = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
   const localFlag = isLocal ? '--local' : '';
 
   // Write value to temp file to handle escaping
@@ -39,131 +48,229 @@ async function uploadToKV(namespace, key, value) {
   try {
     const cmd = `wrangler kv:key put --namespace-id=${namespace} "${key}" --path="${tempFile}" ${localFlag}`;
     await execAsync(cmd, { cwd: path.join(__dirname, '..') });
-    console.log(`  + ${key}`);
+    console.log(`  ✓ ${key}`);
   } finally {
     await fs.unlink(tempFile).catch(() => {});
   }
 }
 
 /**
- * Read and parse the skill registry
+ * Read and parse a YAML file
  */
-async function loadRegistry() {
-  const content = await fs.readFile(REGISTRY_PATH, 'utf-8');
-  return JSON.parse(content);
-}
-
-/**
- * Read a skill file
- */
-async function readSkillFile(skillPath) {
-  const fullPath = path.join(SKILLS_DIR, skillPath);
+async function readYaml(filePath) {
   try {
-    return await fs.readFile(fullPath, 'utf-8');
+    const content = await fs.readFile(filePath, 'utf-8');
+    return parseYaml(content);
   } catch {
     return null;
   }
 }
 
 /**
+ * Discover all skills from the directory structure
+ */
+async function discoverSkills() {
+  const skills = [];
+
+  for (const layer of SKILL_LAYERS) {
+    const layerPath = path.join(SKILLS_DIR, layer);
+
+    try {
+      const entries = await fs.readdir(layerPath, { withFileTypes: true });
+
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+
+        const skillPath = path.join(layerPath, entry.name);
+        const skillYamlPath = path.join(skillPath, 'skill.yaml');
+
+        const skill = await readYaml(skillYamlPath);
+        if (skill) {
+          skills.push({
+            ...skill,
+            layer_name: layer,
+            dir: skillPath,
+          });
+        }
+      }
+    } catch {
+      // Layer directory doesn't exist
+      console.log(`  (no ${layer}/ directory)`);
+    }
+  }
+
+  return skills;
+}
+
+/**
+ * Load sharp edges for a skill
+ */
+async function loadSharpEdges(skillDir) {
+  const edgesPath = path.join(skillDir, 'sharp-edges.yaml');
+  const data = await readYaml(edgesPath);
+  return data?.sharp_edges || [];
+}
+
+/**
+ * Load validations for a skill
+ */
+async function loadValidations(skillDir) {
+  const validationsPath = path.join(skillDir, 'validations.yaml');
+  const data = await readYaml(validationsPath);
+  return data?.validations || [];
+}
+
+/**
+ * Build the skill index for fast lookup
+ */
+function buildSkillIndex(skills) {
+  return {
+    version: '2.0.0',
+    updated_at: new Date().toISOString(),
+    total: skills.length,
+    by_layer: {
+      core: skills.filter(s => s.layer === 1).map(s => s.id),
+      integration: skills.filter(s => s.layer === 2).map(s => s.id),
+      pattern: skills.filter(s => s.layer === 3).map(s => s.id),
+    },
+    skills: skills.map(s => ({
+      id: s.id,
+      name: s.name,
+      layer: s.layer,
+      owns: s.owns || [],
+      tags: s.tags || [],
+      triggers: s.triggers || [],
+    })),
+  };
+}
+
+/**
+ * Build edge index grouped by skill
+ */
+function buildEdgeIndex(allEdges) {
+  const bySkill = {};
+  const bySeverity = {
+    critical: [],
+    high: [],
+    medium: [],
+    low: [],
+  };
+
+  for (const edge of allEdges) {
+    // Group by skill
+    if (!bySkill[edge.skill_id]) {
+      bySkill[edge.skill_id] = [];
+    }
+    bySkill[edge.skill_id].push(edge.id);
+
+    // Group by severity
+    if (bySeverity[edge.severity]) {
+      bySeverity[edge.severity].push(edge.id);
+    }
+  }
+
+  return {
+    version: '2.0.0',
+    updated_at: new Date().toISOString(),
+    total: allEdges.length,
+    by_skill: bySkill,
+    by_severity: bySeverity,
+    all_ids: allEdges.map(e => e.id),
+  };
+}
+
+/**
  * Main upload function
  */
 async function main() {
-  console.log(`Uploading skills to KV (${isLocal ? 'local' : 'production'})...\\n`);
+  console.log(`\n📦 Uploading skills to KV (${isLocal ? 'local' : 'production'})...\n`);
 
-  // Load registry
-  const registry = await loadRegistry();
-  console.log(`Found ${registry.specialists.length} skills in registry\\n`);
+  // Discover all skills
+  console.log('🔍 Discovering skills...');
+  const skills = await discoverSkills();
+  console.log(`   Found ${skills.length} skills\n`);
 
-  // For local dev, we'll create the namespace if it doesn't exist
-  // In production, the namespace ID comes from wrangler.toml
-  const SKILLS_NS = 'SKILLS';  // Replace with actual namespace ID for production
+  if (skills.length === 0) {
+    console.log('⚠️  No skills found. Make sure skills/ directory has the correct structure.');
+    return;
+  }
 
-  console.log('Uploading skill index...');
-  await uploadToKV(SKILLS_NS, 'skill_index', registry);
+  // For local dev, we use the namespace binding name
+  // In production, replace with actual namespace IDs from wrangler.toml
+  const SKILLS_NS = isLocal ? 'SKILLS' : process.env.SKILLS_KV_ID || 'SKILLS';
+  const EDGES_NS = isLocal ? 'SHARP_EDGES' : process.env.EDGES_KV_ID || 'SHARP_EDGES';
 
-  console.log('\\nUploading individual skills...');
-  for (const skill of registry.specialists) {
-    console.log(`\\n${skill.name}:`);
+  // Collect all edges for the index
+  const allEdges = [];
+  const allValidations = [];
+
+  // Upload each skill
+  console.log('📤 Uploading skills...\n');
+  for (const skill of skills) {
+    console.log(`  ${skill.name} (${skill.id}):`);
+
+    // Load sharp edges
+    const edges = await loadSharpEdges(skill.dir);
+    const validations = await loadValidations(skill.dir);
+
+    // Tag edges with skill_id
+    const taggedEdges = edges.map(e => ({ ...e, skill_id: skill.id }));
+    allEdges.push(...taggedEdges);
+
+    // Tag validations with skill_id
+    const taggedValidations = validations.map(v => ({ ...v, skill_id: skill.id }));
+    allValidations.push(...taggedValidations);
+
+    // Prepare skill data for KV (without dir)
+    const { dir, layer_name, ...skillData } = skill;
 
     // Upload skill definition
-    await uploadToKV(SKILLS_NS, `skill:${skill.id}`, skill);
+    await uploadToKV(SKILLS_NS, `skill:${skill.id}`, {
+      ...skillData,
+      sharp_edges_count: edges.length,
+      validations_count: validations.length,
+    });
 
-    // Upload skill content
-    const content = await readSkillFile(skill.path);
-    if (content) {
-      await uploadToKV(SKILLS_NS, `skill:${skill.id}:content`, content);
+    // Upload skill's sharp edges
+    if (edges.length > 0) {
+      await uploadToKV(EDGES_NS, `edges:${skill.id}`, taggedEdges);
     }
-  }
 
-  // Upload sharp edges by stack
-  console.log('\\nBuilding sharp edges index...');
-  const edgesByStack = {};
-
-  // For now, we'll create placeholder edges
-  // In a full implementation, these would come from skill files
-  const sampleEdges = [
-    {
-      id: 'nextjs-async-client',
-      skill_id: 'nextjs-app-router',
-      summary: 'Client Components cannot be async',
-      severity: 'critical',
-      situation: 'Adding async to a component with "use client"',
-      why: 'Client Components run in the browser where top-level await is not supported in the same way',
-      solution: 'Move data fetching to a Server Component parent or use useEffect',
-      symptoms: ['Cannot use keyword \'await\' outside an async function'],
-      detection_pattern: '"use client"[\\\\s\\\\S]*async\\\\s+function',
-    },
-    {
-      id: 'supabase-rls-bypass',
-      skill_id: 'supabase-backend',
-      summary: 'Service role bypasses RLS',
-      severity: 'critical',
-      situation: 'Using service role key in client code',
-      why: 'The service role key bypasses all RLS policies, exposing all data',
-      solution: 'Use anon key for client, service role only in server/edge functions',
-      symptoms: ['All rows returned instead of filtered', 'Security vulnerability'],
-      detection_pattern: 'SUPABASE_SERVICE_ROLE|service_role',
-    },
-    {
-      id: 'nextjs-hydration-mismatch',
-      skill_id: 'nextjs-app-router',
-      summary: 'Hydration mismatch from browser APIs',
-      severity: 'high',
-      situation: 'Using window, document, or localStorage during render',
-      why: 'These APIs don\'t exist on the server, causing different HTML',
-      solution: 'Use useEffect for browser-only code or dynamic imports with ssr: false',
-      symptoms: ['Text content did not match', 'Hydration failed'],
-      detection_pattern: 'window\\\\.|document\\\\.|localStorage',
-    },
-  ];
-
-  // Group edges by stack
-  for (const edge of sampleEdges) {
-    const stack = edge.skill_id.split('-')[0]; // e.g., 'nextjs' from 'nextjs-app-router'
-    if (!edgesByStack[stack]) {
-      edgesByStack[stack] = [];
+    // Upload skill's validations
+    if (validations.length > 0) {
+      await uploadToKV(SKILLS_NS, `validations:${skill.id}`, taggedValidations);
     }
-    edgesByStack[stack].push(edge);
+
+    console.log(`     ${edges.length} edges, ${validations.length} validations\n`);
   }
 
-  // Upload edges
-  const EDGES_NS = 'SHARP_EDGES';  // Replace with actual namespace ID for production
-
-  console.log('\\nUploading sharp edges...');
-  for (const [stack, edges] of Object.entries(edgesByStack)) {
-    await uploadToKV(EDGES_NS, `edges_by_stack:${stack}`, edges);
-    console.log(`  ${stack}: ${edges.length} edges`);
-  }
+  // Upload skill index
+  console.log('📋 Uploading skill index...');
+  const skillIndex = buildSkillIndex(skills);
+  await uploadToKV(SKILLS_NS, 'skill_index', skillIndex);
 
   // Upload edge index
-  const allEdgeIds = sampleEdges.map(e => e.id);
-  await uploadToKV(EDGES_NS, 'edge_index', allEdgeIds);
+  console.log('\n📋 Uploading edge index...');
+  const edgeIndex = buildEdgeIndex(allEdges);
+  await uploadToKV(EDGES_NS, 'edge_index', edgeIndex);
 
-  console.log('\\nDone!');
+  // Upload all edges (for search)
+  console.log('\n📋 Uploading all edges...');
+  await uploadToKV(EDGES_NS, 'all_edges', allEdges);
+
+  // Upload all validations
+  console.log('\n📋 Uploading all validations...');
+  await uploadToKV(SKILLS_NS, 'all_validations', allValidations);
+
+  // Summary
+  console.log('\n✅ Done!\n');
+  console.log(`   Skills: ${skills.length}`);
+  console.log(`   Sharp Edges: ${allEdges.length}`);
+  console.log(`   Validations: ${allValidations.length}`);
+  console.log('');
 }
 
 main().catch(err => {
-  console.error('Error:', err.message);
+  console.error('\n❌ Error:', err.message);
   process.exit(1);
 });
