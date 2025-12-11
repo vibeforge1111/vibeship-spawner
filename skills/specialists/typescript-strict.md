@@ -1,16 +1,46 @@
-# TypeScript Strict Specialist
-
-## Identity
-
-- **Tags**: `typescript`, `types`, `generics`, `validation`, `zod`
-- **Domain**: Type safety, generics, type inference, strict mode, type guards
-- **Use when**: Type errors, generic functions, complex type definitions, type-safe APIs
-
+---
+name: typescript-strict
+description: Use when writing TypeScript code or fixing type errors - enforces strict typing, eliminates any/unknown abuse, and ensures runtime safety through proper type guards and validation
+tags: [typescript, types, generics, validation, zod]
 ---
 
-## Patterns
+# TypeScript Strict Specialist
 
-### Strict tsconfig.json
+## Overview
+
+TypeScript's value is catching bugs at compile time. Using `any`, ignoring errors, or bypassing the type system defeats this purpose entirely.
+
+**Core principle:** Types are contracts. Breaking contracts breaks trust and ships bugs.
+
+## The Iron Law
+
+```
+NO ANY TYPES WITHOUT EXPLICIT JUSTIFICATION AND ESCAPE HATCH COMMENT
+```
+
+Every `any` is a bug waiting to happen. If you truly need escape, use `unknown` and narrow with type guards.
+
+## When to Use
+
+**Always:**
+- Writing new TypeScript code
+- Fixing type errors
+- Defining API contracts
+- Handling external data (APIs, user input)
+- Creating generic utilities
+
+**Don't:**
+- Quick prototypes (but convert before merging)
+- Generated code (configure generator instead)
+- Legacy JavaScript migration (add types incrementally)
+
+Thinking "I'll fix the types later"? Stop. That's technical debt that compounds.
+
+## The Process
+
+### Step 1: Enable Strict Mode
+
+Start with strict tsconfig. Non-negotiable for new projects.
 
 ```json
 {
@@ -18,76 +48,51 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "exactOptionalPropertyTypes": true,
-    "forceConsistentCasingInFileNames": true
+    "exactOptionalPropertyTypes": true
   }
 }
 ```
+
+### Step 2: Define Types First
+
+Before writing implementation, define the types. This forces you to think about the contract.
+
+### Step 3: Validate at Boundaries
+
+External data is `unknown`. Validate with Zod or type guards before trusting it.
+
+## Patterns
 
 ### Type Inference (Let TypeScript Work)
 
+<Good>
 ```typescript
-// BAD - Redundant type annotation
-const numbers: number[] = [1, 2, 3];
-const doubled: number[] = numbers.map((n: number): number => n * 2);
-
-// GOOD - Let TypeScript infer
 const numbers = [1, 2, 3];
 const doubled = numbers.map(n => n * 2);
-// TypeScript knows: numbers is number[], doubled is number[]
+// TypeScript infers: numbers is number[], doubled is number[]
 ```
+TypeScript infers correctly. Redundant annotations add noise.
+</Good>
 
-### Interface vs Type
-
+<Bad>
 ```typescript
-// Use interface for objects that may be extended
-interface User {
-  id: string;
-  name: string;
-}
-
-interface AdminUser extends User {
-  permissions: string[];
-}
-
-// Use type for unions, intersections, mapped types
-type Status = 'pending' | 'active' | 'inactive';
-type UserWithStatus = User & { status: Status };
-type Nullable<T> = T | null;
+const numbers: number[] = [1, 2, 3];
+const doubled: number[] = numbers.map((n: number): number => n * 2);
 ```
+Redundant type annotations. TypeScript already knows.
+</Bad>
 
-### Discriminated Unions
+### Handling Unknown Data
 
+<Good>
 ```typescript
-// Define a discriminated union for state
-type AsyncState<T> =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'success'; data: T }
-  | { status: 'error'; error: Error };
-
-// TypeScript narrows the type based on status
-function handleState<T>(state: AsyncState<T>) {
-  switch (state.status) {
-    case 'idle':
-      return 'Not started';
-    case 'loading':
-      return 'Loading...';
-    case 'success':
-      return state.data; // TypeScript knows data exists
-    case 'error':
-      return state.error.message; // TypeScript knows error exists
+function processData(data: unknown) {
+  if (isUser(data)) {
+    return data.name; // Type-safe after guard
   }
+  throw new Error('Invalid data');
 }
-```
 
-### Type Guards
-
-```typescript
-// Type predicate
 function isUser(value: unknown): value is User {
   return (
     typeof value === 'object' &&
@@ -96,261 +101,148 @@ function isUser(value: unknown): value is User {
     'name' in value
   );
 }
+```
+Uses `unknown` and narrows with type guard. Runtime safe.
+</Good>
 
-// Usage
-function processData(data: unknown) {
-  if (isUser(data)) {
-    console.log(data.name); // TypeScript knows it's User
+<Bad>
+```typescript
+function processData(data: any) {
+  return data.name; // No type safety, crashes if data is wrong
+}
+```
+`any` bypasses all checks. Will crash at runtime with wrong data.
+</Bad>
+
+### Discriminated Unions
+
+<Good>
+```typescript
+type AsyncState<T> =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'success'; data: T }
+  | { status: 'error'; error: Error };
+
+function handleState<T>(state: AsyncState<T>) {
+  switch (state.status) {
+    case 'success':
+      return state.data; // TypeScript knows data exists
+    case 'error':
+      return state.error.message; // TypeScript knows error exists
   }
 }
+```
+Discriminated union provides exhaustive type narrowing.
+</Good>
 
-// Using 'in' operator
-function handleResponse(response: SuccessResponse | ErrorResponse) {
-  if ('error' in response) {
-    console.log(response.error); // ErrorResponse
-  } else {
-    console.log(response.data); // SuccessResponse
+<Bad>
+```typescript
+interface State<T> {
+  loading: boolean;
+  error?: Error;
+  data?: T;
+}
+
+function handleState<T>(state: State<T>) {
+  if (state.data) {
+    return state.data; // But what if loading is true AND data exists?
   }
 }
 ```
+Ambiguous state. Multiple booleans create impossible combinations.
+</Bad>
 
-### Generics
+### Runtime Validation with Zod
 
-```typescript
-// Generic function
-function first<T>(array: T[]): T | undefined {
-  return array[0];
-}
-
-// Generic with constraint
-function getProperty<T, K extends keyof T>(obj: T, key: K): T[K] {
-  return obj[key];
-}
-
-// Generic component
-interface ListProps<T> {
-  items: T[];
-  renderItem: (item: T) => React.ReactNode;
-}
-
-function List<T>({ items, renderItem }: ListProps<T>) {
-  return <ul>{items.map(renderItem)}</ul>;
-}
-
-// Usage - TypeScript infers T from items
-<List
-  items={users}
-  renderItem={(user) => <li>{user.name}</li>} // user is typed!
-/>
-```
-
-### Utility Types
-
-```typescript
-// Partial - all properties optional
-type PartialUser = Partial<User>;
-// { id?: string; name?: string; }
-
-// Required - all properties required
-type RequiredUser = Required<PartialUser>;
-
-// Pick - select specific properties
-type UserName = Pick<User, 'name'>;
-// { name: string }
-
-// Omit - exclude properties
-type UserWithoutId = Omit<User, 'id'>;
-// { name: string }
-
-// Record - typed object
-type UserRoles = Record<string, User>;
-// { [key: string]: User }
-
-// ReturnType - extract function return type
-type ApiResponse = ReturnType<typeof fetchUser>;
-
-// Parameters - extract function parameters
-type FetchParams = Parameters<typeof fetchUser>;
-```
-
-### const Assertions
-
-```typescript
-// Without as const - type is string[]
-const statuses = ['pending', 'active'];
-// Type: string[]
-
-// With as const - type is readonly tuple
-const statuses = ['pending', 'active'] as const;
-// Type: readonly ['pending', 'active']
-
-// Useful for object literals
-const config = {
-  endpoint: '/api',
-  timeout: 5000,
-} as const;
-// Type: { readonly endpoint: '/api'; readonly timeout: 5000 }
-```
-
-### Zod for Runtime Validation
-
+<Good>
 ```typescript
 import { z } from 'zod';
 
-// Define schema
 const UserSchema = z.object({
   id: z.string().uuid(),
   email: z.string().email(),
   name: z.string().min(1),
-  age: z.number().int().positive().optional(),
 });
 
-// Infer TypeScript type from schema
 type User = z.infer<typeof UserSchema>;
 
-// Validate at runtime
 function createUser(data: unknown): User {
   return UserSchema.parse(data); // Throws if invalid
 }
-
-// Safe parse (doesn't throw)
-const result = UserSchema.safeParse(data);
-if (result.success) {
-  console.log(result.data); // Typed as User
-} else {
-  console.log(result.error);
-}
 ```
+Single source of truth for types AND runtime validation.
+</Good>
 
-### API Response Types
-
+<Bad>
 ```typescript
-// Define API response types
-interface ApiResponse<T> {
-  data: T;
-  meta: {
-    timestamp: string;
-    requestId: string;
-  };
+interface User {
+  id: string;
+  email: string;
+  name: string;
 }
 
-interface PaginatedResponse<T> extends ApiResponse<T[]> {
-  pagination: {
-    page: number;
-    pageSize: number;
-    total: number;
-    hasMore: boolean;
-  };
-}
-
-// Type-safe fetch wrapper
-async function fetchApi<T>(url: string): Promise<ApiResponse<T>> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return response.json();
-}
-
-// Usage
-const { data: user } = await fetchApi<User>('/api/users/1');
-// user is typed as User
-```
-
----
-
-## Anti-patterns
-
-### Using `any`
-
-```typescript
-// BAD
-function processData(data: any) {
-  return data.foo.bar; // No type safety
-}
-
-// GOOD - Use unknown and narrow
-function processData(data: unknown) {
-  if (isValidData(data)) {
-    return data.foo.bar; // Type-safe after guard
-  }
-  throw new Error('Invalid data');
+function createUser(data: unknown): User {
+  return data as User; // Lying to TypeScript
 }
 ```
+Type assertion without validation. Will accept invalid data.
+</Bad>
 
-### Non-null Assertion Abuse
+## Anti-Patterns
 
-```typescript
-// BAD - Hiding potential null
-const name = user!.name;
+| Anti-Pattern | Why It Fails | What To Do Instead |
+|--------------|--------------|-------------------|
+| `any` everywhere | Bypasses all type checking | Use `unknown` + type guards |
+| `as Type` casting | Lies to compiler, crashes at runtime | Validate with Zod or guards |
+| `!` non-null assertion | Hides potential null bugs | Handle null explicitly |
+| `@ts-ignore` | Silences errors, doesn't fix them | Fix the actual type issue |
+| Redundant type annotations | Noise, can diverge from inferred | Let TypeScript infer |
 
-// GOOD - Handle the null case
-const name = user?.name ?? 'Unknown';
+## Red Flags - STOP
 
-// Or throw explicitly
-if (!user) throw new Error('User required');
-const name = user.name;
-```
+If you catch yourself:
+- Adding `any` to "fix" a type error
+- Using `as Type` without validation
+- Adding `@ts-ignore` or `@ts-expect-error`
+- Using `!` non-null assertion without checking
+- Thinking "the types are wrong, I know better"
 
-### Type Casting Instead of Guards
+**ALL of these mean: STOP. The type error is telling you something. Understand it first.**
 
-```typescript
-// BAD - Lying to TypeScript
-const user = data as User;
+## Common Rationalizations
 
-// GOOD - Validate at runtime
-const user = UserSchema.parse(data);
-// or
-if (!isUser(data)) throw new Error('Invalid user');
-const user = data;
-```
-
-### Ignoring Strictness
-
-```typescript
-// BAD
-// @ts-ignore
-const value = thing.property;
-
-// GOOD - Fix the actual issue
-const value = thing?.property;
-```
-
----
+| Excuse | Reality |
+|--------|---------|
+| "Types are wrong, I know the data is correct" | Runtime crashes prove otherwise. Validate. |
+| "I'll fix the types later" | You won't. Tech debt compounds. Fix now. |
+| "any is faster for prototyping" | And creates bugs. Use `unknown` instead. |
+| "The library types are wrong" | Create `.d.ts` override. Don't use `any`. |
+| "It's just one any" | Every `any` spreads. It infects everything it touches. |
+| "Type guards are too verbose" | Less verbose than debugging runtime crashes. |
 
 ## Gotchas
 
-### 1. Objects Are Mutable by Default
+### Array Index Access Returns Undefined
+
+With `noUncheckedIndexedAccess: true`:
 
 ```typescript
-const user = { name: 'John' };
-user.name = 'Jane'; // Allowed!
-
-// Use readonly for immutability
-const user: Readonly<User> = { name: 'John' };
-user.name = 'Jane'; // Error!
-```
-
-### 2. Array Index Access Can Be Undefined
-
-```typescript
-// With noUncheckedIndexedAccess: true
 const arr = [1, 2, 3];
 const first = arr[0]; // Type: number | undefined
 
 // Handle it
-const first = arr[0];
 if (first !== undefined) {
   console.log(first * 2);
 }
 
-// Or use assertion after checking length
+// Or check length first
 if (arr.length > 0) {
-  const first = arr[0]!; // Safe here
+  const first = arr[0]!; // Safe assertion after length check
 }
 ```
 
-### 3. Object.keys Returns string[]
+### Object.keys Returns string[]
 
 ```typescript
 const user = { name: 'John', age: 30 };
@@ -358,16 +250,11 @@ Object.keys(user); // Type: string[], not ('name' | 'age')[]
 
 // Type-safe iteration
 (Object.keys(user) as Array<keyof typeof user>).forEach(key => {
-  console.log(user[key]); // Works
-});
-
-// Or use Object.entries
-Object.entries(user).forEach(([key, value]) => {
-  console.log(key, value);
+  console.log(user[key]);
 });
 ```
 
-### 4. Excess Property Checking Only on Literals
+### Excess Property Checking Only on Literals
 
 ```typescript
 interface User { name: string }
@@ -375,70 +262,43 @@ interface User { name: string }
 // Error - excess property
 const user: User = { name: 'John', age: 30 }; // Error!
 
-// No error - assigned from variable
+// No error - assigned from variable (structural typing)
 const data = { name: 'John', age: 30 };
 const user: User = data; // No error!
 ```
 
-### 5. Function Parameter Bivariance
+## Verification Checklist
 
-```typescript
-// This is allowed but can cause runtime errors
-interface Handler {
-  (event: MouseEvent): void;
-}
-
-// This handler expects more specific event
-const handler: Handler = (event: KeyboardEvent) => {
-  event.key; // Runtime error if passed MouseEvent!
-};
-```
-
----
-
-## Checkpoints
-
-Before marking a TypeScript task complete:
+Before marking TypeScript work complete:
 
 - [ ] No `any` types (use `unknown` if truly unknown)
-- [ ] No non-null assertions (`!`) without validation
-- [ ] No `@ts-ignore` or `@ts-expect-error` without comment
+- [ ] No `as Type` assertions without validation
+- [ ] No `!` non-null assertions without null checks
+- [ ] No `@ts-ignore` without documented reason
 - [ ] Strict mode enabled in tsconfig
-- [ ] Types exported from a central location
-- [ ] Zod schemas for external data validation
+- [ ] External data validated with Zod or type guards
+- [ ] Types exported from central location
 - [ ] Generic functions properly constrained
 
----
+Can't check all boxes? You have type safety gaps. Fix them.
 
-## Escape Hatches
+## Integration
 
-### When types are truly impossible
-```typescript
-// Document WHY and use ts-expect-error
-// @ts-expect-error - Library types don't match runtime behavior
-const result = weirdLibraryFunction();
-```
+**Pairs well with:**
+- `supabase-backend` - Database types from schema
+- `api-design` - API contract types
+- `react-patterns` - Component prop types
 
-### When dealing with legacy code
-- Add types incrementally
-- Use `unknown` instead of `any`
-- Create type guards for existing data
+**Requires:**
+- Node.js with TypeScript
+- Zod for runtime validation
 
-### When third-party types are wrong
-- Create declaration file (`.d.ts`) with overrides
-- Use module augmentation
-- Report issue to DefinitelyTyped
+## References
+
+- [TypeScript Handbook](https://www.typescriptlang.org/docs/handbook/)
+- [Zod Documentation](https://zod.dev/)
+- [Total TypeScript](https://www.totaltypescript.com/)
 
 ---
 
-## Squad Dependencies
-
-Often paired with:
-- `supabase-backend` for database types
-- `api-design` for API type contracts
-- `crud-builder` for form types
-- `react-patterns` for component props
-
----
-
-*Last updated: 2025-12-11*
+*This specialist follows the world-class skill pattern.*
