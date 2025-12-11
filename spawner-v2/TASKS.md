@@ -168,7 +168,7 @@
 - [x] D1 database deployed to production (a2dae866-9e54-4d49-98a3-1078f089bd9f)
 - [x] KV namespaces created in production (SKILLS, SHARP_EDGES, CACHE)
 - [x] Worker deployed to production (https://spawner-mcp.spawner.workers.dev)
-- [ ] Custom domain configured (mcp.vibeship.co)
+- [x] Custom domain configured (mcp.vibeship.co)
 
 ### Skills (5 required for launch) - 7 DONE!
 - [x] nextjs-app-router
@@ -240,6 +240,5 @@
   - All tools verified working in production
 
 ### Next Priority
-1. Configure custom domain (mcp.vibeship.co)
-2. Test with Claude Desktop MCP integration
-3. Build a real project using Spawner for dogfooding
+1. Test with Claude Desktop MCP integration
+2. Build a real project using Spawner for dogfooding
