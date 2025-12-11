@@ -212,6 +212,11 @@ export interface ContextOutput {
   };
   last_session?: string;
   open_issues: Issue[];
+  recent_decisions?: {
+    what: string;
+    why: string | null;
+    when: string;
+  }[];
   skills: {
     id: string;
     name: string;

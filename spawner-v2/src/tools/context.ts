@@ -14,6 +14,7 @@ import {
 } from '../db/projects';
 import { getLastSession } from '../db/sessions';
 import { getOpenIssues } from '../db/issues';
+import { getRecentDecisions } from '../db/decisions';
 import { loadRelevantSkills, loadSkillEdges, type Skill } from '../skills/loader';
 import { emitEvent } from '../telemetry/events';
 
@@ -123,6 +124,9 @@ export async function executeContext(
   // 5. Get open issues
   const openIssues = await getOpenIssues(env.DB, project.id);
 
+  // 5b. Get recent decisions (for session resume)
+  const recentDecisions = await getRecentDecisions(env.DB, project.id, 3);
+
   // 6. Cache for quick access
   await env.CACHE.put(
     `session:${userId}`,
@@ -174,6 +178,11 @@ export async function executeContext(
     },
     last_session: lastSession?.summary,
     open_issues: openIssues,
+    recent_decisions: recentDecisions.map(d => ({
+      what: d.decision,
+      why: d.reasoning,
+      when: d.created_at,
+    })),
     skills: skillsSummary,
     sharp_edges: sharpEdges.slice(0, 10), // Top 10 most relevant
     _instruction: instruction,
@@ -189,25 +198,30 @@ function buildInstruction(
   lastSessionSummary: string | undefined,
   openIssuesCount: number
 ): string {
-  const lines = [
-    'Project context loaded. You now have access to:',
-    `- ${skillCount} relevant skill${skillCount !== 1 ? 's' : ''}`,
-    `- ${edgeCount} sharp edge${edgeCount !== 1 ? 's' : ''} for this stack`,
-  ];
+  const lines: string[] = [];
 
-  if (lastSessionSummary) {
-    lines.push(`- Last session context: ${lastSessionSummary}`);
+  // Session resume header
+  if (lastSessionSummary || openIssuesCount > 0) {
+    lines.push('📍 **Picking up where we left off:**');
+    if (lastSessionSummary) {
+      lines.push(`Last session: ${lastSessionSummary}`);
+    }
+    if (openIssuesCount > 0) {
+      lines.push(`⚠️ ${openIssuesCount} open issue${openIssuesCount !== 1 ? 's' : ''} need attention`);
+    }
+    lines.push('');
   }
 
-  if (openIssuesCount > 0) {
-    lines.push(`- ${openIssuesCount} open issue${openIssuesCount !== 1 ? 's' : ''} to address`);
-  }
+  // Context loaded
+  lines.push('Project context loaded:');
+  lines.push(`- ${skillCount} relevant skill${skillCount !== 1 ? 's' : ''} active`);
+  lines.push(`- ${edgeCount} sharp edge${edgeCount !== 1 ? 's' : ''} (gotchas to watch for)`);
 
   lines.push('');
   lines.push('Available tools:');
   lines.push('- spawner_validate: Check code before marking tasks complete');
-  lines.push('- spawner_sharp_edge: Query gotchas matching your current situation');
-  lines.push('- spawner_remember: Save important decisions or progress');
+  lines.push('- spawner_sharp_edge: Query gotchas for your current situation');
+  lines.push('- spawner_remember: Save decisions or session progress');
   lines.push('- spawner_unstick: Get help when stuck on a problem');
 
   return lines.join('\n');
