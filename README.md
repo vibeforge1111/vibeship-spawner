@@ -2,270 +2,205 @@
 
 > "You vibe. It ships."
 
-The agent spawning framework for Claude Code. No backend. No database. Just markdown, JSON, and one shell script.
+An MCP server that transforms Claude into a specialized product-building system with project memory, guardrails, sharp edges, and escape hatches.
 
 ---
 
 ## What It Does
 
-VibeShip Spawner transforms Claude Code into an intelligent planning and execution system:
+Spawner adds capabilities Claude doesn't have by default:
 
-1. **Discovery** - Asks smart questions to understand what you want to build
-2. **Stack Builder** - Spawn agents and connect them with MCPs (like a game character builder)
-3. **Planning** - Generates PRD, architecture, and task breakdown
-4. **Building** - Executes via specialized skill-based agents
-5. **Review** - Summarizes, gets feedback, iterates
+1. **Project Memory** - Remembers your project across sessions
+2. **Guardrails** - Actually catches code issues (not just suggests)
+3. **Sharp Edges** - Knows gotchas Claude doesn't know
+4. **Escape Hatches** - Detects when you're stuck and offers alternatives
 
 ---
 
 ## Quick Start
 
-### Initialize a New Project
+### 1. Configure Claude Desktop
 
-```bash
-./init.sh my-app
-cd my-app
-claude
+Add to your Claude Desktop MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "spawner": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.vibeship.co"]
+    }
+  }
+}
 ```
 
-### Tell Claude What to Build
+Restart Claude Desktop.
+
+### 2. Start Building
+
+Open Claude and describe your idea:
 
 ```
-> I want to build a marketplace for vintage watches
+You: I want to build a marketplace for selling digital art
 ```
 
-Or pick a template:
-
-```
-> Use the marketplace template
-```
-
-Claude will:
-- Offer you a stack of agents + MCPs to customize
-- Ask max 5 clarifying questions
-- Surface assumptions for confirmation
-- Generate PRD and architecture
-- Build it skill by skill
+Spawner automatically:
+1. Detects your skill level
+2. Asks clarifying questions (max 3)
+3. Recommends template, stack, and skills
+4. Creates your project when ready
 
 ---
 
-## The Stack Builder
+## MCP Tools
 
-Think of it like a character builder in a video game. You're **spawning** AI agents and connecting them with **superpowers** (MCPs).
+| Tool | Purpose |
+|------|---------|
+| `spawner_plan` | Plan and create projects (discover → recommend → create) |
+| `spawner_analyze` | Analyze existing codebase for stack/skill recommendations |
+| `spawner_load` | Load project context and skills for session |
+| `spawner_validate` | Run guardrail checks on code |
+| `spawner_remember` | Save decisions and session progress |
+| `spawner_watch_out` | Query gotchas for your current situation |
+| `spawner_unstick` | Get help when stuck on a problem |
+| `spawner_templates` | List available project templates |
+| `spawner_skills` | Search and retrieve skills |
 
-### Templates
+**Production endpoint:** https://mcp.vibeship.co
 
-| Template | Best For | Agents | MCPs |
-|----------|----------|--------|------|
-| SaaS | Subscription products | planner, frontend, backend, database, testing | supabase, stripe |
-| Marketplace | Buy/sell platforms | planner, frontend, backend, database, payments, search | supabase, stripe, algolia |
-| AI App | LLM-powered apps | planner, frontend, backend, database, ai | supabase, anthropic |
-| Web3 dApp | Blockchain apps | planner, frontend, smart-contracts, testing | git, foundry |
-| Mobile PWA | Progressive web apps | planner, frontend, backend, database, devops | supabase |
-| Game | Browser games | planner, frontend, testing | browser-tools |
-| Tool | CLIs and utilities | planner, backend, testing | git |
+---
 
-### Stack Commands
+## Project Templates
+
+| Template | Use Case | Stack |
+|----------|----------|-------|
+| `saas` | Subscription products | Next.js, Supabase, Stripe |
+| `marketplace` | Buy/sell platforms | Next.js, Supabase, Stripe, Algolia |
+| `ai-app` | LLM-powered apps | Next.js, Supabase, OpenAI |
+| `web3` | Blockchain apps | Next.js, wagmi, viem |
+| `tool` | CLIs and utilities | TypeScript, Node |
+
+---
+
+## Example Workflows
+
+### New Project
 
 ```
-add payments      # Add an agent
-remove testing    # Remove an agent
-swap postgres for supabase  # Replace an agent
-show mcps         # List available MCPs
-looks good        # Confirm and continue
+You: I want to build a SaaS for team task management
+
+Claude: [Uses spawner_plan to understand your needs]
+Claude: Based on your idea, I recommend the SaaS template with...
+Claude: [Creates project with spawner_plan action="create"]
 ```
+
+### Existing Project
+
+```
+You: Analyze my codebase and suggest improvements
+
+Claude: [Uses spawner_analyze with your package.json and files]
+Claude: I detected Next.js + Supabase. Missing auth. Recommend adding...
+```
+
+### When Stuck
+
+```
+You: I've been trying to fix this auth redirect for hours
+
+Claude: [Uses spawner_unstick]
+Claude: Here are 3 alternative approaches...
+```
+
+### Watch Out for Gotchas
+
+```
+You: What should I watch out for with Supabase RLS?
+
+Claude: [Uses spawner_watch_out]
+Claude: Found 3 sharp edges for your stack...
+```
+
+---
+
+## Tech Stack
+
+- **Runtime:** Cloudflare Workers
+- **Database:** Cloudflare D1 (SQLite)
+- **Cache/Skills:** Cloudflare KV
+- **Protocol:** MCP (Model Context Protocol)
+- **Language:** TypeScript
 
 ---
 
 ## Project Structure
 
 ```
-/vibeship-spawner
-├── templates/
-│   ├── CLAUDE.md           # Bootloader (copied to new projects)
-│   ├── state.json          # Initial state template
-│   ├── task_queue.json     # Empty queue template
-│   └── docs/
-│       ├── PRD.md          # PRD template
-│       └── ARCHITECTURE.md # Architecture template
-├── skills/
-│   ├── _schema.md          # Shared state schema
-│   ├── planner.md          # The brain
-│   ├── frontend.md         # React/Next.js/Tailwind
-│   ├── backend.md          # APIs/auth/server
-│   ├── database.md         # Schema/migrations
-│   ├── testing.md          # Unit/E2E tests
-│   ├── devops.md           # CI/CD/deployment
-│   ├── payments.md         # Stripe/billing
-│   ├── email.md            # Transactional email
-│   ├── search.md           # Full-text search
-│   ├── ai.md               # LLM integration
-│   └── smart-contracts.md  # Solidity/Web3
-├── catalogs/
-│   ├── agents.json         # Full agent catalog
-│   └── mcps.json           # Full MCP catalog
+vibeship-spawner/
+├── spawner-v2/           # V2 MCP Server (Cloudflare Worker)
+│   ├── src/
+│   │   ├── index.ts      # Main worker, MCP routing
+│   │   ├── tools/        # MCP tool implementations
+│   │   ├── validation/   # Code checking
+│   │   ├── skills/       # Skill loading
+│   │   └── db/           # D1 database operations
+│   ├── skills/           # Skill definitions (YAML)
+│   └── migrations/       # D1 schema
 ├── docs/
-│   ├── STACK_BUILDER.md    # Stack builder documentation
-│   └── TUTORIAL.md         # Getting started guide
-├── registry.json           # Skills + templates registry
-├── init.sh                 # Project initializer
-└── README.md               # This file
+│   ├── TUTORIAL.md       # Getting started guide
+│   └── V2/               # V2 documentation
+│       ├── PRD.md        # Product requirements
+│       ├── ARCHITECTURE.md
+│       ├── SKILL_SPEC.md
+│       └── ROADMAP.md
+├── skills/               # V1 Skills (markdown)
+├── catalogs/             # Agent and MCP catalogs
+└── web/                  # Web UI (SvelteKit)
 ```
 
 ---
 
-## Commands
+## Documentation
 
-Once in a project, use these commands:
-
-| Command | Action |
-|---------|--------|
-| `status` | Show current phase, completed tasks, next steps |
-| `continue` | Resume from checkpoint |
-| `replan` | Go back to planning phase |
-| `assumptions` | Show current assumptions, allow edits |
-| `skip [task]` | Skip a specific task |
-| `pause` | Save state and stop |
-| `add [agent]` | Add an agent to your stack |
-| `remove [agent]` | Remove an agent from your stack |
-| `show mcps` | List available MCPs |
+| Doc | Purpose |
+|-----|---------|
+| [Tutorial](docs/TUTORIAL.md) | Getting started guide |
+| [PRD](docs/V2/PRD.md) | Product requirements |
+| [Architecture](docs/V2/ARCHITECTURE.md) | Technical deep dive |
+| [Skill Spec](docs/V2/SKILL_SPEC.md) | How to build skills |
+| [Roadmap](docs/V2/ROADMAP.md) | What to build when |
 
 ---
 
-## Agents (Skills)
+## Development
 
-| Agent | Expertise |
-|-------|-----------|
-| **Planner** | Orchestration, discovery, task decomposition |
-| **Frontend** | React, Next.js, Tailwind, components |
-| **Backend** | APIs, auth, Node.js, Supabase |
-| **Database** | PostgreSQL, schema design, migrations |
-| **Testing** | Jest, Playwright, coverage |
-| **DevOps** | CI/CD, Docker, deployment |
-| **Payments** | Stripe, subscriptions, checkout |
-| **Email** | Transactional, templates, notifications |
-| **Search** | Algolia, filters, facets |
-| **AI** | LLMs, embeddings, chat interfaces |
-| **Smart Contracts** | Solidity, Foundry, ERC tokens |
+### Local Development
 
----
-
-## MCPs (Superpowers)
-
-| MCP | Category | Purpose |
-|-----|----------|---------|
-| `filesystem` | Core | Read/write files |
-| `git` | DevTools | Version control |
-| `supabase` | Database | Auth + DB + storage |
-| `postgres` | Database | Direct SQL access |
-| `browser-tools` | Browser | Visual testing |
-| `stripe` | API | Payment processing |
-| `resend` | Mail | Email sending |
-| `algolia` | API | Full-text search |
-| `anthropic` | AI | Claude API access |
-| `foundry` | DevTools | Smart contract toolkit |
-
----
-
-## State Files
-
-| File | Purpose |
-|------|---------|
-| `state.json` | Current phase, decisions, assumptions |
-| `task_queue.json` | All tasks and their status |
-| `docs/PRD.md` | Generated requirements |
-| `docs/ARCHITECTURE.md` | Technical decisions |
-| `docs/PROJECT_LOG.md` | Progress narrative |
-
----
-
-## How It Works
-
-### Phase 1: Discovery
-
-The planner assesses your input:
-- **Vague** ("I want an app") -> Full discovery, 5 questions
-- **Partial** ("habit tracker") -> Clarification, 2-3 questions
-- **Complete** (detailed spec) -> Validation, move to stack builder
-
-### Phase 2: Stack Builder
-
-Spawn your agents:
-```
-Your Agents:
-+ PLANNER (always included)
-+ FRONTEND (Next.js + Tailwind)
-+ BACKEND (Supabase + Auth)
-
-MCPs:
-+ filesystem (core)
-+ supabase (database)
-
-Want to add more? [add payments] [add email] [looks good]
+```bash
+cd spawner-v2
+npm install
+wrangler dev
 ```
 
-### Phase 3: Planning
+### Deploy
 
-Generates:
-- `docs/PRD.md` - Requirements document
-- `docs/ARCHITECTURE.md` - Technical decisions
-- `task_queue.json` - Atomic, ordered tasks
-
-### Phase 4: Building
-
-Executes tasks via agents:
-```
-+ Project scaffolded
-+ Database schema created
-+ Auth flow complete
-> Building dashboard UI...
+```bash
+wrangler deploy
 ```
 
-### Phase 5: Review
+### Test with Claude Desktop
 
-Summarizes what was built, asks for feedback, offers next steps.
-
----
-
-## Status Indicators
-
-| Symbol | Meaning |
-|--------|---------|
-| `>` | Active/processing |
-| `+` | Completed |
-| `!` | Warning |
-| `*` | Needs human input |
-| `x` | Error |
-
----
-
-## Design System
-
-VibeShip Orchestrator follows the VibeShip design language:
-
-**Colors:**
-- Green (#2ECC71) - AI active, success
-- Teal (#00C49A) - Primary accent
-- Orange (#FFB020) - Warning, pending
-- Red (#FF4D4D) - Error, escalation
-
-**Typography:**
-- JetBrains Mono for all output (terminal aesthetic)
-- Minimal, functional, no decoration
+1. Run `wrangler dev`
+2. Update MCP config to use `http://localhost:8787/mcp`
+3. Restart Claude Desktop
 
 ---
 
 ## Requirements
 
-- Claude Code CLI (`claude`)
-- Bash shell (macOS, Linux, or Git Bash on Windows)
-
----
-
-## Learn More
-
-- [Stack Builder Guide](docs/STACK_BUILDER.md)
-- [Full Tutorial](docs/TUTORIAL.md)
+- Claude Desktop or Claude Code
+- Node.js 18+
+- Wrangler CLI (for development)
 
 ---
 
