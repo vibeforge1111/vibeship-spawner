@@ -322,7 +322,7 @@ async function fetchGistConfig(gistId) {
   const response = await fetch(url, {
     headers: {
       'Accept': 'application/vnd.github.v3+json',
-      'User-Agent': 'vibeship-orchestrator-mcp'
+      'User-Agent': 'vibeship-spawner-mcp'
     }
   });
 

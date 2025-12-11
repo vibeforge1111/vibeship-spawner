@@ -505,7 +505,7 @@ On session start:
 
   <footer class="footer">
     <div class="footer-links">
-      <a href="https://github.com/vibeforge1111/vibeship-orchestrator" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/vibeforge1111/vibeship-spawner" target="_blank" rel="noopener">GitHub</a>
       <a href="/">Home</a>
       <a href="/builder">Builder</a>
     </div>
