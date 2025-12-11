@@ -2,7 +2,7 @@
 
 ## Identity
 
-- **Layer**: 3 (Pattern)
+- **Layer**: Pattern
 - **Domain**: Stripe integration, checkout, webhooks, subscription management
 - **Triggers**: Payment implementation, subscription features, billing portal, webhooks
 
@@ -652,10 +652,10 @@ Before marking payments complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Layer 1**: `supabase-backend` for subscription storage
-- **Layer 2**: `nextjs-supabase-auth` for user context
-- **Layer 2**: `api-design` for API routes
-- **Layer 3**: `auth-flow` for gated features
+- **Core** `supabase-backend` for subscription storage
+- **Integration** `nextjs-supabase-auth` for user context
+- **Integration** `api-design` for API routes
+- **Pattern** `auth-flow` for gated features
 
 ---
 

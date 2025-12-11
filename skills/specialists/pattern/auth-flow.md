@@ -2,7 +2,7 @@
 
 ## Identity
 
-- **Layer**: 3 (Pattern)
+- **Layer**: Pattern
 - **Domain**: Login, signup, password reset, OAuth, session management
 - **Triggers**: Auth features, user management, protected routes, login/signup pages
 
@@ -601,9 +601,9 @@ Before marking an auth flow task complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Layer 2**: `nextjs-supabase-auth` for server/client auth handling
-- **Layer 1**: `supabase-backend` for database user profiles
-- **Layer 2**: `server-client-boundary` for auth state handling
+- **Integration** `nextjs-supabase-auth` for server/client auth handling
+- **Core** `supabase-backend` for database user profiles
+- **Integration** `server-client-boundary` for auth state handling
 - **Standalone**: `security-audit` for auth security review
 
 ---

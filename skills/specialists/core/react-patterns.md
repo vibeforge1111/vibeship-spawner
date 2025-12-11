@@ -2,7 +2,7 @@
 
 ## Identity
 
-- **Layer**: 1 (Core)
+- **Layer**: Core
 - **Domain**: Hooks, state management, performance optimization, component composition
 - **Triggers**: Component architecture, state bugs, performance issues, hook patterns
 
@@ -562,10 +562,10 @@ Before marking a React task complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Layer 1**: `typescript-strict` for type-safe props
-- **Layer 1**: `nextjs-app-router` for Server Components
-- **Layer 2**: `state-sync` for client/server state
-- **Layer 2**: `server-client-boundary` for RSC patterns
+- **Core** `typescript-strict` for type-safe props
+- **Core** `nextjs-app-router` for Server Components
+- **Integration** `state-sync` for client/server state
+- **Integration** `server-client-boundary` for RSC patterns
 
 ---
 

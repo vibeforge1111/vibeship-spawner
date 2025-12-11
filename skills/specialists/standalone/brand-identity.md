@@ -383,8 +383,8 @@ Before marking brand setup complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Layer 1**: `tailwind-ui` for implementation
-- **Layer 3**: `crud-builder` for consistent forms
+- **Core** `tailwind-ui` for implementation
+- **Pattern** `crud-builder` for consistent forms
 - **Standalone**: `copywriting` for voice consistency
 
 ---

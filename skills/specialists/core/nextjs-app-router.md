@@ -2,7 +2,7 @@
 
 ## Identity
 
-- **Layer**: 1 (Core)
+- **Layer**: Core
 - **Domain**: App Router patterns, Server/Client components, routing, layouts
 - **Triggers**: Any Next.js 13+ project, routing tasks, page creation, layout setup
 
@@ -328,10 +328,10 @@ If stuck on RSC patterns for > 30 minutes, consider:
 ## Squad Dependencies
 
 Often paired with:
-- **Layer 2**: `server-client-boundary` for complex patterns
-- **Layer 2**: `nextjs-supabase-auth` for auth flows
-- **Layer 1**: `react-patterns` for client component optimization
-- **Layer 1**: `typescript-strict` for type safety
+- **Integration** `server-client-boundary` for complex patterns
+- **Integration** `nextjs-supabase-auth` for auth flows
+- **Core** `react-patterns` for client component optimization
+- **Core** `typescript-strict` for type safety
 
 ---
 

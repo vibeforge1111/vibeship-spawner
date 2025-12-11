@@ -2,7 +2,7 @@
 
 ## Identity
 
-- **Layer**: 3 (Pattern)
+- **Layer**: Pattern
 - **Domain**: OpenAI/Anthropic APIs, streaming responses, token management, prompt engineering
 - **Triggers**: AI features, chat interfaces, text generation, embeddings, RAG
 
@@ -542,10 +542,10 @@ Before marking AI integration complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Layer 1**: `supabase-backend` for RAG storage
-- **Layer 2**: `api-design` for API structure
-- **Layer 3**: `payments-flow` for usage billing
-- **Layer 1**: `react-patterns` for chat UI
+- **Core** `supabase-backend` for RAG storage
+- **Integration** `api-design` for API structure
+- **Pattern** `payments-flow` for usage billing
+- **Core** `react-patterns` for chat UI
 
 ---
 

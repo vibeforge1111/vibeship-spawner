@@ -410,8 +410,8 @@ Before marking UX design complete:
 Often paired with:
 - **Standalone**: `brand-identity` for visual consistency
 - **Standalone**: `copywriting` for microcopy
-- **Layer 1**: `tailwind-ui` for implementation
-- **Layer 3**: `auth-flow` for login UX
+- **Core** `tailwind-ui` for implementation
+- **Pattern** `auth-flow` for login UX
 
 ---
 

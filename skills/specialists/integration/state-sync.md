@@ -2,7 +2,7 @@
 
 ## Identity
 
-- **Layer**: 2 (Integration)
+- **Layer**: Integration
 - **Domain**: Client/server state coordination, optimistic updates, cache invalidation
 - **Triggers**: State synchronization issues, stale data, optimistic UI, cache management
 
@@ -591,10 +591,10 @@ Before marking a state sync task complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Layer 1**: `react-patterns` for hooks and state patterns
-- **Layer 2**: `api-design` for API calls
-- **Layer 2**: `server-client-boundary` for RSC patterns
-- **Layer 3**: `realtime-sync` for live updates
+- **Core** `react-patterns` for hooks and state patterns
+- **Integration** `api-design` for API calls
+- **Integration** `server-client-boundary` for RSC patterns
+- **Pattern** `realtime-sync` for live updates
 
 ---
 

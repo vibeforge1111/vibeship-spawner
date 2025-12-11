@@ -2,7 +2,7 @@
 
 ## Identity
 
-- **Layer**: 1 (Core)
+- **Layer**: Core
 - **Domain**: Component patterns, responsive design, dark mode, design systems
 - **Triggers**: UI components, styling tasks, responsive layouts, theme implementation
 
@@ -431,10 +431,10 @@ Before marking a Tailwind UI task complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Layer 1**: `react-patterns` for component logic
-- **Layer 1**: `nextjs-app-router` for layouts
+- **Core** `react-patterns` for component logic
+- **Core** `nextjs-app-router` for layouts
 - **Standalone**: `brand-identity` for color/typography decisions
-- **Layer 3**: `crud-builder` for consistent form styling
+- **Pattern** `crud-builder` for consistent form styling
 
 ---
 

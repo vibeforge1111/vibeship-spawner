@@ -2,7 +2,7 @@
 
 ## Identity
 
-- **Layer**: 2 (Integration)
+- **Layer**: Integration
 - **Domain**: REST conventions, error handling, pagination, rate limiting, versioning
 - **Triggers**: API endpoint design, response structure, error handling, API best practices
 
@@ -686,10 +686,10 @@ Before marking an API design task complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Layer 1**: `supabase-backend` for database operations
-- **Layer 1**: `typescript-strict` for type definitions
-- **Layer 2**: `nextjs-supabase-auth` for auth context
-- **Layer 3**: `crud-builder` for CRUD patterns
+- **Core** `supabase-backend` for database operations
+- **Core** `typescript-strict` for type definitions
+- **Integration** `nextjs-supabase-auth` for auth context
+- **Pattern** `crud-builder` for CRUD patterns
 
 ---
 

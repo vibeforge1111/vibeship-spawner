@@ -408,8 +408,8 @@ Before marking copy complete:
 Often paired with:
 - **Standalone**: `brand-identity` for voice
 - **Standalone**: `ux-research` for user flows
-- **Layer 3**: `auth-flow` for login copy
-- **Layer 1**: `tailwind-ui` for implementation
+- **Pattern** `auth-flow` for login copy
+- **Core** `tailwind-ui` for implementation
 
 ---
 

@@ -2,7 +2,7 @@
 
 ## Identity
 
-- **Layer**: 1 (Core)
+- **Layer**: Core
 - **Domain**: Supabase Auth, Database, RLS, Edge Functions, Realtime, Storage
 - **Triggers**: Any Supabase project, auth tasks, database schema, RLS policies
 
@@ -397,10 +397,10 @@ Before marking a Supabase task complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Layer 2**: `nextjs-supabase-auth` for auth integration
-- **Layer 1**: `typescript-strict` for type generation
-- **Layer 3**: `auth-flow` for login/signup patterns
-- **Layer 3**: `crud-builder` for data operations
+- **Integration** `nextjs-supabase-auth` for auth integration
+- **Core** `typescript-strict` for type generation
+- **Pattern** `auth-flow` for login/signup patterns
+- **Pattern** `crud-builder` for data operations
 
 ---
 

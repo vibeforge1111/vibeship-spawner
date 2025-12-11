@@ -518,10 +518,10 @@ Before marking security complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Layer 2**: `nextjs-supabase-auth` for auth implementation
-- **Layer 1**: `supabase-backend` for RLS
-- **Layer 2**: `api-design` for secure endpoints
-- **Layer 3**: `payments-flow` for payment security
+- **Integration** `nextjs-supabase-auth` for auth implementation
+- **Core** `supabase-backend` for RLS
+- **Integration** `api-design` for secure endpoints
+- **Pattern** `payments-flow` for payment security
 
 ---
 

@@ -2,7 +2,7 @@
 
 ## Identity
 
-- **Layer**: 1 (Core)
+- **Layer**: Core
 - **Domain**: Type safety, generics, type inference, strict mode, type guards
 - **Triggers**: Type errors, generic functions, complex type definitions, type-safe APIs
 
@@ -434,10 +434,10 @@ const result = weirdLibraryFunction();
 ## Squad Dependencies
 
 Often paired with:
-- **Layer 1**: `supabase-backend` for database types
-- **Layer 2**: `api-design` for API type contracts
-- **Layer 3**: `crud-builder` for form types
-- **Layer 1**: `react-patterns` for component props
+- **Core** `supabase-backend` for database types
+- **Integration** `api-design` for API type contracts
+- **Pattern** `crud-builder` for form types
+- **Core** `react-patterns` for component props
 
 ---
 

@@ -415,9 +415,9 @@ The planner assembles squads based on task requirements:
 
 | Layer | Responsibility | Example |
 |-------|---------------|---------|
-| **Layer 1** | Deep domain expertise | `nextjs-app-router` knows RSC patterns cold |
-| **Layer 2** | Cross-cutting integration | `nextjs-supabase-auth` knows SSR auth flow |
-| **Layer 3** | Pattern implementation | `auth-flow` implements login/signup/reset |
+| **Core** | Deep domain expertise | `nextjs-app-router` knows RSC patterns cold |
+| **Integration** | Cross-cutting integration | `nextjs-supabase-auth` knows SSR auth flow |
+| **Pattern** | Pattern implementation | `auth-flow` implements login/signup/reset |
 
 ---
 

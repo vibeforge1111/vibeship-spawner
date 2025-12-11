@@ -2,7 +2,7 @@
 
 ## Identity
 
-- **Layer**: 3 (Pattern)
+- **Layer**: Pattern
 - **Domain**: Supabase Realtime, presence, broadcast, live cursors, collaborative features
 - **Triggers**: Live updates, multiplayer features, notifications, typing indicators
 
@@ -625,10 +625,10 @@ Before marking realtime feature complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Layer 1**: `supabase-backend` for database setup
-- **Layer 2**: `state-sync` for React Query integration
-- **Layer 1**: `react-patterns` for hooks
-- **Layer 3**: `crud-builder` for data operations
+- **Core** `supabase-backend` for database setup
+- **Integration** `state-sync` for React Query integration
+- **Core** `react-patterns` for hooks
+- **Pattern** `crud-builder` for data operations
 
 ---
 

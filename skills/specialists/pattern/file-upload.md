@@ -2,7 +2,7 @@
 
 ## Identity
 
-- **Layer**: 3 (Pattern)
+- **Layer**: Pattern
 - **Domain**: Supabase Storage, presigned URLs, image optimization, file validation
 - **Triggers**: File upload features, image handling, avatar uploads, document storage
 
@@ -647,10 +647,10 @@ Before marking file upload complete:
 ## Squad Dependencies
 
 Often paired with:
-- **Layer 1**: `supabase-backend` for storage setup
-- **Layer 3**: `crud-builder` for file associations
-- **Layer 1**: `react-patterns` for upload components
-- **Layer 2**: `server-client-boundary` for server actions
+- **Core** `supabase-backend` for storage setup
+- **Pattern** `crud-builder` for file associations
+- **Core** `react-patterns` for upload components
+- **Integration** `server-client-boundary` for server actions
 
 ---
 

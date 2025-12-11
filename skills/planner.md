@@ -634,20 +634,20 @@ For each task, assemble the right specialists from three layers.
 
 ### Available Specialists
 
-**Layer 1 (Core):**
+**Core:**
 - `nextjs-app-router` - App Router patterns, RSC, routing
 - `supabase-backend` - Auth, RLS, Edge Functions, Realtime
 - `tailwind-ui` - Component patterns, responsive, dark mode
 - `typescript-strict` - Types, generics, inference
 - `react-patterns` - Hooks, state, performance
 
-**Layer 2 (Integration):**
+**Integration:**
 - `nextjs-supabase-auth` - Full auth flow across systems
 - `server-client-boundary` - RSC boundaries, hydration
 - `api-design` - REST patterns, validation, errors
 - `state-sync` - Client/server state coordination
 
-**Layer 3 (Pattern):**
+**Pattern:**
 - `auth-flow` - Login, signup, password reset, OAuth
 - `crud-builder` - Full CRUD with proper patterns
 - `payments-flow` - Stripe checkout, webhooks, subscriptions
@@ -665,9 +665,9 @@ For each task, assemble the right specialists from three layers.
 
 For each task:
 
-1. **Identify the pattern** (Layer 3) - What specific pattern does this implement?
-2. **Add core expertise** (Layer 1) - What domain knowledge is needed?
-3. **Add integration knowledge** (Layer 2) - What cross-cutting concerns apply?
+1. **Identify the pattern** (Pattern) - What specific pattern does this implement?
+2. **Add core expertise** (Core) - What domain knowledge is needed?
+3. **Add integration knowledge** (Integration) - What cross-cutting concerns apply?
 4. **Keep standalone on-call** - Available if needed during execution
 
 Example: "Implement user login"
