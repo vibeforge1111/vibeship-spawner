@@ -121,11 +121,11 @@ cd mcp && npm start
 
 #### Cloudflare Workers (Production)
 
-**Endpoint:** `https://vibeship-spawner-mcp.spawner.workers.dev/`
+**Endpoint:** `https://mcp.vibeship.co/`
 
 **Health Check:**
 ```bash
-curl https://vibeship-spawner-mcp.spawner.workers.dev/
+curl https://mcp.vibeship.co/
 # Returns: {"status":"ok","service":"vibeship-spawner-mcp","version":"1.0.0"}
 ```
 
