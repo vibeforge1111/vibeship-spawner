@@ -96,6 +96,70 @@ output:
   # If hybrid, structured data with narrative sections
 ```
 
+### Findings Schema (for audit/review outputs)
+
+When a skill produces findings (audits, reviews), use this structure:
+
+```yaml
+findings:
+  - id: string                # Unique finding ID (finding-001)
+    matched_edge: string      # Which sharp edge this matches (optional)
+    severity: critical | high | medium | low
+    status: violated | partial | clear | unknown  # REQUIRED on all findings
+
+    # Location (be specific)
+    file: string              # File path
+    line: number              # Line number (if applicable)
+    files: string[]           # Multiple files (if applicable)
+
+    # The finding (structured, not prose)
+    context:
+      what: string            # One line: what was found
+      where: string[]         # Bullet points: specific locations
+      symptoms: string[]      # Observable indicators
+
+    # Impact (structured)
+    impact:
+      summary: string         # One line impact statement
+      details: string[]       # Bullet points
+      emotional_hook: string  # For rendering: the memorable phrase
+                              # e.g., "The tool to help users IS ITSELF A GOTCHA"
+
+    # Solution (structured)
+    solution:
+      approach: string        # One line
+      steps: string[]         # Numbered steps
+      code_before: string     # Bad code
+      code_after: string      # Fixed code
+      effort: trivial | low | medium | high  # Estimate
+      time_estimate: string   # e.g., "5 min", "30 min", "2 hours"
+
+    # Cross-references
+    related_findings: string[]  # IDs of related findings
+    blocks: string[]           # IDs this must be fixed before
+    blocked_by: string[]       # IDs that must be fixed first
+
+# Summary with scoring components
+summary:
+  health_score: number        # 0-100
+  health_components:          # How score was calculated
+    - name: string
+      score: number
+      weight: number
+      notes: string
+  critical_count: number
+  high_count: number
+  medium_count: number
+  low_count: number
+
+# Priority calculation
+priority_rules:
+  P0: "critical severity OR blocks other findings"
+  P1: "high severity OR multiple related findings"
+  P2: "medium severity"
+  P3: "low severity OR nice-to-have"
+```
+
 ### sharp-edges.yaml
 
 ```yaml
@@ -121,6 +185,8 @@ sharp_edges:
       steps: string[]         # Numbered steps
       code_before: string     # Optional: bad code
       code_after: string      # Optional: fixed code
+      effort: trivial | low | medium | high
+      time_estimate: string   # e.g., "5 min", "30 min"
 
     # Detection (machine-readable)
     detection:
@@ -130,6 +196,13 @@ sharp_edges:
     # Lifecycle
     version_range: string     # Optional: semver range when relevant
     expires_at: string        # Optional: ISO date when obsolete
+
+    # Render hints (for V1 generation)
+    render:
+      emotional_hook: string  # Memorable phrase for emphasis
+                              # e.g., "The tool to help users IS ITSELF A GOTCHA"
+      callout_type: danger | warning | info  # How to style in docs
+      include_in_summary: boolean  # Should this appear in exec summary?
 
 # ============================================================================
 # CONFIG - How to use these edges
