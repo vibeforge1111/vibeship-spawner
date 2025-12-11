@@ -240,6 +240,8 @@ export interface ValidateOutput {
   critical: FormattedResult[];
   errors: FormattedResult[];
   warnings: FormattedResult[];
+  what_to_do?: string;
+  example?: string;
   _instruction: string;
 }
 
@@ -253,7 +255,7 @@ export interface FormattedResult {
 
 // spawner_remember
 export interface RememberInput {
-  project_id: string;
+  project_id?: string;
   update: {
     decision?: {
       what: string;
@@ -269,13 +271,20 @@ export interface RememberInput {
 }
 
 export interface RememberOutput {
+  success: boolean;
   saved: string[];
+  project_id: string;
+  project_name: string;
+  was_project_created: boolean;
+  what_happened: string;
+  what_this_means: string;
+  next_steps: string[];
   message: string;
 }
 
 // spawner_sharp_edge
 export interface SharpEdgeInput {
-  stack: string[];
+  stack?: string[];
   situation?: string;
   code_context?: string;
 }
@@ -296,8 +305,9 @@ export interface SharpEdgeOutput {
 // spawner_unstick
 export interface UnstickInput {
   task_description: string;
-  attempts: string[];
-  errors: string[];
+  situation?: string;
+  attempts?: string[];
+  errors?: string[];
   current_code?: string;
 }
 

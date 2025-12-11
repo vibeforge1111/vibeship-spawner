@@ -100,17 +100,64 @@ function mergeAttemptHistory(
 }
 
 /**
+ * Parse unstructured situation text into attempts and errors
+ */
+function parseUnstructuredSituation(situation: string): { attempts: string[]; errors: string[] } {
+  const attempts: string[] = [];
+  const errors: string[] = [];
+
+  const lines = situation.split(/[.!?\n]+/).map(l => l.trim()).filter(Boolean);
+
+  for (const line of lines) {
+    const lower = line.toLowerCase();
+
+    // Look for error indicators
+    if (lower.includes('error') ||
+        lower.includes('failed') ||
+        lower.includes('doesn\'t work') ||
+        lower.includes('not working') ||
+        lower.includes('broken') ||
+        lower.includes('undefined') ||
+        lower.includes('cannot') ||
+        lower.includes('can\'t')) {
+      errors.push(line);
+    }
+    // Look for attempt indicators
+    else if (lower.includes('tried') ||
+             lower.includes('attempt') ||
+             lower.includes('tested') ||
+             lower.includes('checked') ||
+             lower.includes('changed') ||
+             lower.includes('added') ||
+             lower.includes('removed') ||
+             lower.includes('switched')) {
+      attempts.push(line);
+    }
+  }
+
+  // If we couldn't parse anything, use the whole situation as context
+  if (attempts.length === 0 && errors.length === 0) {
+    attempts.push(situation.slice(0, 200));
+  }
+
+  return { attempts, errors };
+}
+
+/**
  * Input schema for spawner_unstick
  */
 export const unstickInputSchema = z.object({
   task_description: z.string().describe(
     'Description of what you\'re trying to accomplish'
   ),
-  attempts: z.array(z.string()).describe(
-    'List of approaches you\'ve already tried'
+  situation: z.string().optional().describe(
+    'Describe what\'s happening in your own words - I\'ll parse out the attempts and errors'
   ),
-  errors: z.array(z.string()).describe(
-    'Error messages or symptoms you\'ve encountered'
+  attempts: z.array(z.string()).optional().describe(
+    'List of approaches you\'ve already tried (optional if you provide situation)'
+  ),
+  errors: z.array(z.string()).optional().describe(
+    'Error messages or symptoms you\'ve encountered (optional if you provide situation)'
   ),
   current_code: z.string().optional().describe(
     'Current code that\'s not working (if applicable)'
@@ -130,22 +177,26 @@ export const unstickToolDefinition = {
         type: 'string',
         description: 'Description of what you\'re trying to accomplish',
       },
+      situation: {
+        type: 'string',
+        description: 'Describe what\'s happening in your own words - attempts and errors will be parsed automatically',
+      },
       attempts: {
         type: 'array',
         items: { type: 'string' },
-        description: 'List of approaches you\'ve already tried',
+        description: 'List of approaches you\'ve already tried (optional if you provide situation)',
       },
       errors: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Error messages or symptoms you\'ve encountered',
+        description: 'Error messages or symptoms you\'ve encountered (optional if you provide situation)',
       },
       current_code: {
         type: 'string',
         description: 'Current code that\'s not working (if applicable)',
       },
     },
-    required: ['task_description', 'attempts', 'errors'],
+    required: ['task_description'],
   },
 };
 
@@ -170,7 +221,25 @@ export async function executeUnstick(
     };
   }
 
-  const { task_description, attempts, errors } = parsed.data;
+  const { task_description, situation } = parsed.data;
+
+  // Parse attempts and errors from situation if not explicitly provided
+  let attempts = parsed.data.attempts || [];
+  let errors = parsed.data.errors || [];
+
+  if ((!attempts.length || !errors.length) && situation) {
+    const parsed_situation = parseUnstructuredSituation(situation);
+    if (!attempts.length) attempts = parsed_situation.attempts;
+    if (!errors.length) errors = parsed_situation.errors;
+  }
+
+  // If still no attempts, use an empty array (the analysis will handle it)
+  if (!attempts.length && !situation) {
+    attempts = [];
+  }
+  if (!errors.length && !situation) {
+    errors = [];
+  }
 
   // 1. Load and merge attempt history (if project context available)
   let allAttempts = attempts;

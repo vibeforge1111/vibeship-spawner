@@ -6,7 +6,7 @@
 
 import { z } from 'zod';
 import type { Env, RememberInput, RememberOutput } from '../types';
-import { loadProject, touchProject } from '../db/projects';
+import { loadProject, touchProject, findProjectsByUser, createProject } from '../db/projects';
 import { createSession } from '../db/sessions';
 import { createDecision } from '../db/decisions';
 import { createIssue, resolveIssueByDescription } from '../db/issues';
@@ -15,7 +15,7 @@ import { createIssue, resolveIssueByDescription } from '../db/issues';
  * Input schema for spawner_remember
  */
 export const rememberInputSchema = z.object({
-  project_id: z.string().describe('The project ID to save to'),
+  project_id: z.string().optional().describe('Optional project ID - will use most recent project or create one if not provided'),
   update: z.object({
     decision: z.object({
       what: z.string().describe('What was decided'),
@@ -45,7 +45,7 @@ export const rememberToolDefinition = {
     properties: {
       project_id: {
         type: 'string',
-        description: 'The project ID to save to',
+        description: 'Optional project ID - will use most recent project or create one if not provided',
       },
       update: {
         type: 'object',
@@ -85,9 +85,52 @@ export const rememberToolDefinition = {
         description: 'Updates to save',
       },
     },
-    required: ['project_id', 'update'],
+    required: ['update'],
   },
 };
+
+/**
+ * Resolve project_id: use provided, find most recent, or create new
+ */
+async function resolveProjectId(
+  env: Env,
+  userId: string,
+  providedId?: string
+): Promise<{ projectId: string; wasCreated: boolean; projectName: string }> {
+  // If provided, verify it exists
+  if (providedId) {
+    const project = await loadProject(env.DB, providedId, userId);
+    if (project) {
+      return { projectId: providedId, wasCreated: false, projectName: project.name };
+    }
+    // Project not found, will create new one
+  }
+
+  // Try to find most recent project
+  const recentProjects = await findProjectsByUser(env.DB, userId, 1);
+  const recentProject = recentProjects[0];
+  if (recentProject) {
+    return {
+      projectId: recentProject.id,
+      wasCreated: false,
+      projectName: recentProject.name,
+    };
+  }
+
+  // Create new project
+  const newProject = await createProject(
+    env.DB,
+    userId,
+    'My Project',
+    'Auto-created for saving decisions and progress'
+  );
+
+  return {
+    projectId: newProject.id,
+    wasCreated: true,
+    projectName: newProject.name,
+  };
+}
 
 /**
  * Execute the spawner_remember tool
@@ -96,20 +139,25 @@ export async function executeRemember(
   env: Env,
   input: RememberInput,
   userId: string
-): Promise<RememberOutput | { error: string }> {
+): Promise<RememberOutput | { error: string; what_to_do: string; example: string }> {
   // Validate input
   const parsed = rememberInputSchema.safeParse(input);
   if (!parsed.success) {
-    return { error: `Invalid input: ${parsed.error.message}` };
+    return {
+      error: 'I need to know what to remember',
+      what_to_do: 'Pass an update object with a decision, issue, or session_summary',
+      example: 'spawner_remember({ update: { decision: { what: "Use Supabase for auth", why: "Built-in RLS and easy setup" } } })',
+    };
   }
 
   const { project_id, update } = parsed.data;
 
-  // Verify project ownership
-  const project = await loadProject(env.DB, project_id, userId);
-  if (!project) {
-    return { error: 'Project not found or access denied' };
-  }
+  // Resolve project ID (auto-create if needed)
+  const { projectId, wasCreated, projectName } = await resolveProjectId(
+    env,
+    userId,
+    project_id
+  );
 
   const saved: string[] = [];
 
@@ -117,7 +165,7 @@ export async function executeRemember(
   if (update.decision) {
     await createDecision(
       env.DB,
-      project_id,
+      projectId,
       update.decision.what,
       update.decision.why
     );
@@ -130,39 +178,55 @@ export async function executeRemember(
       // Try to find and resolve existing issue
       const resolved = await resolveIssueByDescription(
         env.DB,
-        project_id,
+        projectId,
         update.issue.description
       );
       if (resolved > 0) {
         saved.push(`issue resolved (${resolved} matched)`);
       } else {
         // No matching issue found, create as resolved
-        const issue = await createIssue(env.DB, project_id, update.issue.description);
-        await resolveIssueByDescription(env.DB, project_id, issue.description);
+        const issue = await createIssue(env.DB, projectId, update.issue.description);
+        await resolveIssueByDescription(env.DB, projectId, issue.description);
         saved.push('issue (created and resolved)');
       }
     } else {
-      await createIssue(env.DB, project_id, update.issue.description);
+      await createIssue(env.DB, projectId, update.issue.description);
       saved.push('issue');
     }
   }
 
   // Save session summary
   if (update.session_summary) {
-    await createSession(env.DB, project_id, update.session_summary, {
+    await createSession(env.DB, projectId, update.session_summary, {
       validations_passed: update.validated,
     });
     saved.push('session');
   }
 
   // Touch project (update timestamp)
-  await touchProject(env.DB, project_id);
+  await touchProject(env.DB, projectId);
 
   // Invalidate cache
-  await env.CACHE.delete(`project:${project_id}`);
+  await env.CACHE.delete(`project:${projectId}`);
+
+  // Build rich response
+  const savedDescription = saved.join(' and ');
 
   return {
+    success: true,
     saved,
+    project_id: projectId,
+    project_name: projectName,
+    was_project_created: wasCreated,
+    what_happened: wasCreated
+      ? `Created project "${projectName}" and saved your ${savedDescription}`
+      : `Saved your ${savedDescription} to "${projectName}"`,
+    what_this_means: "I'll remember this across sessions and reference it when relevant",
+    next_steps: [
+      'Continue building - I\'ll use this context when it\'s relevant',
+      `Load full context with: spawner_context({ project_id: "${projectId}" })`,
+      'Use spawner_remember again to save more decisions or progress',
+    ],
     message: saved.length > 0
       ? `Remembered: ${saved.join(', ')}. This will be available in future sessions.`
       : 'Nothing to save. Provide a decision, issue, or session_summary.',

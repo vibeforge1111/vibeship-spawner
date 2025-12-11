@@ -68,6 +68,7 @@ export const templatesToolDefinition = {
  * Output type
  */
 export interface TemplatesOutput {
+  success: boolean;
   templates: {
     id: string;
     name: string;
@@ -76,6 +77,8 @@ export interface TemplatesOutput {
     agents: string[];
     use_cases: string[];
   }[];
+  what_happened: string;
+  next_steps: string[];
   _instruction: string;
 }
 
@@ -109,8 +112,26 @@ export async function executeTemplates(
       )
     : templates;
 
+  const what_happened = filter
+    ? `Found ${filtered.length} template${filtered.length === 1 ? '' : 's'} matching "${filter}"`
+    : `Listed all ${filtered.length} available templates`;
+
+  const firstTemplate = filtered[0];
+  const next_steps = firstTemplate
+    ? [
+        `Pick a template and run: spawner_plan({ action: "create", template: "${firstTemplate.id}" })`,
+        'Or describe your idea: spawner_plan({ idea: "your app idea" })',
+      ]
+    : [
+        'Try a different filter, or run spawner_templates() to see all',
+        'Or describe your idea: spawner_plan({ idea: "your app idea" })',
+      ];
+
   return {
+    success: true,
     templates: filtered,
+    what_happened,
+    next_steps,
     _instruction: buildInstruction(filtered, filter),
   };
 }
@@ -139,7 +160,7 @@ function buildInstruction(
     lines.push('');
   }
 
-  lines.push('Use `spawner_create` with template="<id>" to start a new project.');
+  lines.push('Use `spawner_plan` with action="create" and template="<id>" to start a new project.');
 
   return lines.join('\n');
 }

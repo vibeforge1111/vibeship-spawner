@@ -72,8 +72,8 @@ interface UnifiedSkill {
  * Input schema for spawner_skills
  */
 export const skillsInputSchema = z.object({
-  action: z.enum(['search', 'list', 'get', 'squad']).describe(
-    'Action: search (by query), list (all skills), get (specific skill), squad (get skill squad)'
+  action: z.enum(['search', 'list', 'get', 'squad']).optional().describe(
+    'Action: search (default), list (all skills), get (specific skill), squad (get skill squad)'
   ),
   query: z.string().optional().describe(
     'Search query - matches names, descriptions, tags, triggers'
@@ -107,7 +107,7 @@ export const skillsToolDefinition = {
       action: {
         type: 'string',
         enum: ['search', 'list', 'get', 'squad'],
-        description: 'Action: search (by query), list (all skills), get (specific skill content), squad (get skill squad)',
+        description: 'Action: search (default), list (all skills), get (specific skill content), squad (get skill squad)',
       },
       query: {
         type: 'string',
@@ -136,7 +136,7 @@ export const skillsToolDefinition = {
         description: 'Filter by source: all (default), v1 (markdown skills), v2 (yaml skills with validations)',
       },
     },
-    required: ['action'],
+    required: [],
   },
 };
 
@@ -174,7 +174,19 @@ export async function executeSkills(
     throw new Error(`Invalid input: ${parsed.error.message}`);
   }
 
-  const { action, query, name, tag, layer, squad, source = 'all' } = parsed.data;
+  const { query, name, tag, layer, squad, source = 'all' } = parsed.data;
+
+  // Infer action from provided params if not specified
+  let action = parsed.data.action;
+  if (!action) {
+    if (name) {
+      action = 'get';
+    } else if (squad) {
+      action = 'squad';
+    } else {
+      action = 'search';  // Default
+    }
+  }
 
   // Load V1 registry from KV
   const v1Registry = await loadV1Registry(env);

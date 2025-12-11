@@ -62,16 +62,27 @@ export async function executeValidate(
   userId?: string,
   projectId?: string
 ): Promise<ValidateOutput> {
-  // Validate input
+  // Validate input with human-friendly error messages
   const parsed = validateInputSchema.safeParse(input);
   if (!parsed.success) {
+    // Generate human-friendly error message
+    const missingFields: string[] = [];
+    if (!input.code) missingFields.push('code');
+    if (!input.file_path) missingFields.push('file_path');
+
+    const errorMessage = missingFields.length > 0
+      ? `I need ${missingFields.join(' and ')} to check your code`
+      : 'I need valid code to check';
+
     return {
       passed: false,
-      summary: `Invalid input: ${parsed.error.message}`,
+      summary: errorMessage,
       critical: [],
       errors: [],
       warnings: [],
-      _instruction: 'Please provide valid code and file_path parameters.',
+      what_to_do: 'Pass the code content and the file path so I know which checks to run',
+      example: 'spawner_validate({ code: "your code here", file_path: "src/app.tsx" })',
+      _instruction: `${errorMessage}. ${missingFields.length > 0 ? `Missing: ${missingFields.join(', ')}` : ''}`,
     };
   }
 

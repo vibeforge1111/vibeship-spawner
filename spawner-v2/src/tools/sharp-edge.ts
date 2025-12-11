@@ -58,11 +58,16 @@ function matchEdgesAgainstCode(
 }
 
 /**
+ * Default stack when none provided - covers common vibe coder setup
+ */
+const DEFAULT_STACK = ['nextjs', 'react', 'typescript', 'supabase'];
+
+/**
  * Input schema for spawner_sharp_edge
  */
 export const sharpEdgeInputSchema = z.object({
-  stack: z.array(z.string()).describe(
-    'Technology stack to get sharp edges for (e.g., ["nextjs", "supabase"])'
+  stack: z.array(z.string()).optional().describe(
+    'Technology stack to get sharp edges for. Defaults to common stack: nextjs, react, typescript, supabase'
   ),
   situation: z.string().optional().describe(
     'Description of the current situation or problem to match against'
@@ -84,7 +89,7 @@ export const sharpEdgeToolDefinition = {
       stack: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Technology stack to get sharp edges for (e.g., ["nextjs", "supabase"])',
+        description: 'Technology stack to get sharp edges for. Defaults to common stack: nextjs, react, typescript, supabase',
       },
       situation: {
         type: 'string',
@@ -95,7 +100,7 @@ export const sharpEdgeToolDefinition = {
         description: 'Code snippet to check against detection patterns',
       },
     },
-    required: ['stack'],
+    required: [],
   },
 };
 
@@ -116,7 +121,10 @@ export async function executeSharpEdge(
     };
   }
 
-  const { stack, situation, code_context } = parsed.data;
+  const { situation, code_context } = parsed.data;
+
+  // Use provided stack or default to common setup
+  const stack = parsed.data.stack?.length ? parsed.data.stack : DEFAULT_STACK;
 
   // 1. Get skills for this stack
   const skills = await loadRelevantSkills(env, stack);
