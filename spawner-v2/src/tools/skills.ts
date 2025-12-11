@@ -404,7 +404,7 @@ async function handleGet(
       if (content) {
         return {
           skill_content: content,
-          _instruction: `Loaded V1 skill: ${v1Skill.name}\n\nThis is a markdown skill without structured validations. Use spawner_sharp_edge for gotchas.`,
+          _instruction: `Loaded V1 skill: ${v1Skill.name}\n\nThis is a markdown skill without structured validations. Use spawner_watch_out for gotchas.`,
         };
       }
     }

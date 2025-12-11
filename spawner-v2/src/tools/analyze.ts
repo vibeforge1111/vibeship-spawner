@@ -660,8 +660,8 @@ function buildInstruction(
   // Next steps
   lines.push('## Next Steps');
   lines.push('1. Load recommended skills with `spawner_skills`');
-  lines.push('2. Use `spawner_context` to initialize project memory');
-  lines.push('3. Check `spawner_sharp_edge` for gotchas in your stack');
+  lines.push('2. Use `spawner_load` to initialize project memory');
+  lines.push('3. Check `spawner_watch_out` for gotchas in your stack');
 
   return lines.join('\n');
 }

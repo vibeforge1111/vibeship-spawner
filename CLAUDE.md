@@ -1,29 +1,27 @@
-# CLAUDE.md - Spawner V2 Development Context
+# CLAUDE.md - VibeShip Spawner Development Context
 
-> Read this first when working on Spawner V2
+> Read this first when working on the Spawner MCP server
 
 ## Documentation
 
-All V2 documentation lives in `/docs/v2/`:
-
 | Doc | Purpose |
 |-----|---------|
-| `docs/v2/PRD.md` | Product requirements - what and why |
-| `docs/v2/ARCHITECTURE.md` | Technical architecture - how it works |
-| `docs/v2/SKILL_SPEC.md` | Skill creation guide - building skills |
-| `docs/v2/ROADMAP.md` | Build plan - week by week tasks |
-| `docs/v2/skills/` | Skill definitions and examples |
-
-Read these when you need deeper context on specific areas.
+| `docs/V2/PRD.md` | Product requirements - what and why |
+| `docs/V2/ARCHITECTURE.md` | Technical architecture - how it works |
+| `docs/V2/SKILL_SPEC.md` | Skill creation guide - building skills |
+| `docs/V2/ROADMAP.md` | Build plan - week by week tasks |
+| `docs/TUTORIAL.md` | Getting started guide |
 
 ## What Is Spawner?
 
 Spawner is an MCP server that transforms Claude into a specialized product-building system. It adds capabilities Claude doesn't have by default:
 
-1. **Project Memory** - Remembers your project across sessions
-2. **Guardrails** - Actually catches code issues (not just suggests)
-3. **Sharp Edges** - Knows gotchas Claude doesn't know
+1. **Project Memory** - Remembers your project across sessions (decisions, issues, progress)
+2. **Guardrails** - Actually catches code issues (security, patterns, production readiness)
+3. **Sharp Edges** - Knows gotchas Claude doesn't know (versioned, situation-matched)
 4. **Escape Hatches** - Detects when you're stuck and offers alternatives
+5. **Skill System** - Unified V1 (markdown) + V2 (YAML) specialist knowledge
+6. **Skill Level Detection** - Adapts guidance to user experience level
 
 ## Tech Stack
 
@@ -32,53 +30,113 @@ Spawner is an MCP server that transforms Claude into a specialized product-build
 - **Cache/Skills:** Cloudflare KV
 - **Protocol:** MCP (Model Context Protocol)
 - **Language:** TypeScript
+- **Validation:** Zod
 
 ## Project Structure
 
 ```
-spawner-v2/
-├── src/
-│   ├── index.ts              # Main worker, MCP routing
-│   ├── types.ts              # Type definitions
-│   ├── tools/                # MCP tool implementations
-│   │   ├── context.ts        # spawner_load (renamed from spawner_context)
-│   │   ├── validate.ts       # spawner_validate
-│   │   ├── remember.ts       # spawner_remember
-│   │   ├── sharp-edge.ts     # spawner_watch_out (renamed from spawner_sharp_edge)
-│   │   └── unstick.ts        # spawner_unstick
-│   ├── validation/           # Code checking
-│   │   ├── runner.ts         # Runs checks on code
-│   │   └── checks/           # Individual checks
-│   ├── skills/               # Skill loading and matching
-│   ├── telemetry/            # Event tracking
-│   └── db/                   # D1 database operations
-├── skills/                   # Skill definitions (uploaded to KV)
-│   ├── core/
-│   ├── integration/
-│   └── pattern/
-├── migrations/               # D1 schema
-└── wrangler.toml            # Cloudflare config
+vibeship-spawner/
+├── spawner-v2/              # MCP Server (Cloudflare Worker)
+│   ├── src/
+│   │   ├── index.ts         # Main worker, MCP routing
+│   │   ├── types.ts         # Type definitions
+│   │   ├── tools/           # MCP tool implementations (9 tools)
+│   │   │   ├── plan.ts      # spawner_plan - project planning
+│   │   │   ├── analyze.ts   # spawner_analyze - codebase analysis
+│   │   │   ├── context.ts   # spawner_load - session context
+│   │   │   ├── validate.ts  # spawner_validate - code checks
+│   │   │   ├── remember.ts  # spawner_remember - persistence
+│   │   │   ├── sharp-edge.ts # spawner_watch_out - gotchas
+│   │   │   ├── unstick.ts   # spawner_unstick - escape hatches
+│   │   │   ├── templates.ts # spawner_templates - project templates
+│   │   │   └── skills.ts    # spawner_skills - unified skill search
+│   │   ├── validation/      # Code checking (regex + AST)
+│   │   ├── skills/          # Skill loading and matching
+│   │   ├── telemetry/       # Event tracking
+│   │   └── db/              # D1 database operations
+│   ├── skills/              # V2 Skills (YAML format)
+│   └── migrations/          # D1 schema
+├── skills/                  # V1 Skills (markdown format)
+├── catalogs/                # Agent and MCP catalogs
+├── docs/                    # Documentation
+│   └── V2/                  # V2-specific docs
+└── web/                     # Web UI (SvelteKit)
 ```
 
 ## Key Concepts
 
-### Skills
-Structured knowledge modules that make Claude expert in specific domains.
-Each skill has: identity, sharp edges, patterns, anti-patterns, validations.
+### Skill System (Unified V1 + V2)
 
-Skills are stored in KV and loaded based on project stack.
+The `spawner_skills` tool searches BOTH skill formats:
+
+**V1 Skills (Markdown):**
+- Stored in `/skills/` directory
+- Loaded to KV as `v1:registry` and `v1:skill:{name}`
+- Include: triggers, tags, layers, pairs_with relationships
+
+**V2 Skills (YAML):**
+- Stored in `spawner-v2/skills/`
+- Loaded to KV as `v2:index` and `skill:{id}`
+- Include: structured validations, sharp edges with detection patterns
+
+### Skill Layers
+
+Skills are organized into three layers:
+- **Layer 1 (Core):** Foundation - language, framework, data layer
+- **Layer 2 (Integration):** Features - combine core skills into complete features
+- **Layer 3 (Polish):** Quality - security, UX, design refinement
+
+### Squads
+
+Pre-configured skill combinations for common tasks:
+- `auth-complete` - Full authentication implementation
+- `payments-complete` - Stripe/payments integration
+- `crud-feature` - Database CRUD operations
+
+Use: `spawner_skills({ action: "squad", squad: "auth-complete" })`
+
+### Skill Levels
+
+The system detects user experience level and adapts guidance:
+- **vibe-coder** - Non-technical, needs maximum guidance
+- **builder** - Some tech knowledge, learning
+- **developer** - Technical, familiar with patterns
+- **expert** - Senior developer, strong opinions
+
+Detection uses pattern matching on user phrases (e.g., "I don't know code", "let's use", "in my experience").
+
+### Project Templates
+
+Available templates with pre-configured stack, skills, and agents:
+
+| Template | Use Case | Stack |
+|----------|----------|-------|
+| `saas` | Subscription products | Next.js, Supabase, Stripe, Tailwind |
+| `marketplace` | Buy/sell platforms | Next.js, Supabase, Stripe, Algolia |
+| `ai-app` | LLM-powered apps | Next.js, Supabase, OpenAI |
+| `web3` | Blockchain apps | Next.js, wagmi, viem |
+| `tool` | CLIs and utilities | TypeScript, Node |
 
 ### Sharp Edges
-Specific gotchas Claude doesn't know by default. The real moat.
-Each edge has: situation, why it happens, the fix, detection patterns.
+
+Specific gotchas Claude doesn't know by default - the real moat.
+Each edge has: severity, situation, why, fix, detection pattern.
 
 ### Guardrails
-Machine-runnable checks that catch issues. Not suggestions - actual catches.
-Types: regex patterns, AST checks (ts-morph), file existence checks.
 
-### Project Memory
-D1 stores: project manifest, decisions, session summaries, known issues.
-KV caches: hot session data, active project context.
+Machine-runnable checks that catch issues:
+- **Security:** Hardcoded secrets, injection vulnerabilities
+- **Patterns:** Async client components, server imports in client
+- **Production:** Missing 'use server' directives, env validation
+
+### Stack Detection
+
+`spawner_analyze` detects technologies from:
+- File existence (next.config.js, wrangler.toml)
+- Package.json dependencies
+- Code patterns (imports, API usage)
+
+Detected categories: framework, database, auth, payments, styling, ai, web3, testing, api, deployment
 
 ## MCP Tools (9 total)
 
@@ -86,28 +144,26 @@ KV caches: hot session data, active project context.
 |------|---------|
 | `spawner_plan` | Plan and create projects (discover → recommend → create) |
 | `spawner_analyze` | Analyze existing codebase for stack/skill recommendations |
-| `spawner_load` | Load project + skills for session (was: spawner_context) |
-| `spawner_validate` | Run checks on code |
-| `spawner_remember` | Save decisions/progress |
-| `spawner_watch_out` | Query relevant gotchas (was: spawner_sharp_edge) |
-| `spawner_unstick` | Analyze stuck state, offer alternatives |
+| `spawner_load` | Load project context and skills for session |
+| `spawner_validate` | Run guardrail checks on code |
+| `spawner_remember` | Save decisions, issues, and session progress |
+| `spawner_watch_out` | Query gotchas for your current situation |
+| `spawner_unstick` | Get help when stuck on a problem |
 | `spawner_templates` | List available project templates |
-| `spawner_skills` | Search and retrieve skills |
+| `spawner_skills` | Search, list, get skills and squads |
 
 **Production endpoint:** https://mcp.vibeship.co
 
 ## Environment Variables
 
-```
+```toml
 # wrangler.toml
 [vars]
 ENVIRONMENT = "development" | "production"
 
-# D1 binding
 [[d1_databases]]
 binding = "DB"
 
-# KV bindings
 [[kv_namespaces]]
 binding = "SKILLS"
 binding = "SHARP_EDGES"
@@ -117,7 +173,9 @@ binding = "CACHE"
 ## Development Commands
 
 ```bash
-# Start local dev
+# Start local dev (from spawner-v2/)
+cd spawner-v2
+npm install
 wrangler dev
 
 # Deploy
@@ -135,12 +193,12 @@ node scripts/upload-skills.js
 - TypeScript strict mode
 - Zod for input validation on all tools
 - Explicit error handling (try/catch on all async)
-- No console.log in production (use proper logging)
+- No console.log in production
 - Comments for non-obvious logic only
 
 ## Testing With Claude Desktop
 
-1. Run `wrangler dev`
+1. Run `wrangler dev` in spawner-v2/
 2. Add to Claude Desktop config:
 ```json
 {
@@ -157,13 +215,19 @@ node scripts/upload-skills.js
 
 ## Common Tasks
 
-### Adding a New Skill
+### Adding a V2 Skill
 
-1. Create folder in `skills/core/` or `skills/integration/`
+1. Create folder in `spawner-v2/skills/core/` or `spawner-v2/skills/integration/`
 2. Add `skill.yaml` with identity
 3. Add `sharp-edges.md` with 5+ gotchas
 4. Add `patterns.md` and `anti-patterns.md`
 5. Run upload script: `node scripts/upload-skills.js`
+
+### Adding a V1 Skill
+
+1. Create markdown file in `skills/`
+2. Add to `skills/registry.json` with triggers, tags, layer
+3. Upload to KV
 
 ### Adding a New Check
 
@@ -205,6 +269,10 @@ D1 is cheap, fast, and co-located with Workers.
 Skills are read-heavy, rarely updated.
 KV is optimized for this access pattern.
 
+### Why Both V1 and V2 Skills?
+V1 (markdown) is easier to write, V2 (YAML) has structured validations.
+Unified search lets us leverage both while migrating.
+
 ### Why Not Full AST for All Checks?
 ts-morph is powerful but slow.
 Regex catches 80% of issues with 10% of complexity.
@@ -229,20 +297,12 @@ Use AST only when regex can't express the check.
 Before adding any feature, ask:
 > "Would Claude alone do this? If yes, cut it. If no, ship it."
 
-## Reference Docs
-
-- `docs/v2/PRD.md` - Full product requirements
-- `docs/v2/SKILL_SPEC.md` - How to build skills
-- `docs/v2/ARCHITECTURE.md` - Technical deep dive
-- `docs/v2/ROADMAP.md` - What to build when
-- `docs/v2/skills/core/nextjs-app-router/` - Example skill
-
 ## Questions?
 
 If something isn't clear, check the docs first:
-1. `docs/v2/PRD.md` for "what" and "why"
-2. `docs/v2/ARCHITECTURE.md` for "how"
-3. `docs/v2/SKILL_SPEC.md` for skills specifically
-4. `docs/v2/ROADMAP.md` for priorities
+1. `docs/V2/PRD.md` for "what" and "why"
+2. `docs/V2/ARCHITECTURE.md` for "how"
+3. `docs/V2/SKILL_SPEC.md` for skills specifically
+4. `docs/V2/ROADMAP.md` for priorities
 
 If still unclear, that's a docs gap - fix it when you figure it out.

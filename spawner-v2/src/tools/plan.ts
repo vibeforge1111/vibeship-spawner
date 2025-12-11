@@ -440,7 +440,7 @@ async function handleCreate(
     next_steps: [
       `Project "${projectName}" created with ID: ${projectId}`,
       'Load skills with spawner_skills action="get"',
-      'Use spawner_context to initialize session',
+      'Use spawner_load to initialize session',
       'Start building!',
     ],
     _instruction: buildCreateInstruction(projectName, projectId, templateConfig, skillLevel),
@@ -710,6 +710,6 @@ function buildCreateInstruction(
 
 **Next:**
 1. \`spawner_skills action="get" name="${templateConfig.skills[0]}"\`
-2. \`spawner_context project_id="${projectId}"\`
+2. \`spawner_load project_id="${projectId}"\`
 3. Start building!`;
 }

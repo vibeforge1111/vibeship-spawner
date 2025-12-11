@@ -10,10 +10,12 @@ An MCP server that transforms Claude into a specialized product-building system 
 
 Spawner adds capabilities Claude doesn't have by default:
 
-1. **Project Memory** - Remembers your project across sessions
+1. **Project Memory** - Remembers your project across sessions (decisions, issues, progress)
 2. **Guardrails** - Actually catches code issues (not just suggests)
 3. **Sharp Edges** - Knows gotchas Claude doesn't know
 4. **Escape Hatches** - Detects when you're stuck and offers alternatives
+5. **Skill System** - Unified specialist knowledge (markdown + YAML formats)
+6. **Skill Level Detection** - Adapts guidance to your experience level
 
 ---
 
@@ -64,7 +66,7 @@ Spawner automatically:
 | `spawner_watch_out` | Query gotchas for your current situation |
 | `spawner_unstick` | Get help when stuck on a problem |
 | `spawner_templates` | List available project templates |
-| `spawner_skills` | Search and retrieve skills |
+| `spawner_skills` | Search, list, get skills and squads |
 
 **Production endpoint:** https://mcp.vibeship.co
 
@@ -79,6 +81,48 @@ Spawner automatically:
 | `ai-app` | LLM-powered apps | Next.js, Supabase, OpenAI |
 | `web3` | Blockchain apps | Next.js, wagmi, viem |
 | `tool` | CLIs and utilities | TypeScript, Node |
+
+---
+
+## Skill System
+
+### Unified Skills
+
+Spawner searches both V1 (markdown) and V2 (YAML) skill formats, giving you access to all specialist knowledge:
+
+```
+You: What skills are available for authentication?
+Claude: [Uses spawner_skills({ query: "auth" })]
+```
+
+### Skill Layers
+
+Skills are organized into three layers:
+- **Layer 1 (Core):** Foundation - language, framework, data layer
+- **Layer 2 (Integration):** Features - combine core skills into complete features
+- **Layer 3 (Polish):** Quality - security, UX, design refinement
+
+### Squads
+
+Pre-configured skill combinations for common tasks:
+
+```
+You: I need to add authentication to my app
+Claude: [Uses spawner_skills({ action: "squad", squad: "auth-complete" })]
+```
+
+Available squads:
+- `auth-complete` - Full authentication implementation
+- `payments-complete` - Stripe/payments integration
+- `crud-feature` - Database CRUD operations
+
+### Skill Level Detection
+
+Spawner detects your experience level and adapts guidance:
+- **vibe-coder** - Non-technical, needs maximum guidance
+- **builder** - Some tech knowledge, learning
+- **developer** - Technical, familiar with patterns
+- **expert** - Senior developer, strong opinions
 
 ---
 
@@ -121,6 +165,30 @@ Claude: [Uses spawner_watch_out]
 Claude: Found 3 sharp edges for your stack...
 ```
 
+### Get a Skill Squad
+
+```
+You: I need to implement payments with Stripe
+
+Claude: [Uses spawner_skills({ action: "squad", squad: "payments-complete" })]
+Claude: Loading payments squad: payments-flow (lead), stripe-webhooks, error-handling
+```
+
+---
+
+## Stack Detection
+
+`spawner_analyze` automatically detects technologies from your codebase:
+- **Framework:** Next.js, React, Vue, Svelte
+- **Database:** Supabase, Prisma, Drizzle, Firebase
+- **Auth:** NextAuth, Clerk, Supabase Auth
+- **Payments:** Stripe, LemonSqueezy
+- **Styling:** Tailwind, shadcn/ui
+- **AI:** OpenAI, Anthropic, Vercel AI
+- **Web3:** wagmi, viem, ethers
+- **Testing:** Jest, Vitest, Playwright
+- **Deployment:** Vercel, Cloudflare
+
 ---
 
 ## Tech Stack
@@ -137,15 +205,17 @@ Claude: Found 3 sharp edges for your stack...
 
 ```
 vibeship-spawner/
-├── spawner-v2/           # V2 MCP Server (Cloudflare Worker)
+├── spawner-v2/           # MCP Server (Cloudflare Worker)
 │   ├── src/
 │   │   ├── index.ts      # Main worker, MCP routing
 │   │   ├── tools/        # MCP tool implementations
 │   │   ├── validation/   # Code checking
 │   │   ├── skills/       # Skill loading
 │   │   └── db/           # D1 database operations
-│   ├── skills/           # Skill definitions (YAML)
+│   ├── skills/           # V2 Skills (YAML)
 │   └── migrations/       # D1 schema
+├── skills/               # V1 Skills (markdown)
+├── catalogs/             # Agent and MCP catalogs
 ├── docs/
 │   ├── TUTORIAL.md       # Getting started guide
 │   └── V2/               # V2 documentation
@@ -153,8 +223,6 @@ vibeship-spawner/
 │       ├── ARCHITECTURE.md
 │       ├── SKILL_SPEC.md
 │       └── ROADMAP.md
-├── skills/               # V1 Skills (markdown)
-├── catalogs/             # Agent and MCP catalogs
 └── web/                  # Web UI (SvelteKit)
 ```
 
