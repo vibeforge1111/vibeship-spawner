@@ -15,7 +15,7 @@ Add to your Claude Desktop MCP configuration:
   "mcpServers": {
     "spawner": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "https://mcp.vibeship.co/mcp"]
+      "args": ["-y", "mcp-remote", "https://mcp.vibeship.co"]
     }
   }
 }
@@ -111,7 +111,7 @@ Claude: Here are 3 alternative approaches...
 
 ### MCP Not Connecting
 1. Verify config in Claude Desktop
-2. Check endpoint: https://mcp.vibeship.co/mcp
+2. Check endpoint: https://mcp.vibeship.co
 3. Restart Claude Desktop
 
 ### Tool Not Found
@@ -120,4 +120,4 @@ Claude: Here are 3 alternative approaches...
 
 ---
 
-**Endpoint:** https://mcp.vibeship.co/mcp
+**Endpoint:** https://mcp.vibeship.co

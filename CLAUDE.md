@@ -94,7 +94,7 @@ KV caches: hot session data, active project context.
 | `spawner_templates` | List available project templates |
 | `spawner_skills` | Search and retrieve skills |
 
-**Production endpoint:** https://mcp.vibeship.co/mcp
+**Production endpoint:** https://mcp.vibeship.co
 
 ## Environment Variables
 
