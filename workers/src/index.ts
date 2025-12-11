@@ -118,7 +118,18 @@ async function handleMethod(method: string, params: Record<string, unknown> = {}
     case 'ping':
       return {};
 
+    // Handle notifications (no response needed, return empty object)
+    case 'notifications/initialized':
+    case 'notifications/cancelled':
+    case 'notifications/progress':
+      return {};
+
     default:
+      // For unknown methods, return empty result instead of error
+      // This handles any other notifications gracefully
+      if (method.startsWith('notifications/')) {
+        return {};
+      }
       throw { code: -32601, message: `Method not found: ${method}` };
   }
 }
