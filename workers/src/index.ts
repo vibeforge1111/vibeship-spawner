@@ -200,11 +200,11 @@ interface JsonRpcResponse {
   error?: { code: number; message: string; data?: unknown };
 }
 
-// Tool definitions
+// Tool definitions - ORDER MATTERS: get_started should always be called first
 const TOOLS = [
   {
     name: 'get_started',
-    description: 'ALWAYS CALL THIS FIRST when user mentions vibeship-spawner or wants to create/work on a project. Detects whether this is a new project (needs discovery) or existing codebase (needs analysis). Returns the right next step.',
+    description: 'THE ENTRY POINT - Call this FIRST for ANY vibeship-spawner interaction. When user says "create project", "new project", "use vibeship", "help with my project" - ALWAYS start here. Do NOT call list_templates, create_project, or recommend_squad before calling get_started. This tool detects if user has new idea vs existing code and routes to the right flow.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -226,7 +226,7 @@ const TOOLS = [
   },
   {
     name: 'start_discovery',
-    description: 'Begin discovery for a NEW project idea. Guides through WHO/PROBLEM/EDGE/MINIMUM framework. Use when get_started indicates new project.',
+    description: 'Step 2 for NEW projects (after get_started). Guides through WHO/PROBLEM/EDGE/MINIMUM framework. Do NOT call this first - call get_started first.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -312,7 +312,7 @@ const TOOLS = [
   },
   {
     name: 'create_project',
-    description: 'FINAL STEP - Create project scaffolding AFTER completing: 1) start_discovery, 2) continue_discovery (all stages), 3) assess_skill_level, 4) recommend_squad. Do NOT call this first.',
+    description: 'FINAL STEP ONLY - generates project files. Requires completed discovery session. Do NOT call this when user says "create project" - call get_started first instead. This is step 5 in the flow, not step 1.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -351,7 +351,7 @@ const TOOLS = [
   },
   {
     name: 'list_templates',
-    description: 'List available templates. Only use if user specifically asks "what templates are available" - do NOT use this when starting a new project (use start_discovery instead).',
+    description: 'ONLY use when user explicitly asks "what templates exist?" or "show templates". Do NOT use for "create project" or "new project" - use get_started instead. This just lists template names, not a project creation flow.',
     inputSchema: {
       type: 'object',
       properties: {}
