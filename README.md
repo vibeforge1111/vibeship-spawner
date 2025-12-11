@@ -95,13 +95,6 @@ You: What skills are available for authentication?
 Claude: [Uses spawner_skills({ query: "auth" })]
 ```
 
-### Skill Layers
-
-Skills are organized into three layers:
-- **Layer 1 (Core):** Foundation - language, framework, data layer
-- **Layer 2 (Integration):** Features - combine core skills into complete features
-- **Layer 3 (Polish):** Quality - security, UX, design refinement
-
 ### Squads
 
 Pre-configured skill combinations for common tasks:
