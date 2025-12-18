@@ -14,108 +14,120 @@
 </script>
 
 <nav class="navbar">
-  <a href="/" class="logo">
-    <span class="logo-text">vibeship</span>
-    <span class="logo-sub">spawner</span>
-  </a>
+  <div class="navbar-content">
+    <a href="/" class="navbar-logo-link">
+      <img src="/logo.png" alt="vibeship" class="navbar-logo-img">
+      <span class="navbar-logo-text">vibeship</span>
+      <span class="navbar-logo-product">spawner</span>
+    </a>
 
-  <div class="nav-links">
-    <a href="/how-it-works">How It Works</a>
-    <a href="/builder">Build</a>
-    {#if $isAuthenticated}
-      <span class="user-info">
-        <Icon name="github" size={16} />
-        <span class="username">{$githubUser}</span>
-      </span>
-      <button class="logout-btn" onclick={handleLogout}>Logout</button>
-    {:else}
-      <a href="/api/auth/github" class="login-btn">
-        <Icon name="github" size={16} />
-        <span>Login</span>
-      </a>
-    {/if}
-    <ThemeToggle />
+    <div class="navbar-right">
+      <a href="/how-it-works">How It Works</a>
+      <a href="/builder">Build</a>
+      {#if $isAuthenticated}
+        <span class="user-info">
+          <Icon name="github" size={16} />
+          <span class="username">{$githubUser}</span>
+        </span>
+        <button class="logout-btn" onclick={handleLogout}>Logout</button>
+      {:else}
+        <a href="/api/auth/github" class="login-btn">
+          <Icon name="github" size={16} />
+          <span>Login</span>
+        </a>
+      {/if}
+      <ThemeToggle />
+    </div>
   </div>
 </nav>
 
 <style>
   .navbar {
-    position: fixed;
+    position: sticky;
     top: 0;
-    left: 0;
-    right: 0;
-    height: 60px;
-    padding: 0 var(--space-8);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    background: var(--bg-primary);
+    height: 52px;
     border-bottom: 1px solid var(--border);
+    background: var(--bg-primary);
     z-index: 100;
   }
 
-  .logo {
+  .navbar-content {
+    height: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
     display: flex;
-    align-items: baseline;
-    gap: var(--space-2);
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 1.625rem;
+  }
+
+  .navbar-logo-link {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
     text-decoration: none;
   }
 
-  .logo-text {
-    font-family: var(--font-serif);
-    font-size: var(--text-2xl);
+  .navbar-logo-img {
+    width: 24px;
+    height: 24px;
+    filter: invert(var(--logo-invert, 0));
+  }
+
+  .navbar-logo-text {
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-size: 1.44rem;
     color: var(--text-primary);
-    letter-spacing: -0.02em;
   }
 
-  .logo-sub {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    color: var(--text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+  .navbar-logo-product {
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-size: 1.44rem;
+    color: var(--green-dim);
   }
 
-  .nav-links {
+  .navbar-right {
     display: flex;
     align-items: center;
-    gap: var(--space-6);
+    gap: 0.75rem;
   }
 
-  .nav-links a {
+  .navbar-right a:not(.login-btn) {
     font-size: var(--text-sm);
-    color: var(--text-secondary);
     text-decoration: none;
-    display: flex;
-    align-items: center;
+    color: var(--text-secondary);
+    transition: color 0.2s;
   }
 
-  .nav-links a:hover {
+  .navbar-right a:not(.login-btn):hover {
     color: var(--text-primary);
   }
 
   .login-btn {
     display: flex;
     align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
-    background: transparent;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    text-decoration: none;
     border: 1px solid var(--border);
+    background: transparent;
     color: var(--text-secondary);
-    font-size: var(--text-sm);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: all 0.15s;
   }
 
   .login-btn:hover {
-    border-color: var(--green-dim);
-    color: var(--green-dim);
+    border-color: var(--text-primary);
+    color: var(--text-primary);
   }
 
   .user-info {
     display: flex;
     align-items: center;
-    gap: var(--space-2);
+    gap: 0.5rem;
     font-size: var(--text-sm);
     color: var(--text-secondary);
   }
@@ -125,17 +137,18 @@
   }
 
   .logout-btn {
-    padding: var(--space-1) var(--space-2);
+    padding: 0.5rem 0.75rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: var(--text-xs);
     background: transparent;
     border: 1px solid var(--border);
     color: var(--text-tertiary);
-    font-size: var(--text-xs);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: all 0.15s;
   }
 
   .logout-btn:hover {
-    border-color: var(--red-dim, #ff6b6b);
-    color: var(--red-dim, #ff6b6b);
+    border-color: var(--text-primary);
+    color: var(--text-primary);
   }
 </style>

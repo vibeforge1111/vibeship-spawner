@@ -71,3 +71,27 @@ export type {
   AttemptPattern,
   SessionCache,
 } from './tools/types.js';
+
+// Mind integration types
+export type {
+  MindMemory,
+  MindSession,
+  MindContext,
+  MindDecision,
+  MindSessionEntry,
+} from './mind/types.js';
+
+// Orchestration types
+export type {
+  DetectionResult,
+  OrchestrationPath,
+  OrchestrationResult,
+  SessionInput,
+  LoadedSkill,
+  ProjectInfo,
+  ResumeContext,
+  AnalyzeContext,
+  BrainstormContext,
+  SkillLevel,
+  RecommendedStack,
+} from './orchestration/types.js';

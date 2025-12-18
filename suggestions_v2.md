@@ -21,7 +21,7 @@ Audited all 9 Spawner tools against the mcp-product skill principles. Found **2 
 | `spawner_remember` | ❌ Broken | Requires project_id |
 | `spawner_sharp_edge` | ❌ Broken | Requires stack array |
 | `spawner_unstick` | ⚠️ Needs Work | Requires attempts/errors |
-| `spawner_templates` | 🐛 Bug | References wrong tool |
+| `spawner_templates` | 🐛 Bug | ReferenAces wrong tool |
 | `spawner_skills` | ⚠️ Needs Work | Requires action param |
 
 ---

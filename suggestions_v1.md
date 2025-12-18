@@ -1,4 +1,4 @@
-# Spawner MCP Audit Report V2
+# Spawner MCP Audit Report V1
 
 **Audit Date:** December 2024
 **Audited Against:** `mcp-product-v1` skill (claude-skills-generator framework)

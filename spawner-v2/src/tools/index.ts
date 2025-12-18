@@ -11,9 +11,11 @@
  * Planning & Analysis Tools:
  * - plan (unified: discover + recommend + create)
  * - analyze (codebase analysis for existing projects)
+ *
+ * Orchestration Tool:
+ * - orchestrate (main entry point - auto-detects context)
  */
 
-import type { Env } from '../types.js';
 import {
   registerTool,
   getToolDefinitions,
@@ -34,6 +36,7 @@ import { skillsToolDefinition, executeSkills } from './skills.js';
 import { planToolDefinition, executePlan } from './plan.js';
 import { analyzeToolDefinition, executeAnalyze } from './analyze.js';
 import { skillCreateToolDefinition, executeSkillCreate } from './skill-create.js';
+import { orchestrateToolDefinition, executeOrchestrate } from './orchestrate.js';
 
 // =============================================================================
 // Register all tools
@@ -42,55 +45,61 @@ import { skillCreateToolDefinition, executeSkillCreate } from './skill-create.js
 // V2 Original Tools
 registerTool({
   definition: loadToolDefinition,
-  execute: (env, args, userId) => executeLoad(env, args, userId),
+  execute: (env, args, userId) => executeLoad(env, args as Parameters<typeof executeLoad>[1], userId),
 });
 
 registerTool({
   definition: validateToolDefinition,
-  execute: (env, args, userId) => executeValidate(env, args, userId),
+  execute: (env, args, userId) => executeValidate(env, args as Parameters<typeof executeValidate>[1], userId),
 });
 
 registerTool({
   definition: rememberToolDefinition,
-  execute: (env, args, userId) => executeRemember(env, args, userId),
+  execute: (env, args, userId) => executeRemember(env, args as Parameters<typeof executeRemember>[1], userId),
 });
 
 registerTool({
   definition: watchOutToolDefinition,
-  execute: (env, args, _userId) => executeWatchOut(env, args),
+  execute: (env, args, _userId) => executeWatchOut(env, args as Parameters<typeof executeWatchOut>[1]),
 });
 
 registerTool({
   definition: unstickToolDefinition,
-  execute: (env, args, _userId) => executeUnstick(env, args),
+  execute: (env, args, _userId) => executeUnstick(env, args as Parameters<typeof executeUnstick>[1]),
 });
 
 // V1 Ported Tools
 registerTool({
   definition: templatesToolDefinition,
-  execute: (env, args, _userId) => executeTemplates(env, args),
+  execute: (env, args, _userId) => executeTemplates(env, args as Parameters<typeof executeTemplates>[1]),
 });
 
 registerTool({
   definition: skillsToolDefinition,
-  execute: (env, args, _userId) => executeSkills(env, args),
+  execute: (env, args, _userId) => executeSkills(env, args as Parameters<typeof executeSkills>[1]),
 });
 
 // Planning & Analysis Tools
 registerTool({
   definition: planToolDefinition,
-  execute: (env, args, userId) => executePlan(env, args, userId),
+  execute: (env, args, userId) => executePlan(env, args as Parameters<typeof executePlan>[1], userId),
 });
 
 registerTool({
   definition: analyzeToolDefinition,
-  execute: (env, args, _userId) => executeAnalyze(env, args),
+  execute: (env, args, _userId) => executeAnalyze(env, args as Parameters<typeof executeAnalyze>[1]),
 });
 
 // Skill Creation Tool
 registerTool({
   definition: skillCreateToolDefinition,
-  execute: (env, args, _userId) => executeSkillCreate(env, args),
+  execute: (env, args, _userId) => executeSkillCreate(env, args as Parameters<typeof executeSkillCreate>[1]),
+});
+
+// Orchestration Tool (main entry point)
+registerTool({
+  definition: orchestrateToolDefinition,
+  execute: (env, args, _userId) => executeOrchestrate(env, args as Parameters<typeof executeOrchestrate>[1]),
 });
 
 // =============================================================================
@@ -113,6 +122,7 @@ export {
   planToolDefinition,
   analyzeToolDefinition,
   skillCreateToolDefinition,
+  orchestrateToolDefinition,
 };
 
 // Re-export executors for direct access if needed
@@ -127,4 +137,5 @@ export {
   executePlan,
   executeAnalyze,
   executeSkillCreate,
+  executeOrchestrate,
 };
