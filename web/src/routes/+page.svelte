@@ -165,6 +165,33 @@
     copied = true;
     setTimeout(() => copied = false, 2000);
   }
+
+  const copyTexts: Record<string, string> = {
+    config: `{
+  "mcpServers": {
+    "spawner": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.vibeship.co/sse"]
+    },
+    "mind": {
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-mind"]
+    }
+  }
+}`,
+    'new-project': 'I want to build [your idea]. Use spawner_plan to help me get started.',
+    'existing-project': 'Analyze this codebase with spawner_analyze and load the right skills.',
+    'gotchas': 'Use spawner_watch_out to check for sharp edges before I implement auth.',
+    'unstick': "I'm going in circles. Use spawner_unstick to help me find another approach."
+  };
+
+  let copiedItem = $state<string | null>(null);
+
+  function copyToClipboard(key: string) {
+    navigator.clipboard.writeText(copyTexts[key]);
+    copiedItem = key;
+    setTimeout(() => copiedItem = null, 2000);
+  }
 </script>
 
 <Navbar />
@@ -224,89 +251,216 @@
   <!-- Divider -->
   <div class="section-divider"></div>
 
-  <!-- The Magic: How it works -->
+  <!-- How It Works -->
   <section class="magic-section">
-    <h2 class="section-title">The Magic</h2>
-    <p class="section-desc">Three terminal commands to vibe coding superpowers</p>
+    <h2 class="section-title">How It Works</h2>
+    <p class="section-desc">One install. Tell Claude your idea. Watch it build.</p>
 
     <div class="magic-steps">
-      <div class="terminal-step">
-        <div class="terminal-step-header">
-          <span class="step-label">01</span>
-          <span class="step-title">Install the MCP</span>
-        </div>
-        <div class="terminal-step-body">
-          <div class="terminal-line-output">
-            <span class="terminal-prompt">$</span>
-            <span class="terminal-cmd">Add to claude_desktop_config.json:</span>
-          </div>
-          <div class="terminal-code-block">
+      <div class="magic-step-card">
+        <div class="magic-step-number">1</div>
+        <div class="magic-step-content">
+          <h3 class="magic-step-title">Add Spawner to Claude</h3>
+          <p class="magic-step-desc">Copy this to your Claude Desktop config:</p>
+          <div class="magic-code-block">
             <pre><code>{`"vibeship-spawner": {
   "command": "npx",
   "args": ["vibeship-spawner"]
 }`}</code></pre>
           </div>
-          <div class="terminal-line-output dim">
-            <span class="terminal-prompt">#</span>
-            <span>Restart Claude Desktop after adding</span>
+          <p class="magic-step-note">Restart Claude Desktop after adding. That's the only setup.</p>
+        </div>
+      </div>
+
+      <div class="magic-step-card">
+        <div class="magic-step-number">2</div>
+        <div class="magic-step-content">
+          <h3 class="magic-step-title">Tell Claude What to Build</h3>
+          <p class="magic-step-desc">Just describe your idea in plain English:</p>
+          <div class="magic-examples">
+            <div class="magic-example">"Build me a marketplace for vintage watches"</div>
+            <div class="magic-example">"Create an AI-powered note-taking app"</div>
+            <div class="magic-example">"Start a web3 NFT gallery project"</div>
           </div>
         </div>
       </div>
 
-      <div class="terminal-step">
-        <div class="terminal-step-header">
-          <span class="step-label">02</span>
-          <span class="step-title">Describe Your Vision</span>
+      <div class="magic-step-card">
+        <div class="magic-step-number">3</div>
+        <div class="magic-step-content">
+          <h3 class="magic-step-title">Spawner Does the Rest</h3>
+          <p class="magic-step-desc">It automatically:</p>
+          <ul class="magic-benefits">
+            <li>Picks the right specialist agents for your project</li>
+            <li>Connects the tools each agent needs</li>
+            <li>Creates your architecture and project plan</li>
+            <li>Starts building with focused expertise</li>
+          </ul>
         </div>
-        <div class="terminal-step-body">
-          <div class="terminal-line-output">
-            <span class="terminal-prompt">$</span>
-            <span class="terminal-cmd">Tell Claude what you want to build:</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Divider -->
+  <div class="section-divider"></div>
+
+  <!-- Two Paths Section -->
+  <section class="paths-section">
+    <h2 class="paths-headline">Two Ways In</h2>
+    <p class="paths-subtitle">Starting fresh or adding to existing code—Spawner adapts</p>
+
+    <div class="paths-grid">
+      <!-- New Project Path -->
+      <div class="path-card">
+        <div class="path-header">
+          <span class="path-icon">🆕</span>
+          <h3 class="path-title">New Project</h3>
+        </div>
+        <p class="path-desc">Tell Claude what you want to build</p>
+
+        <div class="path-flow">
+          <div class="path-step">
+            <span class="step-num">1</span>
+            <div class="step-content">
+              <div class="step-label">You say</div>
+              <div class="step-text">"I want to build a SaaS for tracking invoices"</div>
+            </div>
           </div>
-          <div class="terminal-prompts">
-            <div class="terminal-prompt-line">
-              <span class="prompt-arrow">›</span>
-              <span>"Build me a marketplace for vintage watches"</span>
+          <div class="path-step">
+            <span class="step-num">2</span>
+            <div class="step-content">
+              <div class="step-label">Spawner asks</div>
+              <div class="step-text">"Do users need accounts? Will they pay?"</div>
             </div>
-            <div class="terminal-prompt-line">
-              <span class="prompt-arrow">›</span>
-              <span>"Create an AI-powered note-taking app"</span>
+          </div>
+          <div class="path-step">
+            <span class="step-num">3</span>
+            <div class="step-content">
+              <div class="step-label">Spawner recommends</div>
+              <div class="step-text">SaaS template → Next.js + Supabase + Stripe</div>
             </div>
-            <div class="terminal-prompt-line">
-              <span class="prompt-arrow">›</span>
-              <span>"Start a web3 NFT gallery project"</span>
+          </div>
+          <div class="path-step">
+            <span class="step-num">4</span>
+            <div class="step-content">
+              <div class="step-label">Skills loaded</div>
+              <div class="step-text">auth-flow, payments-flow, supabase-backend</div>
             </div>
+          </div>
+        </div>
+
+        <div class="path-result">
+          <span class="result-icon">✓</span>
+          Claude now has specialized knowledge for your exact stack
+        </div>
+      </div>
+
+      <!-- Existing Project Path -->
+      <div class="path-card">
+        <div class="path-header">
+          <span class="path-icon">📂</span>
+          <h3 class="path-title">Existing Project</h3>
+        </div>
+        <p class="path-desc">Point Claude at your codebase</p>
+
+        <div class="path-flow">
+          <div class="path-step">
+            <span class="step-num">1</span>
+            <div class="step-content">
+              <div class="step-label">Spawner scans</div>
+              <div class="step-text">package.json, config files, code patterns</div>
+            </div>
+          </div>
+          <div class="path-step">
+            <span class="step-num">2</span>
+            <div class="step-content">
+              <div class="step-label">Detects stack</div>
+              <div class="step-text">Next.js + Prisma + Clerk + Tailwind</div>
+            </div>
+          </div>
+          <div class="path-step">
+            <span class="step-num">3</span>
+            <div class="step-content">
+              <div class="step-label">Finds gaps</div>
+              <div class="step-text">"No testing detected. Consider Vitest."</div>
+            </div>
+          </div>
+          <div class="path-step">
+            <span class="step-num">4</span>
+            <div class="step-content">
+              <div class="step-label">Skills loaded</div>
+              <div class="step-text">nextjs-app-router, auth-flow, tailwind-ui</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="path-result">
+          <span class="result-icon">✓</span>
+          Claude understands your project and knows the gotchas
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Divider -->
+  <div class="section-divider"></div>
+
+  <!-- Spawning Agents Section -->
+  <section class="agents-deep-section">
+    <h2 class="section-headline">Spawning Specialized Agents</h2>
+    <p class="section-subtitle">Claude doesn't just code—it assembles a team</p>
+
+    <div class="agents-explainer">
+      <div class="agent-flow-visual">
+        <div class="flow-trigger">
+          <span class="trigger-label">You say</span>
+          <span class="trigger-text">"Build me an auth system with Supabase"</span>
+        </div>
+        <div class="flow-arrow-down">↓</div>
+        <div class="spawner-brain">
+          <span class="brain-label">Spawner</span>
+          <span class="brain-action">Spawns specialized agents...</span>
+        </div>
+        <div class="flow-arrow-down">↓</div>
+        <div class="spawned-agents">
+          <div class="spawned-agent">
+            <span class="agent-icon">🔐</span>
+            <span class="agent-name">Auth Agent</span>
+            <span class="agent-skill">auth-flow skill</span>
+          </div>
+          <div class="spawned-agent">
+            <span class="agent-icon">🗄️</span>
+            <span class="agent-name">Database Agent</span>
+            <span class="agent-skill">supabase-backend skill</span>
+          </div>
+          <div class="spawned-agent">
+            <span class="agent-icon">🛡️</span>
+            <span class="agent-name">Security Agent</span>
+            <span class="agent-skill">rls-policies skill</span>
           </div>
         </div>
       </div>
 
-      <div class="terminal-step">
-        <div class="terminal-step-header">
-          <span class="step-label">03</span>
-          <span class="step-title">Watch the Magic</span>
-        </div>
-        <div class="terminal-step-body">
-          <div class="terminal-line-output">
-            <span class="terminal-prompt">$</span>
-            <span class="terminal-cmd">vibeship spawner creates:</span>
+      <div class="agents-benefits">
+        <div class="benefit-item">
+          <span class="benefit-icon">→</span>
+          <div class="benefit-content">
+            <strong>Each agent has focused expertise</strong>
+            <p>Not one Claude doing everything—specialists working together</p>
           </div>
-          <div class="terminal-output-list">
-            <div class="terminal-output-line success">
-              <span class="output-prefix">+</span>
-              <span>Spawns your specialized agents with Claude Skills tailored for your idea</span>
-            </div>
-            <div class="terminal-output-line success">
-              <span class="output-prefix">+</span>
-              <span>Connects the right tools and their MCPs to right agents, and your project</span>
-            </div>
-            <div class="terminal-output-line success">
-              <span class="output-prefix">+</span>
-              <span>Builds your Architecture, PRD, and Implementation Plan in an organized way</span>
-            </div>
-            <div class="terminal-output-line success">
-              <span class="output-prefix">+</span>
-              <span>Starts building immediately, with specialized Opus agents, instead of a generalistic one</span>
-            </div>
+        </div>
+        <div class="benefit-item">
+          <span class="benefit-icon">→</span>
+          <div class="benefit-content">
+            <strong>Agents know their boundaries</strong>
+            <p>Auth agent hands off to database agent when needed</p>
+          </div>
+        </div>
+        <div class="benefit-item">
+          <span class="benefit-icon">→</span>
+          <div class="benefit-content">
+            <strong>Skills stack and combine</strong>
+            <p>auth-flow + supabase-backend + rls-policies = complete auth</p>
           </div>
         </div>
       </div>
@@ -316,19 +470,325 @@
   <!-- Divider -->
   <div class="section-divider"></div>
 
-  <!-- Closing Statement -->
-  <section class="closing-section">
-    <p class="closing-text">
-      Vibing solo? Try shipping with agents.
-    </p>
-    <div class="closing-formula">
-      <span class="formula-text">your_idea</span>
-      <span class="formula-op">×</span>
-      <span class="formula-text highlight">(skilled_agents + mcp_powers + vibeship_spawner)</span>
-      <span class="formula-op">=</span>
-      <span class="formula-result">shipped<span class="claude-highlight">_on_nitro</span></span>
+  <!-- Skills System Section -->
+  <section class="skills-deep-section">
+    <h2 class="section-headline">The Claude Skills System</h2>
+    <p class="section-subtitle">Structured knowledge, not prompt hacks</p>
+
+    <div class="skills-anatomy">
+      <div class="skill-card-example">
+        <div class="skill-header-example">
+          <span class="skill-icon-example">📦</span>
+          <div>
+            <span class="skill-name-example">supabase-backend</span>
+            <span class="skill-type-example">Core Skill</span>
+          </div>
+        </div>
+        <div class="skill-body-example">
+          <div class="skill-section-example">
+            <span class="section-label">Owns</span>
+            <span class="section-value">Database setup, RLS policies, auth hooks, realtime</span>
+          </div>
+          <div class="skill-section-example">
+            <span class="section-label">Sharp Edges</span>
+            <span class="section-value">12 gotchas like "RLS auth.uid() timing race condition"</span>
+          </div>
+          <div class="skill-section-example">
+            <span class="section-label">Patterns</span>
+            <span class="section-value">Server client vs browser client, service role usage</span>
+          </div>
+          <div class="skill-section-example">
+            <span class="section-label">Anti-patterns</span>
+            <span class="section-value">Exposing service key, skipping RLS, sync operations</span>
+          </div>
+          <div class="skill-section-example">
+            <span class="section-label">Validations</span>
+            <span class="section-value">Check for hardcoded keys, missing RLS, exposed routes</span>
+          </div>
+          <div class="skill-section-example">
+            <span class="section-label">Hands off to</span>
+            <span class="section-value">auth-flow for login UI, payments-flow for billing</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="skills-list-example">
+        <h3 class="skills-list-title">Available Skills</h3>
+        <div class="skill-chips">
+          <span class="skill-chip core">nextjs-app-router</span>
+          <span class="skill-chip core">supabase-backend</span>
+          <span class="skill-chip core">auth-flow</span>
+          <span class="skill-chip core">payments-flow</span>
+          <span class="skill-chip integration">tailwind-ui</span>
+          <span class="skill-chip integration">ai-integration</span>
+          <span class="skill-chip pattern">typescript-strict</span>
+          <span class="skill-chip pattern">react-patterns</span>
+          <span class="skill-chip pattern">api-design</span>
+        </div>
+        <p class="skills-note">Skills are curated, versioned, and battle-tested—not AI-generated slop</p>
+      </div>
     </div>
-    <a href="/how-it-works" class="cta-button">See How It Works</a>
+  </section>
+
+  <!-- Divider -->
+  <div class="section-divider"></div>
+
+  <!-- Skills vs General Claude Section -->
+  <section class="comparison-section">
+    <h2 class="section-headline">Skills vs General Claude</h2>
+    <p class="section-subtitle">The difference is night and day</p>
+
+    <div class="comparison-grid">
+      <div class="comparison-card general">
+        <h3 class="comparison-title">General Claude</h3>
+        <div class="comparison-quote">
+          <blockquote>
+            "I have broad knowledge but may not know specific gotchas for your stack. I'll try my best based on general patterns."
+          </blockquote>
+          <cite>— Claude's honest self-assessment</cite>
+        </div>
+        <ul class="comparison-list">
+          <li>Knows documentation but not sharp edges</li>
+          <li>Suggests "best practices" without version context</li>
+          <li>Can't validate code before you ship</li>
+          <li>Forgets your project next session</li>
+          <li>Doesn't know when you're stuck in a loop</li>
+        </ul>
+      </div>
+
+      <div class="comparison-card skilled">
+        <h3 class="comparison-title">Claude + Skills</h3>
+        <div class="comparison-quote">
+          <blockquote>
+            "I have the supabase-backend skill loaded. I know about the RLS timing issue you're about to hit. Let me prevent that."
+          </blockquote>
+          <cite>— Claude with Spawner</cite>
+        </div>
+        <ul class="comparison-list">
+          <li>Knows battle-tested gotchas from real production</li>
+          <li>Patterns versioned for Next.js 14, not Next.js 12</li>
+          <li>Runs actual checks before code ships</li>
+          <li>Remembers your project, decisions, issues</li>
+          <li>Detects loops and offers escape hatches</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="claude-says">
+      <div class="claude-avatar">🤖</div>
+      <div class="claude-message">
+        <p class="claude-text">"Skills give me the context I need to actually help you ship. Without them, I'm guessing based on training data that might be outdated. With them, I know exactly what works and what will break."</p>
+        <span class="claude-source">— How Claude describes the difference</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Divider -->
+  <div class="section-divider"></div>
+
+  <!-- Spawner + Mind Duo Section -->
+  <section class="duo-section">
+    <h2 class="section-headline">Spawner + Mind = Full Stack Claude</h2>
+    <p class="section-subtitle">Together they cover everything Claude needs</p>
+
+    <div class="duo-grid">
+      <div class="duo-card spawner-card">
+        <div class="duo-header">
+          <span class="duo-icon">⚡</span>
+          <h3 class="duo-title">Spawner</h3>
+        </div>
+        <p class="duo-role">The skill system and guardrails</p>
+        <ul class="duo-provides">
+          <li>Specialized skills for your stack</li>
+          <li>Sharp edges and gotchas</li>
+          <li>Code validation before shipping</li>
+          <li>Escape hatch intelligence</li>
+          <li>Project templates and scaffolding</li>
+        </ul>
+      </div>
+
+      <div class="duo-plus">+</div>
+
+      <div class="duo-card mind-card">
+        <div class="duo-header">
+          <span class="duo-icon">🧠</span>
+          <h3 class="duo-title">Mind</h3>
+        </div>
+        <p class="duo-role">The memory and context layer</p>
+        <ul class="duo-provides">
+          <li>Persistent memory across sessions</li>
+          <li>Decision logging and recall</li>
+          <li>Blocker tracking and resolution</li>
+          <li>Session continuity</li>
+          <li>Context-aware reminders</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="duo-result">
+      <span class="result-equals">=</span>
+      <div class="result-content">
+        <h3 class="result-title">Claude that remembers, learns, and never makes the same mistake twice</h3>
+        <p class="result-desc">Spawner gives Claude expertise. Mind gives Claude memory. Together, Claude becomes the senior dev who's seen it all and never forgets.</p>
+      </div>
+    </div>
+
+    <div class="duo-install-hint">
+      <span class="hint-icon">💡</span>
+      <p>Both install as MCP servers—just add two config blocks to Claude Desktop</p>
+    </div>
+  </section>
+
+  <!-- Divider -->
+  <div class="section-divider"></div>
+
+  <!-- What You Get Section (Refined) -->
+  <section class="powers-section">
+    <h2 class="powers-headline">What Claude Gets With Spawner</h2>
+    <p class="powers-subtitle">The superpowers Claude doesn't have by default</p>
+
+    <div class="powers-grid">
+      <div class="power-card">
+        <div class="power-demo">
+          <div class="demo-bubble claude">
+            <span class="demo-label">Claude</span>
+            "Picking up invoice-app. Last session you fixed the Stripe webhook but invoice status wasn't updating. Want to continue?"
+          </div>
+        </div>
+        <div class="power-info">
+          <h3 class="power-title">Project Memory</h3>
+          <p class="power-desc">Remembers your project across sessions. No more re-explaining.</p>
+        </div>
+      </div>
+
+      <div class="power-card">
+        <div class="power-demo">
+          <div class="demo-bubble spawner">
+            <span class="demo-label">Spawner</span>
+            <span class="demo-alert">⚠️ Line 12: SUPABASE_KEY hardcoded</span>
+            Moving to environment variable...
+          </div>
+        </div>
+        <div class="power-info">
+          <h3 class="power-title">Guardrails That Run</h3>
+          <p class="power-desc">Actually catches issues. Not suggestions—real scans.</p>
+        </div>
+      </div>
+
+      <div class="power-card">
+        <div class="power-demo">
+          <div class="demo-bubble spawner">
+            <span class="demo-label">Spawner</span>
+            <span class="demo-warning">Watch out:</span> New users see empty data after signup. RLS policies fail during token refresh window.
+          </div>
+        </div>
+        <div class="power-info">
+          <h3 class="power-title">Sharp Edges</h3>
+          <p class="power-desc">Gotchas Claude doesn't know. Battle-scarred knowledge.</p>
+        </div>
+      </div>
+
+      <div class="power-card">
+        <div class="power-demo">
+          <div class="demo-bubble spawner">
+            <span class="demo-label">Spawner</span>
+            We've tried 3 approaches and we're going in circles. <span class="demo-options">Options: 1) Move auth to layout 2) Client redirect 3) Switch to Clerk</span>
+          </div>
+        </div>
+        <div class="power-info">
+          <h3 class="power-title">Escape Hatches</h3>
+          <p class="power-desc">Detects when you're stuck. Offers real alternatives.</p>
+        </div>
+      </div>
+    </div>
+
+    <a href="/how-it-works" class="cta-button">Get Started</a>
+  </section>
+
+  <!-- Divider -->
+  <div class="section-divider"></div>
+
+  <!-- Quick Start Section -->
+  <section class="quickstart-section">
+    <h2 class="section-headline">Looks Like Rocket Science?</h2>
+    <p class="section-subtitle">It's actually just a few prompts. Here's the whole thing.</p>
+
+    <div class="quickstart-terminal">
+      <div class="terminal-header">
+        <span class="terminal-dot"></span>
+        <span class="terminal-dot"></span>
+        <span class="terminal-dot"></span>
+        <span class="terminal-title">Quick Start Guide</span>
+      </div>
+      <div class="terminal-body quickstart-body">
+        <div class="qs-step">
+          <span class="qs-step-label">Step 1: Add to Claude Desktop config</span>
+          <div class="qs-code-block">
+            <pre>{`{
+  "mcpServers": {
+    "spawner": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.vibeship.co/sse"]
+    },
+    "mind": {
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-mind"]
+    }
+  }
+}`}</pre>
+            <button class="copy-btn" onclick={() => copyToClipboard('config')}>Copy</button>
+          </div>
+        </div>
+
+        <div class="qs-step">
+          <span class="qs-step-label">Step 2: Restart Claude Desktop</span>
+          <p class="qs-instruction">Close and reopen Claude Desktop. Done.</p>
+        </div>
+
+        <div class="qs-step">
+          <span class="qs-step-label">Step 3: Start building (copy-paste these)</span>
+
+          <div class="qs-prompts">
+            <div class="qs-prompt">
+              <span class="prompt-label">New project:</span>
+              <div class="qs-code-block small">
+                <pre>"I want to build [your idea]. Use spawner_plan to help me get started."</pre>
+                <button class="copy-btn small" onclick={() => copyToClipboard('new-project')}>Copy</button>
+              </div>
+            </div>
+
+            <div class="qs-prompt">
+              <span class="prompt-label">Existing project:</span>
+              <div class="qs-code-block small">
+                <pre>"Analyze this codebase with spawner_analyze and load the right skills."</pre>
+                <button class="copy-btn small" onclick={() => copyToClipboard('existing-project')}>Copy</button>
+              </div>
+            </div>
+
+            <div class="qs-prompt">
+              <span class="prompt-label">Check for gotchas:</span>
+              <div class="qs-code-block small">
+                <pre>"Use spawner_watch_out to check for sharp edges before I implement auth."</pre>
+                <button class="copy-btn small" onclick={() => copyToClipboard('gotchas')}>Copy</button>
+              </div>
+            </div>
+
+            <div class="qs-prompt">
+              <span class="prompt-label">When stuck:</span>
+              <div class="qs-code-block small">
+                <pre>"I'm going in circles. Use spawner_unstick to help me find another approach."</pre>
+                <button class="copy-btn small" onclick={() => copyToClipboard('unstick')}>Copy</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="qs-result">
+          <span class="qs-check">✓</span>
+          <span class="qs-result-text">That's it. You now have a senior dev in Claude.</span>
+        </div>
+      </div>
+    </div>
   </section>
 
   <footer class="footer">
@@ -519,17 +979,18 @@
   }
 
   .terminal-body {
-    padding: var(--space-4);
+    padding: var(--space-5) var(--space-5);
     flex: 1;
     overflow-y: auto;
     font-family: var(--font-mono);
     font-size: var(--text-base);
-    line-height: 1.8;
+    line-height: 2;
   }
 
   .terminal-line {
     white-space: pre-wrap;
     color: var(--terminal-text);
+    margin-bottom: 2px;
   }
 
   .terminal-line.prompt { color: var(--terminal-muted); }
@@ -625,154 +1086,940 @@
     gap: var(--space-6);
   }
 
-  /* Terminal Step Cards */
-  .terminal-step {
-    background: var(--terminal-bg);
-    border: 1px solid var(--terminal-border);
-    overflow: hidden;
-    box-shadow: var(--terminal-shadow);
+  /* Magic Step Cards - Friendly version */
+  .magic-step-card {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-5);
+    padding: var(--space-6);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
     text-align: left;
   }
 
-  .terminal-step-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-3) var(--space-4);
-    background: var(--terminal-header);
-    border-bottom: 1px solid var(--terminal-border);
-  }
-
-  .step-label {
+  .magic-step-number {
+    flex-shrink: 0;
     font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    font-weight: 700;
-    color: var(--green-dim);
-    background: rgba(0, 196, 154, 0.15);
-    padding: 2px 8px;
-    border-radius: 4px;
-  }
-
-  .step-title {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    font-size: var(--text-2xl);
     font-weight: 600;
-    color: var(--terminal-heading);
+    color: var(--green-dim);
+    line-height: 1;
   }
 
-  .terminal-step-body {
-    padding: var(--space-4);
-    text-align: left;
+  .magic-step-number::before {
+    content: "//";
+    color: var(--text-tertiary);
+    margin-right: 4px;
   }
 
-  .terminal-line-output {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    font-family: var(--font-mono);
-    font-size: var(--text-base);
-    color: var(--terminal-muted);
+  .magic-step-content {
+    flex: 1;
+  }
+
+  .magic-step-title {
+    font-family: var(--font-serif);
+    font-size: var(--text-2xl);
+    font-weight: 400;
+    color: var(--text-primary);
+    line-height: 1;
     margin-bottom: var(--space-3);
   }
 
-  .terminal-line-output.dim {
-    color: var(--terminal-muted);
-    opacity: 0.7;
+  .magic-step-desc {
+    font-size: var(--text-base);
+    color: var(--text-secondary);
+    margin-bottom: var(--space-4);
+    line-height: 1.7;
+  }
+
+  .magic-step-note {
+    font-size: var(--text-sm);
+    color: var(--text-tertiary);
     margin-top: var(--space-3);
-    margin-bottom: 0;
+    line-height: 1.6;
   }
 
-  .terminal-prompt {
-    color: var(--terminal-command);
-    font-weight: 600;
-  }
-
-  .terminal-cmd {
-    color: var(--terminal-item);
-  }
-
-  .terminal-code-block {
-    position: relative;
-    background: var(--bg-tertiary);
+  .magic-code-block {
+    background: var(--terminal-bg);
     border: 1px solid var(--terminal-border);
     padding: var(--space-4);
+    overflow-x: auto;
   }
 
-  .terminal-code-block pre {
+  .magic-code-block pre {
     margin: 0;
     font-family: var(--font-mono);
     font-size: var(--text-base);
     color: var(--terminal-command);
-    overflow-x: auto;
+    line-height: 1.8;
   }
 
-  .terminal-code-block .copy-btn {
-    position: absolute;
-    top: var(--space-2);
-    right: var(--space-2);
-    background: transparent;
-    border: 1px solid var(--terminal-border);
-    color: var(--terminal-muted);
-    padding: 4px 8px;
-    cursor: pointer;
-    transition: all var(--transition-fast);
+  .magic-examples {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
   }
 
-  .terminal-code-block .copy-btn:hover {
+  .magic-example {
+    font-family: var(--font-mono);
+    font-size: var(--text-base);
+    color: var(--terminal-command);
+    padding: var(--space-3) var(--space-4);
+    background: rgba(0, 196, 154, 0.05);
+    border-left: 3px solid var(--green-dim);
+    line-height: 1.7;
+  }
+
+  .magic-benefits {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .magic-benefits li {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+    font-size: var(--text-base);
+    color: var(--text-secondary);
+    line-height: 1.7;
+  }
+
+  .magic-benefits li::before {
+    content: "→";
+    color: var(--green-dim);
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  /* Paths Section */
+  .paths-section {
+    padding: var(--space-12) var(--space-8);
+    text-align: center;
+  }
+
+  .paths-headline {
+    font-family: var(--font-serif);
+    font-size: var(--text-3xl);
+    font-weight: 400;
+    color: var(--text-primary);
+    margin: 0 0 var(--space-3);
+  }
+
+  .paths-subtitle {
+    font-family: var(--font-mono);
+    font-size: var(--text-base);
+    color: var(--text-tertiary);
+    margin: 0 0 var(--space-10);
+  }
+
+  .paths-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-6);
+    max-width: 1000px;
+    margin: 0 auto;
+    text-align: left;
+  }
+
+  .path-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    padding: var(--space-6);
+  }
+
+  .path-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-2);
+  }
+
+  .path-icon {
+    font-size: var(--text-2xl);
+  }
+
+  .path-title {
+    font-family: var(--font-serif);
+    font-size: var(--text-2xl);
+    font-weight: 400;
+    color: var(--text-primary);
+    margin: 0;
+  }
+
+  .path-desc {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-tertiary);
+    margin: 0 0 var(--space-5);
+  }
+
+  .path-flow {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    margin-bottom: var(--space-5);
+  }
+
+  .path-step {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+
+  .path-step .step-num {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-tertiary);
+    border-radius: 50%;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+
+  .path-step .step-content {
+    flex: 1;
+  }
+
+  .path-step .step-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--green-dim);
+    margin-bottom: 2px;
+  }
+
+  .path-step .step-text {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+
+  .path-result {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    background: rgba(0, 196, 154, 0.08);
+    border: 1px solid rgba(0, 196, 154, 0.2);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--green-dim);
+  }
+
+  .result-icon {
+    font-weight: 600;
+  }
+
+  /* Shared Section Styles */
+  .section-headline {
+    font-family: var(--font-serif);
+    font-size: var(--text-3xl);
+    font-weight: 400;
+    color: var(--text-primary);
+    text-align: center;
+    margin: 0 0 var(--space-3);
+  }
+
+  .section-subtitle {
+    font-family: var(--font-mono);
+    font-size: var(--text-base);
+    color: var(--text-tertiary);
+    text-align: center;
+    margin: 0 0 var(--space-10);
+  }
+
+  /* Agents Deep Section */
+  .agents-deep-section {
+    padding: var(--space-12) var(--space-8);
+  }
+
+  .agents-explainer {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-8);
+    max-width: 1000px;
+    margin: 0 auto;
+    align-items: start;
+  }
+
+  .agent-flow-visual {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .flow-trigger {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    padding: var(--space-4) var(--space-5);
+    text-align: center;
+    width: 100%;
+    max-width: 350px;
+  }
+
+  .trigger-label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-tertiary);
+    margin-bottom: var(--space-2);
+  }
+
+  .trigger-text {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-primary);
+    font-style: italic;
+  }
+
+  .flow-arrow-down {
+    font-size: var(--text-xl);
+    color: var(--text-tertiary);
+  }
+
+  .spawner-brain {
+    background: rgba(0, 196, 154, 0.1);
+    border: 1px solid var(--green-dim);
+    padding: var(--space-4) var(--space-5);
+    text-align: center;
+    width: 100%;
+    max-width: 350px;
+  }
+
+  .brain-label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--green-dim);
+    margin-bottom: var(--space-1);
+  }
+
+  .brain-action {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+  }
+
+  .spawned-agents {
+    display: flex;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 350px;
+  }
+
+  .spawned-agent {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-3);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    flex: 1;
+    min-width: 90px;
+  }
+
+  .agent-icon {
+    font-size: var(--text-xl);
+  }
+
+  .agent-name {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .agent-skill {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--text-tertiary);
+  }
+
+  .agents-benefits {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+  }
+
+  .benefit-item {
+    display: flex;
+    gap: var(--space-3);
+    align-items: flex-start;
+  }
+
+  .benefit-icon {
+    color: var(--green-dim);
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  .benefit-content strong {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: var(--text-base);
+    color: var(--text-primary);
+    margin-bottom: var(--space-1);
+  }
+
+  .benefit-content p {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  /* Skills Deep Section */
+  .skills-deep-section {
+    padding: var(--space-12) var(--space-8);
+    background: var(--bg-secondary);
+  }
+
+  .skills-anatomy {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-8);
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+
+  .skill-card-example {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+  }
+
+  .skill-header-example {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .skill-icon-example {
+    font-size: var(--text-xl);
+  }
+
+  .skill-name-example {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: var(--text-base);
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .skill-type-example {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--green-dim);
+  }
+
+  .skill-body-example {
+    padding: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .skill-section-example {
+    display: flex;
+    gap: var(--space-3);
+  }
+
+  .section-label {
+    flex-shrink: 0;
+    width: 80px;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+  }
+
+  .section-value {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    line-height: 1.4;
+  }
+
+  .skills-list-example {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .skills-list-title {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--text-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0;
+  }
+
+  .skill-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .skill-chip {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border);
+    background: var(--bg-primary);
+  }
+
+  .skill-chip.core {
     border-color: var(--green-dim);
     color: var(--green-dim);
   }
 
-  .terminal-prompts {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
+  .skill-chip.integration {
+    border-color: var(--blue);
+    color: var(--blue);
   }
 
-  .terminal-prompt-line {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
+  .skill-chip.pattern {
+    border-color: var(--violet);
+    color: var(--violet);
+  }
+
+  .skills-note {
     font-family: var(--font-mono);
-    font-size: var(--text-base);
-    color: var(--terminal-command);
-    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+    margin: 0;
+    font-style: italic;
+  }
+
+  /* Comparison Section */
+  .comparison-section {
+    padding: var(--space-12) var(--space-8);
+  }
+
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-6);
+    max-width: 900px;
+    margin: 0 auto var(--space-8);
+  }
+
+  .comparison-card {
+    padding: var(--space-5);
+    border: 1px solid var(--border);
+  }
+
+  .comparison-card.general {
+    background: var(--bg-secondary);
+  }
+
+  .comparison-card.skilled {
     background: rgba(0, 196, 154, 0.05);
-    border-left: 2px solid var(--green-dim);
+    border-color: var(--green-dim);
   }
 
-  .prompt-arrow {
-    color: var(--terminal-command);
-    font-weight: 600;
+  .comparison-title {
+    font-family: var(--font-serif);
+    font-size: var(--text-xl);
+    font-weight: 400;
+    color: var(--text-primary);
+    margin: 0 0 var(--space-4);
   }
 
-  .terminal-output-list {
+  .comparison-quote {
+    margin-bottom: var(--space-4);
+    padding: var(--space-3);
+    background: var(--bg-tertiary);
+    border-left: 2px solid var(--border);
+  }
+
+  .comparison-card.skilled .comparison-quote {
+    border-left-color: var(--green-dim);
+  }
+
+  .comparison-quote blockquote {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    margin: 0 0 var(--space-2);
+    font-style: italic;
+    line-height: 1.5;
+  }
+
+  .comparison-quote cite {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+    font-style: normal;
+  }
+
+  .comparison-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
   }
 
-  .terminal-output-line {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--space-2);
+  .comparison-list li {
     font-family: var(--font-mono);
-    font-size: var(--text-base);
-    padding: var(--space-1) 0;
-    line-height: 1.6;
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    padding-left: var(--space-4);
+    position: relative;
   }
 
-  .terminal-output-line.success {
-    color: var(--terminal-item);
+  .comparison-card.general .comparison-list li::before {
+    content: "×";
+    position: absolute;
+    left: 0;
+    color: var(--text-tertiary);
   }
 
-  .output-prefix {
-    font-weight: 700;
-    color: var(--terminal-command);
+  .comparison-card.skilled .comparison-list li::before {
+    content: "✓";
+    position: absolute;
+    left: 0;
+    color: var(--green-dim);
+  }
+
+  .claude-says {
+    display: flex;
+    gap: var(--space-4);
+    max-width: 700px;
+    margin: 0 auto;
+    padding: var(--space-5);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+  }
+
+  .claude-avatar {
+    font-size: var(--text-2xl);
     flex-shrink: 0;
   }
 
-  /* Agents Section */
+  .claude-message {
+    flex: 1;
+  }
+
+  .claude-text {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin: 0 0 var(--space-2);
+  }
+
+  .claude-source {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+  }
+
+  /* Duo Section */
+  .duo-section {
+    padding: var(--space-12) var(--space-8);
+    background: var(--bg-secondary);
+  }
+
+  .duo-grid {
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    gap: var(--space-4);
+    max-width: 800px;
+    margin: 0 auto var(--space-6);
+  }
+
+  .duo-card {
+    flex: 1;
+    max-width: 300px;
+    padding: var(--space-5);
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+  }
+
+  .duo-card.spawner-card {
+    border-color: var(--green-dim);
+  }
+
+  .duo-card.mind-card {
+    border-color: var(--violet);
+  }
+
+  .duo-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-2);
+  }
+
+  .duo-icon {
+    font-size: var(--text-xl);
+  }
+
+  .duo-title {
+    font-family: var(--font-serif);
+    font-size: var(--text-xl);
+    font-weight: 400;
+    color: var(--text-primary);
+    margin: 0;
+  }
+
+  .duo-role {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-tertiary);
+    margin: 0 0 var(--space-4);
+  }
+
+  .duo-provides {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .duo-provides li {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    padding-left: var(--space-4);
+    position: relative;
+  }
+
+  .duo-provides li::before {
+    content: "•";
+    position: absolute;
+    left: 0;
+    color: var(--text-tertiary);
+  }
+
+  .duo-plus {
+    display: flex;
+    align-items: center;
+    font-family: var(--font-mono);
+    font-size: var(--text-2xl);
+    color: var(--text-tertiary);
+  }
+
+  .duo-result {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    max-width: 700px;
+    margin: 0 auto var(--space-6);
+    padding: var(--space-5);
+    background: rgba(0, 196, 154, 0.08);
+    border: 1px solid rgba(0, 196, 154, 0.3);
+  }
+
+  .result-equals {
+    font-family: var(--font-mono);
+    font-size: var(--text-2xl);
+    color: var(--green-dim);
+    flex-shrink: 0;
+  }
+
+  .result-content {
+    flex: 1;
+  }
+
+  .result-title {
+    font-family: var(--font-serif);
+    font-size: var(--text-xl);
+    font-weight: 400;
+    color: var(--text-primary);
+    margin: 0 0 var(--space-2);
+  }
+
+  .result-desc {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  .duo-install-hint {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-tertiary);
+  }
+
+  .hint-icon {
+    font-size: var(--text-base);
+  }
+
+  .duo-install-hint p {
+    margin: 0;
+  }
+
+  /* Quickstart Section */
+  .quickstart-section {
+    padding: var(--space-12) var(--space-8);
+  }
+
+  .quickstart-terminal {
+    max-width: 700px;
+    margin: 0 auto;
+    background: var(--terminal-bg);
+    border: 1px solid var(--terminal-border);
+    box-shadow: var(--terminal-shadow);
+  }
+
+  .quickstart-body {
+    padding: var(--space-6);
+  }
+
+  .qs-step {
+    margin-bottom: var(--space-6);
+  }
+
+  .qs-step:last-child {
+    margin-bottom: 0;
+  }
+
+  .qs-step-label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--terminal-heading);
+    margin-bottom: var(--space-3);
+  }
+
+  .qs-instruction {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--terminal-text);
+    margin: 0;
+  }
+
+  .qs-code-block {
+    position: relative;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    padding: var(--space-4);
+    overflow-x: auto;
+  }
+
+  .qs-code-block.small {
+    padding: var(--space-3);
+  }
+
+  .qs-code-block pre {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--terminal-command);
+    line-height: 1.6;
+    white-space: pre-wrap;
+  }
+
+  .qs-code-block.small pre {
+    font-size: var(--text-xs);
+  }
+
+  .copy-btn {
+    position: absolute;
+    top: var(--space-2);
+    right: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+
+  .copy-btn:hover {
+    border-color: var(--green-dim);
+    color: var(--green-dim);
+  }
+
+  .copy-btn.small {
+    padding: 2px var(--space-2);
+  }
+
+  .qs-prompts {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .qs-prompt {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .prompt-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .qs-result {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    background: rgba(0, 196, 154, 0.1);
+    border: 1px solid rgba(0, 196, 154, 0.3);
+    margin-top: var(--space-6);
+  }
+
+  .qs-check {
+    font-size: var(--text-lg);
+    color: var(--green-dim);
+    font-weight: 600;
+  }
+
+  .qs-result-text {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--green-dim);
+  }
+
+  /* Agents Section (existing) */
   .agents-section {
     padding: var(--space-16) var(--space-8);
     background: var(--bg-secondary);
@@ -883,57 +2130,119 @@
     color: var(--text-tertiary);
   }
 
-  /* Closing Section */
-  .closing-section {
+  /* Powers Section */
+  .powers-section {
     padding: var(--space-12) var(--space-8);
     text-align: center;
   }
 
-  .closing-text {
+  .powers-headline {
     font-family: var(--font-serif);
-    font-size: var(--text-2xl);
-    font-style: italic;
-    color: var(--text-secondary);
+    font-size: var(--text-3xl);
+    font-weight: 400;
+    color: var(--text-primary);
     margin: 0 0 var(--space-3);
   }
 
-  .closing-text .highlight {
-    color: var(--green-dim);
-    font-style: normal;
-    font-weight: 500;
-  }
-
-  .closing-formula {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-2);
-    flex-wrap: wrap;
+  .powers-subtitle {
     font-family: var(--font-mono);
     font-size: var(--text-base);
     color: var(--text-tertiary);
+    margin: 0 0 var(--space-10);
   }
 
-  .formula-text {
-    color: var(--text-secondary);
+  .powers-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-6);
+    max-width: 900px;
+    margin: 0 auto var(--space-10);
+    text-align: left;
   }
 
-  .formula-text.highlight {
-    color: var(--green-dim);
+  .power-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    padding: var(--space-5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
   }
 
-  .formula-op {
+  .power-demo {
+    background: var(--terminal-bg);
+    border: 1px solid var(--terminal-border);
+    padding: var(--space-4);
+    min-height: 100px;
+  }
+
+  .demo-bubble {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--terminal-text);
+    line-height: 1.6;
+  }
+
+  .demo-bubble.claude {
+    font-style: italic;
+  }
+
+  .demo-label {
+    display: block;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: var(--space-2);
     color: var(--text-tertiary);
   }
 
-  .formula-result {
+  .demo-bubble.spawner .demo-label {
+    color: var(--green-dim);
+  }
+
+  .demo-alert {
+    display: block;
+    color: var(--red);
+    margin-bottom: var(--space-2);
+  }
+
+  .demo-warning {
+    color: var(--orange);
+  }
+
+  .demo-options {
+    display: block;
+    margin-top: var(--space-2);
+    color: var(--text-tertiary);
+    font-size: var(--text-xs);
+  }
+
+  .power-info {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .power-title {
+    font-family: var(--font-serif);
+    font-size: var(--text-xl);
+    font-weight: 400;
     color: var(--text-primary);
-    font-weight: 600;
+    margin: 0;
+  }
+
+  .power-desc {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    margin: 0;
+    line-height: 1.5;
   }
 
   .cta-button {
     display: inline-block;
-    margin-top: var(--space-8);
+    margin-top: var(--space-4);
     padding: var(--space-4) var(--space-8);
     background: transparent;
     border: 1px solid var(--border);
@@ -1077,16 +2386,84 @@
       grid-template-columns: 1fr;
     }
 
-    .closing-section {
+    .paths-section {
       padding: var(--space-8) var(--space-4);
     }
 
-    .closing-text {
-      font-size: var(--text-xl);
+    .paths-headline {
+      font-size: var(--text-2xl);
     }
 
-    .closing-formula {
-      font-size: var(--text-xs);
+    .paths-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .agents-deep-section {
+      padding: var(--space-8) var(--space-4);
+    }
+
+    .agents-explainer {
+      grid-template-columns: 1fr;
+      gap: var(--space-6);
+    }
+
+    .skills-deep-section {
+      padding: var(--space-8) var(--space-4);
+    }
+
+    .skills-anatomy {
+      grid-template-columns: 1fr;
+      gap: var(--space-6);
+    }
+
+    .comparison-section {
+      padding: var(--space-8) var(--space-4);
+    }
+
+    .comparison-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .duo-section {
+      padding: var(--space-8) var(--space-4);
+    }
+
+    .duo-grid {
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .duo-card {
+      max-width: 100%;
+    }
+
+    .duo-plus {
+      transform: rotate(90deg);
+    }
+
+    .duo-result {
+      flex-direction: column;
+      text-align: center;
+    }
+
+    .powers-section {
+      padding: var(--space-8) var(--space-4);
+    }
+
+    .powers-headline {
+      font-size: var(--text-2xl);
+    }
+
+    .powers-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .quickstart-section {
+      padding: var(--space-8) var(--space-4);
+    }
+
+    .section-headline {
+      font-size: var(--text-2xl);
     }
   }
 </style>
