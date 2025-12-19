@@ -1,0 +1,184 @@
+# Backend Engineering Validations
+# Automated checks to catch common backend mistakes
+
+validations:
+  - id: backend-sql-injection
+    name: SQL Injection Risk
+    severity: error
+    type: regex
+    pattern:
+      - '`SELECT[^`]*\\$\\{'
+      - '`INSERT[^`]*\\$\\{'
+      - '`UPDATE[^`]*\\$\\{'
+      - '`DELETE[^`]*\\$\\{'
+      - "query\\s*\\([^)]*\\+.*req\\."
+    message: "Potential SQL injection: user input concatenated into query string."
+    fix_action: "Use parameterized queries ($1, $2) or ORM methods with typed inputs"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: backend-hardcoded-secret
+    name: Hardcoded Secret
+    severity: error
+    type: regex
+    pattern:
+      - "sk_live_[a-zA-Z0-9]+"
+      - "sk_test_[a-zA-Z0-9]+"
+      - "password\\s*[:=]\\s*['\"][^'\"]{8,}['\"]"
+      - "api_key\\s*[:=]\\s*['\"][^'\"]{16,}['\"]"
+      - "secret\\s*[:=]\\s*['\"][^'\"]{8,}['\"]"
+    message: "Potential hardcoded secret detected. Use environment variables."
+    fix_action: "Move to environment variable and use process.env.SECRET_NAME"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.json"
+
+  - id: backend-findmany-no-limit
+    name: Unbounded Query
+    severity: warning
+    type: regex
+    pattern:
+      - 'findMany\\(\\s*\\)'
+      - 'findMany\\(\\s*\\{\\s*where[^}]*\\}\\s*\\)(?!.*take)'
+    message: "Query without limit can return millions of rows. Add take/limit."
+    fix_action: "Add take: limit parameter, implement pagination"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: backend-transaction-external-call
+    name: External Call in Transaction
+    severity: warning
+    type: regex
+    pattern:
+      - '\\$transaction[^}]*fetch\\('
+      - '\\$transaction[^}]*axios\\.'
+      - '\\$transaction[^}]*stripe\\.'
+    message: "External API call inside transaction can hold locks for extended time."
+    fix_action: "Move external calls outside transaction. Use pending states."
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: backend-cascade-delete
+    name: Cascade Delete on Relation
+    severity: warning
+    type: regex
+    pattern:
+      - 'onDelete:\\s*Cascade'
+      - 'ON DELETE CASCADE'
+    message: "Cascade delete can cause long transactions on large tables."
+    fix_action: "Consider soft delete or batched background deletion instead"
+    applies_to:
+      - "*.prisma"
+      - "*.sql"
+
+  - id: backend-no-error-handling
+    name: Async Without Error Handling
+    severity: warning
+    type: regex
+    pattern:
+      - 'app\\.(?:get|post|put|delete)\\([^)]*,\\s*async\\s*\\([^)]*\\)\\s*=>\\s*\\{(?![^}]*try)'
+    message: "Async route handler without try/catch. Errors may crash or hang."
+    fix_action: "Wrap in try/catch with next(error), or use asyncHandler wrapper"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: backend-fire-and-forget
+    name: Fire and Forget Promise
+    severity: warning
+    type: regex
+    pattern:
+      - '(?<!await\\s)sendEmail\\('
+      - '(?<!await\\s)createNotification\\('
+      - '(?<!await\\s)processAsync\\('
+    message: "Promise not awaited - errors will be silently swallowed."
+    fix_action: "Await the promise, or use a job queue for background processing"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: backend-login-no-rate-limit
+    name: Auth Endpoint Without Rate Limit
+    severity: warning
+    type: regex
+    pattern:
+      - "app\\.post\\(['\"].*login['\"]"
+      - "app\\.post\\(['\"].*signin['\"]"
+      - "app\\.post\\(['\"].*auth['\"]"
+    message: "Authentication endpoint may need rate limiting for brute force protection."
+    fix_action: "Add rate limiting middleware (express-rate-limit with Redis store)"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: backend-loop-await
+    name: Await in Loop (N+1 Risk)
+    severity: warning
+    type: regex
+    pattern:
+      - 'for\\s*\\([^)]*\\)\\s*\\{[^}]*await[^}]*find'
+      - '\\.forEach\\([^)]*async[^}]*await[^}]*find'
+      - '\\.map\\([^)]*async[^}]*await[^}]*find'
+    message: "Await inside loop may cause N+1 queries. Consider batching."
+    fix_action: "Use include for eager loading, or batch with Promise.all and IN clause"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: backend-check-then-update
+    name: Check-Then-Update Race Condition
+    severity: warning
+    type: regex
+    pattern:
+      - 'if\\s*\\([^)]*\\.balance[^}]*update'
+      - 'if\\s*\\([^)]*\\.stock[^}]*update'
+      - 'if\\s*\\([^)]*\\.count[^}]*update'
+    message: "Check-then-update pattern is vulnerable to race conditions."
+    fix_action: "Use atomic update with WHERE condition, or SELECT FOR UPDATE"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: backend-sync-file-processing
+    name: Synchronous File Processing
+    severity: warning
+    type: regex
+    pattern:
+      - 'await\\s+processImage\\('
+      - 'await\\s+resize\\('
+      - 'await\\s+transcode\\('
+      - 'await\\s+generatePdf\\('
+    message: "Heavy file processing in request handler may timeout."
+    fix_action: "Move to background job queue (BullMQ, etc.) and return job ID"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: backend-missing-env-validation
+    name: Missing Environment Variable Check
+    severity: warning
+    type: regex
+    pattern:
+      - 'process\\.env\\.(?!NODE_ENV)[A-Z_]+(?![^;]*\\|\\||[^;]*\\?\\?|[^;]*throw|[^;]*if)'
+    message: "Environment variable used without validation or default."
+    fix_action: "Add validation: if (!process.env.VAR) throw new Error('VAR required')"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: backend-jwt-no-expiry
+    name: JWT Without Expiry
+    severity: warning
+    type: regex
+    pattern:
+      - 'jwt\\.sign\\([^)]*\\)(?![^;]*expiresIn)'
+      - "sign\\([^)]*,\\s*['\"][^'\"]+['\"]\\s*\\)"
+    message: "JWT signed without expiry. Tokens will be valid forever."
+    fix_action: "Add expiresIn option: jwt.sign(payload, secret, { expiresIn: '1h' })"
+    applies_to:
+      - "*.ts"
+      - "*.js"

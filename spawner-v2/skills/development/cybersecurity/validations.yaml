@@ -1,0 +1,220 @@
+# Cybersecurity Validations
+# Automated checks to catch common security vulnerabilities
+
+validations:
+  - id: sec-hardcoded-secret
+    name: Hardcoded Secret
+    severity: error
+    type: regex
+    pattern:
+      - 'AKIA[A-Z0-9]{16}'
+      - 'sk_live_[a-zA-Z0-9]+'
+      - 'sk_test_[a-zA-Z0-9]+'
+      - 'password\s*=\s*["\'][^"\']{8,}["\']'
+      - 'secret\s*=\s*["\'][^"\']{8,}["\']'
+      - 'api[_-]?key\s*=\s*["\'][^"\']{16,}["\']'
+      - 'private[_-]?key\s*=\s*["\'][^"\']{16,}["\']'
+    message: "Hardcoded secret detected. Use environment variables or secrets manager."
+    fix_action: "Move to process.env.SECRET_NAME or secrets manager"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.tsx"
+      - "*.jsx"
+      - "*.json"
+      - "*.yaml"
+      - "*.yml"
+
+  - id: sec-sql-injection
+    name: Potential SQL Injection
+    severity: error
+    type: regex
+    pattern:
+      - 'SELECT.*\$\{'
+      - 'INSERT.*\$\{'
+      - 'UPDATE.*\$\{'
+      - 'DELETE.*\$\{'
+      - 'query\s*\(`[^`]*\$\{'
+      - 'execute\s*\(`[^`]*\$\{'
+    message: "String interpolation in SQL query. Use parameterized queries."
+    fix_action: "Use parameterized query: query('SELECT * FROM users WHERE id = $1', [id])"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: sec-xss-innerhtml
+    name: XSS via innerHTML
+    severity: error
+    type: regex
+    pattern:
+      - 'innerHTML\s*=\s*[^"\']+(?:req|user|input|data|param)'
+      - 'dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html'
+      - 'v-html\s*='
+    message: "Potential XSS vulnerability. Sanitize user content before rendering."
+    fix_action: "Use DOMPurify.sanitize() or framework auto-escaping"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.tsx"
+      - "*.jsx"
+      - "*.vue"
+
+  - id: sec-eval-usage
+    name: Dangerous eval Usage
+    severity: error
+    type: regex
+    pattern:
+      - 'eval\s*\('
+      - 'new\s+Function\s*\('
+      - 'setTimeout\s*\(\s*["\']'
+      - 'setInterval\s*\(\s*["\']'
+    message: "eval() or dynamic code execution. Avoid or use safer alternatives."
+    fix_action: "Replace with JSON.parse() for data or explicit logic"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.tsx"
+      - "*.jsx"
+
+  - id: sec-weak-hash
+    name: Weak Hash Algorithm
+    severity: error
+    type: regex
+    pattern:
+      - 'createHash\s*\(\s*["\']md5["\']'
+      - 'createHash\s*\(\s*["\']sha1["\']'
+      - 'md5\s*\('
+      - 'sha1\s*\('
+    message: "MD5/SHA1 is cryptographically broken. Use SHA-256 or bcrypt for passwords."
+    fix_action: "Use createHash('sha256') or bcrypt for passwords"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: sec-weak-cipher
+    name: Weak Cipher
+    severity: error
+    type: regex
+    pattern:
+      - 'createCipher\s*\(\s*["\']des'
+      - 'createCipher\s*\(\s*["\']rc4'
+      - 'aes-.*-ecb'
+    message: "Weak or broken cipher algorithm. Use AES-256-GCM."
+    fix_action: "Use createCipheriv('aes-256-gcm', key, iv)"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: sec-no-csrf
+    name: Missing CSRF Protection
+    severity: warning
+    type: regex
+    pattern:
+      - 'method\s*=\s*["\']POST["\'](?![\\s\\S]*csrf)'
+      - 'method\s*=\s*["\']post["\'](?![\\s\\S]*csrf)'
+    message: "Form without CSRF token. Add CSRF protection."
+    fix_action: "Add CSRF token: <input type='hidden' name='_csrf' value={csrfToken} />"
+    applies_to:
+      - "*.html"
+      - "*.tsx"
+      - "*.jsx"
+      - "*.vue"
+
+  - id: sec-insecure-cookie
+    name: Insecure Cookie
+    severity: warning
+    type: regex
+    pattern:
+      - 'Set-Cookie:(?!.*HttpOnly)'
+      - 'Set-Cookie:(?!.*Secure)'
+      - 'res\.cookie\([^)]*\)(?!.*httpOnly)'
+    message: "Cookie without HttpOnly or Secure flag. Add security flags."
+    fix_action: "Set cookie with { httpOnly: true, secure: true, sameSite: 'lax' }"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: sec-open-redirect
+    name: Open Redirect
+    severity: warning
+    type: regex
+    pattern:
+      - 'res\.redirect\s*\(\s*req\.(query|params|body)'
+      - 'redirect\s*:\s*req\.(query|params|body)'
+      - 'location\s*=\s*[^"\']*req\.'
+    message: "Open redirect vulnerability. Validate redirect URLs."
+    fix_action: "Whitelist allowed redirect destinations"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: sec-path-traversal
+    name: Path Traversal
+    severity: error
+    type: regex
+    pattern:
+      - 'path\.join\s*\([^)]*req\.'
+      - 'readFile\s*\([^)]*req\.'
+      - 'res\.download\s*\([^)]*req\.'
+      - 'res\.sendFile\s*\([^)]*req\.'
+    message: "User input in file path. Validate and sanitize path."
+    fix_action: "Validate path doesn't escape intended directory"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: sec-exposed-stack
+    name: Exposed Stack Trace
+    severity: warning
+    type: regex
+    pattern:
+      - 'res\.json\s*\([^)]*stack'
+      - 'res\.send\s*\([^)]*stack'
+      - 'res\.json\s*\([^)]*err\.message'
+    message: "Stack trace or error details in response. Hide in production."
+    fix_action: "Return generic error message in production"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: sec-command-injection
+    name: Command Injection
+    severity: error
+    type: regex
+    pattern:
+      - 'exec\s*\(`[^`]*\$\{'
+      - 'exec\s*\([^)]*\+\s*\w+'
+      - 'spawn\s*\([^)]*req\.'
+      - 'execSync\s*\([^)]*req\.'
+    message: "User input in shell command. High risk of command injection."
+    fix_action: "Use parameterized commands or avoid shell execution"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: sec-cors-wildcard
+    name: CORS Wildcard
+    severity: warning
+    type: regex
+    pattern:
+      - 'Access-Control-Allow-Origin:\s*\*'
+      - "origin:\s*['\"]\\*['\"]"
+      - 'cors\s*\(\s*\)'
+    message: "CORS allows all origins. Restrict to specific domains."
+    fix_action: "Specify allowed origins: cors({ origin: 'https://yoursite.com' })"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: sec-jwt-none-alg
+    name: JWT None Algorithm
+    severity: error
+    type: regex
+    pattern:
+      - 'algorithms\s*:\s*\[\s*["\']none["\']'
+      - 'algorithm\s*:\s*["\']none["\']'
+    message: "JWT 'none' algorithm allows unsigned tokens. Never allow."
+    fix_action: "Specify allowed algorithms: algorithms: ['HS256', 'RS256']"
+    applies_to:
+      - "*.ts"
+      - "*.js"

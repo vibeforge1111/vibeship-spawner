@@ -1,0 +1,210 @@
+# Codebase Optimization Validations
+# Automated checks to catch common optimization mistakes
+
+validations:
+  - id: opt-unbounded-cache
+    name: Unbounded Cache
+    severity: warning
+    type: regex
+    pattern:
+      - 'new Map\\(\\)(?![\\s\\S]*\\.delete|[\\s\\S]*\\.clear|[\\s\\S]*LRU)'
+      - 'cache\\s*=\\s*\\{\\}(?![\\s\\S]*delete\\s+cache)'
+      - 'new Set\\(\\)(?![\\s\\S]*\\.delete|[\\s\\S]*\\.clear)'
+    message: "Unbounded cache without cleanup. Can cause memory leaks."
+    fix_action: "Use LRU cache with max size or add TTL/cleanup"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: opt-nested-loop
+    name: Nested Loop (O(n²) Potential)
+    severity: warning
+    type: regex
+    pattern:
+      - '\\.forEach\\([^)]*\\)[^}]*\\.forEach\\('
+      - '\\.map\\([^)]*\\)[^}]*\\.map\\('
+      - 'for\\s*\\([^)]*\\)[^}]*for\\s*\\('
+    message: "Nested loops detected. O(n²) complexity. Consider optimization if n is large."
+    fix_action: "Use Map/Set for lookups or reconsider algorithm"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.tsx"
+      - "*.jsx"
+
+  - id: opt-sync-file-op
+    name: Synchronous File Operation
+    severity: warning
+    type: regex
+    pattern:
+      - 'readFileSync'
+      - 'writeFileSync'
+      - 'existsSync(?![\\s\\S]*startup|[\\s\\S]*init)'
+      - 'readdirSync'
+    message: "Synchronous file operation blocks event loop."
+    fix_action: "Use async version: readFile, writeFile, etc."
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: opt-event-listener-leak
+    name: Event Listener Without Cleanup
+    severity: warning
+    type: regex
+    pattern:
+      - 'addEventListener\\([^)]*\\)(?![\\s\\S]{0,200}removeEventListener)'
+      - 'window\\.on[a-z]+\\s*=(?![\\s\\S]{0,100}null)'
+      - '\\.subscribe\\((?![\\s\\S]{0,200}\\.unsubscribe)'
+    message: "Event listener added without visible cleanup. Potential memory leak."
+    fix_action: "Add cleanup in useEffect return or componentWillUnmount"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.tsx"
+      - "*.jsx"
+
+  - id: opt-string-concat-loop
+    name: String Concatenation in Loop
+    severity: warning
+    type: regex
+    pattern:
+      - 'for.*\\+=\\s*["\']'
+      - '\\.forEach.*\\+=\\s*["\']'
+      - 'while.*\\+=\\s*["\']'
+    message: "String concatenation in loop is O(n²). Use array.join() instead."
+    fix_action: "Collect strings in array, then join: parts.push(str); parts.join('')"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: opt-regex-in-loop
+    name: Regex Creation in Loop
+    severity: warning
+    type: regex
+    pattern:
+      - 'for.*new RegExp\\('
+      - '\\.forEach.*new RegExp\\('
+      - '\\.map.*new RegExp\\('
+    message: "Regex created inside loop. Create once outside loop."
+    fix_action: "Hoist regex creation outside the loop"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: opt-json-parse-loop
+    name: JSON Parse in Hot Path
+    severity: warning
+    type: regex
+    pattern:
+      - '\\.map.*JSON\\.parse'
+      - '\\.forEach.*JSON\\.parse'
+      - 'for.*JSON\\.parse'
+    message: "JSON.parse in loop can be expensive. Consider caching or batch processing."
+    fix_action: "Parse once if possible, or use streaming JSON parser for large data"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: opt-await-in-loop
+    name: Sequential Await in Loop
+    severity: warning
+    type: regex
+    pattern:
+      - 'for\\s*\\([^)]*\\)\\s*\\{[^}]*await\\s+'
+      - '\\.forEach\\(async[^}]*await\\s+'
+    message: "Sequential await in loop. Consider Promise.all for parallel execution."
+    fix_action: "Use Promise.all(items.map(async item => ...))"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: opt-no-index-query
+    name: Query Without Index Hint
+    severity: warning
+    type: regex
+    pattern:
+      - '\\.find\\(\\{[^}]*\\$regex'
+      - '\\.find\\(\\{[^}]*\\$where'
+      - 'SELECT.*WHERE(?!.*INDEX)'
+    message: "Query pattern may not use indexes efficiently."
+    fix_action: "Ensure indexed fields are queried, add EXPLAIN to verify"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: opt-large-bundle-import
+    name: Large Library Full Import
+    severity: warning
+    type: regex
+    pattern:
+      - "import\\s+\\*\\s+as\\s+\\w+\\s+from\\s+['\"]lodash['\"]"
+      - "import\\s+\\w+\\s+from\\s+['\"]lodash['\"]"
+      - "import\\s+\\*\\s+as\\s+\\w+\\s+from\\s+['\"]moment['\"]"
+      - "require\\(['\"]lodash['\"]\\)"
+    message: "Full library import increases bundle size. Use specific imports."
+    fix_action: "Import specific: import { debounce } from 'lodash/debounce'"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.tsx"
+      - "*.jsx"
+
+  - id: opt-inefficient-array-check
+    name: Inefficient Array Existence Check
+    severity: warning
+    type: regex
+    pattern:
+      - '\\.indexOf\\([^)]*\\)\\s*[!=]==?\\s*-1'
+      - '\\.indexOf\\([^)]*\\)\\s*>=?\\s*0'
+    message: "Use .includes() instead of .indexOf() !== -1 for clarity."
+    fix_action: "Replace with array.includes(item)"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.tsx"
+      - "*.jsx"
+
+  - id: opt-document-query-loop
+    name: DOM Query in Loop
+    severity: warning
+    type: regex
+    pattern:
+      - 'for.*document\\.querySelector'
+      - '\\.forEach.*document\\.getElementById'
+      - '\\.map.*document\\.querySelector'
+    message: "DOM query inside loop. Query once and cache the result."
+    fix_action: "Hoist DOM query outside loop: const el = document.querySelector(...)"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.tsx"
+      - "*.jsx"
+
+  - id: opt-blocking-main-thread
+    name: Potential Main Thread Block
+    severity: warning
+    type: regex
+    pattern:
+      - 'while\\s*\\(true\\)'
+      - 'while\\s*\\(1\\)'
+      - '\\.sort\\(.*\\.sort\\('
+    message: "Pattern may block main thread. Consider Web Workers or chunking."
+    fix_action: "Use requestIdleCallback, Web Workers, or chunk processing"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.tsx"
+      - "*.jsx"
+
+  - id: opt-console-in-prod
+    name: Console Log in Production Path
+    severity: warning
+    type: regex
+    pattern:
+      - 'console\\.log\\([^)]*\\$\\{.*\\}[^)]*\\)'
+      - 'console\\.log\\([^)]*\\+[^)]*\\)'
+    message: "Console with string interpolation in production code. Use structured logging."
+    fix_action: "Use structured logger: logger.info({ data }, 'message')"
+    applies_to:
+      - "src/**/*.ts"
+      - "src/**/*.js"

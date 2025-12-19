@@ -1,0 +1,475 @@
+# Cybersecurity Sharp Edges
+# Critical security mistakes that lead to breaches, data loss, and regulatory nightmares
+
+sharp_edges:
+  - id: hardcoded-secret
+    summary: Credentials, API keys, or secrets committed to source code
+    severity: critical
+    situation: Secrets in code that get into version history, logs, and attacker hands
+    why: |
+      Git history is forever. Removing from latest commit ≠ removed. Bot scanners find
+      secrets in seconds. One exposed key = full breach. Secrets end up in CI/CD logs,
+      backup systems, and all developer machines that clone the repo.
+    solution: |
+      # 1. Use environment variables
+      const apiKey = process.env.API_KEY
+
+      # 2. Use secrets managers
+      const { data } = await vault.read('secret/api-key')
+
+      # 3. Use .gitignore properly
+      .env
+      .env.local
+      *.pem
+      secrets/
+
+      # 4. Pre-commit hooks
+      # .pre-commit-config.yaml
+      - repo: https://github.com/gitleaks/gitleaks
+        hooks:
+          - id: gitleaks
+
+      # 5. If already leaked:
+      - Rotate immediately (new credentials)
+      - Old ones are compromised
+      - History cleanup is not enough
+
+      # TOOLS
+      - gitleaks: Pre-commit scanning
+      - trufflehog: History scanning
+      - Doppler/Vault: Secrets management
+    symptoms:
+      - API keys in source code
+      - .env files committed
+      - Credentials in config files
+      - Secrets in CI logs
+    detection_pattern: 'sk_live_|AKIA[A-Z0-9]{16}|password\s*=\s*["\'][^"\']{8,}|api[_-]?key\s*=\s*["\']'
+
+  - id: sql-injection
+    summary: Building SQL queries with string concatenation
+    severity: critical
+    situation: User input directly concatenated into SQL queries
+    why: |
+      SQL injection is #1 on OWASP Top 10. Attackers can read, modify, or delete entire
+      databases. One vulnerable endpoint = full database access. Automated tools find
+      and exploit in minutes.
+    solution: |
+      # WRONG: Direct string concatenation
+      const query = `SELECT * FROM users WHERE id = ${userId}`
+      const query = "SELECT * FROM users WHERE name = '" + name + "'"
+
+      # RIGHT: Parameterized queries (ALWAYS)
+      const { rows } = await pool.query(
+        'SELECT * FROM users WHERE id = $1',
+        [userId]
+      )
+
+      # RIGHT: With ORM (Prisma)
+      const user = await prisma.user.findUnique({
+        where: { id: userId }
+      })
+
+      # Defense in depth
+      if (!isValidUUID(userId)) {
+        throw new ValidationError()
+      }
+
+      # Least privilege database user
+      # App DB user should NOT have DROP, GRANT permissions
+    symptoms:
+      - String concatenation in SQL
+      - Template literals with user input in queries
+      - No parameterized queries
+      - Raw SQL with user input
+    detection_pattern: 'SELECT.*\$\{|SELECT.*\+\s*\w+|query\s*\(`[^`]*\$\{'
+
+  - id: xss-vulnerability
+    summary: Rendering untrusted data without proper encoding
+    severity: critical
+    situation: User content inserted into HTML without escaping
+    why: |
+      XSS is #2 on OWASP Top 10. Attackers can steal sessions, credentials, and execute
+      code as users. Persisted XSS affects every user who views the content.
+    solution: |
+      # WRONG: Direct HTML insertion
+      element.innerHTML = userComment
+      dangerouslySetInnerHTML={{ __html: userContent }}
+
+      # RIGHT: Framework auto-escaping (React, Vue)
+      <div>{userContent}</div>  // Safe
+
+      # RIGHT: Content Security Policy
+      Content-Security-Policy: default-src 'self';
+        script-src 'self';
+        style-src 'self' 'unsafe-inline'
+
+      # RIGHT: Sanitize if HTML required
+      import DOMPurify from 'dompurify'
+      const clean = DOMPurify.sanitize(dirty)
+
+      # RIGHT: HTTPOnly cookies
+      Set-Cookie: session=abc; HttpOnly; Secure
+
+      # NEVER:
+      - innerHTML with user content
+      - eval() with user content
+      - document.write() with user content
+    symptoms:
+      - innerHTML with user data
+      - dangerouslySetInnerHTML usage
+      - Missing CSP headers
+      - User content in script tags
+    detection_pattern: 'innerHTML\s*=|dangerouslySetInnerHTML|v-html|document\.write'
+
+  - id: missing-authentication
+    summary: API endpoints or pages accessible without authentication
+    severity: critical
+    situation: Protected resources accessible by anyone
+    why: |
+      Frontend is not a security boundary. Anyone can call your API directly. Every
+      endpoint needs authentication. "Hidden" URLs are not secure.
+    solution: |
+      # WRONG: Frontend checks but API doesn't
+      if (user.isAdmin) { showAdminPanel() }
+
+      app.get('/api/admin/users', (req, res) => {
+        // No auth check!
+        return getAllUsers()
+      })
+
+      # RIGHT: Auth on every protected endpoint
+      app.get('/api/admin/users', authMiddleware, (req, res) => {
+        // Now protected
+      })
+
+      # RIGHT: Default deny
+      app.use('/api/*', authMiddleware)  // All protected
+      app.get('/api/public/*', publicMiddleware)  // Explicit exceptions
+
+      # AUTH CHECKLIST
+      □ All admin endpoints protected
+      □ All data endpoints protected
+      □ File/media endpoints protected
+      □ Webhooks verified
+      □ No auth bypass routes
+    symptoms:
+      - Admin endpoints without auth
+      - APIs assuming frontend auth
+      - No middleware on routes
+      - Inconsistent auth patterns
+    detection_pattern: 'app\.(get|post|put|delete)\s*\([^,]*,\s*\(req'
+
+  - id: missing-authorization
+    summary: User can access another user's resources (IDOR/BOLA)
+    severity: critical
+    situation: Authentication without ownership/access verification
+    why: |
+      Authentication ≠ Authorization. "Who are you?" ≠ "What can you access?"
+      BOLA/IDOR is #1 API security risk. Easy to exploit, often overlooked.
+    solution: |
+      # WRONG: Authenticated but not authorized
+      app.get('/api/orders/:id', authMiddleware, (req, res) => {
+        const order = await getOrder(req.params.id)
+        // Missing: Is req.user allowed to access this order?
+        return res.json(order)
+      })
+
+      # RIGHT: Check ownership on every request
+      app.get('/api/orders/:id', auth, async (req, res) => {
+        const order = await getOrder(req.params.id)
+
+        if (order.userId !== req.user.id) {
+          return res.status(403).json({ error: 'Forbidden' })
+        }
+
+        return res.json(order)
+      })
+
+      # RIGHT: Scope queries to user
+      const order = await prisma.order.findFirst({
+        where: {
+          id: orderId,
+          userId: req.user.id  // Scoped
+        }
+      })
+
+      # Use UUIDs not sequential IDs
+      /orders/550e8400-e29b-41d4-a716-446655440000
+    symptoms:
+      - No ownership checks
+      - Sequential IDs exposed
+      - Generic getById functions
+      - Missing authorization middleware
+    detection_pattern: 'findUnique\s*\(\s*\{[^}]*id:|getOne\s*\([^,]*\)'
+
+  - id: insecure-password-storage
+    summary: Passwords stored in plaintext, weak hashing, or reversible encryption
+    severity: critical
+    situation: Password storage that doesn't use modern password hashing
+    why: |
+      Databases get breached. Assume your password table will be stolen. Proper hashing
+      is the last line of defense. Weak hashing = millions of accounts compromised.
+    solution: |
+      # WRONG
+      user.password = req.body.password  // Plaintext
+      user.password = md5(password)  // MD5 broken
+      user.password = sha256(password)  // No salt, rainbow tables
+
+      # RIGHT: Use bcrypt or argon2
+      import bcrypt from 'bcrypt'
+
+      // Hash password (on signup/change)
+      const hash = await bcrypt.hash(password, 12)  // 12 rounds
+
+      // Verify password (on login)
+      const valid = await bcrypt.compare(password, hash)
+
+      # HASHING ALGORITHMS
+      ✓ bcrypt (battle-tested)
+      ✓ argon2id (modern, recommended)
+      ✓ scrypt (high memory)
+      ✗ MD5 (broken)
+      ✗ SHA1 (broken)
+      ✗ SHA256 alone (rainbow tables)
+    symptoms:
+      - MD5 or SHA1 for passwords
+      - No salt in hashing
+      - Plaintext password storage
+      - Reversible encryption for passwords
+    detection_pattern: 'md5\(|sha1\(|createHash\(["\']md5|createHash\(["\']sha1'
+
+  - id: csrf-vulnerability
+    summary: State-changing requests without CSRF protection
+    severity: high
+    situation: POST/PUT/DELETE requests that don't verify request origin
+    why: |
+      Browsers send cookies with every request, including from other sites. User doesn't
+      have to click anything. One visit to malicious site = attack.
+    solution: |
+      # 1. CSRF tokens
+      const csrfToken = generateCsrfToken()
+      req.session.csrf = csrfToken
+
+      <input type="hidden" name="_csrf" value="${csrfToken}" />
+
+      if (req.body._csrf !== req.session.csrf) {
+        throw new Error('CSRF validation failed')
+      }
+
+      # 2. SameSite cookies
+      Set-Cookie: session=abc; SameSite=Lax; Secure; HttpOnly
+
+      # 3. Custom headers for AJAX
+      fetch('/api/action', {
+        headers: { 'X-CSRF-Token': token }
+      })
+
+      # 4. Origin header checking
+      const origin = req.get('Origin')
+      if (!allowedOrigins.includes(origin)) {
+        throw new Error('Invalid origin')
+      }
+    symptoms:
+      - No CSRF tokens in forms
+      - Missing SameSite cookie attribute
+      - No origin validation
+      - State changes via GET
+    detection_pattern: 'method="POST"(?![\\s\\S]*csrf)|Set-Cookie:(?!.*SameSite)'
+
+  - id: broken-session
+    summary: Sessions that are predictable, never expire, or improperly invalidated
+    severity: high
+    situation: Weak session management allowing hijacking or persistent access
+    why: |
+      Sessions are the keys to the kingdom. Weak sessions = account takeover. Stale
+      sessions = persistent access. Poor logout = sessions live forever.
+    solution: |
+      # Cryptographically random session IDs
+      import { randomBytes } from 'crypto'
+      const sessionId = randomBytes(32).toString('hex')
+
+      # Set appropriate expiration
+      const session = createSession({
+        expiresIn: '1h',           // Absolute
+        inactiveTimeout: '15m'     // Inactivity
+      })
+
+      # Invalidate on logout (server-side)
+      app.post('/logout', (req, res) => {
+        await destroySession(req.sessionId)  // Server invalidation
+        res.clearCookie('session')
+      })
+
+      # Rotate session after authentication
+      app.post('/login', async (req, res) => {
+        const user = await authenticate(req.body)
+        await destroySession(req.sessionId)  // Old session
+        const newSession = await createSession(user.id)  // New session
+        res.cookie('session', newSession.id)
+      })
+    symptoms:
+      - Predictable session IDs
+      - No session expiration
+      - Client-only logout
+      - No session rotation
+    detection_pattern: 'sessionId.*=.*Date\\.now|sessionId.*=.*timestamp'
+
+  - id: exposed-error-details
+    summary: Detailed error messages, stack traces, or debug info in production
+    severity: high
+    situation: Internal system details exposed to users/attackers
+    why: |
+      Error details reveal database schema, technology stack, file paths, configuration,
+      credentials, and valid usernames. Helps attackers understand and exploit system.
+    solution: |
+      # Generic errors in production
+      app.use((err, req, res, next) => {
+        // Log full error internally
+        logger.error(err)
+
+        // Return generic message
+        if (process.env.NODE_ENV === 'production') {
+          return res.status(500).json({
+            error: 'An error occurred',
+            requestId: req.id  // For support
+          })
+        }
+
+        // Details in development only
+        return res.status(500).json({
+          error: err.message,
+          stack: err.stack
+        })
+      })
+
+      # Consistent error responses
+      // Don't reveal if user exists
+      // BAD: "No user with that email"
+      // GOOD: "Invalid email or password"
+
+      # Hide headers
+      app.disable('x-powered-by')
+    symptoms:
+      - Stack traces in responses
+      - SQL queries in errors
+      - Config details exposed
+      - Different errors for existing vs non-existing users
+    detection_pattern: 'res\\.json\\([^)]*stack|res\\.json\\([^)]*err\\.message'
+
+  - id: insecure-direct-object-reference
+    summary: Using user-supplied identifiers without validation
+    severity: high
+    situation: File paths or object references built from user input
+    why: |
+      Path traversal allows access to arbitrary server files. User input should never
+      be used directly in file paths, template names, or include statements.
+    solution: |
+      # WRONG: Direct path usage
+      app.get('/download', (req, res) => {
+        const file = req.query.file
+        res.download(`/uploads/${file}`)
+      })
+      // Attack: GET /download?file=../../../etc/passwd
+
+      # RIGHT: Whitelist allowed values
+      const allowedFiles = ['report.pdf', 'invoice.pdf']
+      if (!allowedFiles.includes(req.query.file)) {
+        return res.status(400).json({ error: 'Invalid file' })
+      }
+
+      # RIGHT: Validate paths
+      const requestedPath = path.join('/uploads', req.query.file)
+      const resolvedPath = path.resolve(requestedPath)
+
+      if (!resolvedPath.startsWith('/uploads/')) {
+        return res.status(403).json({ error: 'Access denied' })
+      }
+
+      # RIGHT: Use indirect references
+      // Instead of: /files/secret_report.pdf
+      // Use: /files/a1b2c3d4-uuid
+      // Map internally to actual file
+    symptoms:
+      - User input in file paths
+      - Template names from parameters
+      - No path validation
+      - Direct file access
+    detection_pattern: 'path\\.join\\([^)]*req\\.|res\\.download\\([^)]*req\\.'
+
+  - id: weak-cryptography
+    summary: Using deprecated algorithms or implementing crypto incorrectly
+    severity: high
+    situation: DES, MD5, ECB mode, predictable IVs, hardcoded keys
+    why: |
+      Crypto is hard. One mistake = no security. Deprecated algorithms are deprecated
+      for a reason. Custom crypto is almost always wrong.
+    solution: |
+      # WRONG
+      crypto.createCipher('des', key)  // DES is broken
+      crypto.createHash('md5')  // MD5 is broken
+      crypto.createCipheriv('aes-256-ecb', key, null)  // ECB patterns visible
+      const iv = Buffer.from('0000000000000000')  // Predictable IV
+
+      # RIGHT: Use modern algorithms
+      const cipher = crypto.createCipheriv(
+        'aes-256-gcm',
+        key,
+        crypto.randomBytes(16)  // Random IV
+      )
+
+      # RIGHT: Use libraries
+      // Node.js: libsodium, tweetnacl
+      // Don't implement yourself
+
+      # CRYPTO CHECKLIST
+      □ AES-256-GCM or ChaCha20-Poly1305
+      □ Random IVs for each encryption
+      □ Keys from secure key store
+      □ HTTPS for transport
+      □ No deprecated algorithms
+    symptoms:
+      - DES or 3DES usage
+      - MD5 or SHA1 for security
+      - ECB mode
+      - Static/predictable IVs
+    detection_pattern: 'createCipher\\(["\']des|createHash\\(["\']md5|aes-.*-ecb'
+
+  - id: unvalidated-redirect
+    summary: Redirecting users based on user-supplied URLs
+    severity: medium
+    situation: Open redirects that can be abused for phishing
+    why: |
+      Open redirects enable phishing (fake login pages), malware distribution, OAuth
+      token theft. Users trust your domain but get redirected to malicious sites.
+    solution: |
+      # WRONG: Open redirect
+      app.get('/redirect', (req, res) => {
+        res.redirect(req.query.url)
+      })
+
+      # RIGHT: Whitelist allowed destinations
+      const allowedRedirects = ['/dashboard', '/settings', '/logout']
+      if (!allowedRedirects.includes(req.query.url)) {
+        return res.redirect('/')
+      }
+
+      # RIGHT: Validate URL is internal
+      function isInternalUrl(url) {
+        try {
+          const parsed = new URL(url, 'https://yoursite.com')
+          return parsed.hostname === 'yoursite.com'
+        } catch {
+          return false
+        }
+      }
+
+      # RIGHT: Use indirect references
+      // Instead of: /redirect?url=https://...
+      // Use: /redirect?target=dashboard
+      // Map 'dashboard' to internal URL
+    symptoms:
+      - Full URLs in query parameters
+      - No redirect validation
+      - External URLs allowed
+      - No whitelist
+    detection_pattern: 'res\\.redirect\\(req\\.(query|params|body)'

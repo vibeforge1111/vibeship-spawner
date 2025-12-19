@@ -1,0 +1,434 @@
+# Frontend Engineering Sharp Edges
+# Real production gotchas that catch frontend developers
+
+sharp_edges:
+  - id: hydration-mismatch
+    summary: Server renders different content than client hydration
+    severity: critical
+    situation: Using Date.now(), Math.random(), window, or localStorage during initial render in SSR/SSG apps
+    why: |
+      Server renders one thing, client hydrates to another. React throws warnings,
+      but the real damage is: content flashes, buttons don't work initially, and
+      SEO is broken because Google sees different content than users.
+    solution: |
+      // WRONG - Different on server vs client
+      function Component() {
+        return <div>{Date.now()}</div>
+      }
+
+      // RIGHT - Use useEffect for client-only values
+      function Component() {
+        const [time, setTime] = useState<number | null>(null)
+        useEffect(() => setTime(Date.now()), [])
+        return <div>{time ?? 'Loading...'}</div>
+      }
+
+      // RIGHT - suppressHydrationWarning for intentional differences
+      <time suppressHydrationWarning>{new Date().toLocaleTimeString()}</time>
+    symptoms:
+      - Console warnings about hydration mismatches
+      - Content flash on initial page load
+      - Interactive elements not responding initially
+      - Different content in view source vs rendered page
+    detection_pattern: 'Date\\.now\\(\\)|Math\\.random\\(\\)|(?<!typeof\\s)window\\.|localStorage\\.'
+
+  - id: useeffect-data-fetching
+    summary: Fetching data in useEffect without proper handling
+    severity: high
+    situation: Using useEffect for data fetching without a library or proper cleanup
+    why: |
+      Creates request waterfalls (parent fetches, then children fetch sequentially).
+      Race conditions when props change faster than fetches complete.
+      Memory leaks when components unmount mid-fetch and setState is called.
+    solution: |
+      // WRONG - Waterfall, race conditions, memory leaks
+      function UserProfile({ userId }) {
+        const [user, setUser] = useState(null)
+        useEffect(() => {
+          fetch(`/api/users/${userId}`)
+            .then(res => res.json())
+            .then(setUser) // Memory leak if unmounted
+        }, [userId]) // Race condition if userId changes quickly
+        return user ? <Profile user={user} /> : <Loading />
+      }
+
+      // RIGHT - Use a data fetching library
+      function UserProfile({ userId }) {
+        const { data: user, isLoading } = useQuery({
+          queryKey: ['user', userId],
+          queryFn: () => fetchUser(userId),
+        })
+        if (isLoading) return <Loading />
+        return <Profile user={user} />
+      }
+    symptoms:
+      - Network tab shows sequential requests instead of parallel
+      - "Can't perform state update on unmounted component" warnings
+      - Data appears in stages (visible waterfall to user)
+    detection_pattern: 'useEffect\\([^)]*\\{[^}]*fetch\\('
+
+  - id: rerender-avalanche
+    summary: Creating new objects/functions every render breaks memo optimization
+    severity: high
+    situation: Using memo() but performance doesn't improve
+    why: |
+      React's memo() only prevents re-renders if props are referentially equal.
+      Inline objects ({ }) and arrow functions (() => {}) create new references
+      every render, defeating memo entirely. The memo overhead is paid but
+      the optimization doesn't happen.
+    solution: |
+      // WRONG - New object every render breaks memo
+      function Parent() {
+        const style = { color: 'red' } // New object every render!
+        return <Child style={style} />
+      }
+
+      // RIGHT - Stable reference outside component
+      const style = { color: 'red' }
+      function Parent() {
+        return <Child style={style} />
+      }
+
+      // WRONG - New function every render
+      function Parent() {
+        return <Child onClick={() => doThing()} />
+      }
+
+      // RIGHT - useCallback for stable function reference
+      function Parent() {
+        const handleClick = useCallback(() => doThing(), [])
+        return <Child onClick={handleClick} />
+      }
+    symptoms:
+      - React DevTools shows many components re-rendering
+      - Profiler shows long render times despite memo usage
+      - UI feels sluggish on interactions
+    detection_pattern: 'memo\\([^)]+\\).*\\{[^}]+:[^}]+\\}'
+
+  - id: bundle-size-blindness
+    summary: Importing entire libraries instead of specific functions
+    severity: high
+    situation: Using import _ from 'lodash' or similar barrel imports
+    why: |
+      npm install is frictionless. Tree shaking doesn't always work, especially
+      with CommonJS. A single import from 'lodash' ships 70KB. moment.js is 290KB.
+      Suddenly your bundle is 2MB, mobile users wait 10 seconds, and Core Web
+      Vitals are red across the board.
+    solution: |
+      // WRONG - Import entire library
+      import _ from 'lodash' // 70KB
+      import moment from 'moment' // 290KB
+
+      // RIGHT - Import only what you need
+      import debounce from 'lodash/debounce' // 2KB
+
+      // RIGHT - Use smaller alternatives
+      import { format } from 'date-fns' // 13KB total
+      // or use Intl.DateTimeFormat (0KB, built-in)
+
+      // RIGHT - Dynamic import for heavy components
+      const Table = lazy(() => import('./Table'))
+    symptoms:
+      - First meaningful paint > 3 seconds on 3G
+      - bundle-analyzer shows unexpected large chunks
+      - Large node_modules in final bundle
+    detection_pattern: "import\\s+\\w+\\s+from\\s+['\"](?:lodash|moment|antd|material-ui)['\"]"
+
+  - id: accessibility-afterthought
+    summary: Building features that only work with mouse
+    severity: critical
+    situation: Creating interactive elements without keyboard/screen reader support
+    why: |
+      15% of users have disabilities affecting web use. Screen readers announce
+      nonsense on div-based "buttons". Keyboard users get trapped. Lawsuit risk
+      is real - Target, Dominos, and thousands of others have been sued.
+    solution: |
+      // WRONG - div with click handler
+      <div onClick={handleClick}>Click me</div>
+
+      // RIGHT - semantic button
+      <button onClick={handleClick}>Click me</button>
+
+      // WRONG - image without alt
+      <img src="chart.png" />
+
+      // RIGHT - descriptive alt
+      <img src="chart.png" alt="Sales increased 40% in Q4" />
+
+      // WRONG - form without labels
+      <input type="email" placeholder="Email" />
+
+      // RIGHT - properly labeled
+      <label>
+        Email
+        <input type="email" />
+      </label>
+    symptoms:
+      - Can't use feature with keyboard only
+      - Screen reader announces "clickable" or nothing useful
+      - Missing focus indicators
+      - axe-core audit shows errors
+    detection_pattern: '<div[^>]*onClick|<span[^>]*onClick'
+
+  - id: memory-leak-timebomb
+    summary: Event listeners and subscriptions not cleaned up
+    severity: high
+    situation: Using useEffect to add listeners without cleanup functions
+    why: |
+      App works great for 5 minutes. After 2 hours, it's slow. After 8 hours,
+      it crashes. Event listeners pile up. Subscriptions keep firing. Intervals
+      never clear. Memory usage grows until the tab dies or crashes.
+    solution: |
+      // WRONG - Listener never removed
+      useEffect(() => {
+        window.addEventListener('resize', handleResize)
+      }, [])
+
+      // RIGHT - Cleanup on unmount
+      useEffect(() => {
+        window.addEventListener('resize', handleResize)
+        return () => window.removeEventListener('resize', handleResize)
+      }, [])
+
+      // WRONG - Interval never cleared
+      useEffect(() => {
+        setInterval(poll, 1000)
+      }, [])
+
+      // RIGHT - Clear interval
+      useEffect(() => {
+        const id = setInterval(poll, 1000)
+        return () => clearInterval(id)
+      }, [])
+    symptoms:
+      - Memory usage grows over time (DevTools Performance Monitor)
+      - "Detached DOM elements" in heap snapshot
+      - Slow UI after extended use
+    detection_pattern: 'useEffect\\([^)]*addEventListener|useEffect\\([^)]*setInterval'
+
+  - id: state-synchronization-hell
+    summary: Same data stored in multiple places gets out of sync
+    severity: high
+    situation: Copying server data to local state, or not using URL as source of truth
+    why: |
+      You have user in component state AND in a query cache. Or filter state
+      in useState AND in URL params. They drift apart. UI shows one thing but
+      another thing happens. "It shows the old data sometimes" is the symptom.
+    solution: |
+      // WRONG - Duplicating server state locally
+      function UserList() {
+        const [users, setUsers] = useState([])
+        const [selectedUser, setSelectedUser] = useState(null) // Copy, goes stale!
+        useEffect(() => { fetchUsers().then(setUsers) }, [])
+      }
+
+      // RIGHT - Derive from single source
+      function UserList() {
+        const { data: users } = useQuery({ queryKey: ['users'], queryFn: fetchUsers })
+        const [selectedId, setSelectedId] = useState(null)
+        const selectedUser = users?.find(u => u.id === selectedId) // Always fresh
+      }
+
+      // WRONG - Component state for URL-driven UI
+      function ProductFilters() {
+        const [category, setCategory] = useState('all')
+        // User can't share URL, back button doesn't work
+      }
+
+      // RIGHT - URL as source of truth
+      function ProductFilters() {
+        const [searchParams, setSearchParams] = useSearchParams()
+        const category = searchParams.get('category') ?? 'all'
+      }
+    symptoms:
+      - "It shows the old data sometimes"
+      - Back button doesn't work as expected
+      - Refreshing page loses state it shouldn't lose
+    detection_pattern: 'useState.*useState.*useEffect.*fetch'
+
+  - id: layout-shift-jank
+    summary: Content jumps around during page load
+    severity: high
+    situation: Images without dimensions, async content injection, font loading
+    why: |
+      Page loads. Content appears. Image loads, everything shifts down.
+      Ad injects, article jumps. User clicks a button but it moves as they click.
+      Cumulative Layout Shift (CLS) tanks Core Web Vitals and frustrates users.
+    solution: |
+      // WRONG - Image without dimensions
+      <img src="photo.jpg" />
+
+      // RIGHT - Reserve space with dimensions
+      <img src="photo.jpg" width={800} height={600} />
+
+      // RIGHT - Aspect ratio for responsive
+      <img src="photo.jpg" style={{ aspectRatio: '4/3', width: '100%' }} />
+
+      // WRONG - Skeleton different size than content
+      <div className="skeleton h-10" /> /* Actual content is h-12 */
+
+      // RIGHT - Skeleton matches content
+      <div className="skeleton h-12" />
+
+      // RIGHT - Reserve space for async content
+      <div style={{ minHeight: 250 }}> /* Ad slot */
+        {adLoaded && <Ad />}
+      </div>
+    symptoms:
+      - CLS score > 0.1 in Lighthouse
+      - User complains "I clicked the wrong thing"
+      - Content visibly jumps during page load
+    detection_pattern: '<img[^>]*src=[^>]*(?!width|height|aspectRatio)'
+
+  - id: works-in-chrome-only
+    summary: Testing only in Chrome, breaking in Safari/Firefox/mobile
+    severity: high
+    situation: Features work in development but break for users on other browsers
+    why: |
+      Chrome's devtools are best so developers use it exclusively. Safari has
+      different date parsing, flex gap support, and 100vh behavior. Firefox
+      handles scrollbars differently. Every iPhone user uses Safari. iOS in-app
+      browsers behave differently from Safari standalone.
+    solution: |
+      Cross-Browser Testing Checklist:
+      □ Chrome (latest)
+      □ Safari (desktop AND iOS)
+      □ Firefox (latest)
+      □ Edge (Chromium)
+      □ Safari iOS (in-app browsers differ!)
+
+      Common Safari issues:
+      - Date parsing: '2024-01-01' works, '2024/01/01' doesn't
+      - 100vh includes address bar (use 100dvh)
+      - Video autoplay restrictions stricter
+
+      Common Firefox issues:
+      - Scrollbar styling limited
+      - Container queries support timing
+
+      Use:
+      - BrowserStack for real device testing
+      - Playwright for automated cross-browser
+      - Can I Use before using new features
+    symptoms:
+      - Bug reports only from specific browsers
+      - CSS features without fallbacks
+      - Using browser APIs without feature detection
+    detection_pattern: '100vh|new Date\\([^)]*\\/[^)]*\\)'
+
+  - id: prop-drilling-death-spiral
+    summary: Passing props through 5+ components that don't use them
+    severity: medium
+    situation: Adding a prop and realizing you have to thread it through many files
+    why: |
+      Every intermediate component depends on those props even if it doesn't use
+      them. Change the prop shape and you're updating 10 files. Refactoring
+      becomes terrifying. TypeScript makes this visible but doesn't fix it.
+    solution: |
+      // WRONG - Prop drilling
+      function App() {
+        const user = useUser()
+        return <Layout user={user} />
+      }
+      function Layout({ user }) { return <Sidebar user={user} /> }
+      function Sidebar({ user }) { return <UserMenu user={user} /> }
+      function UserMenu({ user }) { return <Avatar user={user} /> }
+
+      // RIGHT - Context for cross-cutting concerns
+      const UserContext = createContext(null)
+      function App() {
+        const user = useUser()
+        return <UserContext.Provider value={user}><Layout /></UserContext.Provider>
+      }
+      function Avatar() {
+        const user = useContext(UserContext)
+        return <img src={user.avatar} />
+      }
+
+      // RIGHT - Composition pattern
+      function Layout({ children }) { return <div>{children}</div> }
+      function App() {
+        const user = useUser()
+        return <Layout><Sidebar><UserMenu user={user} /></Sidebar></Layout>
+      }
+    symptoms:
+      - Same prop appears in 4+ component signatures
+      - Intermediate components don't use the prop they receive
+      - Changing prop requires touching many files
+    detection_pattern: null
+
+  - id: css-specificity-war
+    summary: Fighting CSS specificity with more specificity and !important
+    severity: medium
+    situation: Styles not applying, adding !important to fix, then needing to override that
+    why: |
+      CSS specificity is not intuitive. Global styles leak. Third-party components
+      have opinions. Each !important creates a new problem. Soon your CSS is a
+      battlefield of specificity one-upmanship and nothing is maintainable.
+    solution: |
+      /* WRONG - Specificity arms race */
+      .button { color: blue; }
+      .header .button { color: red; }
+      .header .nav .button.active { color: purple !important; }
+
+      /* RIGHT - Flat specificity with BEM */
+      .button { color: blue; }
+      .button--header { color: red; }
+      .button--active { color: purple; }
+
+      /* RIGHT - CSS Modules / Tailwind (scoped by design) */
+
+      /* RIGHT - CSS Layers (modern approach) */
+      @layer base, components, utilities;
+      @layer base { .button { color: blue; } }
+      @layer utilities { .text-red { color: red; } }
+    symptoms:
+      - Multiple !important in codebase
+      - Overly specific selectors (.a .b .c .d .e)
+      - Styles that don't apply without understanding why
+    detection_pattern: '!important'
+
+  - id: form-validation-nightmare
+    summary: Building form validation from scratch instead of using libraries
+    severity: medium
+    situation: Form component has 10+ useState calls for fields, errors, touched state
+    why: |
+      Forms are genuinely hard. Multiple sources of truth (DOM, React state, server).
+      UX requirements conflict on validation timing. Building from scratch means
+      reinventing error state, touched state, submission state, re-render
+      optimization, and getting all the edge cases wrong.
+    solution: |
+      // WRONG - Manual form state
+      function Form() {
+        const [email, setEmail] = useState('')
+        const [emailError, setEmailError] = useState('')
+        const [touched, setTouched] = useState(false)
+        const [submitting, setSubmitting] = useState(false)
+        // ... 10 more fields, 30 more state variables
+      }
+
+      // RIGHT - Use a form library
+      import { useForm } from 'react-hook-form'
+      import { zodResolver } from '@hookform/resolvers/zod'
+
+      const schema = z.object({
+        email: z.string().email('Invalid email'),
+        password: z.string().min(8, 'Min 8 characters'),
+      })
+
+      function Form() {
+        const { register, handleSubmit, formState: { errors } } = useForm({
+          resolver: zodResolver(schema),
+        })
+        return (
+          <form onSubmit={handleSubmit(onSubmit)}>
+            <input {...register('email')} />
+            {errors.email && <span>{errors.email.message}</span>}
+          </form>
+        )
+      }
+    symptoms:
+      - Form component has 10+ useState calls
+      - Validation logic duplicated client and server
+      - Edge cases in form behavior (double submit, flash errors)
+    detection_pattern: 'useState.*Error.*useState.*touched'
