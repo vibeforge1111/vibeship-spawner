@@ -69,8 +69,8 @@
 
 | Skill | Status | Description | Owner |
 |-------|--------|-------------|-------|
-| `ui-design` | 📋 Planned | Visual design principles, design systems, Figma-to-code, color theory, typography, spacing. | - |
-| `ux-design` | 📋 Planned | User flows, information architecture, usability heuristics, accessibility, user research patterns. | - |
+| `ui-design` | ✅ Built | Visual design principles, design systems, Figma-to-code, color theory, typography, spacing. | - |
+| `ux-design` | ✅ Built | User flows, information architecture, usability heuristics, accessibility, user research patterns. | - |
 | `content-strategy` | 📋 Planned | Voice and tone, content hierarchy, microcopy, content modeling, editorial workflows. | - |
 | `motion-design` | 📋 Planned | Animation principles, micro-interactions, page transitions, loading states, delight moments. | - |
 
@@ -84,7 +84,7 @@
 |-------|--------|-------------|-------|
 | `frontend` | ✅ Built | Dan Abramov/Rich Harris style frontend. React, Vue, Svelte, performance, accessibility. | - |
 | `backend` | ✅ Built | Netflix/Stripe-level backend architecture. APIs, databases, reliability, scale. | - |
-| `devops` | 📋 Planned | CI/CD pipelines, infrastructure as code, monitoring, alerting, incident response, SRE practices. | - |
+| `devops` | ✅ Built | CI/CD pipelines, infrastructure as code, monitoring, alerting, incident response, SRE practices. | - |
 | `security` | 📋 Planned | Threat modeling, OWASP top 10, secure coding, pen testing, security architecture, zero trust. | - |
 | `data-engineering` | 📋 Planned | Data pipelines, ETL/ELT, data warehousing, streaming, data quality, governance. | - |
 | `platform-architecture` | 📋 Planned | Multi-tenancy, service design, API gateway, scalability patterns, distributed systems. | - |
@@ -279,9 +279,9 @@ Everything else - build as needed based on product direction and market.
 
 | Status | Count |
 |--------|-------|
-| ✅ Built | 13 |
+| ✅ Built | 16 |
 | 🚧 In Progress | 0 |
-| 📋 Planned | 86 |
+| 📋 Planned | 83 |
 | **Total** | **99** |
 
 ### By Layer
@@ -291,8 +291,8 @@ Everything else - build as needed based on product direction and market.
 | Paul Graham 📜 | 0 | 5 | 5 |
 | YC Hypergrowth 🚀 | 0 | 13 | 13 |
 | Strategic | 3 | 4 | 7 |
-| Design | 0 | 4 | 4 |
-| Tactical | 2 | 7 | 9 |
+| Design | 2 | 2 | 4 |
+| Tactical | 3 | 6 | 9 |
 | Operations | 0 | 4 | 4 |
 | Growth | 0 | 6 | 6 |
 | Core | 5 | 3 | 8 |
@@ -302,7 +302,7 @@ Everything else - build as needed based on product direction and market.
 | Crisis & Edge Cases 🔥 | 0 | 5 | 5 |
 | AI-Native 🤖 | 0 | 6 | 6 |
 | Web3 ⛓️ | 0 | 5 | 5 |
-| **Total** | **13** | **86** | **99** |
+| **Total** | **16** | **83** | **99** |
 
 ---
 
