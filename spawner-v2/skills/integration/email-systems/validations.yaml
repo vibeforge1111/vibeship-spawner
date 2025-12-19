@@ -1,0 +1,150 @@
+# Email Systems Validations
+# Automated checks for email integration code
+
+validations:
+  - id: missing-text-part
+    name: Missing plain text email part
+    description: Emails should always include a plain text alternative
+    severity: warning
+    pattern: "send\\s*\\(\\s*\\{[^}]*html\\s*:[^}]*\\}\\s*\\)"
+    negative_pattern: "text\\s*:"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "Email being sent with HTML but no plain text part. Add 'text:' property for accessibility and deliverability."
+    fix_hint: "Add text: 'Plain text version' alongside html property"
+
+  - id: hardcoded-from-email
+    name: Hardcoded from email address
+    description: From addresses should come from environment variables
+    severity: warning
+    pattern: "from\\s*:\\s*['\"][^'\"]+@[^'\"]+['\"]"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    exclude_patterns:
+      - "**/*.test.*"
+      - "**/*.spec.*"
+    message: "From email appears hardcoded. Use environment variable for flexibility."
+    fix_hint: "Use process.env.FROM_EMAIL or similar"
+
+  - id: no-bounce-handler
+    name: Missing bounce webhook handler
+    description: Email bounces should be handled to maintain list hygiene
+    severity: warning
+    pattern: "resend|sendgrid|postmark|mailgun"
+    negative_pattern: "bounce|Bounce|BOUNCE"
+    file_patterns:
+      - "**/webhook*.ts"
+      - "**/api/**/*.ts"
+    message: "Email provider used but no bounce handling detected. Implement webhook handler for bounces."
+    fix_hint: "Add webhook endpoint to handle bounce events and mark emails as invalid"
+
+  - id: missing-unsubscribe-header
+    name: Missing List-Unsubscribe header
+    description: Marketing emails should include List-Unsubscribe header
+    severity: info
+    pattern: "newsletter|marketing|campaign|broadcast"
+    negative_pattern: "List-Unsubscribe|listUnsubscribe|unsubscribe.*header"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "Marketing email detected without List-Unsubscribe header. Add header for better deliverability."
+    fix_hint: "Add headers: { 'List-Unsubscribe': '<mailto:...>, <https://...>' }"
+
+  - id: sync-email-send
+    name: Synchronous email send in request handler
+    description: Email sends should be queued, not blocking
+    severity: warning
+    pattern: "await.*send.*email|await.*resend.*send|await.*sendgrid.*send"
+    file_patterns:
+      - "**/api/**/*.ts"
+      - "**/routes/**/*.ts"
+    message: "Email sent synchronously in request handler. Consider queuing for better reliability."
+    fix_hint: "Queue email send job instead of awaiting directly in request"
+
+  - id: no-email-retry
+    name: Email send without retry logic
+    description: Email sends should have retry mechanism for failures
+    severity: info
+    pattern: "send\\s*\\(\\s*\\{"
+    negative_pattern: "retry|attempts|backoff"
+    file_patterns:
+      - "**/email*.ts"
+      - "**/mail*.ts"
+    message: "Email send without apparent retry logic. Add retry for transient failures."
+    fix_hint: "Wrap send in retry logic or use queue with built-in retries"
+
+  - id: exposed-api-key
+    name: Email API key in code
+    description: API keys should come from environment variables
+    severity: error
+    pattern: "api[_-]?key\\s*[=:]\\s*['\"][A-Za-z0-9]{20,}['\"]"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    exclude_patterns:
+      - "**/*.example.*"
+      - "**/*.test.*"
+    message: "Email API key appears hardcoded in source code. Use environment variable."
+    fix_hint: "Use process.env.RESEND_API_KEY or similar"
+
+  - id: no-rate-limiting
+    name: Bulk email without rate limiting
+    description: Bulk sends should respect provider rate limits
+    severity: warning
+    pattern: "forEach.*send|map.*send|Promise\\.all.*send"
+    negative_pattern: "limit|throttle|batch|delay|sleep"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "Bulk email sending without apparent rate limiting. Add throttling to avoid hitting limits."
+    fix_hint: "Add delay between sends or use batching"
+
+  - id: missing-preview-text
+    name: Email without preview text
+    description: Emails should include preview/preheader text
+    severity: info
+    pattern: "html\\s*:[^}]*<body"
+    negative_pattern: "preview|preheader|Preview"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.tsx"
+    message: "Email template without preview text. Add hidden preheader for inbox preview."
+    fix_hint: "Add <Preview>Your preview text</Preview> at start of email"
+
+  - id: missing-email-logging
+    name: Email send without logging
+    description: Email sends should be logged for debugging and auditing
+    severity: warning
+    pattern: "await.*send.*\\{"
+    negative_pattern: "log|Log|track|audit|db\\.|prisma\\.|supabase\\."
+    file_patterns:
+      - "**/email*.ts"
+      - "**/mail*.ts"
+      - "**/send*.ts"
+    message: "Email being sent without apparent logging. Log sends for debugging and compliance."
+    fix_hint: "Log email sent event with recipient, subject, and message ID"
+
+  - id: template-interpolation-xss
+    name: Unsafe template interpolation in email
+    description: User input in emails should be escaped
+    severity: error
+    pattern: "\\$\\{.*user.*\\}|\\$\\{.*input.*\\}|\\$\\{.*req\\."
+    file_patterns:
+      - "**/email*.ts"
+      - "**/template*.ts"
+    message: "User input interpolated in email template. Ensure proper escaping to prevent HTML injection."
+    fix_hint: "Use email library's built-in escaping or sanitize input"
+
+  - id: missing-error-handling
+    name: Email send without error handling
+    description: Email sends can fail and should be handled
+    severity: warning
+    pattern: "await.*send\\("
+    negative_pattern: "try|catch|\\.catch|error"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "Email send without apparent error handling. Wrap in try-catch or handle promise rejection."
+    fix_hint: "Add try-catch block and log/handle failures appropriately"

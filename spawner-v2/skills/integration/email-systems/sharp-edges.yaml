@@ -1,0 +1,394 @@
+# Email Systems Sharp Edges
+# The email mistakes that destroy deliverability and trust
+
+sharp_edges:
+  - id: no-authentication-records
+    summary: Missing SPF, DKIM, or DMARC records
+    severity: critical
+    situation: |
+      Sending emails without authentication. Emails going to spam folder.
+      Low open rates. No idea why. Turns out DNS records were never set up.
+    why: |
+      Email authentication (SPF, DKIM, DMARC) tells receiving servers you're
+      legit. Without them, you look like a spammer. Modern email providers
+      increasingly require all three.
+    solution: |
+      # Required DNS records:
+
+      ## SPF (Sender Policy Framework)
+      TXT record: v=spf1 include:_spf.google.com include:sendgrid.net ~all
+
+      ## DKIM (DomainKeys Identified Mail)
+      TXT record provided by your email provider
+      Adds cryptographic signature to emails
+
+      ## DMARC (Domain-based Message Authentication)
+      TXT record: v=DMARC1; p=quarantine; rua=mailto:dmarc@yourdomain.com
+
+      # Verify setup:
+      - Send test email to mail-tester.com
+      - Check MXToolbox for record validation
+      - Monitor DMARC reports
+    symptoms:
+      - Emails going to spam
+      - Low deliverability rates
+      - mail-tester.com score below 8
+      - No DMARC reports received
+    detection_pattern: null
+
+  - id: shared-ip-reputation
+    summary: Using shared IP for transactional email
+    severity: high
+    situation: |
+      Password resets going to spam. Using free tier of email provider.
+      Some other customer on your shared IP got flagged for spam.
+      Your reputation is ruined by association.
+    why: |
+      Shared IPs share reputation. One bad actor affects everyone. For
+      critical transactional email, you need your own IP or a provider
+      with strict shared IP policies.
+    solution: |
+      # Transactional email strategy:
+
+      ## Option 1: Dedicated IP (high volume)
+      - Get dedicated IP from your provider
+      - Warm it up slowly (start with 100/day)
+      - Maintain consistent volume
+
+      ## Option 2: Transactional-only provider
+      - Postmark (very strict, great reputation)
+      - Includes shared pool with high standards
+
+      ## Separate concerns:
+      - Transactional: Postmark or Resend
+      - Marketing: ConvertKit or Customer.io
+      - Never mix marketing and transactional
+    symptoms:
+      - Transactional emails in spam
+      - Inconsistent delivery
+      - Using same provider for marketing and transactional
+    detection_pattern: null
+
+  - id: no-bounce-handling
+    summary: Not processing bounce notifications
+    severity: high
+    situation: |
+      Emailing same dead addresses over and over. Bounce rate climbing.
+      Email provider threatening to suspend account. List is 40% dead.
+    why: |
+      Bounces damage sender reputation. Email providers track bounce rates.
+      Above 2% and you start looking like a spammer. Dead addresses must
+      be removed immediately.
+    solution: |
+      # Bounce handling requirements:
+
+      ## Hard bounces:
+      Remove immediately on first occurrence
+      Invalid address, domain doesn't exist
+
+      ## Soft bounces:
+      Retry 3 times over 72 hours
+      After 3 failures, treat as hard bounce
+
+      ## Implementation:
+      ```typescript
+      // Webhook handler for bounces
+      app.post('/webhooks/email', (req, res) => {
+        const event = req.body;
+        if (event.type === 'bounce') {
+          await markEmailInvalid(event.email);
+          await removeFromAllLists(event.email);
+        }
+      });
+      ```
+
+      ## Monitor:
+      Track bounce rate by campaign
+      Alert if bounce rate exceeds 1%
+    symptoms:
+      - Bounce rate above 2%
+      - No webhook handlers for bounces
+      - Same emails failing repeatedly
+    detection_pattern: null
+
+  - id: no-unsubscribe
+    summary: Missing or hidden unsubscribe link
+    severity: critical
+    situation: |
+      Users marking as spam because they cannot unsubscribe. Spam complaints
+      rising. CAN-SPAM violation. Email provider suspends account.
+    why: |
+      Users who cannot unsubscribe will mark as spam. Spam complaints hurt
+      reputation more than unsubscribes. Also it is literally illegal.
+      CAN-SPAM, GDPR all require clear unsubscribe.
+    solution: |
+      # Unsubscribe requirements:
+
+      ## Visible:
+      - Above the fold in email footer
+      - Clear text, not hidden
+      - Not styled to be invisible
+
+      ## One-click:
+      - Link directly unsubscribes
+      - No login required
+      - No "are you sure" hoops
+
+      ## List-Unsubscribe header:
+      ```
+      List-Unsubscribe: <mailto:unsubscribe@example.com>,
+        <https://example.com/unsubscribe?token=xxx>
+      List-Unsubscribe-Post: List-Unsubscribe=One-Click
+      ```
+
+      ## Preference center:
+      Option to reduce frequency instead of full unsubscribe
+    symptoms:
+      - Hidden unsubscribe links
+      - Multi-step unsubscribe process
+      - No List-Unsubscribe header
+      - High spam complaint rate
+    detection_pattern: null
+
+  - id: html-only-emails
+    summary: Sending HTML without plain text alternative
+    severity: medium
+    situation: |
+      Some users see blank emails. Spam filters flagging emails. Accessibility
+      issues for screen readers. Email clients that strip HTML show nothing.
+    why: |
+      Not everyone can render HTML. Screen readers work better with plain text.
+      Spam filters are suspicious of HTML-only. Multipart is the standard.
+    solution: |
+      # Always send multipart:
+      ```typescript
+      await resend.emails.send({
+        from: 'you@example.com',
+        to: 'user@example.com',
+        subject: 'Welcome!',
+        html: '<h1>Welcome!</h1><p>Thanks for signing up.</p>',
+        text: 'Welcome!\n\nThanks for signing up.',
+      });
+      ```
+
+      # Auto-generate text from HTML:
+      Use html-to-text library as fallback
+      But hand-crafted plain text is better
+
+      # Plain text should be readable:
+      Not just HTML stripped of tags
+      Actual formatted text content
+    symptoms:
+      - No text/plain part in emails
+      - Blank emails for some users
+      - Lower engagement in some segments
+    detection_pattern: "html:.*(?!text:)"
+
+  - id: no-warm-up
+    summary: Sending high volume from new IP immediately
+    severity: high
+    situation: |
+      Just switched providers. Started sending 50,000 emails/day immediately.
+      Massive deliverability issues. New IP has no reputation. Looks like spam.
+    why: |
+      New IPs have no reputation. Sending high volume immediately looks
+      like a spammer who just spun up. You need to gradually build trust.
+    solution: |
+      # IP warm-up schedule:
+
+      Week 1: 50-100 emails/day
+      Week 2: 200-500 emails/day
+      Week 3: 500-1000 emails/day
+      Week 4: 1000-5000 emails/day
+      Continue doubling until at volume
+
+      # Best practices:
+      - Start with most engaged users
+      - Send to Gmail/Microsoft first (they set reputation)
+      - Maintain consistent volume
+      - Don't spike and drop
+
+      # During warm-up:
+      - Monitor deliverability closely
+      - Check feedback loops
+      - Adjust pace if issues arise
+    symptoms:
+      - New IP/provider
+      - Sending high volume immediately
+      - Sudden deliverability drop
+    detection_pattern: null
+
+  - id: sending-without-permission
+    summary: Emailing people who did not opt in
+    severity: critical
+    situation: |
+      Bought an email list. Scraped emails from LinkedIn. Added conference
+      contacts. Spam complaints through the roof. Provider suspends account.
+      Maybe a lawsuit.
+    why: |
+      Permission-based email is not optional. It is the law (CAN-SPAM, GDPR).
+      It is also effective - unwilling recipients hurt your metrics and
+      reputation more than they help.
+    solution: |
+      # Permission requirements:
+
+      ## Explicit opt-in:
+      - User actively chooses to receive email
+      - Not pre-checked boxes
+      - Clear what they are signing up for
+
+      ## Double opt-in:
+      - Confirmation email with link
+      - Only add to list after confirmation
+      - Best practice for marketing lists
+
+      ## What you cannot do:
+      - Buy email lists
+      - Scrape emails from websites
+      - Add conference contacts without consent
+      - Use partner/customer lists without consent
+
+      ## Transactional exception:
+      Password resets, receipts, account alerts
+      do not need marketing opt-in
+    symptoms:
+      - Purchased email lists
+      - Scraped contacts
+      - High unsubscribe rate on first send
+      - Spam complaints above 0.1%
+    detection_pattern: null
+
+  - id: image-heavy-emails
+    summary: Emails that are mostly or entirely images
+    severity: medium
+    situation: |
+      Beautiful designed email that is one big image. Users with images
+      blocked see nothing. Spam filters flag it. Mobile loading is slow.
+      No one can copy text.
+    why: |
+      Images are blocked by default in many clients. Spam filters are
+      suspicious of image-only emails. Accessibility suffers. Load times
+      increase.
+    solution: |
+      # Balance images and text:
+
+      ## 60/40 rule:
+      - At least 60% text content
+      - Images for enhancement, not content
+
+      ## Always include:
+      - Alt text on every image
+      - Key message in text, not just image
+      - Fallback for images-off view
+
+      ## Test:
+      - Preview with images disabled
+      - Should still be usable
+
+      # Example:
+      ```html
+      <img
+        src="hero.jpg"
+        alt="Save 50% this week - use code SAVE50"
+        style="max-width: 100%"
+      />
+      <p>Use code <strong>SAVE50</strong> to save 50% this week.</p>
+      ```
+    symptoms:
+      - Single image emails
+      - No text content visible
+      - Missing or generic alt text
+      - Low engagement when images blocked
+    detection_pattern: null
+
+  - id: no-preview-text
+    summary: Missing or default preview text
+    severity: medium
+    situation: |
+      Inbox shows "View this email in browser" or random HTML as preview.
+      Lower open rates. First impression wasted on boilerplate.
+    why: |
+      Preview text is prime real estate - appears right after subject line.
+      Default or missing preview text wastes this space. Good preview text
+      increases open rates 10-30%.
+    solution: |
+      # Add explicit preview text:
+
+      ## In HTML:
+      ```html
+      <div style="display:none;max-height:0;overflow:hidden;">
+        Your preview text here. This appears in inbox preview.
+        <!-- Add whitespace to push footer text out -->
+        &nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;
+      </div>
+      ```
+
+      ## With React Email:
+      ```tsx
+      <Preview>
+        Your preview text here. This appears in inbox preview.
+      </Preview>
+      ```
+
+      ## Best practices:
+      - Complement the subject line
+      - 40-100 characters optimal
+      - Create curiosity or value
+      - Different from first line of email
+    symptoms:
+      - View in browser as preview
+      - HTML code visible in preview
+      - No preview component in template
+    detection_pattern: null
+
+  - id: batch-sending-errors
+    summary: Not handling partial send failures
+    severity: high
+    situation: |
+      Sending to 10,000 users. API fails at 3,000. No tracking of what sent.
+      Either double-send or lose 7,000. No way to know who got the email.
+    why: |
+      Bulk sends fail partially. APIs timeout. Rate limits hit. Without
+      tracking individual send status, you cannot recover gracefully.
+    solution: |
+      # Track each send individually:
+
+      ```typescript
+      async function sendCampaign(emails: string[]) {
+        const results = await Promise.allSettled(
+          emails.map(async (email) => {
+            try {
+              const result = await resend.emails.send({ to: email, ... });
+              await db.emailLog.create({
+                email,
+                status: 'sent',
+                messageId: result.id,
+              });
+              return result;
+            } catch (error) {
+              await db.emailLog.create({
+                email,
+                status: 'failed',
+                error: error.message,
+              });
+              throw error;
+            }
+          })
+        );
+
+        const failed = results.filter(r => r.status === 'rejected');
+        // Retry failed sends or alert
+      }
+      ```
+
+      # Best practices:
+      - Log every send attempt
+      - Include message ID for tracking
+      - Build retry queue for failures
+      - Monitor success rate per campaign
+    symptoms:
+      - No per-recipient send logging
+      - Cannot tell who received email
+      - Double-sending issues
+      - No retry mechanism
+    detection_pattern: null

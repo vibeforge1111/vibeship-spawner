@@ -1,0 +1,149 @@
+# AI Product Validations
+# Automated checks for LLM integration code
+
+validations:
+  - id: unvalidated-llm-output
+    name: LLM output used without validation
+    description: LLM responses should be validated against a schema
+    severity: warning
+    pattern: "JSON\\.parse\\s*\\(.*completion|JSON\\.parse\\s*\\(.*message\\.content"
+    negative_pattern: "schema|Schema|validate|Validate|parse.*z\\.|zod"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "LLM output parsed as JSON without schema validation. Use Zod or similar to validate."
+    fix_hint: "Wrap in ResponseSchema.parse() to validate structure"
+
+  - id: user-input-in-prompt
+    name: Unsanitized user input in prompt
+    description: User input in prompts risks injection attacks
+    severity: warning
+    pattern: "content\\s*:\\s*`[^`]*\\$\\{.*input|content\\s*:\\s*`[^`]*\\$\\{.*req\\."
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "User input interpolated directly in prompt content. Sanitize or use separate message."
+    fix_hint: "Put user input in separate 'user' role message, not template literal"
+
+  - id: no-streaming
+    name: LLM response without streaming
+    description: Long LLM responses should be streamed for better UX
+    severity: info
+    pattern: "completions\\.create\\s*\\(|chat\\.completions\\.create\\s*\\("
+    negative_pattern: "stream\\s*:\\s*true"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "LLM call without streaming. Consider stream: true for better user experience."
+    fix_hint: "Add stream: true and use streaming response handler"
+
+  - id: missing-error-handling-llm
+    name: LLM call without error handling
+    description: LLM API calls can fail and should be handled
+    severity: warning
+    pattern: "await.*openai\\.|await.*anthropic\\."
+    negative_pattern: "try|catch|\\.catch"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "LLM API call without apparent error handling. Add try-catch for failures."
+    fix_hint: "Wrap in try-catch and handle rate limits, timeouts, etc."
+
+  - id: hardcoded-api-key
+    name: LLM API key in code
+    description: API keys should come from environment variables
+    severity: error
+    pattern: "sk-[A-Za-z0-9]{32,}|anthropic-[A-Za-z0-9]{32,}"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    exclude_patterns:
+      - "**/*.test.*"
+      - "**/*.spec.*"
+    message: "LLM API key appears hardcoded. Use environment variable."
+    fix_hint: "Use process.env.OPENAI_API_KEY or similar"
+
+  - id: no-token-tracking
+    name: LLM usage without token tracking
+    description: Track token usage for cost monitoring
+    severity: info
+    pattern: "completions\\.create|chat\\.create"
+    negative_pattern: "usage|tokens|cost|billing|track"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "LLM call without apparent usage tracking. Log token usage for cost monitoring."
+    fix_hint: "Access response.usage.total_tokens and log/store it"
+
+  - id: missing-timeout
+    name: LLM call without timeout
+    description: LLM calls should have timeout to prevent hanging
+    severity: warning
+    pattern: "openai\\.|anthropic\\."
+    negative_pattern: "timeout|AbortController|signal"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "LLM call without apparent timeout. Add timeout to prevent hanging requests."
+    fix_hint: "Use AbortController with timeout or library timeout option"
+
+  - id: no-rate-limiting-llm
+    name: User-facing LLM without rate limiting
+    description: LLM endpoints should be rate limited per user
+    severity: warning
+    pattern: "POST.*chat|POST.*completion|POST.*generate"
+    negative_pattern: "rateLimit|limit|throttle|Ratelimit"
+    file_patterns:
+      - "**/api/**/*.ts"
+      - "**/routes/**/*.ts"
+    message: "LLM API endpoint without apparent rate limiting. Add per-user limits."
+    fix_hint: "Add rate limiter middleware (e.g., Upstash Ratelimit)"
+
+  - id: sync-embedding-loop
+    name: Sequential embedding generation
+    description: Bulk embeddings should be batched, not sequential
+    severity: info
+    pattern: "for.*await.*embedding|forEach.*await.*embedding"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "Embeddings generated sequentially. Batch requests for better performance."
+    fix_hint: "Use bulk embedding API or Promise.all with batching"
+
+  - id: no-fallback-provider
+    name: Single LLM provider with no fallback
+    description: Consider fallback provider for reliability
+    severity: info
+    pattern: "openai|anthropic"
+    negative_pattern: "fallback|alternative|backup|retry.*different"
+    file_patterns:
+      - "**/ai/**/*.ts"
+      - "**/llm/**/*.ts"
+    message: "Single LLM provider without fallback. Consider backup provider for outages."
+    fix_hint: "Add fallback to alternative provider on failure"
+
+  - id: prompt-in-code
+    name: Long prompts hardcoded in source
+    description: Complex prompts should be externalized for versioning
+    severity: info
+    pattern: "content\\s*:\\s*`[^`]{500,}`|content\\s*:\\s*\"[^\"]{500,}\""
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    exclude_patterns:
+      - "**/prompts/**"
+      - "**/templates/**"
+    message: "Long prompt hardcoded in source. Consider externalizing for easier versioning."
+    fix_hint: "Move prompts to /prompts directory or prompt management system"
+
+  - id: no-content-filtering
+    name: LLM output without content filtering
+    description: User-facing LLM output should be filtered for safety
+    severity: warning
+    pattern: "message\\.content|completion\\.text"
+    negative_pattern: "filter|moderate|safety|sanitize|check"
+    file_patterns:
+      - "**/api/**/*.ts"
+      - "**/chat/**/*.ts"
+    message: "LLM output returned without apparent content filtering. Add safety checks."
+    fix_hint: "Add content moderation before displaying to users"
