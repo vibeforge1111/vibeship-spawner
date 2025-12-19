@@ -1,0 +1,109 @@
+# Frontend Skill Test Cases
+# Tests for: spawner-v2/skills/development/frontend
+
+skill_id: frontend
+skill_path: development/frontend
+
+tests:
+  # Open-ended test - holistic skill application
+  - id: frontend-open-01
+    type: open-ended
+    name: Build a user profile card component
+    prompt: |
+      Build a React component for a user profile card that:
+      - Shows avatar, name, bio, and social links
+      - Has loading and error states
+      - Is accessible
+      - Works on mobile and desktop
+
+      Provide the complete component code with any necessary hooks or utilities.
+    evaluation_criteria:
+      - Component structure and patterns
+      - Error handling approach
+      - Accessibility considerations (ARIA, keyboard nav)
+      - Responsive design approach
+      - Loading state implementation
+
+  # Trap test 1 - targets hydration-mismatch sharp edge
+  - id: frontend-trap-01
+    type: trap
+    name: Fix SSR hydration issue
+    sharp_edge_targeted: hydration-mismatch
+    prompt: |
+      This component works in development but users report a "flash" of different
+      content when the page loads. Fix it:
+
+      ```tsx
+      function WelcomeBanner() {
+        const hour = new Date().getHours()
+        const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
+        const visitCount = parseInt(localStorage.getItem('visits') || '0') + 1
+        localStorage.setItem('visits', String(visitCount))
+
+        return (
+          <div className="banner">
+            <h1>{greeting}, visitor #{visitCount}!</h1>
+            <p>Current time: {new Date().toLocaleTimeString()}</p>
+          </div>
+        )
+      }
+      ```
+    expected_catch: |
+      Should identify SSR hydration mismatch issues:
+      1. Date/time will differ between server and client
+      2. localStorage doesn't exist on server
+      3. Need useEffect for client-only values
+      Not just "add error handling" or generic suggestions.
+
+  # Trap test 2 - targets useeffect-data-fetching sharp edge
+  - id: frontend-trap-02
+    type: trap
+    name: Fix data fetching waterfall
+    sharp_edge_targeted: useeffect-data-fetching
+    prompt: |
+      Users report this page loads slowly. The network tab shows requests
+      happening one after another instead of in parallel. Fix this component:
+
+      ```tsx
+      function UserDashboard({ userId }) {
+        const [user, setUser] = useState(null)
+        const [posts, setPosts] = useState([])
+        const [notifications, setNotifications] = useState([])
+
+        useEffect(() => {
+          fetch(`/api/users/${userId}`)
+            .then(res => res.json())
+            .then(data => {
+              setUser(data)
+              fetch(`/api/users/${userId}/posts`)
+                .then(res => res.json())
+                .then(setPosts)
+            })
+        }, [userId])
+
+        useEffect(() => {
+          if (user) {
+            fetch(`/api/users/${userId}/notifications`)
+              .then(res => res.json())
+              .then(setNotifications)
+          }
+        }, [user, userId])
+
+        if (!user) return <Loading />
+
+        return (
+          <div>
+            <Profile user={user} />
+            <PostList posts={posts} />
+            <NotificationList notifications={notifications} />
+          </div>
+        )
+      }
+      ```
+    expected_catch: |
+      Should identify:
+      1. Request waterfall - sequential instead of parallel fetches
+      2. Missing cleanup for unmount (memory leak potential)
+      3. Race condition if userId changes quickly
+      4. Recommend data fetching library (React Query, SWR) or Promise.all
+      Not just "use async/await" without addressing the core issues.
