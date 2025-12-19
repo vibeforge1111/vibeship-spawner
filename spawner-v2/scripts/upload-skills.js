@@ -47,27 +47,49 @@ const SKILL_CATEGORIES = [
 ];
 
 /**
- * Upload a key-value pair to KV
+ * Upload a key-value pair to KV using REST API (production) or wrangler (local)
  */
 async function uploadToKV(binding, key, value) {
   const valueStr = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
 
-  // Write value to temp file to handle escaping
-  const tempFile = path.join(__dirname, '.temp-kv-value');
-  await fs.writeFile(tempFile, valueStr);
+  if (isLocal) {
+    // Local dev: use wrangler
+    const tempFile = path.join(__dirname, '.temp-kv-value');
+    await fs.writeFile(tempFile, valueStr);
+    try {
+      const cmd = `npx wrangler kv:key put --binding=${binding} "${key}" --path="${tempFile}" --local`;
+      await execAsync(cmd, { cwd: path.join(__dirname, '..') });
+      console.log(`  ✓ ${key}`);
+    } finally {
+      await fs.unlink(tempFile).catch(() => {});
+    }
+  } else {
+    // Production: use REST API directly (wrangler API tokens don't support PUT)
+    const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || 'bbe40a1869cd5c07782c6fda94b38999';
+    const namespaceId = process.env[`${binding}_KV_ID`] || binding;
 
-  try {
-    // For local dev, use --binding flag; for production, use --namespace-id
-    const namespaceArg = isLocal
-      ? `--binding=${binding}`
-      : `--namespace-id=${process.env[`${binding}_KV_ID`] || binding}`;
-    const localFlag = isLocal ? '--local' : '';
+    if (!apiToken) {
+      throw new Error('CLOUDFLARE_API_TOKEN environment variable required for production upload');
+    }
 
-    const cmd = `npx wrangler kv:key put ${namespaceArg} "${key}" --path="${tempFile}" ${localFlag}`;
-    await execAsync(cmd, { cwd: path.join(__dirname, '..') });
+    const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/values/${encodeURIComponent(key)}`;
+
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${apiToken}`,
+        'Content-Type': 'text/plain',
+      },
+      body: valueStr,
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(`KV upload failed: ${JSON.stringify(error)}`);
+    }
+
     console.log(`  ✓ ${key}`);
-  } finally {
-    await fs.unlink(tempFile).catch(() => {});
   }
 }
 
