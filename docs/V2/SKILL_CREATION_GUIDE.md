@@ -171,6 +171,21 @@ sharp_edges:
     detection_pattern: 'regex_to_find_this_problem'
 ```
 
+**Severity Level Criteria:**
+
+| Level | Definition | Examples |
+|-------|------------|----------|
+| `critical` | Will definitely cause major failure - data loss, security breach, user churn, revenue loss | SQL injection, shipping without testing, ignoring churn signals |
+| `high` | Likely to cause significant problems - hard to fix once shipped, compounds over time | Feature bloat, technical debt accumulation, misleading metrics |
+| `medium` | Causes friction and rework - annoying but recoverable | Inconsistent naming, missing documentation, suboptimal patterns |
+| `low` | Minor issues - nice to fix but not urgent | Style preferences, minor optimizations, edge cases |
+
+**The Severity Test:**
+- "Would this wake someone up at 3 AM?" → **critical**
+- "Would this cause a difficult post-mortem?" → **high**
+- "Would this cause frustration during code review?" → **medium**
+- "Would this be a nice-to-have improvement?" → **low**
+
 **Detection Pattern Guidelines:**
 
 | Pattern Type | Example | Use When |
@@ -229,12 +244,11 @@ identity: |
 **Good identity:**
 ```yaml
 identity: |
-  You're a frontend architect who's mass production and has mass produced
-  on projects. You've mass produced products for millions
-  of users, mass debugged production render loops at 2 AM, and mass learned that
-  cleverness is technical debt in disguise. You know that the component
-  that's easiest to delete is the one you never wrote, and that premature
-  abstraction kills more projects than copy-paste ever did.
+  You're a frontend architect who's mass-shipped React apps for a decade.
+  You've built products for millions of users, debugged production render
+  loops at 2 AM, and learned that cleverness is technical debt in disguise.
+  You know that the component that's easiest to delete is the one you never
+  wrote, and that premature abstraction kills more projects than copy-paste.
 
   Your core principles:
   1. Boring technology wins - use what works
@@ -439,6 +453,97 @@ Layer 1: Execution (Craftspeople)
 - Layer 3 hands down to Layer 2 for implementation approach
 - Layer 2 hands down to Layer 1 for specific technology guidance
 - Layer 1 hands up to Layer 2 when hitting architectural decisions
+
+### Non-Technical Skills
+
+Skills aren't just for code. Non-technical skills (marketing, strategy, product, design) follow the same structure with domain-specific adaptations:
+
+**Key Differences from Code Skills:**
+
+| Aspect | Code Skills | Non-Technical Skills |
+|--------|-------------|---------------------|
+| Examples | Runnable code snippets | Frameworks, templates, checklists |
+| Detection patterns | Regex for code | Regex for copy/docs, or `null` |
+| Symptoms | Error messages, bugs | Business metrics, user feedback |
+| Solutions | Code fixes | Process changes, mental models |
+
+**Non-Technical Sharp Edge Example:**
+
+```yaml
+# From marketing/copywriting/sharp-edges.yaml
+- id: feature-vomit
+  summary: Listing features instead of communicating benefits
+  severity: high
+  situation: |
+    Homepage: "AI-powered. Real-time sync. 256-bit encryption. API access."
+    User: "But what does it DO for me?"
+  why: |
+    Features are ingredients. Benefits are the meal. Users don't buy features,
+    they buy outcomes. Feature-focused copy requires users to do translation
+    work. Most won't. They'll bounce.
+  solution: |
+    # Feature → Benefit Translation:
+    Feature: "256-bit encryption"
+    Benefit: "Your data stays private, period."
+
+    Feature: "Real-time sync"
+    Benefit: "Work on any device. Never lose progress."
+
+    # The "So What" Test:
+    After every feature, ask "So what?"
+    Answer that question instead.
+
+    # Formula:
+    [Feature] so you can [benefit] which means [emotional outcome]
+  symptoms:
+    - Spec-sheet homepage
+    - High bounce rate
+    - "What does it do?" support tickets
+    - Competitors with worse products winning
+  detection_pattern: null  # Can't regex-detect bad copy
+```
+
+**Non-Technical Pattern Example:**
+
+```yaml
+# From strategy/product-strategy/skill.yaml
+patterns:
+  - name: Problem-First Discovery
+    description: Starting with user pain, not solution ideas
+    when: Beginning any new feature or product
+    example: |
+      # WRONG: Solution-first
+      "Let's build a notification system!"
+
+      # RIGHT: Problem-first
+      1. What problem are users having?
+         → "Users miss important updates"
+      2. How severe is it?
+         → 40% of users cited this in churn interviews
+      3. What's the current workaround?
+         → Email, which they check less frequently
+      4. What outcomes would solve it?
+         → Users see critical updates within 1 hour
+      5. NOW consider solutions
+```
+
+**Non-Technical Identity Example:**
+
+```yaml
+# From product/product-management/skill.yaml
+identity: |
+  You're a product manager who's shipped 15 products, killed 10, and learned
+  that the features you didn't build often mattered more than the ones you did.
+  You've sat in rooms where executives demanded features that would've killed
+  the product, and you found ways to redirect to what users actually needed.
+
+  Your core principles:
+  1. Outcomes over outputs - shipping features isn't success
+  2. Problem validation before solution design - always
+  3. The roadmap is a hypothesis, not a promise
+  4. Say no to 90% of ideas - that's the job
+  5. User evidence beats stakeholder opinions
+```
 
 ---
 
@@ -660,7 +765,7 @@ See existing skills in `development/` folder for full examples:
 
 ### 4. Missing Detection
 **Bad:** Sharp edge with no way to catch it
-**Good:** Sharp edge with regex that finds it in code
+**Good:** Sharp edge with regex that finds it in code (or explicit `null` for process issues)
 
 ### 5. Untested Regex
 **Bad:** Pattern that matches too much or too little
@@ -669,6 +774,18 @@ See existing skills in `development/` folder for full examples:
 ### 6. No Handoffs
 **Bad:** Skill tries to cover everything
 **Good:** Skill knows its boundaries and hands off appropriately
+
+### 7. Code-Only Thinking (for non-technical skills)
+**Bad:** Leaving detection_pattern blank because "it's not code"
+**Good:** Use `null` explicitly for process issues, or regex for docs/copy patterns
+
+### 8. Abstract Symptoms (for non-technical skills)
+**Bad:** "Product fails" or "Marketing doesn't work"
+**Good:** Observable symptoms like "High bounce rate", "Churned users cite X", "'What does it do?' support tickets"
+
+### 9. Missing the Real Consequences
+**Bad:** "This is a bad practice" (why should I care?)
+**Good:** "This cost us $50k in wasted development" or "40% of churned users cited this"
 
 ---
 
