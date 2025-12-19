@@ -213,9 +213,10 @@ vibeship-spawner/
 │   │   └── db/           # D1 database operations
 │   ├── skills/           # 35+ Skills (YAML format)
 │   └── migrations/       # D1 schema
-├── archive/              # Archived code (workers-v1, etc.)
+├── archive/              # Archived code (workers-v1, v1-skills, v1-scripts)
 ├── benchmarks/           # Skill benchmark system
 ├── catalogs/             # Agent and MCP catalogs
+├── mcp-registry.json     # MCP tool/template registry
 ├── docs/
 │   ├── TUTORIAL.md       # Getting started guide
 │   ├── archive/          # Historical documentation

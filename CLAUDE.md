@@ -20,7 +20,7 @@ Spawner is an MCP server that transforms Claude into a specialized product-build
 2. **Guardrails** - Actually catches code issues (security, patterns, production readiness)
 3. **Sharp Edges** - Knows gotchas Claude doesn't know (versioned, situation-matched)
 4. **Escape Hatches** - Detects when you're stuck and offers alternatives
-5. **Skill System** - Unified V1 (markdown) + V2 (YAML) specialist knowledge
+5. **Skill System** - 35+ specialist skills in YAML format
 6. **Skill Level Detection** - Adapts guidance to user experience level
 
 ## Tech Stack
@@ -36,31 +36,27 @@ Spawner is an MCP server that transforms Claude into a specialized product-build
 
 ```
 vibeship-spawner/
-├── spawner-v2/              # MCP Server (Cloudflare Worker)
+├── spawner-v2/              # MCP Server (Cloudflare Worker) - ACTIVE CODE
 │   ├── src/
 │   │   ├── index.ts         # Main worker, MCP routing
 │   │   ├── types.ts         # Type definitions
 │   │   ├── tools/           # MCP tool implementations (9 tools)
-│   │   │   ├── plan.ts      # spawner_plan - project planning
-│   │   │   ├── analyze.ts   # spawner_analyze - codebase analysis
-│   │   │   ├── context.ts   # spawner_load - session context
-│   │   │   ├── validate.ts  # spawner_validate - code checks
-│   │   │   ├── remember.ts  # spawner_remember - persistence
-│   │   │   ├── sharp-edge.ts # spawner_watch_out - gotchas
-│   │   │   ├── unstick.ts   # spawner_unstick - escape hatches
-│   │   │   ├── templates.ts # spawner_templates - project templates
-│   │   │   └── skills.ts    # spawner_skills - unified skill search
 │   │   ├── validation/      # Code checking (regex + AST)
 │   │   ├── skills/          # Skill loading and matching
 │   │   ├── telemetry/       # Event tracking
 │   │   └── db/              # D1 database operations
-│   ├── skills/              # V2 Skills (YAML format) - 35+ skills
+│   ├── skills/              # 35+ Skills (YAML format)
 │   └── migrations/          # D1 schema
-├── archive/                 # Archived code (workers-v1, etc.)
 ├── benchmarks/              # Skill benchmark system
 ├── catalogs/                # Agent and MCP catalogs
-├── docs/                    # Documentation
-│   └── V2/                  # V2-specific docs
+├── docs/
+│   ├── V2/                  # Active documentation
+│   └── archive/             # Historical docs
+├── archive/                 # Archived code
+│   ├── workers-v1/          # Original monolithic worker
+│   ├── v1-skills/           # V1 markdown skills
+│   └── v1-scripts/          # V1 skill finder script
+├── mcp-registry.json        # MCP tool/template registry
 └── web/                     # Web UI (SvelteKit)
 ```
 
