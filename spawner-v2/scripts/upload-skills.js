@@ -32,7 +32,18 @@ const isLocal = process.argv.includes('--local');
 
 // Paths
 const SKILLS_DIR = path.join(__dirname, '..', 'skills');
-const SKILL_LAYERS = ['core', 'integration', 'pattern'];
+// Skill categories (directories containing skill folders)
+const SKILL_CATEGORIES = [
+  'frameworks',
+  'development',
+  'design',
+  'marketing',
+  'strategy',
+  'product',
+  'communications',
+  'integration',  // legacy
+  'pattern',      // legacy
+];
 
 /**
  * Upload a key-value pair to KV
@@ -77,30 +88,30 @@ async function readYaml(filePath) {
 async function discoverSkills() {
   const skills = [];
 
-  for (const layer of SKILL_LAYERS) {
-    const layerPath = path.join(SKILLS_DIR, layer);
+  for (const category of SKILL_CATEGORIES) {
+    const categoryPath = path.join(SKILLS_DIR, category);
 
     try {
-      const entries = await fs.readdir(layerPath, { withFileTypes: true });
+      const entries = await fs.readdir(categoryPath, { withFileTypes: true });
 
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
 
-        const skillPath = path.join(layerPath, entry.name);
+        const skillPath = path.join(categoryPath, entry.name);
         const skillYamlPath = path.join(skillPath, 'skill.yaml');
 
         const skill = await readYaml(skillYamlPath);
         if (skill) {
           skills.push({
             ...skill,
-            layer_name: layer,
+            category: category,
             dir: skillPath,
           });
         }
       }
     } catch {
-      // Layer directory doesn't exist
-      console.log(`  (no ${layer}/ directory)`);
+      // Category directory doesn't exist
+      console.log(`  (no ${category}/ directory)`);
     }
   }
 
@@ -227,7 +238,7 @@ async function main() {
     allValidations.push(...taggedValidations);
 
     // Prepare skill data for KV (without dir)
-    const { dir, layer_name, ...skillData } = skill;
+    const { dir, category: skillCategory, ...skillData } = skill;
 
     // Upload skill definition
     await uploadToKV(SKILLS_NS, `skill:${skill.id}`, {

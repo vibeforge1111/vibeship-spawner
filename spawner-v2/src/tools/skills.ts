@@ -230,8 +230,9 @@ async function loadV1Registry(env: Env): Promise<V1SkillRegistry | null> {
  * Load V2 skills index from KV
  */
 async function loadV2SkillsIndex(env: Env): Promise<V2Skill[]> {
-  const index = await env.SKILLS.get<V2Skill[]>('v2:index', 'json');
-  return index ?? [];
+  // The skill_index contains a skills array with the skill metadata
+  const index = await env.SKILLS.get<{ skills: V2Skill[] }>('skill_index', 'json');
+  return index?.skills ?? [];
 }
 
 /**
