@@ -1,0 +1,194 @@
+# Technical Debt Strategy Validations
+# Automated checks to catch technical debt management anti-patterns
+
+validations:
+  - id: td-todo-without-ticket
+    name: TODO Comment Without Tracking
+    severity: warning
+    type: regex
+    pattern:
+      - 'TODO(?!.*#\d+)(?!.*JIRA)(?!.*ticket)(?!.*issue)'
+      - 'FIXME(?!.*#\d+)(?!.*JIRA)(?!.*ticket)'
+      - 'HACK(?!.*#\d+)(?!.*JIRA)'
+    message: "TODO/FIXME/HACK without issue reference. Untracked debt is invisible debt that never gets paid."
+    fix_action: "Create a ticket and reference it: TODO(#123): description. Or delete if not worth tracking."
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+      - "*.jsx"
+      - "*.py"
+      - "*.go"
+      - "*.rs"
+
+  - id: td-suppress-without-reason
+    name: Lint Suppression Without Reason
+    severity: warning
+    type: regex
+    pattern:
+      - 'eslint-disable(?!.*because|.*reason|.*TODO)'
+      - '@ts-ignore(?!.*because|.*reason)'
+      - 'noqa(?!.*#)'
+      - 'nolint(?!.*reason)'
+    message: "Lint rule suppressed without explanation. Future developers will not know if this is intentional or forgotten."
+    fix_action: "Add reason: // eslint-disable-next-line rule-name -- reason why this is acceptable"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+      - "*.jsx"
+      - "*.py"
+      - "*.go"
+
+  - id: td-any-type-spread
+    name: TypeScript Any Type Usage
+    severity: warning
+    type: regex
+    pattern:
+      - ':\s*any\b'
+      - 'as\s+any\b'
+      - '<any>'
+    message: "Using any defeats TypeScript purpose. Each any is a future runtime error waiting to happen."
+    fix_action: "Use unknown with type guards, proper generic types, or create specific interfaces"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+
+  - id: td-magic-number
+    name: Magic Numbers in Code
+    severity: info
+    type: regex
+    pattern:
+      - '(?<!["\047\w])(?:86400|3600|1000|60000|300000)(?!["\047\w\d])'
+      - '\[\s*\d{2,}\s*\]'
+      - '===?\s*\d{2,}(?!\d)'
+    message: "Magic numbers make code harder to understand and maintain. What does 86400 mean?"
+    fix_action: "Extract to named constants: const SECONDS_PER_DAY = 86400"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+      - "*.jsx"
+
+  - id: td-deep-nesting
+    name: Deeply Nested Code
+    severity: warning
+    type: regex
+    pattern:
+      - '^\s{16,}(?:if|for|while|switch)'
+      - '\{\s*\{\s*\{\s*\{'
+    message: "Deep nesting makes code hard to follow. Often a sign of missing abstraction."
+    fix_action: "Extract to functions, use early returns, consider state machine for complex conditionals"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+      - "*.jsx"
+      - "*.py"
+
+  - id: td-commented-out-code
+    name: Commented Out Code
+    severity: warning
+    type: regex
+    pattern:
+      - '//\s*(?:const|let|var|function|class|import)\s+\w+'
+      - '//\s*\w+\s*\([^)]*\)\s*[;{]'
+      - '#\s*def\s+\w+'
+    message: "Commented out code is dead weight. Version control exists for a reason."
+    fix_action: "Delete commented code. Use git history if you need it back."
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+      - "*.jsx"
+      - "*.py"
+
+  - id: td-catch-ignore
+    name: Empty Catch Block
+    severity: error
+    type: regex
+    pattern:
+      - 'catch\s*\([^)]*\)\s*\{\s*\}'
+      - 'catch\s*\([^)]*\)\s*\{\s*//.*\s*\}'
+      - 'except:\s*pass'
+    message: "Empty catch block silently swallows errors. Failures become invisible."
+    fix_action: "Log the error, rethrow, or handle explicitly. Silent failure is the worst failure."
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+      - "*.jsx"
+      - "*.py"
+
+  - id: td-console-in-prod
+    name: Console Statements in Production Code
+    severity: warning
+    type: regex
+    pattern:
+      - 'console\.(log|debug|info)\s*\('
+    message: "Console statements in production code. Clutters logs and can leak sensitive data."
+    fix_action: "Use proper logging service with levels, or remove debug statements before commit"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+      - "*.jsx"
+
+  - id: td-hardcoded-url
+    name: Hardcoded URLs or Endpoints
+    severity: warning
+    type: regex
+    pattern:
+      - 'https?://(?!example\.com|localhost|127\.0\.0\.1)[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+    message: "Hardcoded URL found. Environment-specific values should come from configuration."
+    fix_action: "Move to environment variable: process.env.API_URL or configuration file"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+      - "*.jsx"
+
+  - id: td-duplicate-string-literal
+    name: Repeated String Literals
+    severity: info
+    type: regex
+    pattern:
+      - '(["\047][^"\047]{10,}["\047]).*\1.*\1'
+    message: "Same string literal repeated multiple times. Changes require finding all instances."
+    fix_action: "Extract to constant: const ERROR_MESSAGE = 'Your message here'"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+      - "*.jsx"
+
+  - id: td-no-error-context
+    name: Error Without Context
+    severity: warning
+    type: regex
+    pattern:
+      - 'throw\s+new\s+Error\s*\(\s*\)'
+      - 'throw\s+new\s+Error\s*\(\s*["\047]["\047]\s*\)'
+      - 'raise\s+Exception\s*\(\s*\)'
+    message: "Error thrown without message. Debugging this in production will be painful."
+    fix_action: "Include context: throw new Error('Failed to fetch user: ${userId}')"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+      - "*.jsx"
+      - "*.py"
+
+  - id: td-god-file
+    name: Oversized File
+    severity: info
+    type: regex
+    pattern:
+      - '^.{500,}$'
+    message: "File is very large. Large files are hard to navigate and often indicate multiple responsibilities."
+    fix_action: "Consider splitting by concern: one concept per file, one responsibility per module"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+      - "*.jsx"
