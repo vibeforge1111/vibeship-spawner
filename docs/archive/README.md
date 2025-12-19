@@ -12,6 +12,8 @@ This directory contains historical documentation that is no longer actively main
 | `suggestions_v2.md` | Improvement suggestions (follow-up) | Historical |
 | `MCP_IMPROVEMENTS.md` | MCP improvement analysis | Historical |
 | `MEMORY_INTEGRATION_GUIDE.md` | Detailed memory system design (105K) | Historical |
+| `SKILL_SPEC_V1_FORMAT.md` | Original skill spec (V1 markdown format) | Superseded by V2 YAML |
+| `SKILL_EXAMPLE_V1_FORMAT.md` | Example skill in V1 markdown format | Superseded by V2 YAML |
 
 ## Why Archived?
 

@@ -8,7 +8,7 @@
 |-----|---------|
 | `docs/V2/PRD.md` | Product requirements - what and why |
 | `docs/V2/ARCHITECTURE.md` | Technical architecture - how it works |
-| `docs/V2/SKILL_SPEC.md` | Skill creation guide - building skills |
+| `docs/V2/SKILL_CREATION_GUIDE.md` | Skill creation guide - building skills |
 | `docs/V2/ROADMAP.md` | Build plan - week by week tasks |
 | `docs/TUTORIAL.md` | Getting started guide |
 
@@ -295,7 +295,7 @@ Before adding any feature, ask:
 If something isn't clear, check the docs first:
 1. `docs/V2/PRD.md` for "what" and "why"
 2. `docs/V2/ARCHITECTURE.md` for "how"
-3. `docs/V2/SKILL_SPEC.md` for skills specifically
+3. `docs/V2/SKILL_CREATION_GUIDE.md` for skills specifically
 4. `docs/V2/ROADMAP.md` for priorities
 
 If still unclear, that's a docs gap - fix it when you figure it out.
