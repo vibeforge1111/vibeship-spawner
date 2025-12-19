@@ -54,9 +54,10 @@ vibeship-spawner/
 │   │   ├── skills/          # Skill loading and matching
 │   │   ├── telemetry/       # Event tracking
 │   │   └── db/              # D1 database operations
-│   ├── skills/              # V2 Skills (YAML format)
+│   ├── skills/              # V2 Skills (YAML format) - 35+ skills
 │   └── migrations/          # D1 schema
-├── skills/                  # V1 Skills (markdown format)
+├── archive/                 # Archived code (workers-v1, etc.)
+├── benchmarks/              # Skill benchmark system
 ├── catalogs/                # Agent and MCP catalogs
 ├── docs/                    # Documentation
 │   └── V2/                  # V2-specific docs
@@ -65,19 +66,16 @@ vibeship-spawner/
 
 ## Key Concepts
 
-### Skill System (Unified V1 + V2)
+### Skill System
 
-The `spawner_skills` tool searches BOTH skill formats:
-
-**V1 Skills (Markdown):**
-- Stored in `/skills/` directory
-- Loaded to KV as `v1:registry` and `v1:skill:{name}`
-- Include: triggers, tags, layers, pairs_with relationships
-
-**V2 Skills (YAML):**
-- Stored in `spawner-v2/skills/`
+**V2 Skills (YAML)** - The primary skill format:
+- Stored in `spawner-v2/skills/` by category (development/, frameworks/, marketing/, etc.)
+- Each skill has: `skill.yaml`, `sharp-edges.yaml`, `validations.yaml`
+- Optional markdown files for deep-dive content
 - Loaded to KV as `v2:index` and `skill:{id}`
 - Include: structured validations, sharp edges with detection patterns
+
+**35+ skills** across categories: frameworks, development, design, marketing, strategy, product, communications
 
 ### Squads
 
@@ -208,19 +206,18 @@ node scripts/upload-skills.js
 
 ## Common Tasks
 
-### Adding a V2 Skill
+### Adding a New Skill
 
-1. Create folder in `spawner-v2/skills/core/` or `spawner-v2/skills/integration/`
-2. Add `skill.yaml` with identity
-3. Add `sharp-edges.md` with 5+ gotchas
-4. Add `patterns.md` and `anti-patterns.md`
+1. Choose category folder in `spawner-v2/skills/` (development/, frameworks/, marketing/, etc.)
+2. Create skill folder with kebab-case name
+3. Add required files:
+   - `skill.yaml` - identity, patterns, anti-patterns, handoffs
+   - `sharp-edges.yaml` - gotchas with detection patterns (8-12)
+   - `validations.yaml` - automated code checks (8-12)
+4. Optional: Add `.md` files for deeper prose content
 5. Run upload script: `node scripts/upload-skills.js`
 
-### Adding a V1 Skill
-
-1. Create markdown file in `skills/`
-2. Add to `skills/registry.json` with triggers, tags, layer
-3. Upload to KV
+See `docs/V2/SKILL_CREATION_GUIDE.md` for full guide.
 
 ### Adding a New Check
 
@@ -231,9 +228,9 @@ node scripts/upload-skills.js
 
 ### Adding a New Sharp Edge
 
-1. Add to skill's `sharp-edges.md`
-2. Include: severity, situation, why, fix, detection pattern
-3. Update KV with upload script
+1. Add to skill's `sharp-edges.yaml`
+2. Include: id, summary, severity, situation, why, solution, detection_pattern
+3. Run upload script to update KV
 
 ## Debugging
 
@@ -261,10 +258,6 @@ D1 is cheap, fast, and co-located with Workers.
 ### Why KV for Skills?
 Skills are read-heavy, rarely updated.
 KV is optimized for this access pattern.
-
-### Why Both V1 and V2 Skills?
-V1 (markdown) is easier to write, V2 (YAML) has structured validations.
-Unified search lets us leverage both while migrating.
 
 ### Why Not Full AST for All Checks?
 ts-morph is powerful but slow.
