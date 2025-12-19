@@ -17,9 +17,16 @@
  * Usage:
  *   node scripts/upload-skills.js --local  # Upload to local dev
  *   node scripts/upload-skills.js          # Upload to production
+ *
+ * Environment variables (from .env or shell):
+ *   CLOUDFLARE_API_TOKEN - Required for production uploads
+ *   CLOUDFLARE_ACCOUNT_ID - Cloudflare account ID
+ *   SKILLS_KV_ID - KV namespace ID for skills
+ *   EDGES_KV_ID - KV namespace ID for sharp edges
  */
 
 import fs from 'fs/promises';
+import { config } from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
@@ -29,6 +36,9 @@ import { parse as parseYaml } from 'yaml';
 const execAsync = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isLocal = process.argv.includes('--local');
+
+// Load .env file from spawner-v2 directory
+config({ path: path.join(__dirname, '..', '.env') });
 
 // Paths
 const SKILLS_DIR = path.join(__dirname, '..', 'skills');
