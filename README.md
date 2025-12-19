@@ -14,7 +14,7 @@ Spawner adds capabilities Claude doesn't have by default:
 2. **Guardrails** - Actually catches code issues (not just suggests)
 3. **Sharp Edges** - Knows gotchas Claude doesn't know
 4. **Escape Hatches** - Detects when you're stuck and offers alternatives
-5. **Skill System** - Unified specialist knowledge (markdown + YAML formats)
+5. **Skill System** - 35+ specialist skills in YAML format
 6. **Skill Level Detection** - Adapts guidance to your experience level
 
 ---
@@ -86,9 +86,15 @@ Spawner automatically:
 
 ## Skill System
 
-### Unified Skills
+### 35+ Skills
 
-Spawner searches both V1 (markdown) and V2 (YAML) skill formats, giving you access to all specialist knowledge:
+Spawner includes 35+ skills across categories:
+- **Frameworks:** nextjs-app-router, supabase-backend, react-patterns, tailwind-ui, typescript-strict
+- **Development:** frontend, backend, devops, cybersecurity, qa-engineering, game-development
+- **Design:** ui-design, ux-design, branding, landing-page-design
+- **Marketing:** copywriting, content-strategy, viral-marketing
+- **Strategy:** product-strategy, growth-strategy, brand-positioning
+- **Product:** product-management, analytics, a-b-testing
 
 ```
 You: What skills are available for authentication?
@@ -205,16 +211,18 @@ vibeship-spawner/
 │   │   ├── validation/   # Code checking
 │   │   ├── skills/       # Skill loading
 │   │   └── db/           # D1 database operations
-│   ├── skills/           # V2 Skills (YAML)
+│   ├── skills/           # 35+ Skills (YAML format)
 │   └── migrations/       # D1 schema
-├── skills/               # V1 Skills (markdown)
+├── archive/              # Archived code (workers-v1, etc.)
+├── benchmarks/           # Skill benchmark system
 ├── catalogs/             # Agent and MCP catalogs
 ├── docs/
 │   ├── TUTORIAL.md       # Getting started guide
+│   ├── archive/          # Historical documentation
 │   └── V2/               # V2 documentation
 │       ├── PRD.md        # Product requirements
 │       ├── ARCHITECTURE.md
-│       ├── SKILL_SPEC.md
+│       ├── SKILL_CREATION_GUIDE.md
 │       └── ROADMAP.md
 └── web/                  # Web UI (SvelteKit)
 ```
@@ -228,7 +236,7 @@ vibeship-spawner/
 | [Tutorial](docs/TUTORIAL.md) | Getting started guide |
 | [PRD](docs/V2/PRD.md) | Product requirements |
 | [Architecture](docs/V2/ARCHITECTURE.md) | Technical deep dive |
-| [Skill Spec](docs/V2/SKILL_SPEC.md) | How to build skills |
+| [Skill Creation Guide](docs/V2/SKILL_CREATION_GUIDE.md) | How to build skills |
 | [Roadmap](docs/V2/ROADMAP.md) | What to build when |
 
 ---
