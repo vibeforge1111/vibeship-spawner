@@ -1,0 +1,142 @@
+# Stripe Integration Validations
+# Automated checks to catch payment implementation mistakes
+
+validations:
+  - id: stripe-webhook-signature
+    name: Webhook signature verification
+    severity: critical
+    type: regex
+    pattern: "stripe\\.webhooks\\.constructEvent"
+    message: "Stripe webhooks must verify signatures with constructEvent()"
+    fix_action: "Add signature verification: stripe.webhooks.constructEvent(rawBody, sig, secret)"
+    applies_to:
+      - "**/webhook*.ts"
+      - "**/webhook*.js"
+      - "**/stripe*.ts"
+      - "**/stripe*.js"
+    inverse: true  # Should find this pattern
+
+  - id: stripe-raw-body
+    name: Webhook using raw body
+    severity: critical
+    type: regex
+    pattern: "req\\.json\\(\\).*stripe|stripe.*req\\.json\\(\\)"
+    message: "Webhook handlers must use raw body, not parsed JSON"
+    fix_action: "Use req.text() for App Router or express.raw() for Express"
+    applies_to:
+      - "**/webhook*.ts"
+      - "**/webhook*.js"
+
+  - id: stripe-idempotency-payments
+    name: Idempotency key on payment creation
+    severity: error
+    type: regex
+    pattern: "paymentIntents\\.create\\([^)]+\\)(?!.*idempotencyKey)"
+    message: "Payment creation should use idempotency keys to prevent duplicates"
+    fix_action: "Add idempotencyKey option: { idempotencyKey: `payment_${orderId}` }"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: stripe-idempotency-subscriptions
+    name: Idempotency key on subscription creation
+    severity: error
+    type: regex
+    pattern: "subscriptions\\.create\\([^)]+\\)(?!.*idempotencyKey)"
+    message: "Subscription creation should use idempotency keys"
+    fix_action: "Add idempotencyKey option to prevent duplicate subscriptions"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: stripe-checkout-metadata
+    name: Checkout session metadata
+    severity: warning
+    type: regex
+    pattern: "checkout\\.sessions\\.create\\([^)]+\\)(?!.*metadata)"
+    message: "Checkout sessions should include metadata to identify user/order in webhooks"
+    fix_action: "Add metadata: { userId, orderId } to checkout session"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: stripe-test-keys-in-code
+    name: Test keys hardcoded
+    severity: critical
+    type: regex
+    pattern: "sk_test_[a-zA-Z0-9]+|pk_test_[a-zA-Z0-9]+"
+    message: "Stripe test keys should not be hardcoded - use environment variables"
+    fix_action: "Use process.env.STRIPE_SECRET_KEY and process.env.STRIPE_PUBLISHABLE_KEY"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  - id: stripe-live-keys-in-code
+    name: Live keys hardcoded
+    severity: critical
+    type: regex
+    pattern: "sk_live_[a-zA-Z0-9]+|pk_live_[a-zA-Z0-9]+"
+    message: "CRITICAL: Live Stripe keys must NEVER be in code"
+    fix_action: "Remove immediately and rotate keys in Stripe dashboard"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  - id: stripe-webhook-secret-hardcoded
+    name: Webhook secret hardcoded
+    severity: critical
+    type: regex
+    pattern: "whsec_[a-zA-Z0-9]+"
+    message: "Webhook secrets must not be hardcoded"
+    fix_action: "Use process.env.STRIPE_WEBHOOK_SECRET"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: stripe-currency-hardcoded
+    name: Currency hardcoded as USD
+    severity: warning
+    type: regex
+    pattern: "currency:\\s*['\"]usd['\"]"
+    message: "Consider making currency configurable for international support"
+    fix_action: "Use a price object or make currency a parameter"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: stripe-amount-cents
+    name: Amount not in cents
+    severity: warning
+    type: regex
+    pattern: "amount:\\s*(?!.*\\*\\s*100)[0-9]+(?!00\\b)"
+    message: "Stripe amounts are in cents - ensure you're not passing dollars"
+    fix_action: "Multiply dollar amount by 100: amount: dollars * 100"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: stripe-refund-without-reason
+    name: Refund without reason
+    severity: warning
+    type: regex
+    pattern: "refunds\\.create\\([^)]*\\)(?!.*reason)"
+    message: "Refunds should include a reason for audit purposes"
+    fix_action: "Add reason parameter: reason: 'requested_by_customer'"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: stripe-error-handling
+    name: Stripe API call without error handling
+    severity: error
+    type: regex
+    pattern: "await stripe\\.[a-zA-Z]+\\.[a-zA-Z]+\\([^)]+\\)(?![^;]*catch)"
+    message: "Stripe API calls should have error handling"
+    fix_action: "Wrap in try/catch and handle StripeError appropriately"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"

@@ -41,8 +41,9 @@ const SKILL_CATEGORIES = [
   'strategy',
   'product',
   'communications',
-  'integration',  // legacy
-  'pattern',      // legacy
+  'integration',
+  'pattern',
+  'startup',      // YC/founder skills
 ];
 
 /**
