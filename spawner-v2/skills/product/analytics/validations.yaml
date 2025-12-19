@@ -1,0 +1,183 @@
+# Analytics Validations
+# Automated checks to catch data instrumentation and analytics anti-patterns
+
+validations:
+  - id: analytics-no-naming-convention
+    name: Missing Event Naming Convention
+    severity: error
+    type: regex
+    pattern:
+      - "track\\(['\"](?![A-Z][a-z]+(?:[A-Z][a-z]+)*)['\"]"
+      - "trackEvent\\(['\"](?!\\w+_\\w+)['\"]"
+    message: "Event name doesn't follow naming convention. Inconsistent naming makes analysis impossible."
+    fix_action: "Use consistent convention: PascalCase (ButtonClicked) or snake_case (button_clicked). Document in analytics spec."
+    applies_to:
+      - "*.js"
+      - "*.jsx"
+      - "*.ts"
+      - "*.tsx"
+
+  - id: analytics-pii-in-events
+    name: PII in Event Properties
+    severity: error
+    type: regex
+    pattern:
+      - "\\b(email|password|ssn|social_security|credit_card|phone)\\b.{0,50}:"
+      - "properties.{0,50}\\b(firstName|lastName|name|address|dob|birthdate)\\b"
+    message: "Potential PII in event properties. This violates privacy regulations (GDPR, CCPA) and analytics ToS."
+    fix_action: "Use anonymized IDs instead. Hash or encrypt if user-specific tracking needed. Never track passwords."
+    applies_to:
+      - "*.js"
+      - "*.jsx"
+      - "*.ts"
+      - "*.tsx"
+      - "*.py"
+
+  - id: analytics-client-only
+    name: Client-Side Only Tracking
+    severity: warning
+    type: regex
+    pattern:
+      - "track\\(['\"](?:Purchase|Payment|Transaction|Checkout)\\w*['\"]\\)(?!.{0,500}//.*server)"
+      - "analytics\\.track.{0,100}\\b(revenue|payment|order)\\b(?!.{0,500}//.*server-side)"
+    message: "Critical business event tracked only on client. Client-side tracking is unreliable (ad blockers, errors)."
+    fix_action: "Implement server-side tracking for revenue/conversion events as source of truth"
+    applies_to:
+      - "*.js"
+      - "*.jsx"
+      - "*.ts"
+      - "*.tsx"
+
+  - id: analytics-no-user-id
+    name: Missing User Identification
+    severity: error
+    type: regex
+    pattern:
+      - "analytics\\.track\\((?!.{0,200}userId)"
+      - "track\\(['\"]\\w+['\"]\\s*,\\s*\\{(?!.{0,200}\\buser_id\\b)"
+    message: "Event tracked without user ID. Can't build user journey or retention analysis without user identification."
+    fix_action: "Include userId in all events after login. Use anonymous_id for pre-login tracking."
+    applies_to:
+      - "*.js"
+      - "*.jsx"
+      - "*.ts"
+      - "*.tsx"
+
+  - id: analytics-hardcoded-properties
+    name: Hardcoded Event Properties
+    severity: warning
+    type: regex
+    pattern:
+      - "track\\(['\"]\\w+['\"]\\s*,\\s*\\{\\s*['\"]\\w+['\"]\\s*:\\s*['\"]\\w+['\"]\\s*\\}"
+    message: "Event properties appear hardcoded. Properties should be dynamic to capture actual state."
+    fix_action: "Use variables for properties to capture real values: { buttonText: button.innerText, pageUrl: window.location.href }"
+    applies_to:
+      - "*.js"
+      - "*.jsx"
+      - "*.ts"
+      - "*.tsx"
+
+  - id: analytics-no-context
+    name: Missing Contextual Properties
+    severity: warning
+    type: regex
+    pattern:
+      - "track\\(['\"]\\w+['\"]\\s*,\\s*\\{\\s*\\}\\s*\\)"
+      - "track\\(['\"]\\w+['\"]\\s*\\)(?!.{0,100}\\{)"
+    message: "Event tracked with no properties. Context is essential for analysis (what, where, when, how)."
+    fix_action: "Add properties: page, section, item_id, source, timestamp, etc."
+    applies_to:
+      - "*.js"
+      - "*.jsx"
+      - "*.ts"
+      - "*.tsx"
+
+  - id: analytics-no-error-handling
+    name: Missing Analytics Error Handling
+    severity: warning
+    type: regex
+    pattern:
+      - "analytics\\.track\\((?!.{0,500}\\btry\\b)(?!.{0,500}\\bcatch\\b)"
+      - "track\\(['\"]\\w+['\"](?!.{0,500}\\.catch)"
+    message: "No error handling for analytics calls. Failed tracking calls can crash app or go unnoticed."
+    fix_action: "Wrap analytics calls in try-catch or use .catch() for promise-based tracking"
+    applies_to:
+      - "*.js"
+      - "*.jsx"
+      - "*.ts"
+      - "*.tsx"
+
+  - id: analytics-sync-blocking
+    name: Synchronous Analytics Blocking UI
+    severity: error
+    type: regex
+    pattern:
+      - "await\\s+analytics\\.track"
+      - "track\\(['\"]\\w+['\"].*\\)\\.then\\(.*=>.*\\{[^}]{100,}\\}"
+    message: "Synchronous or blocking analytics call. Analytics should never block user interactions."
+    fix_action: "Make analytics fire-and-forget. Don't await unless critical for UX (e.g., navigation tracking)"
+    applies_to:
+      - "*.js"
+      - "*.jsx"
+      - "*.ts"
+      - "*.tsx"
+
+  - id: analytics-no-page-tracking
+    name: Missing Page View Tracking
+    severity: error
+    type: regex
+    pattern:
+      - "function\\s+\\w*Router\\w*|<Router|useRouter\\(\\)(?!.{0,500}analytics\\.page)"
+      - "Route\\s+path=(?!.{0,500}analytics\\.page)"
+    message: "Router setup without page view tracking. Page views are fundamental for understanding user flow."
+    fix_action: "Add analytics.page() call in router middleware or useEffect on route changes"
+    applies_to:
+      - "*.js"
+      - "*.jsx"
+      - "*.ts"
+      - "*.tsx"
+
+  - id: analytics-inconsistent-casing
+    name: Inconsistent Property Casing
+    severity: warning
+    type: regex
+    pattern:
+      - "\\{\\s*[A-Z]\\w+:"
+      - "\\{\\s*\\w+-\\w+:"
+    message: "Inconsistent property casing detected. Mix of camelCase, PascalCase, or kebab-case makes querying difficult."
+    fix_action: "Standardize on one convention across all events (recommend snake_case or camelCase)"
+    applies_to:
+      - "*.js"
+      - "*.jsx"
+      - "*.ts"
+      - "*.tsx"
+
+  - id: analytics-no-consent-check
+    name: Missing Privacy Consent Check
+    severity: error
+    type: regex
+    pattern:
+      - "analytics\\.track\\((?!.{0,200}\\bconsentGiven\\b)(?!.{0,200}\\bhasConsent\\b)"
+      - "track\\(['\"]\\w+['\"](?!.{0,300}if\\s*\\(.{0,50}consent)"
+    message: "Analytics tracking without consent check. Required for GDPR compliance in EU."
+    fix_action: "Check consent status before tracking: if (hasConsent()) { analytics.track(...) }"
+    applies_to:
+      - "*.js"
+      - "*.jsx"
+      - "*.ts"
+      - "*.tsx"
+
+  - id: analytics-undefined-properties
+    name: Potentially Undefined Properties
+    severity: warning
+    type: regex
+    pattern:
+      - "track\\(['\"]\\w+['\"]\\s*,\\s*\\{[^}]*\\buser\\.\\w+[^}]*\\}\\)(?!.{0,100}\\?)"
+      - "properties:\\s*\\{[^}]*\\w+\\.\\w+\\.\\w+[^}]*\\}(?!.{0,100}\\?)"
+    message: "Nested object properties without null checks may cause tracking errors."
+    fix_action: "Use optional chaining: { userName: user?.name, orgId: user?.org?.id }"
+    applies_to:
+      - "*.js"
+      - "*.jsx"
+      - "*.ts"
+      - "*.tsx"

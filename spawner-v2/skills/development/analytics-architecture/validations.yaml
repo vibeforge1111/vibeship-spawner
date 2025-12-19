@@ -1,0 +1,176 @@
+# Analytics Architecture Validations
+# Automated checks to catch analytics implementation anti-patterns
+
+validations:
+  - id: analytics-pii-in-events
+    name: PII in Analytics Events
+    severity: critical
+    type: regex
+    pattern:
+      - "track\\([^)]*email\\s*:"
+      - "track\\([^)]*phone\\s*:"
+      - "track\\([^)]*ssn\\s*:"
+      - "track\\([^)]*address\\s*:"
+      - "analytics\\.identify\\([^)]*email\\s*:"
+    message: "Potential PII (email, phone, SSN, address) in analytics events. Hash or exclude PII."
+    fix_action: "Hash PII before tracking: { emailHash: hashEmail(email) }"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  - id: analytics-no-schema
+    name: Unstructured Event Data
+    severity: warning
+    type: regex
+    pattern:
+      - "track\\(['\"][^'\"]+['\"]\\s*,\\s*\\{[^}]*\\}\\)(?!.*\\bschema\\b)"
+      - "analytics\\.track\\([^)]*\\)(?!.*validate)"
+    message: "Analytics event without schema validation. Define event schema."
+    fix_action: "Create schema: const PageViewSchema = z.object({ ... })"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: analytics-client-side-only
+    name: Client-Side Only Tracking
+    severity: warning
+    type: regex
+    pattern:
+      - "analytics\\.track\\("
+    message: "Client-side analytics can be blocked by ad blockers. Implement server-side tracking."
+    fix_action: "Add server-side tracking endpoint: POST /api/track"
+    applies_to:
+      - "app/**/*.tsx"
+      - "app/**/*.jsx"
+      - "pages/**/*.tsx"
+      - "pages/**/*.jsx"
+
+  - id: analytics-no-user-id
+    name: Events Without User Identification
+    severity: warning
+    type: regex
+    pattern:
+      - "track\\(['\"][^'\"]+['\"]\\s*,\\s*\\{(?!.*userId)(?!.*anonymousId)"
+    message: "Analytics event without user identification. Add userId or anonymousId."
+    fix_action: "Include: { userId: user.id, anonymousId: getAnonymousId() }"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  - id: analytics-hardcoded-keys
+    name: Hardcoded Analytics API Keys
+    severity: critical
+    type: regex
+    pattern:
+      - "writeKey:\\s*['\"][a-zA-Z0-9]{20,}['\"]"
+      - "apiKey:\\s*['\"]AIza[a-zA-Z0-9_-]{35}['\"]"
+      - "mixpanel\\.init\\(['\"][a-f0-9]{32}['\"]"
+    message: "Analytics API key hardcoded in client code. Use environment variables."
+    fix_action: "Use process.env.NEXT_PUBLIC_ANALYTICS_KEY"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  - id: analytics-missing-error-tracking
+    name: Missing Error Tracking
+    severity: warning
+    type: regex
+    pattern:
+      - "catch\\s*\\([^)]*\\)\\s*\\{(?!.*track|.*captureException|.*logError)"
+    message: "Error not tracked in analytics. Add error tracking."
+    fix_action: "Add: analytics.track('Error Occurred', { error: e.message })"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  - id: analytics-magic-event-names
+    name: Magic String Event Names
+    severity: warning
+    type: regex
+    pattern:
+      - "track\\(['\"][^'\"]+['\"]"
+    message: "Event name is magic string. Use constants for type safety."
+    fix_action: "Define: const EVENTS = { PAGE_VIEW: 'Page Viewed' } as const"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  - id: analytics-no-consent
+    name: Tracking Without Consent
+    severity: error
+    type: regex
+    pattern:
+      - "analytics\\.track\\((?!.*hasConsent|.*cookieConsent)"
+      - "gtag\\((?!.*consent)"
+    message: "Analytics tracking without consent check. Add GDPR/CCPA compliance."
+    fix_action: "Check consent: if (hasAnalyticsConsent()) { analytics.track(...) }"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  - id: analytics-sync-blocking
+    name: Synchronous Analytics Blocking Render
+    severity: warning
+    type: regex
+    pattern:
+      - "const\\s+\\w+\\s*=\\s*analytics\\.track\\("
+      - "await\\s+analytics\\.track\\("
+    message: "Analytics blocking code execution. Track asynchronously without await."
+    fix_action: "Fire and forget: analytics.track(...) // no await"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  - id: analytics-no-retry
+    name: No Retry Logic for Failed Events
+    severity: warning
+    type: regex
+    pattern:
+      - "fetch\\([^)]*\\/track[^)]*\\)(?!.*retry|.*catch)"
+    message: "Analytics request without retry logic. Events may be lost."
+    fix_action: "Add retry: await retryWithBackoff(() => fetch('/track', ...))"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: analytics-excessive-events
+    name: Excessive Event Tracking
+    severity: info
+    type: regex
+    pattern:
+      - "onMouseMove.*track\\("
+      - "onScroll.*track\\("
+      - "onChange.*track\\("
+    message: "High-frequency events can overwhelm analytics. Debounce or sample."
+    fix_action: "Use debounce: const trackScroll = debounce(() => analytics.track(...), 1000)"
+    applies_to:
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  - id: analytics-no-environment-filter
+    name: Development Events to Production
+    severity: warning
+    type: regex
+    pattern:
+      - "analytics\\.track\\((?!.*process\\.env\\.NODE_ENV)"
+    message: "Analytics may send dev events to production. Filter by environment."
+    fix_action: "Add check: if (process.env.NODE_ENV === 'production') { track(...) }"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.tsx"
+      - "**/*.jsx"
