@@ -208,7 +208,7 @@
         <span class="hero-badge claude-badge">SKILL-BASED AGENTS</span>
       </div>
       <h1 class="hero-tagline">Give <span class="highlight">Claude, Skills<span class="claude-underline"></span></span> it's missing.</h1>
-      <p class="hero-subtitle">Automatically spawn the right skills for your project. Overclock your outputs at every level vs the generalized approach. Claude says skills make the difference. Spawner + <a href="https://mind.vibeship.co" target="_blank" rel="noopener" class="mind-link">Mind<span class="mind-bubble">🧠</span></a> automate these skills into a seamless workflow.</p>
+      <p class="hero-subtitle">Automatically spawn the right skills for your project. Overclock your outputs at every level vs the generalized approach. Claude says skills make the difference. Spawner + <a href="https://mind.vibeship.co" target="_blank" rel="noopener" class="mind-link">Mind<span class="mind-bubble"><Icon name="brain" size={14} /></span></a> automate these skills into a seamless workflow.</p>
       <a href="https://claude.com/blog/skills" target="_blank" rel="noopener" class="hero-cta">
         <span>What Claude says about Skills</span>
         <Icon name="external-link" size={14} />
@@ -313,7 +313,7 @@
       <!-- New Project Path -->
       <div class="path-card">
         <div class="path-header">
-          <span class="path-icon">🆕</span>
+          <span class="path-icon"><Icon name="file-plus" size={20} /></span>
           <h3 class="path-title">New Project</h3>
         </div>
         <p class="path-desc">Tell Claude what you want to build</p>
@@ -358,7 +358,7 @@
       <!-- Existing Project Path -->
       <div class="path-card">
         <div class="path-header">
-          <span class="path-icon">📂</span>
+          <span class="path-icon"><Icon name="folder" size={20} /></span>
           <h3 class="path-title">Existing Project</h3>
         </div>
         <p class="path-desc">Point Claude at your codebase</p>
@@ -424,17 +424,17 @@
         <div class="flow-arrow-down">↓</div>
         <div class="spawned-agents">
           <div class="spawned-agent">
-            <span class="agent-icon">🔐</span>
+            <span class="agent-icon"><Icon name="lock" size={18} /></span>
             <span class="agent-name">Auth Agent</span>
             <span class="agent-skill">auth-flow skill</span>
           </div>
           <div class="spawned-agent">
-            <span class="agent-icon">🗄️</span>
+            <span class="agent-icon"><Icon name="database" size={18} /></span>
             <span class="agent-name">Database Agent</span>
             <span class="agent-skill">supabase-backend skill</span>
           </div>
           <div class="spawned-agent">
-            <span class="agent-icon">🛡️</span>
+            <span class="agent-icon"><Icon name="shield" size={18} /></span>
             <span class="agent-name">Security Agent</span>
             <span class="agent-skill">rls-policies skill</span>
           </div>
@@ -575,7 +575,7 @@
     </div>
 
     <div class="claude-says">
-      <div class="claude-avatar">🤖</div>
+      <div class="claude-avatar"><Icon name="message-circle" size={24} /></div>
       <div class="claude-message">
         <p class="claude-text">"Skills give me the context I need to actually help you ship. Without them, I'm guessing based on training data that might be outdated. With them, I know exactly what works and what will break."</p>
         <span class="claude-source">— How Claude describes the difference</span>
@@ -594,7 +594,7 @@
     <div class="duo-grid">
       <div class="duo-card spawner-card">
         <div class="duo-header">
-          <span class="duo-icon">⚡</span>
+          <span class="duo-icon"><Icon name="zap" size={20} /></span>
           <h3 class="duo-title">Spawner</h3>
         </div>
         <p class="duo-role">The skill system and guardrails</p>
@@ -611,7 +611,7 @@
 
       <div class="duo-card mind-card">
         <div class="duo-header">
-          <span class="duo-icon">🧠</span>
+          <span class="duo-icon"><Icon name="brain" size={20} /></span>
           <h3 class="duo-title">Mind</h3>
         </div>
         <p class="duo-role">The memory and context layer</p>
@@ -665,7 +665,7 @@
         <div class="power-demo">
           <div class="demo-bubble spawner">
             <span class="demo-label">Spawner</span>
-            <span class="demo-alert">⚠️ Line 12: SUPABASE_KEY hardcoded</span>
+            <span class="demo-alert"><Icon name="alert-triangle" size={14} /> Line 12: SUPABASE_KEY hardcoded</span>
             Moving to environment variable...
           </div>
         </div>
@@ -1283,7 +1283,10 @@
   }
 
   .path-icon {
-    font-size: var(--text-2xl);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
   }
 
   .path-title {
@@ -1482,7 +1485,10 @@
   }
 
   .agent-icon {
-    font-size: var(--text-xl);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
   }
 
   .agent-name {
@@ -1764,8 +1770,11 @@
   }
 
   .claude-avatar {
-    font-size: var(--text-2xl);
+    display: flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
+    color: var(--text-secondary);
   }
 
   .claude-message {
@@ -1825,7 +1834,10 @@
   }
 
   .duo-icon {
-    font-size: var(--text-xl);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
   }
 
   .duo-title {
@@ -2099,10 +2111,6 @@
     transform: translateY(-2px);
   }
 
-  .agent-icon {
-    font-size: var(--text-2xl);
-  }
-
   .agent-name {
     font-family: var(--font-mono);
     font-size: var(--text-xs);
@@ -2246,7 +2254,9 @@
   }
 
   .demo-alert {
-    display: block;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
     color: var(--red);
     margin-bottom: var(--space-2);
   }
