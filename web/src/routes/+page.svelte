@@ -2305,29 +2305,6 @@
     color: var(--green-dim);
   }
 
-  /* Advanced section */
-  .advanced {
-    text-align: center;
-    padding: var(--space-12) var(--space-8);
-    border-top: 1px solid var(--border);
-  }
-
-  .advanced h3 {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--text-secondary);
-    margin: 0 0 var(--space-2);
-  }
-
-  .advanced p {
-    font-size: var(--text-sm);
-    color: var(--text-tertiary);
-    margin: 0 0 var(--space-4);
-  }
-
   .btn-secondary {
     display: inline-flex;
     align-items: center;
@@ -2410,10 +2387,6 @@
     }
 
     .terminal-line-output {
-      font-size: var(--text-xs);
-    }
-
-    .terminal-code-block pre {
       font-size: var(--text-xs);
     }
 

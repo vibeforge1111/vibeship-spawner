@@ -1,16 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import ThemeToggle from './ThemeToggle.svelte';
-  import Icon from './Icon.svelte';
-  import { githubUser, isAuthenticated, initAuth } from '$lib/stores/auth';
-
-  onMount(() => {
-    initAuth();
-  });
-
-  function handleLogout() {
-    window.location.href = '/api/auth/logout';
-  }
 </script>
 
 <nav class="navbar">
@@ -22,22 +11,9 @@
     </a>
 
     <div class="navbar-right">
-      <a href="/why-spawner">Why Spawner</a>
+      <a href="/why-spawner">Benefits</a>
       <a href="/mcp-guide">Guide</a>
       <a href="/skills">Skills</a>
-      <a href="/builder">Build</a>
-      {#if $isAuthenticated}
-        <span class="user-info">
-          <Icon name="github" size={16} />
-          <span class="username">{$githubUser}</span>
-        </span>
-        <button class="logout-btn" onclick={handleLogout}>Logout</button>
-      {:else}
-        <a href="/api/auth/github" class="login-btn">
-          <Icon name="github" size={16} />
-          <span>Login</span>
-        </a>
-      {/if}
       <ThemeToggle />
     </div>
   </div>
@@ -109,63 +85,14 @@
     gap: 0.75rem;
   }
 
-  .navbar-right a:not(.login-btn) {
+  .navbar-right a {
     font-size: var(--text-sm);
     text-decoration: none;
     color: var(--text-secondary);
     transition: color 0.2s;
   }
 
-  .navbar-right a:not(.login-btn):hover {
-    color: var(--text-primary);
-  }
-
-  .login-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 0.75rem;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: var(--text-xs);
-    font-weight: 500;
-    text-decoration: none;
-    border: 1px solid var(--border);
-    background: transparent;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .login-btn:hover {
-    border-color: var(--text-primary);
-    color: var(--text-primary);
-  }
-
-  .user-info {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-  }
-
-  .username {
-    color: var(--green-dim);
-  }
-
-  .logout-btn {
-    padding: 0.5rem 0.75rem;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: var(--text-xs);
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text-tertiary);
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .logout-btn:hover {
-    border-color: var(--text-primary);
+  .navbar-right a:hover {
     color: var(--text-primary);
   }
 </style>
