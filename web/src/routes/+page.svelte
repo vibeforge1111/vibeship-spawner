@@ -282,10 +282,11 @@
       </div>
     </div>
 
-    <p class="benefits-note">
-      <Icon name="folder" size={14} />
-      <span>Already have a project? Spawner analyzes your codebase and spawns the right skills to turbocharge your flow.</span>
-    </p>
+    <div class="benefits-note">
+      <Icon name="folder" size={16} />
+      <span>Already have a project?</span>
+      <span>Spawner analyzes your codebase and spawns the right skills to turbocharge your flow.</span>
+    </div>
   </section>
 
   <!-- Divider -->
@@ -1159,20 +1160,26 @@
   }
 
   .benefits-note {
-    display: inline-flex;
+    display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
+    gap: var(--space-2);
     margin-top: var(--space-8);
-    padding: var(--space-3) var(--space-5);
+    padding: var(--space-4) var(--space-6);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     color: var(--text-secondary);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
+    text-align: center;
   }
 
-  .benefits-note span {
+  .benefits-note span:first-of-type {
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .benefits-note span:last-of-type {
     line-height: 1.5;
   }
 
