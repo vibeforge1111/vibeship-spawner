@@ -333,13 +333,13 @@
           <div class="example-arrow"><Icon name="arrow-right" size={16} /></div>
           <div class="example-output">
             <span class="output-tag">Stack detected</span>
-            <span class="output-tag">Gaps found</span>
+            <span class="output-tag">Skills spawned</span>
           </div>
         </div>
 
         <div class="path-result">
           <Icon name="check" size={14} />
-          <span>Instant context, zero ramp-up time</span>
+          <span>Zero ramp-up, instant expertise</span>
         </div>
       </div>
     </div>
