@@ -5,11 +5,11 @@
  * skill design before the automated research → new → score flow.
  *
  * Brainstorm Areas:
- * 1. Identity & Persona - Who is this skill at the world-class level?
- * 2. Domain Boundaries - What does it own vs. hand off?
- * 3. Sharp Edges - What painful gotchas must be captured?
- * 4. Collaboration Model - How does it work with other skills?
- * 5. Target Audience - Who benefits most?
+ * 1. The Expert - What makes this skill truly world-class?
+ * 2. Stay in Your Lane - What should this skill focus on vs. pass to others?
+ * 3. Common Pitfalls - What mistakes does this skill help people avoid?
+ * 4. Works Well With - How does this skill team up with other skills?
+ * 5. Built For - Who is this skill designed to help?
  */
 
 import { z } from 'zod';
@@ -71,28 +71,28 @@ const SKILL_CATEGORIES = [
 
 const BRAINSTORM_AREAS = {
   identity: {
-    name: 'Identity & Persona',
-    description: 'Who is this skill at the world-class level?',
-    icon: '🎭',
+    name: 'The Expert',
+    description: 'What makes this skill truly world-class? Think of it as a seasoned pro with decades of experience.',
+    icon: '🧠',
   },
   boundaries: {
-    name: 'Domain Boundaries',
-    description: 'What does this skill own vs. hand off?',
-    icon: '🗺️',
+    name: 'Stay in Your Lane',
+    description: 'What should this skill focus on, and when should it pass the baton to someone else?',
+    icon: '🎯',
   },
   edges: {
-    name: 'Sharp Edges',
-    description: 'What painful gotchas must be captured?',
+    name: 'Common Pitfalls',
+    description: 'What mistakes does this skill help people avoid? The "I wish someone told me this sooner" moments.',
     icon: '⚠️',
   },
   collaboration: {
-    name: 'Collaboration Model',
-    description: 'How does this skill work with other skills?',
+    name: 'Works Well With',
+    description: 'How does this skill team up with other skills to get things done?',
     icon: '🤝',
   },
   audience: {
-    name: 'Target Audience',
-    description: 'Who benefits most from this skill?',
+    name: 'Built For',
+    description: 'Who is this skill designed to help? What are they trying to accomplish?',
     icon: '👥',
   },
 };
@@ -314,7 +314,7 @@ const AUDIENCE_QUESTIONS: BrainstormQuestion[] = [
 export const skillBrainstormToolDefinition: ToolDefinition = {
   name: 'spawner_skill_brainstorm',
   description:
-    'Optional brainstorming session before skill creation. Helps deeply explore skill identity, boundaries, edges, collaboration, and audience. Use when you want to go deep before the automated research → new → score pipeline.',
+    'Optional brainstorming session before skill creation. Explore what makes a skill world-class, what it should focus on, common pitfalls to avoid, how it works with other skills, and who it helps. Use when you want to think deeply before the automated pipeline runs.',
   inputSchema: {
     type: 'object' as const,
     properties: {
@@ -337,7 +337,7 @@ export const skillBrainstormToolDefinition: ToolDefinition = {
       area: {
         type: 'string',
         enum: ['identity', 'boundaries', 'edges', 'collaboration', 'audience'],
-        description: 'Area to explore (required for explore action)',
+        description: 'Area to explore: identity (the expert), boundaries (stay in lane), edges (pitfalls), collaboration (works with), audience (built for)',
       },
       insights: {
         type: 'array',
@@ -420,11 +420,11 @@ spawner_skill_brainstorm({
 This is an **optional** step before the automated skill creation pipeline.
 
 **Use brainstorming when you want to:**
-- Deeply explore what makes a skill world-class
-- Define clear boundaries and ownership
-- Capture critical sharp edges before research
-- Plan collaboration with other skills
-- Clarify target audience and goals
+- Think through what makes this skill truly great
+- Decide what the skill should focus on vs. leave to others
+- Capture common mistakes people make (so the skill can warn them)
+- Plan how the skill teams up with other skills
+- Get clear on who this skill is built for
 
 **Pipeline Flow:**
 \`\`\`
@@ -471,11 +471,11 @@ ${area.description}
 
 ## Recommended Flow
 
-1. **Start with Identity** - Define who this skill is at the expert level
-2. **Set Boundaries** - Clarify what it owns vs. hands off
-3. **Capture Sharp Edges** - Document painful gotchas
-4. **Plan Collaboration** - Define how it works with others
-5. **Target Audience** - Clarify who benefits most
+1. **The Expert** - Define what makes this skill world-class
+2. **Stay in Your Lane** - Clarify what it focuses on vs. passes to others
+3. **Common Pitfalls** - Document mistakes people make that this skill prevents
+4. **Works Well With** - Define how it teams up with other skills
+5. **Built For** - Get clear on who this skill helps
 
 ---
 
@@ -507,11 +507,11 @@ function handleExplore(input: BrainstormInput): {
           text: `# Missing Area
 
 Please specify an area to explore:
-- \`identity\` - Identity & Persona
-- \`boundaries\` - Domain Boundaries
-- \`edges\` - Sharp Edges
-- \`collaboration\` - Collaboration Model
-- \`audience\` - Target Audience`,
+- \`identity\` - The Expert (what makes it world-class)
+- \`boundaries\` - Stay in Your Lane (focus vs. hand off)
+- \`edges\` - Common Pitfalls (mistakes to avoid)
+- \`collaboration\` - Works Well With (teaming up with other skills)
+- \`audience\` - Built For (who this helps)`,
         },
       ],
     };
