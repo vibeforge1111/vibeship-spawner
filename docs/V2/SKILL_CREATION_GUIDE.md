@@ -4,13 +4,14 @@
 
 ## TL;DR
 
-A world-class skill has **3 YAML files**:
+A world-class skill has **4 YAML files**:
 
 | File | Purpose | Machine Use |
 |------|---------|-------------|
 | `skill.yaml` | Identity, patterns, anti-patterns, handoffs | Skill matching, context loading |
 | `sharp-edges.yaml` | Gotchas with detection patterns | Proactive warnings, code scanning |
 | `validations.yaml` | Automated checks | Real-time code validation |
+| `collaboration.yaml` | Prerequisites, delegation, skill interactions | Skill orchestration, handoffs |
 
 Optional markdown files (`patterns.md`, `anti-patterns.md`, `decisions.md`, `sharp-edges.md`) provide deeper prose for complex topics.
 
@@ -25,7 +26,7 @@ A skill transforms Claude from a general assistant into a **domain expert with b
 **Without skill:** Claude gives generic React advice
 **With skill:** Claude knows that `useEffect` with missing deps causes infinite loops, catches it in your code, and shows the exact fix
 
-### The Three Pillars
+### The Four Pillars
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -34,6 +35,7 @@ A skill transforms Claude from a general assistant into a **domain expert with b
 │                                                         │
 │  1. IDENTITY (skill.yaml)                              │
 │     WHO is this expert? What do they believe?          │
+│     → Battle scars and strong opinions                 │
 │     → Patterns they follow                             │
 │     → Anti-patterns they avoid                         │
 │     → When to hand off to other experts                │
@@ -49,6 +51,13 @@ A skill transforms Claude from a general assistant into a **domain expert with b
 │     → Regex patterns for common mistakes               │
 │     → File-type targeting                              │
 │     → Actionable fix suggestions                       │
+│                                                         │
+│  4. COLLABORATION (collaboration.yaml)                 │
+│     HOW does this skill work with others?              │
+│     → Prerequisites (skills & knowledge needed)        │
+│     → Delegation triggers (when to hand off)           │
+│     → Cross-domain insights (adjacent expertise)       │
+│     → Ecosystem (tools, alternatives, deprecated)      │
 │                                                         │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -226,6 +235,92 @@ validations:
 | `warning` | Bad practice, likely problems | Missing error handling |
 | `info` | Suggestion for improvement | Could use newer API |
 
+### collaboration.yaml
+
+```yaml
+# Collaboration Model - How This Skill Works With Others
+# Defines prerequisites, delegation triggers, and cross-domain insights
+
+# PREREQUISITE SKILLS
+# Skills and knowledge this skill assumes or builds upon
+prerequisites:
+  skills:
+    - frontend          # Skill IDs this skill assumes access to
+    - typescript-strict
+  knowledge:
+    - "Understanding of async/await patterns"
+    - "Familiarity with component lifecycles"
+    - "Basic understanding of state management concepts"
+
+# COMPLEMENTARY SKILLS MAP
+# 5-10 related skills and how they interact with this one
+complementary_skills:
+  - skill: backend
+    relationship: "API layer coordination"
+    brings: "Server-side data contracts and error handling patterns"
+  - skill: testing
+    relationship: "Quality assurance"
+    brings: "Component testing strategies and mocking patterns"
+
+# DELEGATION TRIGGERS
+# When to let another skill take over completely
+delegation:
+  - trigger: "authentication" # Phrase or situation
+    delegate_to: auth-flow
+    pattern: sequential       # sequential | parallel | review
+    context: "Pass user state requirements and session needs"
+    receive: "Auth implementation and session management"
+
+  - trigger: "database schema"
+    delegate_to: supabase-backend
+    pattern: parallel
+    context: "Data model requirements"
+    receive: "Schema design and migration files"
+
+# COLLABORATION PATTERNS
+# How this skill works with others on complex tasks
+collaboration_patterns:
+  sequential:
+    - "I define component structure, then testing skill adds test cases"
+  parallel:
+    - "I handle frontend while backend skill handles API simultaneously"
+  review:
+    - "Security skill reviews my authentication implementation"
+
+# CROSS-DOMAIN INSIGHTS
+# Knowledge from adjacent fields that informs this skill
+cross_domain_insights:
+  - domain: psychology
+    insight: "Cognitive load limits (7±2 items) inform component complexity decisions"
+    applies_when: "Designing user-facing component hierarchies"
+
+  - domain: game-development
+    insight: "Frame-rate optimization techniques apply to animation performance"
+    applies_when: "Building smooth UI transitions"
+
+# SKILL ECOSYSTEM (for technical skills)
+# Related tools, alternatives, what's deprecated
+ecosystem:
+  primary_tools:
+    - "React DevTools"
+    - "Chrome Performance tab"
+  alternatives:
+    - name: Vue
+      use_when: "Need simpler reactivity model or smaller bundle"
+      avoid_when: "Large existing React codebase or need mature ecosystem"
+  deprecated:
+    - "Class components (prefer hooks)"
+    - "componentWillMount lifecycle (removed in React 18)"
+```
+
+**Collaboration Pattern Types:**
+
+| Pattern | When to Use | Example |
+|---------|-------------|---------|
+| `sequential` | One skill's output feeds the next | Frontend → Testing → Deployment |
+| `parallel` | Skills work simultaneously on different aspects | Frontend + Backend + Design |
+| `review` | One skill validates another's output | Security reviews Auth implementation |
+
 ---
 
 ## Part 3: Writing World-Class Content
@@ -241,21 +336,45 @@ identity: |
   You should follow best practices and write clean code.
 ```
 
-**Good identity:**
+**Good identity (World-Class Template):**
 ```yaml
 identity: |
+  # WHO YOU ARE
   You're a frontend architect who's mass-shipped React apps for a decade.
   You've built products for millions of users, debugged production render
   loops at 2 AM, and learned that cleverness is technical debt in disguise.
   You know that the component that's easiest to delete is the one you never
   wrote, and that premature abstraction kills more projects than copy-paste.
 
+  # STRONG OPINIONS (earned through experience)
   Your core principles:
   1. Boring technology wins - use what works
   2. Delete code before you add it
   3. The best component is no component
   4. Types are documentation that compiles
   5. If it's not tested, it's broken
+
+  # CONTRARIAN INSIGHT
+  What most React developers get wrong: They optimize for DRY when they should
+  optimize for deletion. Three similar components that can be deleted independently
+  are better than one "flexible" component with 12 props.
+
+  # HISTORY & EVOLUTION
+  The field evolved from jQuery spaghetti → class components → hooks → RSC
+  because the abstraction level kept rising to manage complexity. The failed
+  experiments (mixins, HOC hell) taught us that composition beats inheritance.
+  Where it's heading: Server components by default, client islands for interactivity.
+
+  # KNOWING YOUR LIMITS
+  What you don't cover: Backend architecture, database design, deployment.
+  When to defer: Authentication (→ auth-flow), State management at scale (→ redux-patterns),
+  Server components (→ nextjs-app-router).
+
+  # PREREQUISITE KNOWLEDGE
+  To use this skill effectively, you should understand:
+  - JavaScript closures and this binding
+  - Basic understanding of the virtual DOM concept
+  - Async/await and Promise patterns
 ```
 
 ### Sharp Edges: Real Pain, Not Theory
@@ -645,6 +764,13 @@ Identify:
 - [ ] Target skills exist
 - [ ] Context is clear
 
+**Collaboration (collaboration.yaml):**
+- [ ] Prerequisites list foundational skills and knowledge
+- [ ] 5-10 complementary skills with relationships
+- [ ] 3-5 delegation triggers with context and expected output
+- [ ] Cross-domain insights documented (2-3 minimum)
+- [ ] Ecosystem defined for technical skills (tools/alternatives/deprecated)
+
 ---
 
 ## Part 7: File Structure
@@ -656,13 +782,14 @@ spawner-v2/skills/
 │       ├── skill.yaml           # Required: identity + patterns + anti-patterns
 │       ├── sharp-edges.yaml     # Required: structured gotchas
 │       ├── validations.yaml     # Required: automated checks
+│       ├── collaboration.yaml   # Required: skill interactions + delegation
 │       ├── patterns.md          # Optional: deep-dive on patterns
 │       ├── anti-patterns.md     # Optional: deep-dive on anti-patterns
 │       ├── decisions.md         # Optional: decision frameworks
 │       └── sharp-edges.md       # Optional: prose version of edges
 ```
 
-**Required files:** `skill.yaml`, `sharp-edges.yaml`, `validations.yaml`
+**Required files:** `skill.yaml`, `sharp-edges.yaml`, `validations.yaml`, `collaboration.yaml`
 **Optional files:** Markdown files for deeper prose when YAML isn't enough
 
 ---
@@ -821,18 +948,43 @@ new_in_update: 'update\s*\([^)]*\)\s*\{[^}]*new\s+[A-Z]'
 
 ## Appendix B: Skill Generator Usage
 
-The skill generator creates scaffolds. Use it to start, then fill with real content:
+The skill generator (`spawner_skill_new`) creates complete skill scaffolds with 4 YAML files. Use it to start, then fill with real content:
 
 ```bash
-# Create new skill scaffold
-spawner_skills({ action: "scaffold", type: "development", name: "rust-async" })
+# List available categories
+spawner_skill_new({ action: "list-categories" })
 
-# Validate existing skill
-spawner_skills({ action: "validate", skill: "frontend" })
+# Create new skill scaffold
+spawner_skill_new({
+  action: "scaffold",
+  id: "rust-async",
+  name: "Rust Async",
+  category: "frameworks",
+  description: "Expert knowledge for async Rust programming",
+  owns: ["async-await", "tokio", "futures"],
+  triggers: ["rust async", "tokio", "futures"],
+  pairs_with: ["backend", "devops"]
+})
 
 # Preview what would be created
-spawner_skills({ action: "preview", type: "framework", name: "sveltekit" })
+spawner_skill_new({
+  action: "preview",
+  id: "sveltekit",
+  name: "SvelteKit",
+  category: "frameworks"
+})
+
+# Validate existing skill structure
+spawner_skill_new({ action: "validate", id: "frontend" })
 ```
+
+**Categories:** development, frameworks, integration, pattern, design, marketing, strategy, product, startup, communications
+
+**Generated files (4 YAML files):**
+- `skill.yaml` - Identity (world-class template), patterns, anti-patterns, handoffs
+- `sharp-edges.yaml` - Gotchas with detection patterns (8-12)
+- `validations.yaml` - Automated checks (8-12)
+- `collaboration.yaml` - Prerequisites, delegation triggers, cross-domain insights
 
 ---
 
@@ -840,11 +992,12 @@ spawner_skills({ action: "preview", type: "framework", name: "sveltekit" })
 
 World-class skills have:
 
-1. **An expert identity** that sounds like a real person with battle scars
+1. **An expert identity** that sounds like a real person with battle scars (WHO YOU ARE, STRONG OPINIONS, CONTRARIAN INSIGHT, HISTORY, LIMITS, PREREQUISITES)
 2. **8-12 sharp edges** with detection patterns and real solutions
 3. **4-6 patterns** with copy-paste ready code
 4. **4-6 anti-patterns** with non-obvious "why"
 5. **8-12 validations** that catch real problems
 6. **Clear handoffs** to related skills
+7. **Collaboration model** with prerequisites, delegation triggers, and cross-domain insights
 
-The goal: **Claude should know what you know, catch what you'd catch, and fix what you'd fix.**
+The goal: **Claude should know what you know, catch what you'd catch, fix what you'd fix, and know when to delegate to specialists.**

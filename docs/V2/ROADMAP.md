@@ -111,29 +111,27 @@ Skills with real knowledge. Validation that catches issues.
 
 #### 2.2 First Skill: nextjs-app-router
 ```
-□ Create skill.yaml (identity)
-□ Write sharp-edges.md (5+ edges)
-□ Write patterns.md (3+ patterns)
-□ Write anti-patterns.md (3+ anti-patterns)
+□ Create skill.yaml (identity + patterns + anti-patterns + handoffs)
+□ Write sharp-edges.yaml (8-12 edges)
+□ Write validations.yaml (8-12 checks)
 □ Upload to KV
 ```
 
 **Files:**
-- `skills/core/nextjs-app-router/*`
+- `skills/frameworks/nextjs-app-router/*`
 
 **Success:** Skill loads and provides context to Claude
 
 #### 2.3 Second Skill: supabase-backend
 ```
-□ Create skill.yaml
-□ Write sharp-edges.md (5+ edges)
-□ Write patterns.md
-□ Write anti-patterns.md
-□ Include RLS-specific gotchas
+□ Create skill.yaml (identity + patterns + anti-patterns + handoffs)
+□ Write sharp-edges.yaml (8-12 edges, include RLS-specific gotchas)
+□ Write validations.yaml (8-12 checks)
+□ Upload to KV
 ```
 
 **Files:**
-- `skills/core/supabase-backend/*`
+- `skills/frameworks/supabase-backend/*`
 
 **Success:** Two skills can load together
 

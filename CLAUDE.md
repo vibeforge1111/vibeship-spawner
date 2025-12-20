@@ -66,10 +66,15 @@ vibeship-spawner/
 
 **V2 Skills (YAML)** - The primary skill format:
 - Stored in `spawner-v2/skills/` by category (development/, frameworks/, marketing/, etc.)
-- Each skill has: `skill.yaml`, `sharp-edges.yaml`, `validations.yaml`
+- Each skill has 4 required files:
+  - `skill.yaml` - Identity (world-class template), patterns, anti-patterns, handoffs
+  - `sharp-edges.yaml` - Gotchas with detection patterns (8-12)
+  - `validations.yaml` - Automated code checks (8-12)
+  - `collaboration.yaml` - Prerequisites, delegation triggers, cross-domain insights
 - Optional markdown files for deep-dive content
 - Loaded to KV as `v2:index` and `skill:{id}`
 - Include: structured validations, sharp edges with detection patterns
+- Quality scored against 100-point rubric (80 minimum to ship)
 
 **35+ skills** across categories: frameworks, development, design, marketing, strategy, product, communications
 
@@ -125,7 +130,7 @@ Machine-runnable checks that catch issues:
 
 Detected categories: framework, database, auth, payments, styling, ai, web3, testing, api, deployment
 
-## MCP Tools (9 total)
+## MCP Tools (13 total)
 
 | Tool | Purpose |
 |------|---------|
@@ -138,6 +143,10 @@ Detected categories: framework, database, auth, payments, styling, ai, web3, tes
 | `spawner_unstick` | Get help when stuck on a problem |
 | `spawner_templates` | List available project templates |
 | `spawner_skills` | Search, list, get skills and squads |
+| `spawner_skill_new` | Create world-class skills with 4 YAML files |
+| `spawner_skill_research` | Research phase for skill creation |
+| `spawner_skill_score` | Score skill against 100-point quality rubric |
+| `spawner_skill_upgrade` | Enhance existing skills with more depth |
 
 **Production endpoint:** https://mcp.vibeship.co
 

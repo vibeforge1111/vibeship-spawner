@@ -12,6 +12,12 @@
  * - plan (unified: discover + recommend + create)
  * - analyze (codebase analysis for existing projects)
  *
+ * Skill Creation Tools:
+ * - spawner_skill_new (scaffold new skills with 4 YAML files)
+ * - spawner_skill_research (research phase for world-class skills)
+ * - spawner_skill_score (quality scoring against 100-point rubric)
+ * - spawner_skill_upgrade (enhance existing skills)
+ *
  * Orchestration Tool:
  * - orchestrate (main entry point - auto-detects context)
  */
@@ -36,6 +42,9 @@ import { skillsToolDefinition, executeSkills } from './skills.js';
 import { planToolDefinition, executePlan } from './plan.js';
 import { analyzeToolDefinition, executeAnalyze } from './analyze.js';
 import { skillCreateToolDefinition, executeSkillCreate } from './skill-create.js';
+import { skillResearchToolDefinition, executeSkillResearch } from './skill-research.js';
+import { skillScoreToolDefinition, executeSkillScore } from './skill-score.js';
+import { skillUpgradeToolDefinition, executeSkillUpgrade } from './skill-upgrade.js';
 import { orchestrateToolDefinition, executeOrchestrate } from './orchestrate.js';
 
 // =============================================================================
@@ -90,10 +99,25 @@ registerTool({
   execute: (env, args, _userId) => executeAnalyze(env, args as Parameters<typeof executeAnalyze>[1]),
 });
 
-// Skill Creation Tool
+// Skill Creation Tools
 registerTool({
   definition: skillCreateToolDefinition,
   execute: (env, args, _userId) => executeSkillCreate(env, args as Parameters<typeof executeSkillCreate>[1]),
+});
+
+registerTool({
+  definition: skillResearchToolDefinition,
+  execute: (env, args, _userId) => executeSkillResearch(env, args as Parameters<typeof executeSkillResearch>[1]),
+});
+
+registerTool({
+  definition: skillScoreToolDefinition,
+  execute: (env, args, _userId) => executeSkillScore(env, args as Parameters<typeof executeSkillScore>[1]),
+});
+
+registerTool({
+  definition: skillUpgradeToolDefinition,
+  execute: (env, args, _userId) => executeSkillUpgrade(env, args as Parameters<typeof executeSkillUpgrade>[1]),
 });
 
 // Orchestration Tool (main entry point)
@@ -122,6 +146,9 @@ export {
   planToolDefinition,
   analyzeToolDefinition,
   skillCreateToolDefinition,
+  skillResearchToolDefinition,
+  skillScoreToolDefinition,
+  skillUpgradeToolDefinition,
   orchestrateToolDefinition,
 };
 
@@ -137,5 +164,8 @@ export {
   executePlan,
   executeAnalyze,
   executeSkillCreate,
+  executeSkillResearch,
+  executeSkillScore,
+  executeSkillUpgrade,
   executeOrchestrate,
 };

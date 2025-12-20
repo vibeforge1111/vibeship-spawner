@@ -1,34 +1,58 @@
 /**
- * spawner_skill_create Tool
+ * spawner_skill_new Tool
  *
- * Generate world-class V2 skills following the SKILL_SPEC.md specification.
- * Creates skills in progressive layers with proper structure.
+ * Generate world-class skills following our current conventions.
+ * Creates complete skill directories with 4 YAML files:
+ *   - skill.yaml (identity, patterns, anti_patterns, handoffs)
+ *   - sharp-edges.yaml (gotchas with detection patterns)
+ *   - validations.yaml (automated code checks)
+ *   - collaboration.yaml (prerequisites, delegation, skill interactions)
  *
- * Layers:
- *   Layer 1 (Required): skill.yaml + sharp-edges.md (5+ gotchas)
- *   Layer 2 (Core): patterns.md + anti-patterns.md + decisions.md
- *   Layer 3 (Verification): validations/checks.yaml + boundaries.md
- *   Layer 4 (Polish): templates/, benchmarks/, examples/
+ * Skills are organized by category:
+ *   - development/ (frontend, backend, devops, cybersecurity, etc.)
+ *   - frameworks/ (nextjs-app-router, supabase-backend, etc.)
+ *   - integration/ (nextjs-supabase-auth, vercel-deployment, etc.)
+ *   - pattern/ (code-review, codebase-optimization, etc.)
+ *   - design/ (ui-design, ux-design, branding, etc.)
+ *   - marketing/ (copywriting, content-strategy, etc.)
+ *   - strategy/ (product-strategy, growth-strategy, etc.)
+ *   - product/ (product-management, analytics, etc.)
+ *   - startup/ (founder-mode, yc-playbook, etc.)
+ *   - communications/ (dev-communications, etc.)
  */
 
 import { z } from 'zod';
 import type { Env } from '../types.js';
 
+// Valid skill categories matching our directory structure
+const SKILL_CATEGORIES = [
+  'development',
+  'frameworks',
+  'integration',
+  'pattern',
+  'design',
+  'marketing',
+  'strategy',
+  'product',
+  'startup',
+  'communications',
+] as const;
+
 /**
- * Input schema for spawner_skill_create
+ * Input schema for spawner_skill_new
  */
 export const skillCreateInputSchema = z.object({
-  action: z.enum(['scaffold', 'preview', 'validate', 'list-types']).optional().describe(
-    'Action: scaffold (default), preview (show what would be created), validate (check existing skill), list-types (show skill types)'
+  action: z.enum(['scaffold', 'preview', 'validate', 'list-categories']).optional().describe(
+    'Action: scaffold (default), preview (show what would be created), validate (check existing skill), list-categories (show skill categories)'
   ),
   id: z.string().optional().describe(
-    'Skill ID in kebab-case (e.g., "nextjs-app-router", "code-cleanup")'
+    'Skill ID in kebab-case (e.g., "nextjs-app-router", "cybersecurity")'
   ),
   name: z.string().optional().describe(
-    'Human-readable skill name (e.g., "Next.js App Router", "Code Cleanup Agent")'
+    'Human-readable skill name (e.g., "Next.js App Router", "Cybersecurity")'
   ),
-  type: z.enum(['core', 'integration', 'pattern']).optional().describe(
-    'Skill type: core (single tech), integration (cross-tech), pattern (problem-focused)'
+  category: z.enum(SKILL_CATEGORIES).optional().describe(
+    'Skill category: development, frameworks, integration, pattern, design, marketing, strategy, product, startup, communications'
   ),
   description: z.string().optional().describe(
     'Brief description of what the skill does'
@@ -36,23 +60,14 @@ export const skillCreateInputSchema = z.object({
   owns: z.array(z.string()).optional().describe(
     'Domains this skill owns (e.g., ["server-components", "client-components"])'
   ),
-  does_not_own: z.array(z.string()).optional().describe(
-    'Domains to hand off to other skills (e.g., ["styling", "database"])'
-  ),
   triggers: z.array(z.string()).optional().describe(
     'Phrases that activate this skill (e.g., ["next.js app router", "server component"])'
   ),
   pairs_with: z.array(z.string()).optional().describe(
     'Compatible skill IDs (e.g., ["supabase-backend", "typescript-strict"])'
   ),
-  stack: z.array(z.string()).optional().describe(
-    'Required technologies (e.g., ["nextjs", "react", "typescript"])'
-  ),
   tags: z.array(z.string()).optional().describe(
     'Searchable tags (e.g., ["nextjs", "react", "ssr"])'
-  ),
-  layer: z.enum(['1', '2', '3']).optional().describe(
-    'Target layer to generate: 1 (minimal), 2 (with patterns), 3 (with validations)'
   ),
 });
 
@@ -61,14 +76,14 @@ export const skillCreateInputSchema = z.object({
  */
 export const skillCreateToolDefinition = {
   name: 'spawner_skill_new',
-  description: 'Create world-class V2 skills following the SKILL_SPEC. Generates skill.yaml, sharp-edges.md, patterns.md, anti-patterns.md based on input.',
+  description: 'Create world-class skills with 4 YAML files: skill.yaml (identity + patterns + anti-patterns + handoffs), sharp-edges.yaml (gotchas with detection), validations.yaml (automated checks), collaboration.yaml (prerequisites + delegation + skill interactions). Skills are organized by category (development, frameworks, integration, etc.).',
   inputSchema: {
     type: 'object' as const,
     properties: {
       action: {
         type: 'string',
-        enum: ['scaffold', 'preview', 'validate', 'list-types'],
-        description: 'Action: scaffold (default), preview (show structure), validate (check skill), list-types (show skill types)',
+        enum: ['scaffold', 'preview', 'validate', 'list-categories'],
+        description: 'Action: scaffold (default), preview (show structure), validate (check skill), list-categories (show categories)',
       },
       id: {
         type: 'string',
@@ -78,10 +93,10 @@ export const skillCreateToolDefinition = {
         type: 'string',
         description: 'Human-readable skill name (e.g., "Next.js App Router")',
       },
-      type: {
+      category: {
         type: 'string',
-        enum: ['core', 'integration', 'pattern'],
-        description: 'Skill type: core (single tech), integration (cross-tech), pattern (problem-focused)',
+        enum: SKILL_CATEGORIES,
+        description: 'Skill category: development, frameworks, integration, pattern, design, marketing, strategy, product, startup, communications',
       },
       description: {
         type: 'string',
@@ -91,11 +106,6 @@ export const skillCreateToolDefinition = {
         type: 'array',
         items: { type: 'string' },
         description: 'Domains this skill owns',
-      },
-      does_not_own: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Domains to hand off to other skills',
       },
       triggers: {
         type: 'array',
@@ -107,20 +117,10 @@ export const skillCreateToolDefinition = {
         items: { type: 'string' },
         description: 'Compatible skill IDs',
       },
-      stack: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Required technologies',
-      },
       tags: {
         type: 'array',
         items: { type: 'string' },
         description: 'Searchable tags',
-      },
-      layer: {
-        type: 'string',
-        enum: ['1', '2', '3'],
-        description: 'Target layer: 1 (minimal), 2 (with patterns), 3 (with validations)',
       },
     },
     required: [],
@@ -133,6 +133,7 @@ export const skillCreateToolDefinition = {
 export interface SkillCreateOutput {
   action: string;
   skill_id?: string;
+  category?: string;
   files?: {
     path: string;
     content: string;
@@ -140,21 +141,19 @@ export interface SkillCreateOutput {
   }[];
   validation_result?: {
     valid: boolean;
-    layer: number;
     issues: string[];
     suggestions: string[];
   };
-  types?: {
+  categories?: {
     name: string;
     description: string;
-    directory: string;
     examples: string[];
   }[];
   _instruction: string;
 }
 
 /**
- * Execute the spawner_skill_create tool
+ * Execute the spawner_skill_new tool
  */
 export async function executeSkillCreate(
   _env: Env,
@@ -168,8 +167,8 @@ export async function executeSkillCreate(
   const action = parsed.data.action ?? 'scaffold';
 
   switch (action) {
-    case 'list-types':
-      return handleListTypes();
+    case 'list-categories':
+      return handleListCategories();
 
     case 'preview':
       return handlePreview(parsed.data);
@@ -186,32 +185,79 @@ export async function executeSkillCreate(
 }
 
 /**
- * List skill types
+ * List skill categories
  */
-function handleListTypes(): SkillCreateOutput {
+function handleListCategories(): SkillCreateOutput {
   return {
-    action: 'list-types',
-    types: [
+    action: 'list-categories',
+    categories: [
       {
-        name: 'core',
-        description: 'Deep expertise in a single technology. The foundation layer.',
-        directory: 'skills/core/',
-        examples: ['nextjs-app-router', 'typescript-strict', 'supabase-backend', 'tailwind-ui'],
+        name: 'development',
+        description: 'General development practices - frontend, backend, devops, security, etc.',
+        examples: ['frontend', 'backend', 'devops', 'cybersecurity', 'game-development', 'qa-engineering'],
+      },
+      {
+        name: 'frameworks',
+        description: 'Specific technology expertise - deep knowledge of one framework/tool.',
+        examples: ['nextjs-app-router', 'supabase-backend', 'react-patterns', 'tailwind-ui', 'typescript-strict'],
       },
       {
         name: 'integration',
-        description: 'Cross-technology knowledge. Combines multiple core skills.',
-        directory: 'skills/integration/',
-        examples: ['nextjs-supabase-auth', 'vercel-deployment', 'stripe-nextjs'],
+        description: 'Cross-technology knowledge - combining multiple technologies.',
+        examples: ['nextjs-supabase-auth', 'vercel-deployment', 'stripe-integration'],
       },
       {
         name: 'pattern',
-        description: 'Problem-focused skills that solve specific recurring problems.',
-        directory: 'skills/pattern/',
-        examples: ['code-cleanup', 'code-architecture-review', 'mcp-product'],
+        description: 'Problem-focused skills - solving specific recurring problems.',
+        examples: ['code-review', 'codebase-optimization', 'mcp-product', 'code-architecture-review'],
+      },
+      {
+        name: 'design',
+        description: 'Visual and experience design - UI, UX, branding.',
+        examples: ['ui-design', 'ux-design', 'branding', 'landing-page-design'],
+      },
+      {
+        name: 'marketing',
+        description: 'Growth and communication - copywriting, content, SEO.',
+        examples: ['copywriting', 'content-strategy', 'viral-marketing', 'seo'],
+      },
+      {
+        name: 'strategy',
+        description: 'High-level direction - product strategy, growth, positioning.',
+        examples: ['product-strategy', 'growth-strategy', 'brand-positioning', 'creative-strategy'],
+      },
+      {
+        name: 'product',
+        description: 'Product development practices - management, analytics, testing.',
+        examples: ['product-management', 'analytics', 'a-b-testing', 'customer-success'],
+      },
+      {
+        name: 'startup',
+        description: 'Startup-specific knowledge - founder skills, fundraising, operations.',
+        examples: ['founder-mode', 'yc-playbook', 'burn-rate-management'],
+      },
+      {
+        name: 'communications',
+        description: 'Developer and team communications.',
+        examples: ['dev-communications'],
       },
     ],
-    _instruction: buildTypesInstruction(),
+    _instruction: `## Skill Categories
+
+Choose a category that best fits your skill. Use action="scaffold" with id, name, and category to create a skill.
+
+**Example:**
+\`\`\`json
+{
+  "action": "scaffold",
+  "id": "rust-async",
+  "name": "Rust Async",
+  "category": "frameworks",
+  "description": "Expert knowledge for async Rust programming",
+  "owns": ["async-await", "tokio", "futures"],
+  "triggers": ["rust async", "tokio", "futures"]
+}
+\`\`\``,
   };
 }
 
@@ -219,26 +265,27 @@ function handleListTypes(): SkillCreateOutput {
  * Preview what would be created
  */
 function handlePreview(input: z.infer<typeof skillCreateInputSchema>): SkillCreateOutput {
-  const { id, name, type, layer = '1' } = input;
+  const { id, name, category } = input;
 
-  if (!id || !name || !type) {
+  if (!id || !name || !category) {
     return {
       action: 'preview',
-      _instruction: buildMissingFieldsInstruction(['id', 'name', 'type'].filter(f => !input[f as keyof typeof input])),
+      _instruction: buildMissingFieldsInstruction(['id', 'name', 'category'].filter(f => !input[f as keyof typeof input])),
     };
   }
 
-  const files = generateSkillFiles(input, parseInt(layer, 10));
+  const files = generateSkillFiles(input);
 
   return {
     action: 'preview',
     skill_id: id,
+    category,
     files: files.map(f => ({
       path: f.path,
-      content: f.content.substring(0, 500) + (f.content.length > 500 ? '\n... (truncated for preview)' : ''),
+      content: f.content.substring(0, 800) + (f.content.length > 800 ? '\n... (truncated for preview)' : ''),
       description: f.description,
     })),
-    _instruction: buildPreviewInstruction(id, type, files, parseInt(layer, 10)),
+    _instruction: buildPreviewInstruction(id, category, files),
   };
 }
 
@@ -246,22 +293,23 @@ function handlePreview(input: z.infer<typeof skillCreateInputSchema>): SkillCrea
  * Generate skill scaffold
  */
 function handleScaffold(input: z.infer<typeof skillCreateInputSchema>): SkillCreateOutput {
-  const { id, name, type, layer = '1' } = input;
+  const { id, name, category } = input;
 
-  if (!id || !name || !type) {
+  if (!id || !name || !category) {
     return {
       action: 'scaffold',
-      _instruction: buildMissingFieldsInstruction(['id', 'name', 'type'].filter(f => !input[f as keyof typeof input])),
+      _instruction: buildMissingFieldsInstruction(['id', 'name', 'category'].filter(f => !input[f as keyof typeof input])),
     };
   }
 
-  const files = generateSkillFiles(input, parseInt(layer, 10));
+  const files = generateSkillFiles(input);
 
   return {
     action: 'scaffold',
     skill_id: id,
+    category,
     files,
-    _instruction: buildScaffoldInstruction(id, type, files, parseInt(layer, 10)),
+    _instruction: buildScaffoldInstruction(id, category, files),
   };
 }
 
@@ -278,21 +326,17 @@ function handleValidate(input: z.infer<typeof skillCreateInputSchema>): SkillCre
     };
   }
 
-  // This would typically load and validate an existing skill
-  // For now, return validation checklist
   return {
     action: 'validate',
     skill_id: id,
     validation_result: {
       valid: false,
-      layer: 0,
-      issues: ['Cannot validate - skill must be loaded from filesystem'],
+      issues: ['Cannot validate remotely - skill must be read from filesystem'],
       suggestions: [
         'Use Claude to read the skill files directly',
-        'Check skill.yaml has: id, name, version, type, owns, does_not_own, triggers',
-        'Check sharp-edges.md has 5+ edges with Severity, The Trap, Why, The Fix',
-        'Check patterns.md has 3+ patterns with code examples',
-        'Check anti-patterns.md has 3+ anti-patterns with fixes',
+        'Check skill.yaml has: id, name, version, layer, description, owns, pairs_with, tags, triggers, identity, patterns, anti_patterns, handoffs',
+        'Check sharp-edges.yaml has 8-12 edges with: id, summary, severity, situation, why, solution, symptoms, detection_pattern',
+        'Check validations.yaml has 8-12 validations with: id, name, severity, type, pattern, message, fix_action, applies_to',
       ],
     },
     _instruction: buildValidationChecklist(id),
@@ -300,153 +344,93 @@ function handleValidate(input: z.infer<typeof skillCreateInputSchema>): SkillCre
 }
 
 /**
- * Generate all skill files for a given layer
+ * Generate all skill files (always generates 4 YAML files)
  */
 function generateSkillFiles(
-  input: z.infer<typeof skillCreateInputSchema>,
-  targetLayer: number
+  input: z.infer<typeof skillCreateInputSchema>
 ): { path: string; content: string; description: string }[] {
   const {
     id,
     name,
-    type,
+    category,
     description = `Expert knowledge for ${name}`,
     owns = [],
-    does_not_own = [],
     triggers = [],
     pairs_with = [],
-    stack = [],
     tags = [],
-  } = input as Required<Pick<typeof input, 'id' | 'name' | 'type'>> & typeof input;
+  } = input as Required<Pick<typeof input, 'id' | 'name' | 'category'>> & typeof input;
 
-  const baseDir = `skills/${type}/${id}`;
+  const baseDir = `skills/${category}/${id}`;
   const files: { path: string; content: string; description: string }[] = [];
 
-  // Layer 1: skill.yaml (always required)
+  // Always generate all 4 YAML files
   files.push({
     path: `${baseDir}/skill.yaml`,
     content: generateSkillYaml({
       id: id!,
       name: name!,
-      type: type!,
       description,
       owns,
-      does_not_own,
       triggers,
       pairs_with,
-      stack,
       tags,
     }),
-    description: 'Skill identity and metadata',
+    description: 'Skill identity, patterns, anti-patterns, and handoffs',
   });
 
-  // Layer 1: sharp-edges.md (always required)
   files.push({
-    path: `${baseDir}/sharp-edges.md`,
-    content: generateSharpEdges(id!, name!),
-    description: 'Gotchas Claude doesn\'t know by default (5+ required)',
+    path: `${baseDir}/sharp-edges.yaml`,
+    content: generateSharpEdgesYaml(id!, name!),
+    description: 'Gotchas with detection patterns (8-12 required)',
   });
 
-  // Layer 2: patterns.md
-  if (targetLayer >= 2) {
-    files.push({
-      path: `${baseDir}/patterns.md`,
-      content: generatePatterns(id!, name!),
-      description: 'Best practices and proven patterns (3+ required)',
-    });
+  files.push({
+    path: `${baseDir}/validations.yaml`,
+    content: generateValidationsYaml(id!, name!),
+    description: 'Automated code checks (8-12 required)',
+  });
 
-    files.push({
-      path: `${baseDir}/anti-patterns.md`,
-      content: generateAntiPatterns(id!, name!),
-      description: 'Common mistakes to avoid (3+ required)',
-    });
-
-    files.push({
-      path: `${baseDir}/decisions.md`,
-      content: generateDecisions(id!, name!),
-      description: 'Decision guidance for choosing approaches',
-    });
-  }
-
-  // Layer 3: validations
-  if (targetLayer >= 3) {
-    files.push({
-      path: `${baseDir}/validations/checks.yaml`,
-      content: generateValidationsYaml(id!, name!),
-      description: 'Machine-runnable validation checks',
-    });
-
-    files.push({
-      path: `${baseDir}/boundaries.md`,
-      content: generateBoundaries(id!, name!, does_not_own),
-      description: 'Handoff triggers and limitations',
-    });
-  }
+  files.push({
+    path: `${baseDir}/collaboration.yaml`,
+    content: generateCollaborationYaml(id!, name!, pairs_with),
+    description: 'Skill prerequisites, complementary skills, and delegation triggers',
+  });
 
   return files;
 }
 
 /**
- * Generate skill.yaml content
+ * Generate skill.yaml content (with embedded patterns, anti_patterns, handoffs)
  */
 function generateSkillYaml(opts: {
   id: string;
   name: string;
-  type: string;
   description: string;
   owns: string[];
-  does_not_own: string[];
   triggers: string[];
   pairs_with: string[];
-  stack: string[];
   tags: string[];
 }): string {
-  const {
-    id,
-    name,
-    type,
-    description,
-    owns,
-    does_not_own,
-    triggers,
-    pairs_with,
-    stack,
-    tags,
-  } = opts;
+  const { id, name, description, owns, triggers, pairs_with, tags } = opts;
 
-  // Generate owns if empty
   const ownsSection = owns.length > 0
     ? owns.map(o => `  - ${o}`).join('\n')
     : `  - # Add domains this skill owns
-  - # Example: server-components
-  - # Example: data-fetching`;
+  - # Example: component-design
+  - # Example: state-management`;
 
-  // Generate does_not_own if empty
-  const doesNotOwnSection = does_not_own.length > 0
-    ? does_not_own.map(o => `  - ${o} → relevant-skill`).join('\n')
-    : `  - styling → tailwind-ui
-  - database → supabase-backend
-  - deployment → vercel-deployment`;
-
-  // Generate triggers if empty
   const triggersSection = triggers.length > 0
     ? triggers.map(t => `  - ${t}`).join('\n')
-    : `  - # Add activation phrases
-  - # Example: "${name.toLowerCase()}"
+    : `  - ${name.toLowerCase()}
+  - # Add activation phrases
   - # Example: related technology terms`;
 
-  // Generate pairs_with if empty
   const pairsWithSection = pairs_with.length > 0
     ? pairs_with.map(p => `  - ${p}`).join('\n')
-    : `  - # Add compatible skill IDs`;
+    : `  - # Add compatible skill IDs
+  - # Example: frontend
+  - # Example: backend`;
 
-  // Generate stack if empty
-  const stackSection = stack.length > 0
-    ? stack.map(s => `  ${s}: ">=1.0.0"`).join('\n')
-    : `  # Add required technologies with versions
-  # example-tech: ">=1.0.0"`;
-
-  // Generate tags if empty
   const tagsSection = tags.length > 0
     ? tags.map(t => `  - ${t}`).join('\n')
     : `  - ${id}
@@ -455,466 +439,370 @@ function generateSkillYaml(opts: {
   return `id: ${id}
 name: ${name}
 version: 1.0.0
-type: ${type}
-
-description: |
-  ${description}
+layer: 1
+description: ${description}
 
 owns:
 ${ownsSection}
 
-does_not_own:
-${doesNotOwnSection}
+pairs_with:
+${pairsWithSection}
+
+requires: []
+
+tags:
+${tagsSection}
 
 triggers:
 ${triggersSection}
 
-pairs_with:
-${pairsWithSection}
+identity: |
+  # WHO YOU ARE
+  You are a [role] with [X+ years/decades] of experience. You've worked at
+  [types of companies/contexts] where [high-stakes situation that shaped you].
+  You've [specific battle scar #1] and [specific battle scar #2].
 
-requires:
-  # Add hard requirements (won't load without these)
-  # - nextjs: ">=13.0.0"
+  # STRONG OPINIONS (earned through experience)
+  Your core principles:
+  1. [First non-negotiable principle] - because [reasoning]
+  2. [Second principle] - because [reasoning]
+  3. [Third principle] - because [reasoning]
+  4. [Fourth principle] - because [reasoning]
+  5. [Fifth principle] - because [reasoning]
 
-stack:
-${stackSection}
+  # CONTRARIAN INSIGHT
+  What most practitioners get wrong: [common misconception and why it's wrong]
 
-tags:
-${tagsSection}
+  # HISTORY & EVOLUTION
+  The field evolved from [previous approach] to [current state] because [why].
+  What was tried before and failed: [failed approaches and lessons].
+  Where things are heading: [future direction].
+
+  # KNOWING YOUR LIMITS
+  What you explicitly don't cover: [out of scope areas].
+  When to defer to other expertise: [delegation triggers].
+
+  # PREREQUISITE KNOWLEDGE
+  To use this skill effectively, you should understand:
+  - [Prerequisite concept #1]
+  - [Prerequisite concept #2]
+  - [Cross-domain insight that informs this expertise]
+
+patterns:
+  - name: [Pattern Name]
+    description: [What this pattern achieves]
+    when: [Situations where this applies]
+    example: |
+      // Good example showing the pattern
+      const example = doItRight()
+
+  - name: [Second Pattern]
+    description: [What it achieves]
+    when: [When to use]
+    example: |
+      // Working code example
+
+  - name: [Third Pattern]
+    description: [What it achieves]
+    when: [When to use]
+    example: |
+      // Working code example
+
+  - name: [Fourth Pattern]
+    description: [What it achieves]
+    when: [When to use]
+    example: |
+      // Working code example
+
+anti_patterns:
+  - name: [Anti-Pattern Name]
+    description: [What people do wrong]
+    why: [Why this causes problems - be specific]
+    instead: [What to do instead]
+
+  - name: [Second Anti-Pattern]
+    description: [What's wrong]
+    why: [The real consequences]
+    instead: [The fix]
+
+  - name: [Third Anti-Pattern]
+    description: [What's wrong]
+    why: [The real consequences]
+    instead: [The fix]
+
+  - name: [Fourth Anti-Pattern]
+    description: [What's wrong]
+    why: [The real consequences]
+    instead: [The fix]
+
+handoffs:
+  - trigger: [keyword or phrase that indicates need for different skill]
+    to: [other-skill-id]
+    context: [Why this handoff makes sense]
+
+  - trigger: [another trigger]
+    to: [skill-id]
+    context: [Context for handoff]
 `;
 }
 
 /**
- * Generate sharp-edges.md content
+ * Generate sharp-edges.yaml content
  */
-function generateSharpEdges(id: string, name: string): string {
-  return `# Sharp Edges: ${name}
+function generateSharpEdgesYaml(id: string, name: string): string {
+  return `# ${name} Sharp Edges
+# Real gotchas that catch people working with ${name}
 
-Sharp edges are specific gotchas that can bite developers working with ${name}.
-Each edge represents knowledge earned through broken builds and reverted commits.
+sharp_edges:
+  - id: ${id}-edge-1
+    summary: "[One-line description of the gotcha]"
+    severity: critical  # critical | high | medium | low
+    situation: |
+      [When/how people typically encounter this problem.
+      Be specific about the context.]
+    why: |
+      [The real consequences - what actually breaks, costs money,
+      causes outages, loses users. Be concrete.]
+    solution: |
+      # WRONG - What people typically do
+      bad_example_code()
 
----
+      # RIGHT - What they should do
+      good_example_code()
 
-## 1. [Edge Title]
+      # Step by step if complex:
+      # 1. First step
+      # 2. Second step
+    symptoms:
+      - [Observable sign this is happening]
+      - [Error message pattern]
+      - [User-visible symptom]
+    detection_pattern: 'regex-to-find-this-in-code'
 
-**Severity:** Critical | High | Medium | Low
+  - id: ${id}-edge-2
+    summary: "[Second gotcha]"
+    severity: high
+    situation: |
+      [Description of the situation]
+    why: |
+      [Why this is painful]
+    solution: |
+      # Solution with code
+    symptoms:
+      - [Symptom 1]
+      - [Symptom 2]
+    detection_pattern: 'regex-pattern'
 
-**The Trap:**
-\`\`\`typescript
-// Code that looks right but isn't
-\`\`\`
+  - id: ${id}-edge-3
+    summary: "[Third gotcha]"
+    severity: high
+    situation: |
+      [Description]
+    why: |
+      [Consequences]
+    solution: |
+      # Solution
+    symptoms:
+      - [Symptoms]
+    detection_pattern: 'regex-pattern'
 
-**Why It Happens:**
-Explain the root cause and why this catches people off guard.
+  - id: ${id}-edge-4
+    summary: "[Fourth gotcha]"
+    severity: medium
+    situation: |
+      [Description]
+    why: |
+      [Consequences]
+    solution: |
+      # Solution
+    symptoms:
+      - [Symptoms]
+    detection_pattern: null  # Use null if can't detect automatically
 
-**The Fix:**
-\`\`\`typescript
-// Working solution
-\`\`\`
+  - id: ${id}-edge-5
+    summary: "[Fifth gotcha]"
+    severity: medium
+    situation: |
+      [Description]
+    why: |
+      [Consequences]
+    solution: |
+      # Solution
+    symptoms:
+      - [Symptoms]
+    detection_pattern: null
 
-**Detection Pattern:**
-\`regex-to-spot-in-code\`
-
----
-
-## 2. [Second Edge Title]
-
-**Severity:** High
-
-**The Trap:**
-\`\`\`typescript
-// Another common mistake
-\`\`\`
-
-**Why It Happens:**
-Root cause explanation.
-
-**The Fix:**
-\`\`\`typescript
-// Correct approach
-\`\`\`
-
----
-
-## 3. [Third Edge Title]
-
-**Severity:** Medium
-
-**The Trap:**
-Document the subtle issue.
-
-**Why It Happens:**
-Why developers miss this.
-
-**The Fix:**
-The solution.
-
----
-
-## 4. [Fourth Edge Title]
-
-**Severity:** Warning
-
-**The Trap:**
-The problematic pattern.
-
-**Why It Happens:**
-Root cause.
-
-**The Fix:**
-Resolution.
-
----
-
-## 5. [Fifth Edge Title]
-
-**Severity:** Subtle
-
-**The Trap:**
-Hard-to-spot issue.
-
-**Why It Happens:**
-Why it's easy to miss.
-
-**The Fix:**
-How to address it.
-
----
-
-<!--
-CHECKLIST for Sharp Edges:
-- [ ] 5+ edges documented
-- [ ] Each edge has Severity, The Trap, Why, The Fix
-- [ ] Code examples are copy-pastable
-- [ ] Detection patterns are regex-compatible
-- [ ] Edges are specific (not generic advice)
-- [ ] Version-specific edges note version ranges
--->
+  # Add 3-7 more edges to reach 8-12 total
+  # Each edge should be something you learned the hard way
+  # Severity guide:
+  #   critical = Will definitely cause major failure (data loss, security, revenue)
+  #   high = Likely significant problems, hard to fix once shipped
+  #   medium = Causes friction and rework, but recoverable
+  #   low = Minor issues, nice to fix but not urgent
 `;
 }
 
 /**
- * Generate patterns.md content
- */
-function generatePatterns(id: string, name: string): string {
-  return `# Patterns: ${name}
-
-Best practices for working with ${name}.
-
----
-
-## 1. [Pattern Name]
-
-Description of what this pattern achieves.
-
-**When to Use:**
-- Condition 1
-- Condition 2
-
-**Implementation:**
-\`\`\`typescript
-// Working code example
-\`\`\`
-
-**Why This Works:**
-Explanation of why this is the right approach.
-
----
-
-## 2. [Second Pattern Name]
-
-Description.
-
-**When to Use:**
-- Conditions
-
-**Implementation:**
-\`\`\`typescript
-// Code example
-\`\`\`
-
----
-
-## 3. [Third Pattern Name]
-
-Description.
-
-**When to Use:**
-- Conditions
-
-**Implementation:**
-\`\`\`typescript
-// Code example
-\`\`\`
-
----
-
-<!--
-CHECKLIST for Patterns:
-- [ ] 3+ patterns documented
-- [ ] Each pattern has When, Implementation, Why
-- [ ] Code examples actually work
-- [ ] Patterns are actionable (not just theory)
--->
-`;
-}
-
-/**
- * Generate anti-patterns.md content
- */
-function generateAntiPatterns(id: string, name: string): string {
-  return `# Anti-Patterns: ${name}
-
-Common mistakes that turn ${name} work into chaos.
-
----
-
-## 1. [Anti-Pattern Name]
-
-**The Mistake:**
-\`\`\`typescript
-// Code showing the wrong way
-\`\`\`
-
-**Why It's Wrong:**
-- Problem 1
-- Problem 2
-- Problem 3
-
-**The Fix:**
-\`\`\`typescript
-// The correct approach
-\`\`\`
-
----
-
-## 2. [Second Anti-Pattern Name]
-
-**The Mistake:**
-\`\`\`typescript
-// Wrong approach
-\`\`\`
-
-**Why It's Wrong:**
-- Issues caused
-
-**The Fix:**
-\`\`\`typescript
-// Right approach
-\`\`\`
-
----
-
-## 3. [Third Anti-Pattern Name]
-
-**The Mistake:**
-Description of common error.
-
-**Why It's Wrong:**
-- Consequences
-
-**The Fix:**
-Resolution.
-
----
-
-<!--
-CHECKLIST for Anti-Patterns:
-- [ ] 3+ anti-patterns documented
-- [ ] Each has The Mistake, Why Wrong, The Fix
-- [ ] Code examples show wrong AND right way
-- [ ] Problems are concrete (not vague warnings)
--->
-`;
-}
-
-/**
- * Generate decisions.md content
- */
-function generateDecisions(id: string, name: string): string {
-  return `# Decisions: ${name}
-
-Decision guidance for choosing between approaches when working with ${name}.
-
----
-
-## Decision 1: [Choice Title]
-
-**Context:** When you need to...
-
-**Options:**
-
-| Option | Pros | Cons | Choose When |
-|--------|------|------|-------------|
-| Option A | Pro 1, Pro 2 | Con 1 | Condition 1 |
-| Option B | Pro 1 | Con 1, Con 2 | Condition 2 |
-
-**Default Recommendation:** Option A unless [specific condition].
-
----
-
-## Decision 2: [Second Choice]
-
-**Context:** When deciding between...
-
-**Options:**
-
-| Option | Pros | Cons | Choose When |
-|--------|------|------|-------------|
-| Option A | Benefits | Drawbacks | When to use |
-| Option B | Benefits | Drawbacks | When to use |
-
-**Default Recommendation:** Your guidance here.
-
----
-
-<!--
-CHECKLIST for Decisions:
-- [ ] Key decisions documented
-- [ ] Each has Context, Options, Recommendation
-- [ ] Trade-offs are honest (no "always do X")
-- [ ] Defaults help when unsure
--->
-`;
-}
-
-/**
- * Generate validations/checks.yaml content
+ * Generate validations.yaml content
  */
 function generateValidationsYaml(id: string, name: string): string {
-  return `# Validations: ${name}
-# Machine-runnable checks for ${name}
+  return `# ${name} Validations
+# Automated checks to catch common ${name} mistakes
 
 validations:
   - id: ${id}-check-1
     name: "[Check Name]"
-    description: "What this check validates"
-    severity: critical  # critical, high, warning, low
-    type: regex  # regex, ast, custom
-    pattern: "pattern-to-match"
-    message: "Error message when pattern matches"
-    fix_hint: "How to resolve this issue"
+    severity: error  # error | warning | info
+    type: regex  # regex | ast | file
+    pattern:
+      - 'first-regex-pattern'
+      - 'alternative-pattern'
+    message: "What's wrong and why it matters"
+    fix_action: "Specific action to fix it"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
 
   - id: ${id}-check-2
     name: "[Second Check]"
-    description: "Description"
-    severity: high
+    severity: error
     type: regex
-    pattern: "another-pattern"
+    pattern:
+      - 'pattern-to-match'
     message: "Error message"
-    fix_hint: "Resolution guidance"
+    fix_action: "How to fix"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
 
   - id: ${id}-check-3
     name: "[Third Check]"
-    description: "Description"
     severity: warning
     type: regex
-    pattern: "warning-pattern"
+    pattern:
+      - 'warning-pattern'
     message: "Warning message"
-    fix_hint: "Suggestion"
+    fix_action: "Suggestion"
+    applies_to:
+      - "*.ts"
 
-# Check types:
-# - regex: Simple pattern matching (80% of cases)
-# - ast: TypeScript AST analysis for complex checks
-# - custom: Custom validation function
+  - id: ${id}-check-4
+    name: "[Fourth Check]"
+    severity: warning
+    type: regex
+    pattern:
+      - 'pattern'
+    message: "Message"
+    fix_action: "Fix"
+    applies_to:
+      - "*.ts"
 
-# Severity levels:
-# - critical: Must fix before deploy
-# - high: Should fix, significant risk
-# - warning: Consider fixing
-# - low: Minor improvement
+  - id: ${id}-check-5
+    name: "[Fifth Check]"
+    severity: warning
+    type: regex
+    pattern:
+      - 'pattern'
+    message: "Message"
+    fix_action: "Fix"
+    applies_to:
+      - "*.ts"
+
+  # Add 3-7 more validations to reach 8-12 total
+  # Severity guide:
+  #   error = Will cause bugs/security issues, must fix
+  #   warning = Bad practice, likely problems
+  #   info = Suggestion for improvement
+  #
+  # Pattern tips:
+  #   - Test regex against real code samples
+  #   - Avoid false positives (better to miss some than cry wolf)
+  #   - Use applies_to to target specific file types
 `;
 }
 
 /**
- * Generate boundaries.md content
+ * Generate collaboration.yaml content
  */
-function generateBoundaries(id: string, name: string, doesNotOwn: string[]): string {
-  const handoffs = doesNotOwn.length > 0
-    ? doesNotOwn.map((d, i) => `
-## Handoff ${i + 1}: ${d}
+function generateCollaborationYaml(id: string, name: string, pairsWith: string[]): string {
+  const pairsWithSection = pairsWith.length > 0
+    ? pairsWith.map(skill => `  - skill: ${skill}
+    relationship: "[How these skills work together]"
+    brings: "[What this skill contributes]"`).join('\n')
+    : `  - skill: "[complementary-skill-id]"
+    relationship: "[How these skills work together]"
+    brings: "[What this skill contributes]"
+  - skill: "[another-skill-id]"
+    relationship: "[Relationship description]"
+    brings: "[What it contributes]"`;
 
-**Trigger:** When user mentions ${d}...
+  return `# ${name} Collaboration Model
+# How this skill works with other skills, prerequisites, and delegation
 
-**Hand to:** [skill-id]
+# PREREQUISITE SKILLS
+# Skills and knowledge this skill assumes or builds upon
+prerequisites:
+  skills:
+    - # Skill IDs this skill assumes access to
+    - # Example: backend (for a security skill)
+  knowledge:
+    - "[Foundational concept the user should understand]"
+    - "[Another prerequisite concept]"
+    - "[Cross-domain knowledge that informs this skill]"
 
-**Context to Provide:**
-- What was being worked on
-- Relevant decisions made
-- Any constraints identified
-`).join('\n---\n')
-    : `
-## Handoff 1: [Domain]
+# COMPLEMENTARY SKILLS MAP
+# 5-10 related skills and how they interact with this one
+complementary_skills:
+${pairsWithSection}
 
-**Trigger:** When user mentions...
+# DELEGATION TRIGGERS
+# When to let another skill take over completely (not just hand off context)
+delegation:
+  - trigger: "[Phrase or situation that triggers delegation]"
+    delegate_to: "[skill-id]"
+    pattern: sequential  # sequential | parallel | review
+    context: "[What context to pass to the other skill]"
+    receive: "[What you expect back from the delegation]"
 
-**Hand to:** [skill-id]
+  - trigger: "[Another trigger]"
+    delegate_to: "[skill-id]"
+    pattern: parallel
+    context: "[Context to share]"
+    receive: "[Expected output]"
 
-**Context to Provide:**
-- What was being worked on
-- Relevant decisions made
+# COLLABORATION PATTERNS
+# How this skill works with others on complex tasks
+collaboration_patterns:
+  sequential:
+    - "[I do X, then Y skill does Z]"
+  parallel:
+    - "[I handle A while Y skill handles B simultaneously]"
+  review:
+    - "[Y skill reviews my output for their domain expertise]"
+
+# CROSS-DOMAIN INSIGHTS
+# Knowledge from adjacent fields that informs this skill
+cross_domain_insights:
+  - domain: "[Adjacent field, e.g., psychology, economics, design]"
+    insight: "[What you know from this domain that helps]"
+    applies_when: "[Situations where this insight is valuable]"
+
+  - domain: "[Another domain]"
+    insight: "[Cross-domain knowledge]"
+    applies_when: "[When it applies]"
+
+# SKILL ECOSYSTEM
+# For technical skills: related tools, alternatives, what's deprecated
+ecosystem:
+  primary_tools:
+    - "[Main tool/library this skill uses]"
+  alternatives:
+    - name: "[Alternative tool]"
+      use_when: "[When to prefer this alternative]"
+      avoid_when: "[When not to use it]"
+  deprecated:
+    - "[Tools/approaches to avoid and why]"
 `;
-
-  return `# Boundaries: ${name}
-
-Clear handoff points and limitations for ${name}.
-
----
-${handoffs}
-
----
-
-## Limitations
-
-What this skill explicitly does NOT handle:
-
-1. **[Limitation 1]** - Reason and what handles it instead
-2. **[Limitation 2]** - Reason and alternative
-3. **[Limitation 3]** - Reason and where to go
-
----
-
-## Escape Hatches
-
-When to abandon this skill's approach:
-
-1. **[Situation 1]** - Consider [alternative]
-2. **[Situation 2]** - May need [different approach]
-
----
-
-<!--
-CHECKLIST for Boundaries:
-- [ ] All does_not_own items have handoffs
-- [ ] Handoffs specify what context to pass
-- [ ] Limitations are honest
-- [ ] Escape hatches documented
--->
-`;
-}
-
-/**
- * Build instruction for list-types action
- */
-function buildTypesInstruction(): string {
-  return `## Skill Types
-
-**core** - Single technology expertise (Layer 1)
-Foundation skills with deep knowledge of one technology.
-Directory: skills/core/
-
-**integration** - Cross-technology knowledge (Layer 2)
-Skills that combine multiple core skills for complete features.
-Directory: skills/integration/
-
-**pattern** - Problem-focused skills (Layer 3)
-Skills that solve specific recurring problems across technologies.
-Directory: skills/pattern/
-
----
-
-Use action="scaffold" with id, name, and type to create a skill.
-Example: { "action": "scaffold", "id": "react-hooks", "name": "React Hooks", "type": "core" }`;
 }
 
 /**
@@ -931,7 +819,7 @@ The following fields are required: ${missing.join(', ')}
   "action": "scaffold",
   "id": "my-skill",
   "name": "My Skill Name",
-  "type": "core",
+  "category": "development",
   "description": "What this skill does",
   "owns": ["domain-1", "domain-2"],
   "triggers": ["phrase 1", "phrase 2"],
@@ -939,7 +827,7 @@ The following fields are required: ${missing.join(', ')}
 }
 \`\`\`
 
-Use action="list-types" to see skill type options.`;
+Use action="list-categories" to see available categories.`;
 }
 
 /**
@@ -947,16 +835,12 @@ Use action="list-types" to see skill type options.`;
  */
 function buildPreviewInstruction(
   id: string,
-  type: string,
-  files: { path: string; description: string }[],
-  layer: number
+  category: string,
+  files: { path: string; description: string }[]
 ): string {
-  const layerNames = ['', 'Minimal (skill.yaml + sharp-edges)', 'Core (+ patterns + anti-patterns)', 'Complete (+ validations + boundaries)'];
-
   return `## Skill Preview: ${id}
 
-**Type:** ${type}
-**Layer:** ${layer} - ${layerNames[layer]}
+**Category:** ${category}
 
 **Files to be created:**
 ${files.map(f => `- ${f.path}\n  ${f.description}`).join('\n')}
@@ -972,58 +856,57 @@ Use action="scaffold" to generate full file contents.`;
  */
 function buildScaffoldInstruction(
   id: string,
-  type: string,
-  files: { path: string }[],
-  layer: number
+  category: string,
+  files: { path: string }[]
 ): string {
-  const layerNames = ['', 'Minimal', 'Core', 'Complete'];
-
   return `## Skill Scaffold Generated: ${id}
 
-**Type:** ${type}
-**Layer:** ${layer} - ${layerNames[layer]}
+**Category:** ${category}
 **Files:** ${files.length}
 
 ### Next Steps
 
-1. **Create the files** in your spawner-v2 directory:
-   ${files.map(f => f.path).join('\n   ')}
+1. **Create the files** in spawner-v2/skills/${category}/${id}/:
+   ${files.map(f => f.path.split('/').pop()).join('\n   ')}
 
 2. **Fill in the placeholders** in each file:
-   - skill.yaml: Add your owns, triggers, tags
-   - sharp-edges.md: Document 5+ real gotchas with code examples
-   - patterns.md: Add 3+ best practices (if layer >= 2)
-   - anti-patterns.md: Add 3+ common mistakes (if layer >= 2)
+   - skill.yaml: Complete identity, add real patterns/anti-patterns/handoffs
+   - sharp-edges.yaml: Document 8-12 real gotchas with detection patterns
+   - validations.yaml: Add 8-12 automated checks with tested regex
+   - collaboration.yaml: Define prerequisites, delegation triggers, skill interactions
 
-3. **Test your skill** on a real task
+3. **Quality requirements:**
+   - [ ] Identity sounds like a real expert with battle scars
+   - [ ] 4-6 patterns with copy-paste ready code
+   - [ ] 4-6 anti-patterns with clear "why" and alternatives
+   - [ ] 8-12 sharp edges with specific situations and solutions
+   - [ ] 8-12 validations with tested regex patterns
+   - [ ] Handoffs to related skills defined
+   - [ ] 3-5 delegation triggers with context
+   - [ ] 2-3 cross-domain insights
 
 4. **Upload to KV:**
    \`\`\`bash
    cd spawner-v2
-   node scripts/upload-skills.js --local
+   node scripts/upload-skills.js
    \`\`\`
 
 ### Quality Checklist
 
-Layer 1 (Required):
-- [ ] skill.yaml has clear owns/does_not_own
-- [ ] 5+ sharp edges with code examples
-- [ ] Edges are specific (not generic advice)
+Sharp Edges:
+- [ ] Each is a real gotcha learned the hard way
+- [ ] Specific situations, not generic advice
+- [ ] Working code in solutions
+- [ ] Detection patterns tested
 
-${layer >= 2 ? `Layer 2 (Core):
-- [ ] 3+ patterns with working code
-- [ ] 3+ anti-patterns with fixes
-- [ ] Decisions documented
-` : ''}
-${layer >= 3 ? `Layer 3 (Complete):
-- [ ] Critical validations implemented
-- [ ] Handoff triggers defined
-- [ ] Escape hatches documented
-` : ''}
+Validations:
+- [ ] Regex tested against real code
+- [ ] No excessive false positives
+- [ ] Fix actions are specific and actionable
 
 ---
 
-A Layer 1 skill is useful. Ship early, iterate often.`;
+Ship early, iterate based on real usage.`;
 }
 
 /**
@@ -1032,34 +915,44 @@ A Layer 1 skill is useful. Ship early, iterate often.`;
 function buildValidationChecklist(id: string): string {
   return `## Skill Validation: ${id}
 
-### Layer 1 Checklist (Required)
-- [ ] skill.yaml exists with valid structure
+### skill.yaml Checklist
 - [ ] id is kebab-case
 - [ ] name is human-readable
-- [ ] version follows semver
-- [ ] type is core/integration/pattern
-- [ ] owns has at least 1 domain
-- [ ] does_not_own has clear handoffs
-- [ ] triggers has at least 3 activation phrases
+- [ ] version follows semver (1.0.0)
+- [ ] layer is set (usually 1)
+- [ ] description is concise
+- [ ] owns has domains this skill is authoritative on
+- [ ] pairs_with lists compatible skills
+- [ ] triggers has 5+ activation phrases
+- [ ] tags has searchable keywords
+- [ ] identity sounds like a real expert
+- [ ] 4-6 patterns with working code examples
+- [ ] 4-6 anti-patterns with clear alternatives
+- [ ] handoffs to related skills defined
 
-- [ ] sharp-edges.md exists
-- [ ] 5+ sharp edges documented
-- [ ] Each edge has: Severity, The Trap, Why, The Fix
-- [ ] Code examples are copy-pastable
-- [ ] Edges are specific (not generic)
+### sharp-edges.yaml Checklist
+- [ ] 8-12 sharp edges documented
+- [ ] Each has: id, summary, severity, situation, why, solution, symptoms
+- [ ] detection_pattern is regex or null
+- [ ] Edges are specific (not generic advice)
+- [ ] Code examples actually work
 
-### Layer 2 Checklist (Core)
-- [ ] patterns.md with 3+ patterns
-- [ ] anti-patterns.md with 3+ anti-patterns
-- [ ] decisions.md with key choices
+### validations.yaml Checklist
+- [ ] 8-12 validations defined
+- [ ] Each has: id, name, severity, type, pattern, message, fix_action, applies_to
+- [ ] Regex patterns tested against real code
+- [ ] No excessive false positives
+- [ ] File types correctly targeted
 
-### Layer 3 Checklist (Complete)
-- [ ] validations/checks.yaml with regex patterns
-- [ ] boundaries.md with handoff triggers
+### collaboration.yaml Checklist
+- [ ] Prerequisites list foundational skills/knowledge
+- [ ] 5-10 complementary skills with relationships
+- [ ] 3-5 delegation triggers with context
+- [ ] Cross-domain insights documented
+- [ ] Ecosystem (tools/alternatives/deprecated) for tech skills
 
 ### Quality Check
-- [ ] Dogfooded on real project
+- [ ] Tested on real project
 - [ ] Sharp edges catch real issues
-- [ ] Code examples actually work
-- [ ] Version ranges specified where needed`;
+- [ ] Validations don't cry wolf`;
 }
