@@ -67,6 +67,11 @@ Spawner automatically:
 | `spawner_unstick` | Get help when stuck on a problem |
 | `spawner_templates` | List available project templates |
 | `spawner_skills` | Search, list, get skills and squads |
+| `spawner_skill_brainstorm` | Optional deep exploration before skill creation |
+| `spawner_skill_research` | Research phase for skill creation |
+| `spawner_skill_new` | Create world-class skills with 4 YAML files |
+| `spawner_skill_score` | Score skill against 100-point quality rubric |
+| `spawner_skill_upgrade` | Enhance existing skills |
 
 **Production endpoint:** https://mcp.vibeship.co
 
@@ -122,6 +127,75 @@ Spawner detects your experience level and adapts guidance:
 - **builder** - Some tech knowledge, learning
 - **developer** - Technical, familiar with patterns
 - **expert** - Senior developer, strong opinions
+
+---
+
+## Skill Creation
+
+Create world-class skills for Spawner with our automated pipeline.
+
+### Two Paths
+
+Choose your approach based on how deeply you want to explore:
+
+| Path | Flow | When to Use |
+|------|------|-------------|
+| **Quick** | `research` → `new` → `score` | You know exactly what skill you want |
+| **Deep** | `brainstorm` → `research` → `new` → `score` | You want to explore and add your personal touch |
+
+### Quick Path (Automated)
+
+Jump straight into creation when you have a clear vision:
+
+```
+You: I want to create a skill for React performance optimization
+
+Claude: [Uses spawner_skill_research to gather pain points, patterns, gotchas]
+Claude: [Uses spawner_skill_new to generate 4 YAML files]
+Claude: [Uses spawner_skill_score to validate against 100-point rubric]
+```
+
+### Deep Path (Brainstorm + Automated)
+
+Start with exploration when you want maximum depth:
+
+```
+You: Let's brainstorm a skill for database migrations
+
+Claude: [Uses spawner_skill_brainstorm]
+        - The Expert: Who inspires this skill?
+        - Boundaries: What does it own vs. hand off?
+        - Common Pitfalls: Walk through dangerous scenarios
+        - Collaboration: What skills does it work with?
+        - Personal Touch: Your unique insights
+
+Claude: [Uses spawner_skill_research with brainstorm insights]
+Claude: [Uses spawner_skill_new to generate skill files]
+Claude: [Uses spawner_skill_score - minimum 80 to ship]
+```
+
+### Skill Creation Tools
+
+| Tool | Purpose |
+|------|---------|
+| `spawner_skill_brainstorm` | Optional deep exploration before creation |
+| `spawner_skill_research` | Gather pain points, expert content, ecosystem mapping |
+| `spawner_skill_new` | Generate 4 YAML files (skill, sharp-edges, validations, collaboration) |
+| `spawner_skill_score` | Score against 100-point quality rubric (80 min to ship) |
+| `spawner_skill_upgrade` | Enhance existing skills with targeted improvements |
+
+### Skill Files
+
+Each skill requires 4 YAML files:
+
+```
+skills/
+└── your-skill/
+    ├── skill.yaml          # Identity, patterns, anti-patterns, handoffs
+    ├── sharp-edges.yaml    # 8-12 gotchas with detection patterns
+    ├── validations.yaml    # 8-12 automated code checks
+    └── collaboration.yaml  # Prerequisites, delegation triggers
+```
 
 ---
 

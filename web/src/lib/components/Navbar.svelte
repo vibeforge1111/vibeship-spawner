@@ -23,6 +23,7 @@
 
     <div class="navbar-right">
       <a href="/how-it-works">How It Works</a>
+      <a href="/skill-creation">Skills</a>
       <a href="/builder">Build</a>
       {#if $isAuthenticated}
         <span class="user-info">
