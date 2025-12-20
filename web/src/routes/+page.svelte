@@ -348,6 +348,59 @@
   <!-- Divider -->
   <div class="section-divider"></div>
 
+  <!-- Skills vs General Claude Section -->
+  <section class="comparison-section">
+    <h2 class="section-headline">Skills vs General Claude</h2>
+    <p class="section-subtitle">The difference is night and day</p>
+
+    <div class="comparison-grid">
+      <div class="comparison-card general">
+        <h3 class="comparison-title">General Claude</h3>
+        <div class="comparison-quote">
+          <blockquote>
+            "I have broad knowledge but may not know specific gotchas for your stack. I'll try my best based on general patterns."
+          </blockquote>
+          <cite>— Claude's honest self-assessment</cite>
+        </div>
+        <ul class="comparison-list">
+          <li>Knows documentation but not sharp edges</li>
+          <li>Suggests "best practices" without version context</li>
+          <li>Can't validate code before you ship</li>
+          <li>Forgets your project next session</li>
+          <li>Doesn't know when you're stuck in a loop</li>
+        </ul>
+      </div>
+
+      <div class="comparison-card skilled">
+        <h3 class="comparison-title">Claude + Skills</h3>
+        <div class="comparison-quote">
+          <blockquote>
+            "I have the supabase-backend skill loaded. I know about the RLS timing issue you're about to hit. Let me prevent that."
+          </blockquote>
+          <cite>— Claude with Spawner</cite>
+        </div>
+        <ul class="comparison-list">
+          <li>Knows battle-tested gotchas from real production</li>
+          <li>Patterns versioned for Next.js 14, not Next.js 12</li>
+          <li>Runs actual checks before code ships</li>
+          <li>Remembers your project, decisions, issues</li>
+          <li>Detects loops and offers escape hatches</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="claude-says">
+      <div class="claude-avatar"><Icon name="message-circle" size={24} /></div>
+      <div class="claude-message">
+        <p class="claude-text">"Skills give me the context I need to actually help you ship. Without them, I'm guessing based on training data that might be outdated. With them, I know exactly what works and what will break."</p>
+        <span class="claude-source">— How Claude describes the difference</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Divider -->
+  <div class="section-divider"></div>
+
   <!-- Skills System Section -->
   <section class="skills-deep-section">
     <h2 class="section-headline">The Claude Skills System</h2>
@@ -404,59 +457,6 @@
           <span class="skill-chip pattern">api-design</span>
         </div>
         <p class="skills-note">Skills are curated, versioned, and battle-tested—not AI-generated slop</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- Divider -->
-  <div class="section-divider"></div>
-
-  <!-- Skills vs General Claude Section -->
-  <section class="comparison-section">
-    <h2 class="section-headline">Skills vs General Claude</h2>
-    <p class="section-subtitle">The difference is night and day</p>
-
-    <div class="comparison-grid">
-      <div class="comparison-card general">
-        <h3 class="comparison-title">General Claude</h3>
-        <div class="comparison-quote">
-          <blockquote>
-            "I have broad knowledge but may not know specific gotchas for your stack. I'll try my best based on general patterns."
-          </blockquote>
-          <cite>— Claude's honest self-assessment</cite>
-        </div>
-        <ul class="comparison-list">
-          <li>Knows documentation but not sharp edges</li>
-          <li>Suggests "best practices" without version context</li>
-          <li>Can't validate code before you ship</li>
-          <li>Forgets your project next session</li>
-          <li>Doesn't know when you're stuck in a loop</li>
-        </ul>
-      </div>
-
-      <div class="comparison-card skilled">
-        <h3 class="comparison-title">Claude + Skills</h3>
-        <div class="comparison-quote">
-          <blockquote>
-            "I have the supabase-backend skill loaded. I know about the RLS timing issue you're about to hit. Let me prevent that."
-          </blockquote>
-          <cite>— Claude with Spawner</cite>
-        </div>
-        <ul class="comparison-list">
-          <li>Knows battle-tested gotchas from real production</li>
-          <li>Patterns versioned for Next.js 14, not Next.js 12</li>
-          <li>Runs actual checks before code ships</li>
-          <li>Remembers your project, decisions, issues</li>
-          <li>Detects loops and offers escape hatches</li>
-        </ul>
-      </div>
-    </div>
-
-    <div class="claude-says">
-      <div class="claude-avatar"><Icon name="message-circle" size={24} /></div>
-      <div class="claude-message">
-        <p class="claude-text">"Skills give me the context I need to actually help you ship. Without them, I'm guessing based on training data that might be outdated. With them, I know exactly what works and what will break."</p>
-        <span class="claude-source">— How Claude describes the difference</span>
       </div>
     </div>
   </section>
