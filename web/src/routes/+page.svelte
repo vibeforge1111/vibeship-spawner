@@ -350,50 +350,48 @@
 
   <!-- Skills vs General Claude Section -->
   <section class="comparison-section">
-    <h2 class="section-headline">Skills vs General Claude</h2>
-    <p class="section-subtitle">The difference is night and day</p>
+    <h2 class="section-headline">Why Skills Matter</h2>
+    <p class="section-subtitle">What Anthropic says about Claude Skills</p>
+
+    <div class="anthropic-quote-banner">
+      <blockquote>"Think of Skills as custom onboarding materials that let you package expertise, making Claude a specialist on what matters most to you."</blockquote>
+      <cite>— <a href="https://claude.com/blog/skills" target="_blank" rel="noopener">Anthropic, Introducing Agent Skills</a></cite>
+    </div>
 
     <div class="comparison-grid">
       <div class="comparison-card general">
-        <h3 class="comparison-title">General Claude</h3>
-        <div class="comparison-quote">
-          <blockquote>
-            "I have broad knowledge but may not know specific gotchas for your stack. I'll try my best based on general patterns."
-          </blockquote>
-          <cite>— Claude's honest self-assessment</cite>
-        </div>
+        <h3 class="comparison-title">Without Skills</h3>
         <ul class="comparison-list">
-          <li>Knows documentation but not sharp edges</li>
-          <li>Suggests "best practices" without version context</li>
-          <li>Can't validate code before you ship</li>
-          <li>Forgets your project next session</li>
-          <li>Doesn't know when you're stuck in a loop</li>
+          <li><Icon name="x" size={14} /> Broad knowledge, no stack-specific gotchas</li>
+          <li><Icon name="x" size={14} /> Generic patterns that may be outdated</li>
+          <li><Icon name="x" size={14} /> Can't validate code before you ship</li>
+          <li><Icon name="x" size={14} /> Forgets your project next session</li>
         </ul>
       </div>
 
       <div class="comparison-card skilled">
-        <h3 class="comparison-title">Claude + Skills</h3>
-        <div class="comparison-quote">
-          <blockquote>
-            "I have the supabase-backend skill loaded. I know about the RLS timing issue you're about to hit. Let me prevent that."
-          </blockquote>
-          <cite>— Claude with Spawner</cite>
-        </div>
+        <h3 class="comparison-title">With Skills</h3>
         <ul class="comparison-list">
-          <li>Knows battle-tested gotchas from real production</li>
-          <li>Patterns versioned for Next.js 14, not Next.js 12</li>
-          <li>Runs actual checks before code ships</li>
-          <li>Remembers your project, decisions, issues</li>
-          <li>Detects loops and offers escape hatches</li>
+          <li><Icon name="check" size={14} /> Battle-tested patterns for your exact stack</li>
+          <li><Icon name="check" size={14} /> Version-specific knowledge (Next.js 14, not 12)</li>
+          <li><Icon name="check" size={14} /> Runs actual checks before code ships</li>
+          <li><Icon name="check" size={14} /> Remembers your project context</li>
         </ul>
       </div>
     </div>
 
-    <div class="claude-says">
-      <div class="claude-avatar"><Icon name="message-circle" size={24} /></div>
-      <div class="claude-message">
-        <p class="claude-text">"Skills give me the context I need to actually help you ship. Without them, I'm guessing based on training data that might be outdated. With them, I know exactly what works and what will break."</p>
-        <span class="claude-source">— How Claude describes the difference</span>
+    <div class="skills-features">
+      <div class="skill-feature">
+        <span class="feature-label">Composable</span>
+        <span class="feature-desc">Skills stack together. Claude identifies what's needed and coordinates their use.</span>
+      </div>
+      <div class="skill-feature">
+        <span class="feature-label">Efficient</span>
+        <span class="feature-desc">Only loads what's needed, when it's needed.</span>
+      </div>
+      <div class="skill-feature">
+        <span class="feature-label">Powerful</span>
+        <span class="feature-desc">Skills include executable code for tasks where traditional programming is more reliable.</span>
       </div>
     </div>
   </section>
@@ -1336,11 +1334,45 @@
     padding: var(--space-12) var(--space-8);
   }
 
+  .anthropic-quote-banner {
+    max-width: 800px;
+    margin: 0 auto var(--space-8);
+    padding: var(--space-6);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--green-dim);
+    text-align: center;
+  }
+
+  .anthropic-quote-banner blockquote {
+    font-family: var(--font-serif);
+    font-size: var(--text-xl);
+    color: var(--text-primary);
+    margin: 0 0 var(--space-3);
+    line-height: 1.5;
+  }
+
+  .anthropic-quote-banner cite {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-tertiary);
+    font-style: normal;
+  }
+
+  .anthropic-quote-banner cite a {
+    color: var(--green-dim);
+    text-decoration: none;
+  }
+
+  .anthropic-quote-banner cite a:hover {
+    text-decoration: underline;
+  }
+
   .comparison-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: var(--space-6);
-    max-width: 900px;
+    max-width: 800px;
     margin: 0 auto var(--space-8);
   }
 
@@ -1366,62 +1398,64 @@
     margin: 0 0 var(--space-4);
   }
 
-  .comparison-quote {
-    margin-bottom: var(--space-4);
-    padding: var(--space-3);
-    background: var(--bg-tertiary);
-    border-left: 2px solid var(--border);
-  }
-
-  .comparison-card.skilled .comparison-quote {
-    border-left-color: var(--green-dim);
-  }
-
-  .comparison-quote blockquote {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    margin: 0 0 var(--space-2);
-    font-style: italic;
-    line-height: 1.5;
-  }
-
-  .comparison-quote cite {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--text-tertiary);
-    font-style: normal;
-  }
-
   .comparison-list {
     list-style: none;
     padding: 0;
     margin: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--space-2);
+    gap: var(--space-3);
   }
 
   .comparison-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
     font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    font-size: var(--text-base);
     color: var(--text-secondary);
-    padding-left: var(--space-4);
-    position: relative;
+    line-height: 1.5;
   }
 
-  .comparison-card.general .comparison-list li::before {
-    content: "×";
-    position: absolute;
-    left: 0;
+  .comparison-card.general .comparison-list li {
     color: var(--text-tertiary);
   }
 
-  .comparison-card.skilled .comparison-list li::before {
-    content: "✓";
-    position: absolute;
-    left: 0;
+  .comparison-card.skilled .comparison-list li {
+    color: var(--text-primary);
+  }
+
+  .skills-features {
+    display: flex;
+    justify-content: center;
+    gap: var(--space-8);
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  .skill-feature {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: var(--space-2);
+  }
+
+  .feature-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 600;
     color: var(--green-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .feature-desc {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    max-width: 250px;
+    line-height: 1.5;
   }
 
   .claude-says {
@@ -2082,8 +2116,29 @@
       padding: var(--space-8) var(--space-4);
     }
 
+    .anthropic-quote-banner {
+      padding: var(--space-4);
+    }
+
+    .anthropic-quote-banner blockquote {
+      font-size: var(--text-lg);
+    }
+
     .comparison-grid {
       grid-template-columns: 1fr;
+    }
+
+    .comparison-list li {
+      font-size: var(--text-sm);
+    }
+
+    .skills-features {
+      flex-direction: column;
+      gap: var(--space-4);
+    }
+
+    .feature-desc {
+      max-width: 100%;
     }
 
     .duo-section {
