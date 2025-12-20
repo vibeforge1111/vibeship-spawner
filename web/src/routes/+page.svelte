@@ -281,6 +281,11 @@
         <p class="benefit-desc">Starts building with deep knowledge of your exact stack and patterns.</p>
       </div>
     </div>
+
+    <p class="benefits-note">
+      <Icon name="folder" size={14} />
+      <span>Already have a project? Spawner analyzes your codebase and spawns the right skills to turbocharge your flow.</span>
+    </p>
   </section>
 
   <!-- Divider -->
@@ -1151,6 +1156,24 @@
     color: var(--text-secondary);
     margin: 0;
     line-height: 1.6;
+  }
+
+  .benefits-note {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-top: var(--space-8);
+    padding: var(--space-3) var(--space-5);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+  }
+
+  .benefits-note span {
+    line-height: 1.5;
   }
 
   /* Paths Section */
