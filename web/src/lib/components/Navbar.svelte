@@ -1,5 +1,6 @@
 <script lang="ts">
   import ThemeToggle from './ThemeToggle.svelte';
+  import Icon from './Icon.svelte';
 </script>
 
 <nav class="navbar">
@@ -11,9 +12,14 @@
     </a>
 
     <div class="navbar-right">
-      <a href="/why-spawner">Benefits</a>
-      <a href="/mcp-guide">Guide</a>
-      <a href="/skills">Skills</a>
+      <a href="/why-spawner" class="nav-btn">
+        <Icon name="zap" size={14} />
+        <span>Benefits</span>
+      </a>
+      <a href="/skills" class="nav-btn">
+        <Icon name="layers" size={14} />
+        <span>Skills</span>
+      </a>
       <ThemeToggle />
     </div>
   </div>
@@ -82,17 +88,24 @@
   .navbar-right {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.5rem;
   }
 
-  .navbar-right a {
+  .nav-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.75rem;
+    font-family: var(--font-mono);
     font-size: var(--text-sm);
     text-decoration: none;
     color: var(--text-secondary);
-    transition: color 0.2s;
+    border: 1px solid transparent;
+    transition: all 0.2s;
   }
 
-  .navbar-right a:hover {
+  .nav-btn:hover {
     color: var(--text-primary);
+    border-color: var(--border);
   }
 </style>

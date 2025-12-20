@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Navbar from '$lib/components/Navbar.svelte';
+  import Footer from '$lib/components/Footer.svelte';
+  import GuidePromo from '$lib/components/GuidePromo.svelte';
   import TemplateCard from '$lib/components/TemplateCard.svelte';
   import Icon from '$lib/components/Icon.svelte';
   import { templates, applyTemplate, projectDescription } from '$lib/stores/stack';
@@ -789,13 +791,8 @@
     </div>
   </section>
 
-  <footer class="footer">
-    <div class="footer-links">
-      <a href="https://github.com/vibeforge1111/vibeship-spawner" target="_blank" rel="noopener">GitHub</a>
-      <a href="/how-it-works">How It Works</a>
-      <a href="/builder">Builder</a>
-    </div>
-  </footer>
+  <GuidePromo />
+  <Footer />
 </main>
 
 <style>
@@ -2321,36 +2318,6 @@
 
   .btn-secondary:hover {
     border-color: var(--green-dim);
-    color: var(--green-dim);
-  }
-
-  /* Footer */
-  .footer {
-    padding: var(--space-8);
-    text-align: center;
-    border-top: 1px solid var(--border);
-  }
-
-  .footer-tagline {
-    font-family: var(--font-serif);
-    font-size: var(--text-lg);
-    font-style: italic;
-    color: var(--text-secondary);
-    margin: 0 0 var(--space-4);
-  }
-
-  .footer-links {
-    display: flex;
-    justify-content: center;
-    gap: var(--space-6);
-  }
-
-  .footer-links a {
-    font-size: var(--text-sm);
-    color: var(--text-tertiary);
-  }
-
-  .footer-links a:hover {
     color: var(--green-dim);
   }
 
