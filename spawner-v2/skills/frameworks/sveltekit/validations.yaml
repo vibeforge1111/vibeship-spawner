@@ -1,0 +1,150 @@
+id: sveltekit-validations
+skill: sveltekit
+version: 1.0.0
+
+validations:
+  # Critical: Security checks
+  - id: no-secrets-in-page-ts
+    name: No secrets in +page.ts
+    severity: critical
+    description: API keys and secrets must not be in +page.ts files (exposed to client)
+    pattern:
+      file_glob: "**/+page.ts"
+      match: "(API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE)\\s*="
+      exclude: "\\$env/static/public"
+    message: "Secrets detected in +page.ts - this file is bundled and sent to client. Move to +page.server.ts"
+    autofix: false
+
+  - id: private-env-in-server-only
+    name: Private env only in server files
+    severity: critical
+    description: $env/static/private must only be used in server-side files
+    pattern:
+      file_glob: "**/*.{ts,js,svelte}"
+      match: "\\$env/(static|dynamic)/private"
+      exclude: "(\\+page\\.server|\\+layout\\.server|\\+server|hooks\\.server)"
+    message: "Private environment variables used in client-accessible file"
+    autofix: false
+
+  # High: Common mistakes
+  - id: form-has-enhance
+    name: Forms should use enhance
+    severity: high
+    description: Form actions without use:enhance cause full page reloads
+    pattern:
+      file_glob: "**/*.svelte"
+      match: 'method="POST"(?!.*use:enhance)'
+      context_lines: 3
+    message: "Form with POST method should use use:enhance for SPA behavior"
+    autofix:
+      find: '(<form[^>]*method="POST"[^>]*)>'
+      replace: '$1 use:enhance>'
+      import_needed: "import { enhance } from '$app/forms';"
+
+  - id: no-fetch-in-component
+    name: No fetch in onMount
+    severity: high
+    description: Data fetching should happen in load functions, not components
+    pattern:
+      file_glob: "**/*.svelte"
+      match: "onMount\\s*\\(\\s*async.*fetch\\("
+      context_lines: 5
+    message: "Move fetch to +page.ts or +page.server.ts load function for SSR support"
+    autofix: false
+
+  - id: use-runes-not-stores
+    name: Prefer runes over stores in Svelte 5
+    severity: medium
+    description: Svelte 5 runes ($state, $derived) should be used instead of stores
+    pattern:
+      file_glob: "**/*.svelte"
+      match: "import.*\\{.*writable.*\\}.*from.*'svelte/store'"
+    message: "Consider using $state rune instead of writable store in Svelte 5"
+    autofix: false
+
+  - id: redirect-not-goto-in-load
+    name: Use redirect() in load functions
+    severity: high
+    description: goto() doesn't work properly in load functions, use redirect()
+    pattern:
+      file_glob: "**/+page.{ts,server.ts}"
+      match: "goto\\s*\\("
+    message: "Use 'throw redirect(303, '/path')' instead of goto() in load functions"
+    autofix: false
+
+  # Medium: Best practices
+  - id: svelte5-props-syntax
+    name: Use $props() in Svelte 5
+    severity: medium
+    description: Svelte 5 uses $props() instead of export let for component props
+    pattern:
+      file_glob: "**/*.svelte"
+      match: "export\\s+let\\s+\\w+\\s*[=;]"
+    message: "Use 'let { prop } = $props()' instead of 'export let prop' in Svelte 5"
+    autofix: false
+
+  - id: parallel-load-fetches
+    name: Parallelize independent fetches
+    severity: medium
+    description: Sequential awaits in load functions should be parallelized
+    pattern:
+      file_glob: "**/+page.{ts,server.ts}"
+      match: "await\\s+fetch.*\\n.*await\\s+fetch"
+      context_lines: 5
+    message: "Use Promise.all() for independent fetches to avoid waterfalls"
+    autofix: false
+
+  - id: browser-check-for-client-apis
+    name: Check browser before using client APIs
+    severity: high
+    description: Client-only APIs (localStorage, window) cause SSR hydration mismatches
+    pattern:
+      file_glob: "**/*.svelte"
+      match: "(localStorage|sessionStorage|window\\.|document\\.)(?!.*browser)"
+      exclude: "\\$effect|onMount"
+    message: "Wrap browser-only APIs with 'if (browser)' check or use in onMount/$effect"
+    autofix: false
+
+  - id: adapter-configured
+    name: Adapter must be configured
+    severity: high
+    description: SvelteKit requires an adapter for production builds
+    pattern:
+      file_glob: "svelte.config.js"
+      match: "adapter-auto"
+    message: "Configure a specific adapter (adapter-node, adapter-vercel, etc.) for production"
+    autofix: false
+
+  - id: runes-in-svelte-files
+    name: Runes require .svelte or .svelte.ts files
+    severity: high
+    description: $state, $derived, $effect only work in .svelte files or .svelte.ts files
+    pattern:
+      file_glob: "**/*.ts"
+      match: "\\$(state|derived|effect|props)\\s*\\("
+      exclude: "\\.svelte\\.ts$"
+    message: "Runes only work in .svelte or .svelte.ts files. Rename to .svelte.ts or use different patterns"
+    autofix: false
+
+  - id: load-has-depends
+    name: Use depends() for invalidation
+    severity: low
+    description: Load functions using invalidate() should declare dependencies
+    pattern:
+      file_glob: "**/+page.{ts,server.ts}"
+      match: "invalidate\\s*\\(['\"]"
+      exclude: "depends\\s*\\("
+    message: "Add depends('key') to load function when using invalidate('key')"
+    autofix: false
+
+pre_commit:
+  - id: no-secrets-in-page-ts
+  - id: private-env-in-server-only
+  - id: form-has-enhance
+  - id: browser-check-for-client-apis
+
+ci_checks:
+  - id: no-secrets-in-page-ts
+  - id: private-env-in-server-only
+  - id: adapter-configured
+  - id: runes-in-svelte-files

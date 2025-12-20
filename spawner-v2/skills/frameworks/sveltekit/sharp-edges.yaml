@@ -1,0 +1,298 @@
+id: sveltekit-sharp-edges
+skill: sveltekit
+version: 1.0.0
+
+edges:
+  - id: ssr-hydration-mismatch
+    summary: SSR/Client HTML mismatch causes hydration errors
+    severity: critical
+    situation: Component renders different HTML on server vs client
+    why: |
+      SvelteKit pre-renders on the server, then hydrates on the client. If the HTML differs
+      (e.g., using Math.random(), Date.now(), or browser-only APIs), you get hydration errors
+      and the page may break or flash.
+    solution: |
+      Use `browser` check for client-only code, or disable SSR for that page:
+
+      ```typescript
+      // Check if running in browser
+      import { browser } from '$app/environment';
+
+      let value = $state(browser ? localStorage.getItem('key') : null);
+
+      // Or disable SSR for the page
+      // +page.ts
+      export const ssr = false;
+      ```
+    detection_pattern: '(localStorage|sessionStorage|window\.|document\.)'
+
+  - id: load-function-not-reactive
+    summary: Load function data isn't reactive - changes don't trigger reload
+    severity: high
+    situation: Expecting load function to re-run when component state changes
+    why: |
+      Load functions only run on navigation or invalidation. Changing component state
+      won't trigger them. This catches React developers who expect useEffect behavior.
+    solution: |
+      Use invalidate() or invalidateAll() to trigger reload:
+
+      ```typescript
+      import { invalidate, invalidateAll } from '$app/navigation';
+
+      // Invalidate specific dependency
+      await invalidate('app:todos');
+
+      // Or invalidate everything
+      await invalidateAll();
+
+      // In load function, declare dependency:
+      export const load = async ({ depends }) => {
+        depends('app:todos');
+        return { todos: await getTodos() };
+      };
+      ```
+    detection_pattern: 'depends\s*\('
+
+  - id: form-action-without-enhance
+    summary: Form actions without use:enhance cause full page reload
+    severity: high
+    situation: Using form actions but forms still reload the page
+    why: |
+      By default, form submissions in SvelteKit do a full page navigation (progressive
+      enhancement). You need use:enhance for SPA-like behavior.
+    solution: |
+      Add use:enhance to your form:
+
+      ```svelte
+      <script>
+        import { enhance } from '$app/forms';
+      </script>
+
+      <form method="POST" action="?/create" use:enhance>
+        <input name="title" />
+        <button>Submit</button>
+      </form>
+      ```
+    detection_pattern: 'method="POST"(?!.*use:enhance)'
+
+  - id: page-ts-runs-on-client
+    summary: +page.ts runs on both server AND client - don't put secrets there
+    severity: critical
+    situation: Putting API keys or sensitive logic in +page.ts
+    why: |
+      Unlike +page.server.ts, the +page.ts file is bundled and sent to the client.
+      Any secrets or server-only logic will be exposed.
+    solution: |
+      Use +page.server.ts for anything sensitive:
+
+      ```typescript
+      // BAD: +page.ts (exposed to client)
+      const API_KEY = 'secret123';
+
+      // GOOD: +page.server.ts (server only)
+      import { API_KEY } from '$env/static/private';
+
+      export const load = async () => {
+        const data = await fetch(url, {
+          headers: { Authorization: API_KEY }
+        });
+        return { data };
+      };
+      ```
+    detection_pattern: '\+page\.ts.*\$env/(static|dynamic)/private'
+
+  - id: runes-outside-component
+    summary: Runes ($state, $derived) only work in .svelte files or specific contexts
+    severity: high
+    situation: Using runes in regular .ts files and getting errors
+    why: |
+      Runes are compiled by Svelte and only work in .svelte files, or in .svelte.ts
+      files that are specifically processed. Regular .ts files don't support runes.
+    solution: |
+      Either use .svelte.ts extension or use different patterns:
+
+      ```typescript
+      // user.svelte.ts - runes work here
+      export const user = $state({ name: '', email: '' });
+
+      // OR use regular functions in .ts files
+      // store.ts
+      export function createCounter() {
+        let count = $state(0);
+        return {
+          get count() { return count },
+          increment() { count++ }
+        };
+      }
+      ```
+    detection_pattern: '\$state\s*\(.*\).*\.ts(?!\.svelte)'
+
+  - id: missing-adapter
+    summary: Build fails without an adapter configured
+    severity: high
+    situation: Running build without specifying an adapter
+    why: |
+      SvelteKit doesn't know how to output your app without an adapter. adapter-auto
+      tries to detect your platform, but explicit is better.
+    solution: |
+      Install and configure the right adapter:
+
+      ```bash
+      npm install -D @sveltejs/adapter-node  # or adapter-vercel, adapter-static
+      ```
+
+      ```javascript
+      // svelte.config.js
+      import adapter from '@sveltejs/adapter-node';
+
+      export default {
+        kit: {
+          adapter: adapter()
+        }
+      };
+      ```
+    detection_pattern: 'adapter-auto'
+
+  - id: fetch-in-component
+    summary: Using fetch in components instead of load functions
+    severity: medium
+    situation: Calling fetch in onMount or $effect instead of +page.ts
+    why: |
+      Fetching in components bypasses SSR, causes loading flashes, creates waterfalls,
+      and makes error handling harder.
+    solution: |
+      Move data fetching to load functions:
+
+      ```typescript
+      // +page.server.ts
+      export const load = async ({ fetch }) => {
+        const res = await fetch('/api/data');
+        return { data: await res.json() };
+      };
+
+      // +page.svelte
+      <script>
+        let { data } = $props();
+        // data is already loaded, no flash
+      </script>
+      ```
+    detection_pattern: 'onMount\s*\(\s*async'
+
+  - id: hooks-vs-layout
+    summary: Confusion between hooks.server.ts and +layout.server.ts
+    severity: medium
+    situation: Not knowing where to put authentication/middleware logic
+    why: |
+      hooks.server.ts runs on EVERY request (including API routes, assets).
+      +layout.server.ts only runs for pages under that layout. Wrong choice = bugs.
+    solution: |
+      Use hooks for request-level concerns, layouts for page-level:
+
+      ```typescript
+      // hooks.server.ts - runs on ALL requests
+      export const handle = async ({ event, resolve }) => {
+        event.locals.user = await getUser(event.cookies);
+        return resolve(event);
+      };
+
+      // +layout.server.ts - runs for pages only
+      export const load = async ({ locals }) => {
+        return { user: locals.user };
+      };
+      ```
+    detection_pattern: 'hooks\.server'
+
+  - id: goto-in-load
+    summary: Using goto() in load functions instead of redirect()
+    severity: medium
+    situation: Trying to redirect from a load function
+    why: |
+      goto() is for client-side navigation. In load functions, it either won't work
+      (server) or causes issues. Use redirect() which works on both.
+    solution: |
+      Use redirect from @sveltejs/kit:
+
+      ```typescript
+      import { redirect } from '@sveltejs/kit';
+
+      export const load = async ({ locals }) => {
+        if (!locals.user) {
+          throw redirect(303, '/login');
+        }
+        return { user: locals.user };
+      };
+      ```
+    detection_pattern: 'goto\s*\(.*load'
+
+  - id: env-wrong-import
+    summary: Using wrong $env module - private vs public
+    severity: critical
+    situation: Environment variables not available or exposed to client
+    why: |
+      $env/static/private is server-only. $env/static/public is exposed to client.
+      Using the wrong one either exposes secrets or fails at runtime.
+    solution: |
+      Use the right module:
+
+      ```typescript
+      // Server-only (secrets, API keys)
+      import { DATABASE_URL } from '$env/static/private';
+
+      // Client-safe (public config) - must prefix with PUBLIC_
+      import { PUBLIC_API_URL } from '$env/static/public';
+      ```
+
+      In .env:
+      ```
+      DATABASE_URL=secret    # private
+      PUBLIC_API_URL=https://api.example.com  # public
+      ```
+    detection_pattern: '\$env/static/public.*(?!PUBLIC_)'
+
+  - id: prerender-dynamic-routes
+    summary: Prerendering dynamic routes without entries
+    severity: medium
+    situation: Dynamic routes ([slug]) fail to prerender
+    why: |
+      SvelteKit can't know what slugs exist at build time. You need to provide entries
+      or disable prerendering for dynamic routes.
+    solution: |
+      Provide entries or mark as not prerenderable:
+
+      ```typescript
+      // +page.ts
+      export const prerender = true;
+
+      export const entries = async () => {
+        const posts = await getPosts();
+        return posts.map(post => ({ slug: post.slug }));
+      };
+
+      // Or disable prerender for this route
+      export const prerender = false;
+      ```
+    detection_pattern: 'prerender.*=.*true.*\[.*\]'
+
+  - id: props-destructuring-svelte5
+    summary: Using export let instead of $props() in Svelte 5
+    severity: medium
+    situation: Old Svelte 4 syntax doesn't work or shows warnings
+    why: |
+      Svelte 5 uses $props() rune instead of export let. Old syntax still works
+      but mixing them causes confusion and future compatibility issues.
+    solution: |
+      Use $props() in Svelte 5:
+
+      ```svelte
+      <!-- Svelte 4 (deprecated) -->
+      <script>
+        export let name;
+        export let count = 0;
+      </script>
+
+      <!-- Svelte 5 -->
+      <script>
+        let { name, count = 0 } = $props();
+      </script>
+      ```
+    detection_pattern: 'export\s+let\s+\w+\s*[=;]'
