@@ -353,46 +353,101 @@
     <h2 class="section-headline">Why Skills Matter</h2>
     <p class="section-subtitle">What Anthropic says about Claude Skills</p>
 
+    <div class="comparison-table">
+      <div class="comparison-header">
+        <div class="comparison-col topic-col"></div>
+        <div class="comparison-col without-col">Without Skills</div>
+        <div class="comparison-col with-col">With Skills</div>
+      </div>
+
+      <div class="comparison-row">
+        <div class="comparison-col topic-col">Stack Knowledge</div>
+        <div class="comparison-col without-col">
+          <Icon name="x" size={14} />
+          <span>Generic advice across all frameworks</span>
+        </div>
+        <div class="comparison-col with-col">
+          <Icon name="check" size={14} />
+          <span>Battle-tested patterns for your exact stack</span>
+        </div>
+      </div>
+
+      <div class="comparison-row">
+        <div class="comparison-col topic-col">Versioning</div>
+        <div class="comparison-col without-col">
+          <Icon name="x" size={14} />
+          <span>May suggest outdated implementations</span>
+        </div>
+        <div class="comparison-col with-col">
+          <Icon name="check" size={14} />
+          <span>Current version patterns</span>
+        </div>
+      </div>
+
+      <div class="comparison-row">
+        <div class="comparison-col topic-col">Sharp Edges</div>
+        <div class="comparison-col without-col">
+          <Icon name="x" size={14} />
+          <span>Learns gotchas after you hit them</span>
+        </div>
+        <div class="comparison-col with-col">
+          <Icon name="check" size={14} />
+          <span>Warns you before you hit them</span>
+        </div>
+      </div>
+
+      <div class="comparison-row">
+        <div class="comparison-col topic-col">Code Validation</div>
+        <div class="comparison-col without-col">
+          <Icon name="x" size={14} />
+          <span>Relies on your review to catch issues</span>
+        </div>
+        <div class="comparison-col with-col">
+          <Icon name="check" size={14} />
+          <span>Runs actual checks before shipping</span>
+        </div>
+      </div>
+
+      <div class="comparison-row">
+        <div class="comparison-col topic-col">Security</div>
+        <div class="comparison-col without-col">
+          <Icon name="x" size={14} />
+          <span>General security awareness</span>
+        </div>
+        <div class="comparison-col with-col">
+          <Icon name="check" size={14} />
+          <span>Stack-specific vulnerability detection</span>
+        </div>
+      </div>
+
+      <div class="comparison-row">
+        <div class="comparison-col topic-col">Anti-patterns</div>
+        <div class="comparison-col without-col">
+          <Icon name="x" size={14} />
+          <span>Learns mistakes after you ship</span>
+        </div>
+        <div class="comparison-col with-col">
+          <Icon name="check" size={14} />
+          <span>Knows what NOT to do upfront</span>
+        </div>
+      </div>
+
+      <div class="comparison-row">
+        <div class="comparison-col topic-col">Getting Stuck</div>
+        <div class="comparison-col without-col">
+          <Icon name="x" size={14} />
+          <span>Keeps trying same approach</span>
+        </div>
+        <div class="comparison-col with-col">
+          <Icon name="check" size={14} />
+          <span>Detects loops and offers alternatives</span>
+        </div>
+      </div>
+    </div>
+
     <div class="anthropic-quote-banner">
       <blockquote>"Think of Skills as custom onboarding materials that let you package expertise, making Claude a specialist on what matters most to you."</blockquote>
       <cite>— <a href="https://claude.com/blog/skills" target="_blank" rel="noopener">Anthropic, Introducing Agent Skills</a></cite>
-    </div>
-
-    <div class="comparison-grid">
-      <div class="comparison-card general">
-        <h3 class="comparison-title">Without Skills</h3>
-        <ul class="comparison-list">
-          <li><Icon name="x" size={14} /> Broad knowledge, no stack-specific gotchas</li>
-          <li><Icon name="x" size={14} /> Generic patterns that may be outdated</li>
-          <li><Icon name="x" size={14} /> Can't validate code before you ship</li>
-          <li><Icon name="x" size={14} /> Forgets your project next session</li>
-        </ul>
-      </div>
-
-      <div class="comparison-card skilled">
-        <h3 class="comparison-title">With Skills</h3>
-        <ul class="comparison-list">
-          <li><Icon name="check" size={14} /> Battle-tested patterns for your exact stack</li>
-          <li><Icon name="check" size={14} /> Version-specific knowledge (Next.js 14, not 12)</li>
-          <li><Icon name="check" size={14} /> Runs actual checks before code ships</li>
-          <li><Icon name="check" size={14} /> Remembers your project context</li>
-        </ul>
-      </div>
-    </div>
-
-    <div class="skills-features">
-      <div class="skill-feature">
-        <span class="feature-label">Composable</span>
-        <span class="feature-desc">Skills stack together. Claude identifies what's needed and coordinates their use.</span>
-      </div>
-      <div class="skill-feature">
-        <span class="feature-label">Efficient</span>
-        <span class="feature-desc">Only loads what's needed, when it's needed.</span>
-      </div>
-      <div class="skill-feature">
-        <span class="feature-label">Powerful</span>
-        <span class="feature-desc">Skills include executable code for tasks where traditional programming is more reliable.</span>
-      </div>
     </div>
   </section>
 
@@ -1335,26 +1390,26 @@
   }
 
   .anthropic-quote-banner {
-    max-width: 800px;
-    margin: 0 auto var(--space-8);
-    padding: var(--space-6);
-    background: var(--bg-secondary);
+    max-width: 900px;
+    margin: 0 auto;
+    padding: var(--space-4) var(--space-8);
+    background: var(--bg-tertiary);
     border: 1px solid var(--border);
-    border-left: 3px solid var(--green-dim);
+    border-top: none;
     text-align: center;
   }
 
   .anthropic-quote-banner blockquote {
     font-family: var(--font-serif);
-    font-size: var(--text-xl);
-    color: var(--text-primary);
-    margin: 0 0 var(--space-3);
+    font-size: var(--text-base);
+    color: var(--text-secondary);
+    margin: 0 0 var(--space-2);
     line-height: 1.5;
   }
 
   .anthropic-quote-banner cite {
     font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    font-size: var(--text-xs);
     color: var(--text-tertiary);
     font-style: normal;
   }
@@ -1368,94 +1423,92 @@
     text-decoration: underline;
   }
 
-  .comparison-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--space-6);
-    max-width: 800px;
-    margin: 0 auto var(--space-8);
-  }
-
-  .comparison-card {
-    padding: var(--space-5);
+  .comparison-table {
+    max-width: 900px;
+    margin: 0 auto;
     border: 1px solid var(--border);
-  }
-
-  .comparison-card.general {
     background: var(--bg-secondary);
   }
 
-  .comparison-card.skilled {
-    background: rgba(0, 196, 154, 0.05);
-    border-color: var(--green-dim);
+  .comparison-header {
+    display: grid;
+    grid-template-columns: 140px 1fr 1fr;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border);
   }
 
-  .comparison-title {
-    font-family: var(--font-serif);
-    font-size: var(--text-xl);
-    font-weight: 400;
-    color: var(--text-primary);
-    margin: 0 0 var(--space-4);
-  }
-
-  .comparison-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-
-  .comparison-list li {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--space-2);
-    font-family: var(--font-mono);
-    font-size: var(--text-base);
-    color: var(--text-secondary);
-    line-height: 1.5;
-  }
-
-  .comparison-card.general .comparison-list li {
-    color: var(--text-tertiary);
-  }
-
-  .comparison-card.skilled .comparison-list li {
-    color: var(--text-primary);
-  }
-
-  .skills-features {
-    display: flex;
-    justify-content: center;
-    gap: var(--space-8);
-    max-width: 900px;
-    margin: 0 auto;
-  }
-
-  .skill-feature {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    gap: var(--space-2);
-  }
-
-  .feature-label {
+  .comparison-header .comparison-col {
+    padding: var(--space-3) var(--space-4);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     font-weight: 600;
-    color: var(--green-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    color: var(--text-primary);
   }
 
-  .feature-desc {
+  .comparison-header .without-col {
+    color: var(--text-tertiary);
+  }
+
+  .comparison-header .with-col {
+    color: var(--green-dim);
+  }
+
+  .comparison-row {
+    display: grid;
+    grid-template-columns: 140px 1fr 1fr;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .comparison-row:last-child {
+    border-bottom: none;
+  }
+
+  .comparison-col {
+    padding: var(--space-3) var(--space-4);
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+  }
+
+  .comparison-col.topic-col {
     font-family: var(--font-mono);
     font-size: var(--text-sm);
-    color: var(--text-secondary);
-    max-width: 250px;
+    font-weight: 600;
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+    border-right: 1px solid var(--border);
+  }
+
+  .comparison-col.without-col {
+    background: var(--bg-secondary);
+    color: var(--text-tertiary);
+    border-right: 1px solid var(--border);
+  }
+
+  .comparison-col.without-col span {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
     line-height: 1.5;
+  }
+
+  .comparison-col.with-col {
+    background: rgba(0, 196, 154, 0.03);
+    color: var(--text-primary);
+  }
+
+  .comparison-col.with-col span {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    line-height: 1.5;
+  }
+
+  .comparison-row:hover .comparison-col.without-col,
+  .comparison-row:hover .comparison-col.with-col {
+    background: var(--bg-primary);
+  }
+
+  .comparison-row:hover .comparison-col.with-col {
+    background: rgba(0, 196, 154, 0.08);
   }
 
   .claude-says {
@@ -2124,21 +2177,42 @@
       font-size: var(--text-lg);
     }
 
-    .comparison-grid {
+    .comparison-header {
+      display: none;
+    }
+
+    .comparison-row {
       grid-template-columns: 1fr;
+      gap: 0;
     }
 
-    .comparison-list li {
-      font-size: var(--text-sm);
+    .comparison-col.topic-col {
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+      font-size: var(--text-base);
+      padding: var(--space-3) var(--space-4);
     }
 
-    .skills-features {
-      flex-direction: column;
-      gap: var(--space-4);
+    .comparison-col.without-col,
+    .comparison-col.with-col {
+      border-right: none;
+      padding: var(--space-3) var(--space-4);
     }
 
-    .feature-desc {
-      max-width: 100%;
+    .comparison-col.without-col {
+      border-bottom: 1px solid var(--border);
+    }
+
+    .comparison-col.without-col::before {
+      content: "Without: ";
+      font-weight: 600;
+      color: var(--text-tertiary);
+    }
+
+    .comparison-col.with-col::before {
+      content: "With: ";
+      font-weight: 600;
+      color: var(--green-dim);
     }
 
     .duo-section {
