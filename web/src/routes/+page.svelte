@@ -239,12 +239,6 @@
           {/if}
         </div>
       </div>
-      {#if !isAnimating && visibleLines.length === 0}
-        <button class="play-btn" onclick={startAnimation}>
-          <Icon name="play" size={24} />
-          <span>Watch the magic</span>
-        </button>
-      {/if}
     </div>
   </section>
 
@@ -1013,39 +1007,6 @@
   @keyframes blink {
     0%, 50% { opacity: 1; }
     51%, 100% { opacity: 0; }
-  }
-
-  .play-btn {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-6);
-    background: var(--bg-secondary);
-    border: 2px solid var(--green-dim);
-    color: var(--green-dim);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    width: 120px;
-    height: 120px;
-    justify-content: center;
-  }
-
-  .play-btn span {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-  }
-
-  .play-btn:hover {
-    background: var(--green-dim);
-    color: var(--bg-primary);
-    box-shadow: var(--shadow-glow-green);
   }
 
   /* Section Divider */
