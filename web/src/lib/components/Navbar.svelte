@@ -13,7 +13,7 @@
 
     <div class="navbar-right">
       <a href="/why-spawner" class="nav-btn">
-        <Icon name="zap" size={14} />
+        <Icon name="check-circle" size={14} />
         <span>Benefits</span>
       </a>
       <a href="/mcp-guide" class="nav-btn">
