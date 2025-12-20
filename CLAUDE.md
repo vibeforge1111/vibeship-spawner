@@ -40,7 +40,7 @@ vibeship-spawner/
 │   ├── src/
 │   │   ├── index.ts         # Main worker, MCP routing
 │   │   ├── types.ts         # Type definitions
-│   │   ├── tools/           # MCP tool implementations (9 tools)
+│   │   ├── tools/           # MCP tool implementations (14 tools)
 │   │   ├── validation/      # Code checking (regex + AST)
 │   │   ├── skills/          # Skill loading and matching
 │   │   ├── telemetry/       # Event tracking
@@ -130,7 +130,7 @@ Machine-runnable checks that catch issues:
 
 Detected categories: framework, database, auth, payments, styling, ai, web3, testing, api, deployment
 
-## MCP Tools (13 total)
+## MCP Tools (14 total)
 
 | Tool | Purpose |
 |------|---------|
@@ -143,10 +143,13 @@ Detected categories: framework, database, auth, payments, styling, ai, web3, tes
 | `spawner_unstick` | Get help when stuck on a problem |
 | `spawner_templates` | List available project templates |
 | `spawner_skills` | Search, list, get skills and squads |
-| `spawner_skill_new` | Create world-class skills with 4 YAML files |
+| `spawner_skill_brainstorm` | Optional pre-pipeline deep skill exploration |
 | `spawner_skill_research` | Research phase for skill creation |
+| `spawner_skill_new` | Create world-class skills with 4 YAML files |
 | `spawner_skill_score` | Score skill against 100-point quality rubric |
 | `spawner_skill_upgrade` | Enhance existing skills with more depth |
+
+**Skill Creation Pipeline:** `brainstorm?` → `research` → `new` → `score`
 
 **Production endpoint:** https://mcp.vibeship.co
 

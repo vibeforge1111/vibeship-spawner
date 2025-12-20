@@ -12,9 +12,10 @@
  * - plan (unified: discover + recommend + create)
  * - analyze (codebase analysis for existing projects)
  *
- * Skill Creation Tools:
- * - spawner_skill_new (scaffold new skills with 4 YAML files)
+ * Skill Creation Tools (Pipeline: brainstorm? → research → new → score):
+ * - spawner_skill_brainstorm (optional pre-pipeline deep exploration)
  * - spawner_skill_research (research phase for world-class skills)
+ * - spawner_skill_new (scaffold new skills with 4 YAML files)
  * - spawner_skill_score (quality scoring against 100-point rubric)
  * - spawner_skill_upgrade (enhance existing skills)
  *
@@ -45,6 +46,7 @@ import { skillCreateToolDefinition, executeSkillCreate } from './skill-create.js
 import { skillResearchToolDefinition, executeSkillResearch } from './skill-research.js';
 import { skillScoreToolDefinition, executeSkillScore } from './skill-score.js';
 import { skillUpgradeToolDefinition, executeSkillUpgrade } from './skill-upgrade.js';
+import { skillBrainstormToolDefinition, executeSkillBrainstorm } from './skill-brainstorm.js';
 import { orchestrateToolDefinition, executeOrchestrate } from './orchestrate.js';
 
 // =============================================================================
@@ -120,6 +122,11 @@ registerTool({
   execute: (env, args, _userId) => executeSkillUpgrade(env, args as Parameters<typeof executeSkillUpgrade>[1]),
 });
 
+registerTool({
+  definition: skillBrainstormToolDefinition,
+  execute: (env, args, _userId) => executeSkillBrainstorm(env, args as Parameters<typeof executeSkillBrainstorm>[1]),
+});
+
 // Orchestration Tool (main entry point)
 registerTool({
   definition: orchestrateToolDefinition,
@@ -149,6 +156,7 @@ export {
   skillResearchToolDefinition,
   skillScoreToolDefinition,
   skillUpgradeToolDefinition,
+  skillBrainstormToolDefinition,
   orchestrateToolDefinition,
 };
 
@@ -167,5 +175,6 @@ export {
   executeSkillResearch,
   executeSkillScore,
   executeSkillUpgrade,
+  executeSkillBrainstorm,
   executeOrchestrate,
 };
