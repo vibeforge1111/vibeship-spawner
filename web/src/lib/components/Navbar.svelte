@@ -22,7 +22,8 @@
     </a>
 
     <div class="navbar-right">
-      <a href="/how-it-works">How It Works</a>
+      <a href="/why-spawner">Why Spawner</a>
+      <a href="/mcp-guide">Guide</a>
       <a href="/skills">Skills</a>
       <a href="/builder">Build</a>
       {#if $isAuthenticated}
