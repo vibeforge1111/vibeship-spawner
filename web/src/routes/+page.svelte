@@ -517,120 +517,128 @@
   <!-- Divider -->
   <div class="section-divider"></div>
 
-  <!-- Spawner + Mind Duo Section -->
-  <section class="duo-section">
+  <!-- Unified Spawner + Mind Flow Section -->
+  <section class="flow-section">
     <h2 class="section-headline">Spawner + Mind = Full Stack Claude</h2>
-    <p class="section-subtitle">Together they cover everything Claude needs</p>
+    <p class="section-subtitle">Watch how they work together</p>
 
-    <div class="duo-grid">
-      <div class="duo-card spawner-card">
-        <div class="duo-header">
-          <span class="duo-icon"><Icon name="zap" size={20} /></span>
-          <h3 class="duo-title">Spawner</h3>
-        </div>
-        <p class="duo-role">The skill system and guardrails</p>
-        <ul class="duo-provides">
-          <li>Specialized skills for your stack</li>
-          <li>Sharp edges and gotchas</li>
-          <li>Code validation before shipping</li>
-          <li>Escape hatch intelligence</li>
-          <li>Project templates and scaffolding</li>
-        </ul>
+    <!-- Animated Flow Diagram -->
+    <div class="flow-diagram">
+      <!-- User Input -->
+      <div class="flow-node user-node">
+        <div class="node-icon"><Icon name="user" size={20} /></div>
+        <span class="node-label">You</span>
       </div>
 
-      <div class="duo-plus">+</div>
+      <div class="flow-arrow">
+        <div class="arrow-line"></div>
+        <div class="arrow-pulse"></div>
+      </div>
 
-      <div class="duo-card mind-card">
-        <div class="duo-header">
-          <span class="duo-icon"><Icon name="brain" size={20} /></span>
-          <h3 class="duo-title">Mind</h3>
+      <!-- Central Claude -->
+      <div class="flow-node claude-node">
+        <div class="node-icon"><Icon name="terminal" size={24} /></div>
+        <span class="node-label">Claude</span>
+
+        <!-- Spawner Feed -->
+        <div class="capability-feed spawner-feed">
+          <div class="feed-header">
+            <Icon name="zap" size={14} />
+            <span>Spawner</span>
+          </div>
+          <div class="feed-items">
+            <span class="feed-item" style="--delay: 0s">Skills loaded</span>
+            <span class="feed-item" style="--delay: 0.5s">Patterns applied</span>
+            <span class="feed-item" style="--delay: 1s">Code validated</span>
+            <span class="feed-item" style="--delay: 1.5s">Sharp edges checked</span>
+          </div>
         </div>
-        <p class="duo-role">The memory and context layer</p>
-        <ul class="duo-provides">
-          <li>Persistent memory across sessions</li>
-          <li>Decision logging and recall</li>
-          <li>Blocker tracking and resolution</li>
-          <li>Session continuity</li>
-          <li>Context-aware reminders</li>
-        </ul>
+
+        <!-- Mind Feed -->
+        <div class="capability-feed mind-feed">
+          <div class="feed-header">
+            <Icon name="brain" size={14} />
+            <span>Mind</span>
+          </div>
+          <div class="feed-items">
+            <span class="feed-item" style="--delay: 0.2s">Context recalled</span>
+            <span class="feed-item" style="--delay: 0.7s">Decisions loaded</span>
+            <span class="feed-item" style="--delay: 1.2s">Blockers tracked</span>
+            <span class="feed-item" style="--delay: 1.7s">Session continued</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-arrow">
+        <div class="arrow-line"></div>
+        <div class="arrow-pulse"></div>
+      </div>
+
+      <!-- Enhanced Output -->
+      <div class="flow-node output-node">
+        <div class="node-icon"><Icon name="check-circle" size={20} /></div>
+        <span class="node-label">Senior Dev Output</span>
       </div>
     </div>
 
-    <div class="duo-result">
-      <span class="result-equals">=</span>
-      <div class="result-content">
-        <h3 class="result-title">Claude that remembers, learns, and never makes the same mistake twice</h3>
-        <p class="result-desc">Spawner gives Claude expertise. Mind gives Claude memory. Together, Claude becomes the senior dev who's seen it all and never forgets.</p>
+    <!-- Capabilities in Action -->
+    <div class="capabilities-demo">
+      <div class="capability-card mind-capability">
+        <div class="capability-header">
+          <Icon name="brain" size={16} />
+          <span>Mind recalls</span>
+        </div>
+        <div class="capability-example">
+          "Picking up invoice-app. Last session you fixed the Stripe webhook but invoice status wasn't updating. Want to continue?"
+        </div>
+        <span class="capability-name">Project Memory</span>
+      </div>
+
+      <div class="capability-card spawner-capability">
+        <div class="capability-header">
+          <Icon name="zap" size={16} />
+          <span>Spawner validates</span>
+        </div>
+        <div class="capability-example">
+          <span class="example-alert"><Icon name="alert-triangle" size={12} /> Line 12: SUPABASE_KEY hardcoded</span>
+          Moving to environment variable...
+        </div>
+        <span class="capability-name">Guardrails That Run</span>
+      </div>
+
+      <div class="capability-card spawner-capability">
+        <div class="capability-header">
+          <Icon name="zap" size={16} />
+          <span>Spawner warns</span>
+        </div>
+        <div class="capability-example">
+          <span class="example-warning">Watch out:</span> New users see empty data after signup. RLS policies fail during token refresh window.
+        </div>
+        <span class="capability-name">Sharp Edges</span>
+      </div>
+
+      <div class="capability-card spawner-capability">
+        <div class="capability-header">
+          <Icon name="zap" size={16} />
+          <span>Spawner unsticks</span>
+        </div>
+        <div class="capability-example">
+          We've tried 3 approaches and we're going in circles.
+          <span class="example-options">Options: 1) Move auth to layout 2) Client redirect 3) Switch to Clerk</span>
+        </div>
+        <span class="capability-name">Escape Hatches</span>
       </div>
     </div>
 
-    <div class="duo-install-hint">
-      <span class="hint-icon">💡</span>
-      <p>Both install as MCP servers—just add two config blocks to Claude Desktop</p>
+    <!-- Result Summary -->
+    <div class="flow-result">
+      <p class="result-text">Spawner gives Claude <strong>expertise</strong>. Mind gives Claude <strong>memory</strong>.</p>
+      <p class="result-tagline">Together, Claude becomes the senior dev who's seen it all and never forgets.</p>
     </div>
-  </section>
 
-  <!-- Divider -->
-  <div class="section-divider"></div>
-
-  <!-- What You Get Section (Refined) -->
-  <section class="powers-section">
-    <h2 class="powers-headline">What Claude Gets With Spawner</h2>
-    <p class="powers-subtitle">The superpowers Claude doesn't have by default</p>
-
-    <div class="powers-grid">
-      <div class="power-card">
-        <div class="power-demo">
-          <div class="demo-bubble claude">
-            <span class="demo-label">Claude</span>
-            "Picking up invoice-app. Last session you fixed the Stripe webhook but invoice status wasn't updating. Want to continue?"
-          </div>
-        </div>
-        <div class="power-info">
-          <h3 class="power-title">Project Memory</h3>
-          <p class="power-desc">Remembers your project across sessions. No more re-explaining.</p>
-        </div>
-      </div>
-
-      <div class="power-card">
-        <div class="power-demo">
-          <div class="demo-bubble spawner">
-            <span class="demo-label">Spawner</span>
-            <span class="demo-alert"><Icon name="alert-triangle" size={14} /> Line 12: SUPABASE_KEY hardcoded</span>
-            Moving to environment variable...
-          </div>
-        </div>
-        <div class="power-info">
-          <h3 class="power-title">Guardrails That Run</h3>
-          <p class="power-desc">Actually catches issues. Not suggestions—real scans.</p>
-        </div>
-      </div>
-
-      <div class="power-card">
-        <div class="power-demo">
-          <div class="demo-bubble spawner">
-            <span class="demo-label">Spawner</span>
-            <span class="demo-warning">Watch out:</span> New users see empty data after signup. RLS policies fail during token refresh window.
-          </div>
-        </div>
-        <div class="power-info">
-          <h3 class="power-title">Sharp Edges</h3>
-          <p class="power-desc">Gotchas Claude doesn't know. Battle-scarred knowledge.</p>
-        </div>
-      </div>
-
-      <div class="power-card">
-        <div class="power-demo">
-          <div class="demo-bubble spawner">
-            <span class="demo-label">Spawner</span>
-            We've tried 3 approaches and we're going in circles. <span class="demo-options">Options: 1) Move auth to layout 2) Client redirect 3) Switch to Clerk</span>
-          </div>
-        </div>
-        <div class="power-info">
-          <h3 class="power-title">Escape Hatches</h3>
-          <p class="power-desc">Detects when you're stuck. Offers real alternatives.</p>
-        </div>
-      </div>
+    <div class="flow-install-hint">
+      <Icon name="info" size={14} />
+      <span>Both install as MCP servers—just add two config blocks to Claude Desktop</span>
     </div>
 
     <a href="/how-it-works" class="cta-button">Get Started</a>
@@ -1547,137 +1555,268 @@
     color: var(--text-tertiary);
   }
 
-  /* Duo Section */
-  .duo-section {
+  /* Flow Section */
+  .flow-section {
     padding: var(--space-12) var(--space-8);
     background: var(--bg-secondary);
   }
 
-  .duo-grid {
+  /* Flow Diagram */
+  .flow-diagram {
     display: flex;
-    align-items: stretch;
+    align-items: center;
     justify-content: center;
     gap: var(--space-4);
-    max-width: 800px;
-    margin: 0 auto var(--space-6);
+    max-width: 900px;
+    margin: 0 auto var(--space-10);
+    padding: var(--space-6) 0;
   }
 
-  .duo-card {
-    flex: 1;
-    max-width: 300px;
-    padding: var(--space-5);
-    background: var(--bg-primary);
-    border: 1px solid var(--border);
-  }
-
-  .duo-card.spawner-card {
-    border-color: var(--green-dim);
-  }
-
-  .duo-card.mind-card {
-    border-color: var(--violet);
-  }
-
-  .duo-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    margin-bottom: var(--space-2);
-  }
-
-  .duo-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-secondary);
-  }
-
-  .duo-title {
-    font-family: var(--font-serif);
-    font-size: var(--text-xl);
-    font-weight: 400;
-    color: var(--text-primary);
-    margin: 0;
-  }
-
-  .duo-role {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    color: var(--text-tertiary);
-    margin: 0 0 var(--space-4);
-  }
-
-  .duo-provides {
-    list-style: none;
-    padding: 0;
-    margin: 0;
+  .flow-node {
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: var(--space-2);
-  }
-
-  .duo-provides li {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    padding-left: var(--space-4);
     position: relative;
   }
 
-  .duo-provides li::before {
-    content: "•";
-    position: absolute;
-    left: 0;
-    color: var(--text-tertiary);
-  }
-
-  .duo-plus {
+  .node-icon {
     display: flex;
     align-items: center;
-    font-family: var(--font-mono);
-    font-size: var(--text-2xl);
-    color: var(--text-tertiary);
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    background: var(--bg-primary);
+    border: 2px solid var(--border);
+    border-radius: 50%;
+    color: var(--text-secondary);
+    transition: all 0.3s;
   }
 
-  .duo-result {
-    display: flex;
-    align-items: center;
-    gap: var(--space-4);
-    max-width: 700px;
-    margin: 0 auto var(--space-6);
-    padding: var(--space-5);
-    background: rgba(0, 196, 154, 0.08);
-    border: 1px solid rgba(0, 196, 154, 0.3);
+  .user-node .node-icon {
+    border-color: var(--text-tertiary);
   }
 
-  .result-equals {
-    font-family: var(--font-mono);
-    font-size: var(--text-2xl);
+  .claude-node .node-icon {
+    width: 80px;
+    height: 80px;
+    border-color: var(--green-dim);
     color: var(--green-dim);
-    flex-shrink: 0;
+    box-shadow: 0 0 20px rgba(0, 196, 154, 0.2);
   }
 
-  .result-content {
-    flex: 1;
+  .output-node .node-icon {
+    border-color: var(--green-dim);
+    color: var(--green-dim);
   }
 
-  .result-title {
-    font-family: var(--font-serif);
-    font-size: var(--text-xl);
-    font-weight: 400;
-    color: var(--text-primary);
-    margin: 0 0 var(--space-2);
+  .node-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
   }
 
-  .result-desc {
+  /* Flow Arrows */
+  .flow-arrow {
+    position: relative;
+    width: 60px;
+    height: 2px;
+  }
+
+  .arrow-line {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--border);
+  }
+
+  .arrow-pulse {
+    position: absolute;
+    top: -3px;
+    left: 0;
+    width: 8px;
+    height: 8px;
+    background: var(--green-dim);
+    border-radius: 50%;
+    animation: pulse-flow 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-flow {
+    0% { left: 0; opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { left: calc(100% - 8px); opacity: 0; }
+  }
+
+  /* Capability Feeds on Claude Node */
+  .capability-feed {
+    position: absolute;
+    width: 160px;
+    padding: var(--space-3);
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+  }
+
+  .spawner-feed {
+    top: -10px;
+    right: calc(100% + 20px);
+    border-color: var(--green-dim);
+  }
+
+  .mind-feed {
+    top: -10px;
+    left: calc(100% + 20px);
+    border-color: var(--violet);
+  }
+
+  .feed-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+  }
+
+  .spawner-feed .feed-header {
+    color: var(--green-dim);
+  }
+
+  .mind-feed .feed-header {
+    color: var(--violet);
+  }
+
+  .feed-items {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .feed-item {
+    color: var(--text-tertiary);
+    opacity: 0;
+    animation: feed-appear 3s ease-in-out infinite;
+    animation-delay: var(--delay);
+  }
+
+  @keyframes feed-appear {
+    0%, 20% { opacity: 0; transform: translateX(-5px); }
+    30%, 70% { opacity: 1; transform: translateX(0); }
+    80%, 100% { opacity: 0; transform: translateX(5px); }
+  }
+
+  /* Capabilities Demo Grid */
+  .capabilities-demo {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-4);
+    max-width: 900px;
+    margin: 0 auto var(--space-8);
+  }
+
+  .capability-card {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    padding: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .capability-card.mind-capability {
+    border-left: 3px solid var(--violet);
+  }
+
+  .capability-card.spawner-capability {
+    border-left: 3px solid var(--green-dim);
+  }
+
+  .capability-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .mind-capability .capability-header {
+    color: var(--violet);
+  }
+
+  .spawner-capability .capability-header {
+    color: var(--green-dim);
+  }
+
+  .capability-example {
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     color: var(--text-secondary);
-    margin: 0;
     line-height: 1.5;
+    padding: var(--space-3);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
   }
 
-  .duo-install-hint {
+  .example-alert {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--red);
+    margin-bottom: var(--space-2);
+  }
+
+  .example-warning {
+    color: var(--orange);
+  }
+
+  .example-options {
+    display: block;
+    margin-top: var(--space-2);
+    color: var(--text-tertiary);
+    font-size: var(--text-xs);
+  }
+
+  .capability-name {
+    font-family: var(--font-serif);
+    font-size: var(--text-lg);
+    color: var(--text-primary);
+  }
+
+  /* Flow Result */
+  .flow-result {
+    text-align: center;
+    max-width: 600px;
+    margin: 0 auto var(--space-6);
+  }
+
+  .result-text {
+    font-family: var(--font-mono);
+    font-size: var(--text-base);
+    color: var(--text-secondary);
+    margin: 0 0 var(--space-2);
+  }
+
+  .result-text strong {
+    color: var(--green-dim);
+  }
+
+  .result-tagline {
+    font-family: var(--font-serif);
+    font-size: var(--text-xl);
+    color: var(--text-primary);
+    margin: 0;
+  }
+
+  .flow-install-hint {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1685,14 +1824,7 @@
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     color: var(--text-tertiary);
-  }
-
-  .hint-icon {
-    font-size: var(--text-base);
-  }
-
-  .duo-install-hint p {
-    margin: 0;
+    margin-bottom: var(--space-6);
   }
 
   /* Quickstart Section */
@@ -1934,118 +2066,6 @@
     color: var(--text-tertiary);
   }
 
-  /* Powers Section */
-  .powers-section {
-    padding: var(--space-12) var(--space-8);
-    text-align: center;
-  }
-
-  .powers-headline {
-    font-family: var(--font-serif);
-    font-size: var(--text-3xl);
-    font-weight: 400;
-    color: var(--text-primary);
-    margin: 0 0 var(--space-3);
-  }
-
-  .powers-subtitle {
-    font-family: var(--font-mono);
-    font-size: var(--text-base);
-    color: var(--text-tertiary);
-    margin: 0 0 var(--space-10);
-  }
-
-  .powers-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: var(--space-6);
-    max-width: 900px;
-    margin: 0 auto var(--space-10);
-    text-align: left;
-  }
-
-  .power-card {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    padding: var(--space-5);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  .power-demo {
-    background: var(--terminal-bg);
-    border: 1px solid var(--terminal-border);
-    padding: var(--space-4);
-    min-height: 100px;
-  }
-
-  .demo-bubble {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    color: var(--terminal-text);
-    line-height: 1.6;
-  }
-
-  .demo-bubble.claude {
-    font-style: italic;
-  }
-
-  .demo-label {
-    display: block;
-    font-size: var(--text-xs);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: var(--space-2);
-    color: var(--text-tertiary);
-  }
-
-  .demo-bubble.spawner .demo-label {
-    color: var(--green-dim);
-  }
-
-  .demo-alert {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    color: var(--red);
-    margin-bottom: var(--space-2);
-  }
-
-  .demo-warning {
-    color: var(--orange);
-  }
-
-  .demo-options {
-    display: block;
-    margin-top: var(--space-2);
-    color: var(--text-tertiary);
-    font-size: var(--text-xs);
-  }
-
-  .power-info {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .power-title {
-    font-family: var(--font-serif);
-    font-size: var(--text-xl);
-    font-weight: 400;
-    color: var(--text-primary);
-    margin: 0;
-  }
-
-  .power-desc {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    margin: 0;
-    line-height: 1.5;
-  }
-
   .cta-button {
     display: inline-block;
     margin-top: var(--space-4);
@@ -2215,38 +2235,72 @@
       color: var(--green-dim);
     }
 
-    .duo-section {
+    .flow-section {
       padding: var(--space-8) var(--space-4);
     }
 
-    .duo-grid {
+    .flow-diagram {
+      flex-direction: column;
+      gap: var(--space-6);
+      padding: var(--space-4) 0;
+    }
+
+    .flow-arrow {
+      width: 2px;
+      height: 40px;
+    }
+
+    .arrow-pulse {
+      top: 0;
+      left: -3px;
+      animation: pulse-flow-vertical 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse-flow-vertical {
+      0% { top: 0; opacity: 0; }
+      10% { opacity: 1; }
+      90% { opacity: 1; }
+      100% { top: calc(100% - 8px); opacity: 0; }
+    }
+
+    .capability-feed {
+      position: relative;
+      top: auto;
+      left: auto;
+      right: auto;
+      width: 100%;
+      max-width: 200px;
+      margin-top: var(--space-3);
+    }
+
+    .spawner-feed {
+      order: 1;
+    }
+
+    .mind-feed {
+      order: 2;
+    }
+
+    .claude-node {
+      display: flex;
       flex-direction: column;
       align-items: center;
     }
 
-    .duo-card {
-      max-width: 100%;
+    .claude-node .node-icon {
+      order: 0;
     }
 
-    .duo-plus {
-      transform: rotate(90deg);
+    .claude-node .node-label {
+      order: 3;
     }
 
-    .duo-result {
-      flex-direction: column;
-      text-align: center;
-    }
-
-    .powers-section {
-      padding: var(--space-8) var(--space-4);
-    }
-
-    .powers-headline {
-      font-size: var(--text-2xl);
-    }
-
-    .powers-grid {
+    .capabilities-demo {
       grid-template-columns: 1fr;
+    }
+
+    .flow-result {
+      text-align: center;
     }
 
     .quickstart-section {
