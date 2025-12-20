@@ -294,8 +294,8 @@
 
   <!-- Two Paths Section -->
   <section class="paths-section">
-    <h2 class="paths-headline">Two Ways In</h2>
-    <p class="paths-subtitle">Starting fresh or adding to existing code—Spawner adapts</p>
+    <h2 class="paths-headline">Works Both Ways</h2>
+    <p class="paths-subtitle">New idea or existing code—same superpowers</p>
 
     <div class="paths-grid">
       <!-- New Project Path -->
@@ -304,42 +304,20 @@
           <span class="path-icon"><Icon name="file-plus" size={20} /></span>
           <h3 class="path-title">New Project</h3>
         </div>
-        <p class="path-desc">Tell Claude what you want to build</p>
 
-        <div class="path-flow">
-          <div class="path-step">
-            <span class="step-num">1</span>
-            <div class="step-content">
-              <div class="step-label">You say</div>
-              <div class="step-text">"I want to build a SaaS for tracking invoices"</div>
-            </div>
-          </div>
-          <div class="path-step">
-            <span class="step-num">2</span>
-            <div class="step-content">
-              <div class="step-label">Spawner asks</div>
-              <div class="step-text">"Do users need accounts? Will they pay?"</div>
-            </div>
-          </div>
-          <div class="path-step">
-            <span class="step-num">3</span>
-            <div class="step-content">
-              <div class="step-label">Spawner recommends</div>
-              <div class="step-text">SaaS template → Next.js + Supabase + Stripe</div>
-            </div>
-          </div>
-          <div class="path-step">
-            <span class="step-num">4</span>
-            <div class="step-content">
-              <div class="step-label">Skills loaded</div>
-              <div class="step-text">auth-flow, payments-flow, supabase-backend</div>
-            </div>
+        <div class="path-example">
+          <div class="example-input">"Build me an invoice tracking SaaS"</div>
+          <div class="example-arrow"><Icon name="arrow-right" size={16} /></div>
+          <div class="example-output">
+            <span class="output-tag">Next.js</span>
+            <span class="output-tag">Supabase</span>
+            <span class="output-tag">Stripe</span>
           </div>
         </div>
 
         <div class="path-result">
-          <span class="result-icon">✓</span>
-          Claude now has specialized knowledge for your exact stack
+          <Icon name="check" size={14} />
+          <span>Stack chosen, skills loaded, building starts</span>
         </div>
       </div>
 
@@ -349,42 +327,19 @@
           <span class="path-icon"><Icon name="folder" size={20} /></span>
           <h3 class="path-title">Existing Project</h3>
         </div>
-        <p class="path-desc">Point Claude at your codebase</p>
 
-        <div class="path-flow">
-          <div class="path-step">
-            <span class="step-num">1</span>
-            <div class="step-content">
-              <div class="step-label">Spawner scans</div>
-              <div class="step-text">package.json, config files, code patterns</div>
-            </div>
-          </div>
-          <div class="path-step">
-            <span class="step-num">2</span>
-            <div class="step-content">
-              <div class="step-label">Detects stack</div>
-              <div class="step-text">Next.js + Prisma + Clerk + Tailwind</div>
-            </div>
-          </div>
-          <div class="path-step">
-            <span class="step-num">3</span>
-            <div class="step-content">
-              <div class="step-label">Finds gaps</div>
-              <div class="step-text">"No testing detected. Consider Vitest."</div>
-            </div>
-          </div>
-          <div class="path-step">
-            <span class="step-num">4</span>
-            <div class="step-content">
-              <div class="step-label">Skills loaded</div>
-              <div class="step-text">nextjs-app-router, auth-flow, tailwind-ui</div>
-            </div>
+        <div class="path-example">
+          <div class="example-input">Point Claude at your codebase</div>
+          <div class="example-arrow"><Icon name="arrow-right" size={16} /></div>
+          <div class="example-output">
+            <span class="output-tag">Stack detected</span>
+            <span class="output-tag">Gaps found</span>
           </div>
         </div>
 
         <div class="path-result">
-          <span class="result-icon">✓</span>
-          Claude understands your project and knows the gotchas
+          <Icon name="check" size={14} />
+          <span>Instant context, zero ramp-up time</span>
         </div>
       </div>
     </div>
@@ -1203,14 +1158,14 @@
     font-family: var(--font-mono);
     font-size: var(--text-base);
     color: var(--text-tertiary);
-    margin: 0 0 var(--space-10);
+    margin: 0 0 var(--space-8);
   }
 
   .paths-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: var(--space-6);
-    max-width: 1000px;
+    max-width: 800px;
     margin: 0 auto;
     text-align: left;
   }
@@ -1218,101 +1173,81 @@
   .path-card {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    padding: var(--space-6);
+    padding: var(--space-5);
+    transition: border-color 0.2s;
+  }
+
+  .path-card:hover {
+    border-color: var(--green-dim);
   }
 
   .path-header {
     display: flex;
     align-items: center;
     gap: var(--space-3);
-    margin-bottom: var(--space-2);
+    margin-bottom: var(--space-4);
   }
 
   .path-icon {
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--text-secondary);
+    color: var(--green-dim);
   }
 
   .path-title {
     font-family: var(--font-serif);
-    font-size: var(--text-2xl);
+    font-size: var(--text-xl);
     font-weight: 400;
     color: var(--text-primary);
     margin: 0;
   }
 
-  .path-desc {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    color: var(--text-tertiary);
-    margin: 0 0 var(--space-5);
-  }
-
-  .path-flow {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    margin-bottom: var(--space-5);
-  }
-
-  .path-step {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--space-3);
-  }
-
-  .path-step .step-num {
-    flex-shrink: 0;
-    width: 20px;
-    height: 20px;
+  .path-example {
     display: flex;
     align-items: center;
-    justify-content: center;
-    background: var(--bg-tertiary);
-    border-radius: 50%;
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    font-weight: 600;
-    color: var(--text-secondary);
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+    flex-wrap: wrap;
   }
 
-  .path-step .step-content {
-    flex: 1;
-  }
-
-  .path-step .step-label {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--green-dim);
-    margin-bottom: 2px;
-  }
-
-  .path-step .step-text {
+  .example-input {
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     color: var(--text-secondary);
-    line-height: 1.5;
+    padding: var(--space-2) var(--space-3);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+  }
+
+  .example-arrow {
+    color: var(--text-tertiary);
+    display: flex;
+    align-items: center;
+  }
+
+  .example-output {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .output-tag {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--green-dim);
+    padding: 0.25rem 0.5rem;
+    background: rgba(0, 196, 154, 0.1);
+    border: 1px solid rgba(0, 196, 154, 0.3);
   }
 
   .path-result {
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    padding: var(--space-3) var(--space-4);
-    background: rgba(0, 196, 154, 0.08);
-    border: 1px solid rgba(0, 196, 154, 0.2);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     color: var(--green-dim);
-  }
-
-  .result-icon {
-    font-weight: 600;
   }
 
   /* Shared Section Styles */
