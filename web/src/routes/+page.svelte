@@ -207,7 +207,7 @@
         <span class="hero-badge">MCP-FIRST DEVELOPMENT</span>
         <span class="hero-badge claude-badge">SKILL-BASED AGENTS</span>
       </div>
-      <h1 class="hero-tagline">Give <span class="highlight">Claude Skills<span class="claude-underline"></span></span> it's missing.</h1>
+      <h1 class="hero-tagline">Give <span class="highlight">Claude, Skills<span class="claude-underline"></span></span> it's missing.</h1>
       <p class="hero-subtitle">Automatically spawn the right skills for your project. Overclock your outputs at every level vs the generalized approach. Claude says skills make the difference. Spawner + <a href="https://mind.vibeship.co" target="_blank" rel="noopener" class="mind-link">Mind<span class="mind-bubble">🧠</span></a> automate these skills into a seamless workflow.</p>
       <a href="https://claude.com/blog/skills" target="_blank" rel="noopener" class="hero-cta">
         <span>What Claude says about Skills</span>

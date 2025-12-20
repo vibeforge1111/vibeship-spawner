@@ -16,6 +16,10 @@
         <Icon name="zap" size={14} />
         <span>Benefits</span>
       </a>
+      <a href="/mcp-guide" class="nav-btn">
+        <Icon name="book" size={14} />
+        <span>Guide</span>
+      </a>
       <a href="/skills" class="nav-btn">
         <Icon name="layers" size={14} />
         <span>Skills</span>
