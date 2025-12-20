@@ -251,52 +251,34 @@
   <!-- Divider -->
   <div class="section-divider"></div>
 
-  <!-- How It Works -->
-  <section class="magic-section">
-    <h2 class="section-title">How It Works</h2>
-    <p class="section-desc">One install. Tell Claude your idea. Watch it build.</p>
+  <!-- Instant Benefits -->
+  <section class="benefits-section">
+    <h2 class="section-title">One Install. Instant Superpowers.</h2>
+    <p class="section-desc">Tell Claude your idea. Spawner handles the rest.</p>
 
-    <div class="magic-steps">
-      <div class="magic-step-card">
-        <div class="magic-step-number">1</div>
-        <div class="magic-step-content">
-          <h3 class="magic-step-title">Add Spawner to Claude</h3>
-          <p class="magic-step-desc">Copy this to your Claude Desktop config:</p>
-          <div class="magic-code-block">
-            <pre><code>{`"vibeship-spawner": {
-  "command": "npx",
-  "args": ["vibeship-spawner"]
-}`}</code></pre>
-          </div>
-          <p class="magic-step-note">Restart Claude Desktop after adding. That's the only setup.</p>
-        </div>
+    <div class="benefits-grid">
+      <div class="benefit-card">
+        <div class="benefit-icon"><Icon name="users" size={24} /></div>
+        <h3 class="benefit-title">Right Agents</h3>
+        <p class="benefit-desc">Picks the specialist agents your project needs—auth, database, UI, payments.</p>
       </div>
 
-      <div class="magic-step-card">
-        <div class="magic-step-number">2</div>
-        <div class="magic-step-content">
-          <h3 class="magic-step-title">Tell Claude What to Build</h3>
-          <p class="magic-step-desc">Just describe your idea in plain English:</p>
-          <div class="magic-examples">
-            <div class="magic-example">"Build me a marketplace for vintage watches"</div>
-            <div class="magic-example">"Create an AI-powered note-taking app"</div>
-            <div class="magic-example">"Start a web3 NFT gallery project"</div>
-          </div>
-        </div>
+      <div class="benefit-card">
+        <div class="benefit-icon"><Icon name="link" size={24} /></div>
+        <h3 class="benefit-title">Connected Tools</h3>
+        <p class="benefit-desc">Wires up each agent with the tools and context it needs to work.</p>
       </div>
 
-      <div class="magic-step-card">
-        <div class="magic-step-number">3</div>
-        <div class="magic-step-content">
-          <h3 class="magic-step-title">Spawner Does the Rest</h3>
-          <p class="magic-step-desc">It automatically:</p>
-          <ul class="magic-benefits">
-            <li>Picks the right specialist agents for your project</li>
-            <li>Connects the tools each agent needs</li>
-            <li>Creates your architecture and project plan</li>
-            <li>Starts building with focused expertise</li>
-          </ul>
-        </div>
+      <div class="benefit-card">
+        <div class="benefit-icon"><Icon name="git-branch" size={24} /></div>
+        <h3 class="benefit-title">Architecture Ready</h3>
+        <p class="benefit-desc">Creates your project plan and architecture before writing a line of code.</p>
+      </div>
+
+      <div class="benefit-card">
+        <div class="benefit-icon"><Icon name="zap" size={24} /></div>
+        <h3 class="benefit-title">Focused Expertise</h3>
+        <p class="benefit-desc">Starts building with deep knowledge of your exact stack and patterns.</p>
       </div>
     </div>
   </section>
@@ -1101,10 +1083,10 @@
     margin: var(--space-8) auto 0;
   }
 
-  /* Magic Section */
-  .magic-section {
+  /* Benefits Section */
+  .benefits-section {
     padding: var(--space-12) var(--space-8);
-    max-width: 900px;
+    max-width: 1000px;
     margin: 0 auto;
   }
 
@@ -1124,119 +1106,51 @@
     margin: 0 0 var(--space-8);
   }
 
-  .magic-steps {
-    display: flex;
-    flex-direction: column;
+  .benefits-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
     gap: var(--space-6);
   }
 
-  /* Magic Step Cards - Friendly version */
-  .magic-step-card {
+  .benefit-card {
     display: flex;
-    align-items: baseline;
-    gap: var(--space-5);
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
     padding: var(--space-6);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    text-align: left;
+    transition: all 0.2s;
   }
 
-  .magic-step-number {
-    flex-shrink: 0;
-    font-family: var(--font-mono);
-    font-size: var(--text-2xl);
-    font-weight: 600;
+  .benefit-card:hover {
+    border-color: var(--green-dim);
+  }
+
+  .benefit-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    margin-bottom: var(--space-4);
     color: var(--green-dim);
-    line-height: 1;
   }
 
-  .magic-step-number::before {
-    content: "//";
-    color: var(--text-tertiary);
-    margin-right: 4px;
-  }
-
-  .magic-step-content {
-    flex: 1;
-  }
-
-  .magic-step-title {
+  .benefit-title {
     font-family: var(--font-serif);
-    font-size: var(--text-2xl);
+    font-size: var(--text-lg);
     font-weight: 400;
     color: var(--text-primary);
-    line-height: 1;
-    margin-bottom: var(--space-3);
+    margin: 0 0 var(--space-2);
   }
 
-  .magic-step-desc {
-    font-size: var(--text-base);
-    color: var(--text-secondary);
-    margin-bottom: var(--space-4);
-    line-height: 1.7;
-  }
-
-  .magic-step-note {
+  .benefit-desc {
+    font-family: var(--font-mono);
     font-size: var(--text-sm);
-    color: var(--text-tertiary);
-    margin-top: var(--space-3);
-    line-height: 1.6;
-  }
-
-  .magic-code-block {
-    background: var(--terminal-bg);
-    border: 1px solid var(--terminal-border);
-    padding: var(--space-4);
-    overflow-x: auto;
-  }
-
-  .magic-code-block pre {
-    margin: 0;
-    font-family: var(--font-mono);
-    font-size: var(--text-base);
-    color: var(--terminal-command);
-    line-height: 1.8;
-  }
-
-  .magic-examples {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-
-  .magic-example {
-    font-family: var(--font-mono);
-    font-size: var(--text-base);
-    color: var(--terminal-command);
-    padding: var(--space-3) var(--space-4);
-    background: rgba(0, 196, 154, 0.05);
-    border-left: 3px solid var(--green-dim);
-    line-height: 1.7;
-  }
-
-  .magic-benefits {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-
-  .magic-benefits li {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--space-3);
-    font-size: var(--text-base);
     color: var(--text-secondary);
-    line-height: 1.7;
-  }
-
-  .magic-benefits li::before {
-    content: "→";
-    color: var(--green-dim);
-    font-weight: 600;
-    flex-shrink: 0;
+    margin: 0;
+    line-height: 1.6;
   }
 
   /* Paths Section */
@@ -2355,8 +2269,17 @@
       font-size: var(--text-xs);
     }
 
-    .magic-section {
+    .benefits-section {
       padding: var(--space-8) var(--space-4);
+    }
+
+    .benefits-grid {
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-4);
+    }
+
+    .benefit-card {
+      padding: var(--space-4);
     }
 
     .terminal-step-body {
