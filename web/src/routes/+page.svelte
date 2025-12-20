@@ -1175,7 +1175,9 @@
   }
 
   .benefits-note span:first-of-type {
-    font-weight: 500;
+    font-family: var(--font-serif);
+    font-size: var(--text-lg);
+    font-weight: 400;
     color: var(--text-primary);
   }
 
