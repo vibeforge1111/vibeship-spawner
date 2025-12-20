@@ -205,8 +205,12 @@
         <span class="hero-badge">MCP-FIRST DEVELOPMENT</span>
         <span class="hero-badge claude-badge">SKILL-BASED AGENTS</span>
       </div>
-      <p class="hero-tagline">The MCP that spawns your <span class="claude-highlight">Claude Agents.</span></p>
-      <p class="hero-subtitle">The singularity of focused, trained Claude Opus agents and MCPs, instead of the generic approach. One command to spawn your entire agent stack and tools to work for you.</p>
+      <h1 class="hero-tagline">Give <span class="highlight">Claude Skills<span class="claude-underline"></span></span> it's missing.</h1>
+      <p class="hero-subtitle">Automatically spawn the right skills for your project. Overclock your outputs at every level vs the generalized approach. Claude says skills make the difference. Spawner + <a href="https://mind.vibeship.co" target="_blank" rel="noopener" class="mind-link">Mind<span class="mind-bubble">🧠</span></a> automate these skills into a seamless workflow.</p>
+      <a href="https://claude.com/blog/skills" target="_blank" rel="noopener" class="hero-cta">
+        <span>What Claude says about Skills</span>
+        <Icon name="external-link" size={14} />
+      </a>
     </div>
 
     <!-- Animated Terminal -->
@@ -876,14 +880,35 @@
 
   .hero-tagline {
     font-family: var(--font-serif);
-    font-size: var(--text-3xl);
-    font-style: italic;
+    font-size: 3.5rem;
+    font-weight: 400;
     color: var(--text-primary);
     margin: 0 0 var(--space-4);
   }
 
-  .claude-highlight {
-    color: #D97757;
+  .highlight {
+    color: var(--green-dim);
+    position: relative;
+    display: inline-block;
+  }
+
+  .text-accent {
+    color: var(--green-dim);
+  }
+
+  .underline-only {
+    position: relative;
+    display: inline-block;
+  }
+
+  .claude-underline {
+    position: absolute;
+    bottom: calc(0.15em + 2px);
+    left: -3%;
+    width: 115%;
+    height: 3px;
+    background: linear-gradient(90deg, transparent 0%, #D97757 8%, #D97757 60%, transparent 100%);
+    transform: rotate(-3deg) skewX(-15deg);
   }
 
   .hero-subtitle {
@@ -894,6 +919,67 @@
     margin-left: auto;
     margin-right: auto;
     line-height: 1.7;
+  }
+
+  .hero-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-4);
+    padding: var(--space-3) var(--space-5);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    text-decoration: none;
+    transition: all var(--transition-fast);
+  }
+
+  .hero-cta:hover {
+    color: var(--green-dim);
+    border-color: var(--green-dim);
+  }
+
+  .mind-link {
+    color: var(--text-secondary);
+    text-decoration: none;
+    position: relative;
+    transition: color var(--transition-fast);
+  }
+
+  .mind-link:hover {
+    color: var(--green-dim);
+  }
+
+  .mind-bubble {
+    position: absolute;
+    top: -3.2em;
+    left: 50%;
+    transform: translateX(-50%) scale(0);
+    font-size: 1em;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.3em 0.5em;
+    opacity: 0;
+    transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    white-space: nowrap;
+  }
+
+  .mind-bubble::after {
+    content: '';
+    position: absolute;
+    bottom: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 6px solid var(--border);
+  }
+
+  .mind-link:hover .mind-bubble {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
   }
 
   /* Terminal */
@@ -2303,7 +2389,7 @@
     }
 
     .hero-tagline {
-      font-size: var(--text-xl);
+      font-size: 2.5rem;
     }
 
     .terminal-container {
