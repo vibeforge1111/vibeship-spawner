@@ -72,7 +72,7 @@ const SKILL_CATEGORIES = [
 const BRAINSTORM_AREAS = {
   identity: {
     name: 'The Expert',
-    description: 'What makes this skill truly world-class? Think of it as a seasoned pro with decades of experience.',
+    description: 'Who inspires this skill? Name real people, thought leaders, or iconic figures whose expertise this skill channels.',
     icon: '🧠',
   },
   boundaries: {
@@ -82,7 +82,7 @@ const BRAINSTORM_AREAS = {
   },
   edges: {
     name: 'Common Pitfalls',
-    description: 'What mistakes does this skill help people avoid? The "I wish someone told me this sooner" moments.',
+    description: 'We\'ll walk through typical scenarios together to uncover the "I wish someone told me this" moments.',
     icon: '⚠️',
   },
   collaboration: {
@@ -91,9 +91,9 @@ const BRAINSTORM_AREAS = {
     icon: '🤝',
   },
   audience: {
-    name: 'Built For',
-    description: 'Who is this skill designed to help? What are they trying to accomplish?',
-    icon: '👥',
+    name: 'Your Personal Touch',
+    description: 'Who is this skill for, and what would YOU add to make it truly special? This is your chance to shape it.',
+    icon: '✨',
   },
 };
 
@@ -105,45 +105,46 @@ const IDENTITY_QUESTIONS: BrainstormQuestion[] = [
   {
     id: 'identity-1',
     area: 'identity',
-    question: 'If this skill were a person, what would their 20+ years of experience look like?',
-    why: 'World-class skills embody deep expertise. Understanding the journey helps define the persona.',
+    question: 'Who are 1-3 real people that inspire this skill? Think thought leaders, practitioners, or iconic figures in this space.',
+    why: 'Every world-class skill channels the wisdom of masters. Naming them helps define the voice and philosophy.',
     examples: [
-      'A Next.js skill might have: "Started with PHP, then React, then SSR, now App Router. Seen every migration pattern."',
-      'A copywriting skill might have: "Written 10,000+ headlines, run 500+ A/B tests, worked with Fortune 500s and startups."',
+      'For a React skill: Dan Abramov, Kent C. Dodds, or Ryan Florence',
+      'For a copywriting skill: David Ogilvy, Gary Halbert, or Joanna Wiebe',
+      'For a startup skill: Paul Graham, Marc Andreessen, or Naval Ravikant',
     ],
     followUps: [
-      'What mistakes would they have made along the way?',
-      'What hard-won lessons define their approach?',
+      'What would each of them say about how to approach this?',
+      'Where do they agree? Where do they disagree?',
     ],
   },
   {
     id: 'identity-2',
     area: 'identity',
-    question: 'What are the 3-5 STRONG OPINIONS this skill holds that others might disagree with?',
-    why: 'Strong opinions separate world-class from generic. These should be specific and defensible.',
+    question: 'If this skill were a person with 20+ years of experience, what would their journey look like?',
+    why: 'Understanding the path helps define what hard-won wisdom this skill carries.',
     examples: [
-      '"Always use server components by default" - controversial but defensible',
-      '"Long-form always beats short-form for B2B" - strong stance backed by experience',
+      'A Next.js expert: "Started with PHP, migrated to React, then SSR, now App Router. Seen every migration pain."',
+      'A marketing expert: "Ran 500+ campaigns, burned $1M learning what doesn\'t work, now knows exactly what converts."',
     ],
   },
   {
     id: 'identity-3',
     area: 'identity',
-    question: 'What is one CONTRARIAN INSIGHT this skill knows that most practitioners get wrong?',
-    why: 'The contrarian view is often where the most value lies - it shows deep understanding.',
+    question: 'What strong opinions does this skill hold that others might disagree with?',
+    why: 'Strong opinions backed by experience separate world-class from generic advice.',
     examples: [
-      '"Most people think caching is about speed. It\'s actually about consistency."',
-      '"Everyone focuses on acquisition. The money is in activation."',
+      '"Always use server components by default" - controversial but defensible',
+      '"Long-form always beats short-form for B2B" - strong stance backed by data',
     ],
   },
   {
     id: 'identity-4',
     area: 'identity',
-    question: 'What does this skill REFUSE to do, even if asked?',
-    why: 'Knowing limits shows mastery. A world-class expert knows when to say no.',
+    question: 'What does this skill refuse to do, even if asked?',
+    why: 'Knowing when to say no shows true mastery. What lines won\'t this skill cross?',
     examples: [
-      'A database skill might refuse to design schemas without understanding access patterns first.',
-      'A UX skill might refuse to add features without user research.',
+      'A database skill refuses to design schemas without understanding access patterns first.',
+      'A UX skill refuses to add features without user research.',
     ],
   },
 ];
@@ -185,46 +186,49 @@ const EDGES_QUESTIONS: BrainstormQuestion[] = [
   {
     id: 'edges-1',
     area: 'edges',
-    question: 'What are the 3 most PAINFUL mistakes you\'ve seen people make in this domain?',
-    why: 'Sharp edges come from real pain. These become the most valuable warnings.',
+    question: 'Let\'s walk through a scenario: Someone is just getting started with this. What\'s the FIRST mistake they\'ll probably make?',
+    why: 'The beginner\'s first stumble is often the most common pitfall. Catching it early saves hours.',
     examples: [
-      'Next.js: Using client components everywhere → bundle bloat',
-      'Supabase: Not setting up RLS → security nightmare',
+      'Getting started with Next.js? They\'ll probably make everything a client component.',
+      'Setting up Supabase? They\'ll forget to enable Row Level Security.',
+      'Writing their first landing page? They\'ll bury the call-to-action below the fold.',
     ],
     followUps: [
-      'How long did it take to discover each mistake?',
-      'What was the cost of each mistake?',
+      'How would they discover this mistake?',
+      'How long would it take them to figure out what went wrong?',
     ],
   },
   {
     id: 'edges-2',
     area: 'edges',
-    question: 'What gotchas are NOT in the official documentation but everyone learns the hard way?',
-    why: 'These undocumented edges are where world-class skills add the most value.',
+    question: 'Now they\'re a few weeks in and feeling confident. What mistake will bite them next?',
+    why: 'The intermediate trap is often more painful because they think they know what they\'re doing.',
     examples: [
-      'Vercel: Edge functions have no native fetch retry → add your own',
-      'Stripe: Webhook signature verification fails silently → explicit logging needed',
+      'They\'ll start caching without thinking about invalidation.',
+      'They\'ll add features without considering mobile users.',
+      'They\'ll optimize for the wrong metric.',
     ],
   },
   {
     id: 'edges-3',
     area: 'edges',
-    question: 'What version-specific or environment-specific gotchas exist?',
-    why: 'Context-specific edges prevent wasted debugging time.',
+    question: 'They\'re about to launch or go to production. What could go wrong that they haven\'t thought about?',
+    why: 'Production surprises are the most expensive. A warning here saves real money and stress.',
     examples: [
-      'React 18 vs 19 hydration differences',
-      'Safari-specific CSS issues',
-      'Local vs production environment differences',
+      'Their local setup works but production fails silently.',
+      'They didn\'t test on slow connections or older devices.',
+      'They missed an edge case that only appears at scale.',
     ],
   },
   {
     id: 'edges-4',
     area: 'edges',
-    question: 'What common "best practices" are actually harmful in specific situations?',
-    why: 'Blindly following best practices without context causes problems. Skills should know when rules don\'t apply.',
+    question: 'What "best practice" advice will they follow that will actually hurt them in their specific situation?',
+    why: 'Rules have exceptions. Knowing when NOT to follow advice is expert-level knowledge.',
     examples: [
-      '"Always normalize your database" → except for read-heavy analytics',
-      '"Never use !important in CSS" → except for utility overrides',
+      '"Always normalize your database" - except their app is read-heavy and needs speed.',
+      '"Never use !important in CSS" - except they\'re fighting a third-party library.',
+      '"Move fast and break things" - except they\'re handling payments or health data.',
     ],
   },
 ];
@@ -276,33 +280,50 @@ const AUDIENCE_QUESTIONS: BrainstormQuestion[] = [
   {
     id: 'audience-1',
     area: 'audience',
-    question: 'Who is the PRIMARY user of this skill? Be specific about their experience level.',
-    why: 'Clear audience targeting shapes the depth and style of guidance.',
+    question: 'Picture the person who will use this skill. Who are they, and what\'s their day like?',
+    why: 'A vivid picture of your user helps the skill speak directly to their situation.',
     examples: [
-      'Junior developers learning their first framework',
-      'Senior engineers scaling to millions of users',
-      'Non-technical founders building MVPs',
+      'A solo founder juggling 10 things, needs to ship fast without breaking things.',
+      'A junior dev on their first job, wants to impress their team lead.',
+      'A designer learning to code, frustrated by confusing error messages.',
     ],
   },
   {
     id: 'audience-2',
     area: 'audience',
-    question: 'What does the target user already know vs. what do they need to learn?',
-    why: 'Understanding prerequisites prevents over-explaining basics or assuming too much.',
+    question: 'What\'s the ONE thing they\'re trying to accomplish when they reach for this skill?',
+    why: 'Knowing their immediate goal helps the skill cut straight to what matters.',
     examples: [
-      'Knows: JavaScript, React basics. Needs to learn: Server components, App Router',
-      'Knows: Business fundamentals. Needs to learn: Technical constraints, MVP scoping',
+      'Get authentication working TODAY so they can show investors tomorrow.',
+      'Fix this bug before the client notices.',
+      'Understand why their page is so slow.',
     ],
   },
   {
     id: 'audience-3',
     area: 'audience',
-    question: 'What is the user trying to achieve when they invoke this skill?',
-    why: 'Goal-oriented skills are more actionable than abstract ones.',
+    question: 'Now here\'s YOUR chance to shape this skill. What would YOU add to make it truly special?',
+    why: 'This is where YOU put your stamp on it. Your insight, your experience, your magic.',
     examples: [
-      'Ship a production-ready auth system in 2 hours',
-      'Write a landing page that converts at 5%+',
-      'Debug a performance issue in production',
+      'A specific workflow you\'ve perfected over the years.',
+      'A mental model that made everything click for you.',
+      'A warning about something you learned the hard way.',
+      'A philosophy or approach that guides how you work.',
+    ],
+    followUps: [
+      'What do you wish someone had told you when you started?',
+      'What makes YOUR approach different from the standard advice?',
+    ],
+  },
+  {
+    id: 'audience-4',
+    area: 'audience',
+    question: 'Is there anything else you\'d like this skill to include? Any special touches?',
+    why: 'Your personal additions make this skill uniquely valuable. Don\'t hold back!',
+    examples: [
+      'A favorite quote or principle that guides you.',
+      'A checklist you always run through.',
+      'A story about a time this knowledge saved the day.',
     ],
   },
 ];
@@ -420,11 +441,11 @@ spawner_skill_brainstorm({
 This is an **optional** step before the automated skill creation pipeline.
 
 **Use brainstorming when you want to:**
-- Think through what makes this skill truly great
+- Name the experts and thought leaders who inspire this skill
 - Decide what the skill should focus on vs. leave to others
-- Capture common mistakes people make (so the skill can warn them)
+- Walk through scenarios to uncover mistakes people make
 - Plan how the skill teams up with other skills
-- Get clear on who this skill is built for
+- Add YOUR personal touch to make the skill uniquely yours
 
 **Pipeline Flow:**
 \`\`\`
@@ -471,11 +492,11 @@ ${area.description}
 
 ## Recommended Flow
 
-1. **The Expert** - Define what makes this skill world-class
+1. **The Expert** - Name the inspirational figures and define the expertise
 2. **Stay in Your Lane** - Clarify what it focuses on vs. passes to others
-3. **Common Pitfalls** - Document mistakes people make that this skill prevents
+3. **Common Pitfalls** - Walk through scenarios to uncover mistakes to prevent
 4. **Works Well With** - Define how it teams up with other skills
-5. **Built For** - Get clear on who this skill helps
+5. **Your Personal Touch** - Add YOUR insights to make this skill uniquely yours
 
 ---
 
@@ -507,11 +528,11 @@ function handleExplore(input: BrainstormInput): {
           text: `# Missing Area
 
 Please specify an area to explore:
-- \`identity\` - The Expert (what makes it world-class)
+- \`identity\` - The Expert (who inspires this skill)
 - \`boundaries\` - Stay in Your Lane (focus vs. hand off)
-- \`edges\` - Common Pitfalls (mistakes to avoid)
+- \`edges\` - Common Pitfalls (we'll walk through scenarios together)
 - \`collaboration\` - Works Well With (teaming up with other skills)
-- \`audience\` - Built For (who this helps)`,
+- \`audience\` - Your Personal Touch (make it uniquely yours)`,
         },
       ],
     };
