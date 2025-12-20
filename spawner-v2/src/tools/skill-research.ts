@@ -144,6 +144,18 @@ export const skillResearchInputSchema = z.object({
   focus_areas: z.array(z.string()).optional().describe(
     'Specific areas to focus research on (e.g., ["authentication", "performance"])'
   ),
+  // Optional brainstorm insights from spawner_skill_brainstorm
+  brainstorm_insights: z.object({
+    inspirational_figures: z.array(z.string()).optional().describe('People who inspire this skill'),
+    identity_notes: z.array(z.string()).optional().describe('Notes about the skill\'s expertise and philosophy'),
+    boundaries: z.object({
+      owns: z.array(z.string()).optional(),
+      delegates: z.array(z.string()).optional(),
+    }).optional().describe('What the skill owns vs. hands off'),
+    pitfalls: z.array(z.string()).optional().describe('Common mistakes identified during brainstorming'),
+    collaborations: z.array(z.string()).optional().describe('Skills this works well with'),
+    personal_touches: z.array(z.string()).optional().describe('User\'s personal additions to make it special'),
+  }).optional().describe('Insights from optional spawner_skill_brainstorm session'),
 });
 
 // =============================================================================
@@ -152,7 +164,7 @@ export const skillResearchInputSchema = z.object({
 
 export const skillResearchToolDefinition = {
   name: 'spawner_skill_research',
-  description: 'Research a skill topic before generation. Gathers pain points from GitHub/SO, expert content, ecosystem mapping, and practitioner insights. Returns structured findings to feed into world-class skill generation.',
+  description: 'Research a skill topic before generation. Gathers pain points from GitHub/SO, expert content, ecosystem mapping, and practitioner insights. Optionally accepts insights from spawner_skill_brainstorm to guide research. Returns structured findings to feed into world-class skill generation.',
   inputSchema: {
     type: 'object' as const,
     properties: {
@@ -183,6 +195,43 @@ export const skillResearchToolDefinition = {
         items: { type: 'string' },
         description: 'Specific areas to focus on',
       },
+      brainstorm_insights: {
+        type: 'object',
+        description: 'Optional insights from spawner_skill_brainstorm session',
+        properties: {
+          inspirational_figures: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'People who inspire this skill',
+          },
+          identity_notes: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Notes about the skill\'s expertise',
+          },
+          boundaries: {
+            type: 'object',
+            properties: {
+              owns: { type: 'array', items: { type: 'string' } },
+              delegates: { type: 'array', items: { type: 'string' } },
+            },
+          },
+          pitfalls: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Common mistakes from brainstorming',
+          },
+          collaborations: {
+            type: 'array',
+            items: { type: 'string' },
+          },
+          personal_touches: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'User\'s personal additions',
+          },
+        },
+      },
     },
     required: ['id', 'name', 'category'],
   },
@@ -210,7 +259,7 @@ export async function executeSkillResearch(
     throw new Error(`Invalid input: ${parsed.error.message}`);
   }
 
-  const { id, name, category, description, depth = 'standard', focus_areas = [] } = parsed.data;
+  const { id, name, category, description, depth = 'standard', focus_areas = [], brainstorm_insights } = parsed.data;
 
   // Determine skill type
   const isTechnical = (TECHNICAL_CATEGORIES as readonly string[]).includes(category);
@@ -224,13 +273,18 @@ export async function executeSkillResearch(
   // For now, we generate a template that guides the research process
   const findings = buildResearchTemplate(id, name, category, skillType, description, depth, searchQueries);
 
+  // If brainstorm insights provided, enhance the findings
+  if (brainstorm_insights) {
+    enhanceWithBrainstormInsights(findings, brainstorm_insights);
+  }
+
   // Validate research depth
   const validation = validateResearchDepth(findings, skillType, depth);
   findings.validation = validation;
 
   return {
     research: findings,
-    _instruction: buildResearchInstruction(findings, skillType),
+    _instruction: buildResearchInstruction(findings, skillType, !!brainstorm_insights),
   };
 }
 
@@ -590,18 +644,102 @@ function validateResearchDepth(
   };
 }
 
+/**
+ * Enhance research findings with brainstorm insights
+ */
+function enhanceWithBrainstormInsights(
+  findings: ResearchFindings,
+  insights: NonNullable<z.infer<typeof skillResearchInputSchema>['brainstorm_insights']>
+): void {
+  // Add inspirational figures to identity material
+  if (insights.inspirational_figures && insights.inspirational_figures.length > 0) {
+    findings.identity_material.battle_scars.unshift(
+      `Inspired by: ${insights.inspirational_figures.join(', ')}`
+    );
+  }
+
+  // Add identity notes as strong opinions
+  if (insights.identity_notes) {
+    for (const note of insights.identity_notes) {
+      if (!note.includes('[RESEARCH:')) {
+        findings.identity_material.strong_opinions.push(note);
+      }
+    }
+  }
+
+  // Add pitfalls as pain points
+  if (insights.pitfalls) {
+    for (const pitfall of insights.pitfalls) {
+      if (!pitfall.includes('[RESEARCH:')) {
+        findings.pain_points.push({
+          summary: pitfall,
+          source: 'Brainstorm session',
+          frequency: 'common',
+          severity: 'high',
+          potential_edge_id: `${findings.skill_id}-brainstorm-edge-${findings.pain_points.length + 1}`,
+        });
+      }
+    }
+  }
+
+  // Add boundaries to known limits
+  if (insights.boundaries) {
+    if (insights.boundaries.owns) {
+      findings.identity_material.known_limits.unshift(
+        `OWNS: ${insights.boundaries.owns.join(', ')}`
+      );
+    }
+    if (insights.boundaries.delegates) {
+      findings.identity_material.known_limits.push(
+        `DELEGATES TO OTHERS: ${insights.boundaries.delegates.join(', ')}`
+      );
+    }
+  }
+
+  // Add collaborations to ecosystem
+  if (insights.collaborations) {
+    for (const collab of insights.collaborations) {
+      findings.ecosystem.push({
+        name: collab,
+        type: 'complementary',
+        description: `Works well with this skill (from brainstorm)`,
+      });
+    }
+  }
+
+  // Add personal touches as expert insights
+  if (insights.personal_touches) {
+    for (const touch of insights.personal_touches) {
+      findings.insights.push({
+        insight: touch,
+        category: 'principle',
+        author: 'User contribution',
+        source: 'Brainstorm session',
+      });
+    }
+  }
+}
+
 function buildResearchInstruction(
   findings: ResearchFindings,
-  skillType: 'technical' | 'non_technical'
+  skillType: 'technical' | 'non_technical',
+  hasBrainstormInsights: boolean = false
 ): string {
   const hasPlaceholders = JSON.stringify(findings).includes('[RESEARCH:');
+
+  const brainstormBanner = hasBrainstormInsights ? `
+✨ **Enhanced with Brainstorm Insights** - Your personal touches have been incorporated!
+
+---
+
+` : '';
 
   if (hasPlaceholders) {
     return `## Research Template Generated: ${findings.skill_name}
 
 **Skill Type:** ${skillType === 'technical' ? 'Technical' : 'Non-Technical'}
 **Category:** ${findings.category}
-
+${brainstormBanner}
 ---
 
 ### Research Action Required
@@ -653,7 +791,7 @@ Complete the research by replacing all [RESEARCH: ...] placeholders with actual 
 **Skill Type:** ${skillType === 'technical' ? 'Technical' : 'Non-Technical'}
 **Category:** ${findings.category}
 **Score:** ${findings.validation.score}%
-
+${brainstormBanner}
 ---
 
 ### Research Summary

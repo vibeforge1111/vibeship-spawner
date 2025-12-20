@@ -888,38 +888,54 @@ Then export the results.`,
   }
 
   const skillIdea = input.skill_idea || 'Skill';
+  const category = input.category || 'development';
 
-  // Generate research input from insights
-  const researchInput = {
-    skill_idea: skillIdea,
-    category: input.category || 'development',
-    brainstorm_insights: input.insights,
-    focus_areas: {
-      identity_hints: input.insights.filter(
-        (i) =>
-          i.toLowerCase().includes('identity') ||
-          i.toLowerCase().includes('persona') ||
-          i.toLowerCase().includes('opinion')
+  // Convert skill idea to kebab-case ID
+  const skillId = skillIdea.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+  // Parse insights into structured format for spawner_skill_research
+  const brainstormInsights = {
+    inspirational_figures: input.insights.filter(
+      (i) => i.toLowerCase().includes('inspired by') || i.toLowerCase().includes('like') && i.toLowerCase().includes('expert')
+    ),
+    identity_notes: input.insights.filter(
+      (i) =>
+        i.toLowerCase().includes('[identity]') ||
+        i.toLowerCase().includes('opinion') ||
+        i.toLowerCase().includes('philosophy') ||
+        i.toLowerCase().includes('approach')
+    ),
+    boundaries: {
+      owns: input.insights.filter(
+        (i) => i.toLowerCase().includes('owns') || i.toLowerCase().includes('focus on')
       ),
-      boundary_hints: input.insights.filter(
-        (i) =>
-          i.toLowerCase().includes('owns') ||
-          i.toLowerCase().includes('boundary') ||
-          i.toLowerCase().includes('delegate')
-      ),
-      edge_hints: input.insights.filter(
-        (i) =>
-          i.toLowerCase().includes('gotcha') ||
-          i.toLowerCase().includes('mistake') ||
-          i.toLowerCase().includes('edge')
-      ),
-      collaboration_hints: input.insights.filter(
-        (i) =>
-          i.toLowerCase().includes('pairs') ||
-          i.toLowerCase().includes('collaborate') ||
-          i.toLowerCase().includes('works with')
+      delegates: input.insights.filter(
+        (i) => i.toLowerCase().includes('delegate') || i.toLowerCase().includes('hand off') || i.toLowerCase().includes('pass to')
       ),
     },
+    pitfalls: input.insights.filter(
+      (i) =>
+        i.toLowerCase().includes('[edges]') ||
+        i.toLowerCase().includes('mistake') ||
+        i.toLowerCase().includes('pitfall') ||
+        i.toLowerCase().includes('avoid') ||
+        i.toLowerCase().includes('wrong')
+    ),
+    collaborations: input.insights.filter(
+      (i) =>
+        i.toLowerCase().includes('[collaboration]') ||
+        i.toLowerCase().includes('pairs') ||
+        i.toLowerCase().includes('works with') ||
+        i.toLowerCase().includes('teams up')
+    ),
+    personal_touches: input.insights.filter(
+      (i) =>
+        i.toLowerCase().includes('[audience]') ||
+        i.toLowerCase().includes('personal') ||
+        i.toLowerCase().includes('special') ||
+        i.toLowerCase().includes('my') ||
+        i.toLowerCase().includes('i ')
+    ),
   };
 
   const output = `# 📤 Brainstorm Export: ${skillIdea}
@@ -928,13 +944,18 @@ Then export the results.`,
 
 Your brainstorming session has been synthesized and is ready to feed into the automated skill creation pipeline.
 
+✨ **Your personal touches will be incorporated into the skill!**
+
 ---
 
-## Research Input Package
+## Brainstorm Insights Summary
 
-\`\`\`json
-${JSON.stringify(researchInput, null, 2)}
-\`\`\`
+**Inspirational Figures:** ${brainstormInsights.inspirational_figures.length > 0 ? brainstormInsights.inspirational_figures.join(', ') : 'None specified'}
+**Identity Notes:** ${brainstormInsights.identity_notes.length} captured
+**Boundaries:** ${brainstormInsights.boundaries.owns.length} owns, ${brainstormInsights.boundaries.delegates.length} delegates
+**Pitfalls:** ${brainstormInsights.pitfalls.length} identified
+**Collaborations:** ${brainstormInsights.collaborations.length} noted
+**Personal Touches:** ${brainstormInsights.personal_touches.length} added
 
 ---
 
@@ -946,12 +967,13 @@ The research phase will use your insights to:
 3. Find additional sharp edges
 4. Discover collaboration opportunities
 
-**Start the automated pipeline:**
+**Start the automated pipeline with your insights:**
 \`\`\`
 spawner_skill_research({
-  skill_idea: "${skillIdea}",
-  category: "${input.category || 'development'}",
-  brainstorm_insights: ${JSON.stringify(input.insights)}
+  id: "${skillId}",
+  name: "${skillIdea}",
+  category: "${category}",
+  brainstorm_insights: ${JSON.stringify(brainstormInsights, null, 2)}
 })
 \`\`\`
 
@@ -962,14 +984,14 @@ spawner_skill_research({
 \`\`\`
 [✓] spawner_skill_brainstorm  ← You are here
     ↓
-[ ] spawner_skill_research    ← Next
+[ ] spawner_skill_research    ← Next (with your insights!)
     ↓
 [ ] spawner_skill_new
     ↓
 [ ] spawner_skill_score
 \`\`\`
 
-The remaining steps are automated. The research phase will complete, then automatically feed into skill generation, which will be scored against our 100-point rubric.`;
+The remaining steps are automated. Your brainstorm insights will flow through the entire pipeline, making this skill uniquely yours.`;
 
   return { content: [{ type: 'text', text: output }] };
 }
