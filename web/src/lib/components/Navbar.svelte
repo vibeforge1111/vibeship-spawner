@@ -73,19 +73,34 @@
   .navbar-logo-img {
     width: 24px;
     height: 24px;
-    filter: invert(var(--logo-invert, 0));
+    position: relative;
+    left: -1px;
+  }
+
+  /* Logo is white - invert to black in light mode, keep white in dark mode */
+  :global([data-theme="light"]) .navbar-logo-img {
+    filter: invert(1);
+  }
+
+  :global([data-theme="dark"]) .navbar-logo-img {
+    filter: none;
   }
 
   .navbar-logo-text {
     font-family: 'Instrument Serif', Georgia, serif;
-    font-size: 1.44rem;
+    font-size: 1.36rem;
     color: var(--text-primary);
+    position: relative;
+    top: 1px;
+    left: -1px;
   }
 
   .navbar-logo-product {
     font-family: 'Instrument Serif', Georgia, serif;
-    font-size: 1.44rem;
+    font-size: 1.36rem;
     color: var(--green-dim);
+    position: relative;
+    top: 1px;
   }
 
   .navbar-right {
