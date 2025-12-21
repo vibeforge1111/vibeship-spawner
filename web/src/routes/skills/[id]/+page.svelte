@@ -199,7 +199,10 @@
             <!-- What this skill covers -->
             {#if skill.owns?.length}
               <div class="covers-section">
-                <h3>What This Skill Covers</h3>
+                <h3>
+                  <Icon name="layers" size={16} />
+                  What This Skill Covers
+                </h3>
                 <div class="covers-grid">
                   {#each skill.owns as item}
                     <span class="covers-item">
@@ -242,7 +245,10 @@
             <!-- Related skills -->
             {#if skill.pairs_with?.length}
               <div class="related-section">
-                <h3>Works Well With</h3>
+                <h3>
+                  <Icon name="users" size={16} />
+                  Works Well With
+                </h3>
                 <div class="related-links">
                   {#each skill.pairs_with as id}
                     <a href="/skills/{id}" class="related-link">{id}</a>
@@ -648,6 +654,9 @@
   }
 
   .covers-section h3 {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     font-weight: 600;
@@ -655,6 +664,11 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin: 0 0 var(--space-3);
+  }
+
+  .covers-section h3 :global(svg) {
+    color: var(--text-tertiary);
+    opacity: 0.7;
   }
 
   .covers-grid {
@@ -729,14 +743,17 @@
     align-items: center;
     gap: var(--space-2);
     font-family: var(--font-mono);
-    font-size: var(--text-base);
+    font-size: var(--text-sm);
     font-weight: 600;
-    color: var(--text-primary);
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
     margin: 0 0 var(--space-3);
   }
 
   .content-block h3 :global(svg) {
-    color: var(--green-dim);
+    color: var(--text-tertiary);
+    opacity: 0.7;
   }
 
   .block-description {
@@ -1015,6 +1032,9 @@
   }
 
   .related-section h3 {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     font-weight: 600;
@@ -1022,6 +1042,11 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin: 0 0 var(--space-3);
+  }
+
+  .related-section h3 :global(svg) {
+    color: var(--text-tertiary);
+    opacity: 0.7;
   }
 
   .content-block .related-section {
