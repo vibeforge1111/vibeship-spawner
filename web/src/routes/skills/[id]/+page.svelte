@@ -581,7 +581,7 @@
 
   .skill-description p {
     font-size: var(--text-base);
-    color: rgba(255, 255, 255, 0.7);
+    color: var(--text-secondary);
     line-height: 1.7;
     margin: 0 0 var(--space-4) 0;
   }
@@ -653,7 +653,7 @@
 
   .skill-intro p {
     font-size: 1.125rem; /* 18px */
-    color: rgba(255, 255, 255, 0.9);
+    color: var(--text-primary);
     line-height: 1.7;
     margin: 0;
     max-width: 640px;
