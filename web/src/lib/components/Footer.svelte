@@ -16,10 +16,6 @@
     <div class="footer-links">
       <div class="footer-column">
         <h4 class="footer-heading">Product</h4>
-        <a href="/why-spawner">
-          <Icon name="zap" size={12} />
-          <span>Benefits</span>
-        </a>
         <a href="/skills">
           <Icon name="layers" size={12} />
           <span>Skills</span>
