@@ -1024,7 +1024,8 @@ New score: 91/100 (+4)`,
 
   .tool-btn .tool-desc {
     font-size: var(--text-xs);
-    color: var(--text-tertiary);
+    color: var(--text-secondary);
+    margin-top: 4px;
   }
 
   .tool-btn .optional-badge {
