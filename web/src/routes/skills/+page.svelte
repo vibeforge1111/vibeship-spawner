@@ -336,7 +336,7 @@
             <span class="anatomy-dot edges"></span>
             <div class="anatomy-content">
               <span class="anatomy-file">sharp-edges.yaml</span>
-              <span class="anatomy-desc">8-12 gotchas to catch</span>
+              <span class="anatomy-desc">Gotchas to catch</span>
             </div>
           </div>
           <div class="anatomy-item">
@@ -360,14 +360,6 @@
         <div class="stat">
           <span class="stat-value">{allSkills.length}</span>
           <span class="stat-label">Skills</span>
-        </div>
-        <div class="stat">
-          <span class="stat-value">8-12</span>
-          <span class="stat-label">Sharp Edges Each</span>
-        </div>
-        <div class="stat">
-          <span class="stat-value">80+</span>
-          <span class="stat-label">Quality Score</span>
         </div>
       </div>
     </section>
