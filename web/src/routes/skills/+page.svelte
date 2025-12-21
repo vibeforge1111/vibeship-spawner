@@ -323,37 +323,10 @@
 
       <!-- What makes a skill -->
       <div class="skill-anatomy">
-        <h3>Each Skill Contains</h3>
-        <div class="anatomy-grid">
-          <div class="anatomy-item">
-            <span class="anatomy-dot identity"></span>
-            <div class="anatomy-content">
-              <span class="anatomy-file">skill.yaml</span>
-              <span class="anatomy-desc">Identity & patterns</span>
-            </div>
-          </div>
-          <div class="anatomy-item">
-            <span class="anatomy-dot edges"></span>
-            <div class="anatomy-content">
-              <span class="anatomy-file">sharp-edges.yaml</span>
-              <span class="anatomy-desc">Gotchas to catch</span>
-            </div>
-          </div>
-          <div class="anatomy-item">
-            <span class="anatomy-dot validations"></span>
-            <div class="anatomy-content">
-              <span class="anatomy-file">validations.yaml</span>
-              <span class="anatomy-desc">Automated code checks</span>
-            </div>
-          </div>
-          <div class="anatomy-item">
-            <span class="anatomy-dot collab"></span>
-            <div class="anatomy-content">
-              <span class="anatomy-file">collaboration.yaml</span>
-              <span class="anatomy-desc">Handoffs & delegation</span>
-            </div>
-          </div>
-        </div>
+        <h3>What Makes Our Skills Different</h3>
+        <p class="anatomy-text">
+          Our skills contain multiple YAML and MD files—not just a single markdown file—to get more out of Claude's capabilities and make each skill highly specialized. Browse the directory below to see what's in each skill.
+        </p>
       </div>
 
       <div class="stats-bar">
@@ -831,49 +804,12 @@
     margin: 0 0 var(--space-3);
   }
 
-  .anatomy-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: var(--space-3);
-  }
-
-  .anatomy-item {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-3);
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-  }
-
-  .anatomy-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .anatomy-dot.identity { background: var(--green-dim); }
-  .anatomy-dot.edges { background: #f59e0b; }
-  .anatomy-dot.validations { background: #3b82f6; }
-  .anatomy-dot.collab { background: #a855f7; }
-
-  .anatomy-content {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .anatomy-file {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    color: var(--text-primary);
-  }
-
-  .anatomy-desc {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--text-tertiary);
+  .anatomy-text {
+    font-size: var(--text-base);
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin: 0;
+    max-width: 600px;
   }
 
   .stats-bar {
