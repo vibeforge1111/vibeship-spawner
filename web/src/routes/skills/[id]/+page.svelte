@@ -168,7 +168,11 @@
           <h1>{skill.name}</h1>
           <span class="skill-layer layer-{skill.layer}">{LAYER_LABELS[skill.layer]}</span>
         </div>
-        <p class="skill-description">{skill.description}</p>
+        <div class="skill-description">
+          {#each skill.description.split('\n\n').filter(p => p.trim()) as paragraph}
+            <p>{paragraph.replace(/\n/g, ' ')}</p>
+          {/each}
+        </div>
       </header>
 
       <!-- Tab Navigation -->
@@ -572,11 +576,18 @@
   .layer-3 { background: rgba(180, 130, 255, 0.15); color: #b482ff; }
 
   .skill-description {
-    font-size: var(--text-lg);
-    color: rgba(255, 255, 255, 0.75);
-    line-height: 1.7;
-    margin: 0;
     max-width: 640px;
+  }
+
+  .skill-description p {
+    font-size: var(--text-base);
+    color: rgba(255, 255, 255, 0.7);
+    line-height: 1.7;
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .skill-description p:last-child {
+    margin-bottom: 0;
   }
 
   /* Tab Navigation */
