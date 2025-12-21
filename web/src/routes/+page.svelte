@@ -826,10 +826,10 @@ export async function GET(req: Request) {
               <span class="yaml-filename">sharp-edges.yaml</span>
             </div>
             <ul class="yaml-contents">
-              <li><strong>8-12 gotchas</strong> — Real pitfalls that catch developers</li>
-              <li><strong>Detection patterns</strong> — Regex to spot issues in code</li>
-              <li><strong>Severity levels</strong> — Critical, high, medium warnings</li>
-              <li><strong>Solutions</strong> — Exact fix with code examples</li>
+              <li><strong>Gotchas</strong> — Real pitfalls that catch developers</li>
+              <li><strong>Detection</strong> — Spots issues in your code</li>
+              <li><strong>Severity</strong> — Critical, high, medium warnings</li>
+              <li><strong>Solutions</strong> — Exact fix with examples</li>
             </ul>
           </div>
 
@@ -839,10 +839,10 @@ export async function GET(req: Request) {
               <span class="yaml-filename">validations.yaml</span>
             </div>
             <ul class="yaml-contents">
-              <li><strong>8-12 automated checks</strong> — Run against your code</li>
-              <li><strong>Pattern matching</strong> — Catches bugs before shipping</li>
+              <li><strong>Checks</strong> — Automated validation on your code</li>
+              <li><strong>Patterns</strong> — Catches bugs before shipping</li>
               <li><strong>Fix actions</strong> — What to do when check fails</li>
-              <li><strong>File targeting</strong> — Knows which files to scan</li>
+              <li><strong>Targeting</strong> — Knows which files to scan</li>
             </ul>
           </div>
 
