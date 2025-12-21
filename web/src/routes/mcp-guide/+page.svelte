@@ -414,9 +414,15 @@ New score: 91/100 (+4)`,
 
   // Syntax highlighter for terminal output
   function highlightOutput(text: string): string {
-    return text
+    // First escape HTML to prevent XSS
+    let result = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    return result
       // Commands (> spawner_...)
-      .replace(/^(&gt;|>)\s*(spawner_\w+.*?)$/gm, '<span class="hl-command">$1 $2</span>')
+      .replace(/^(&gt;)\s*(spawner_\w+\(.*?\))$/gm, '<span class="hl-command">$1 $2</span>')
       // Headers (## ...)
       .replace(/^(##\s+.*)$/gm, '<span class="hl-header">$1</span>')
       // Success indicators
@@ -429,24 +435,24 @@ New score: 91/100 (+4)`,
       .replace(/\[warning\]/g, '<span class="hl-warning">[warning]</span>')
       // Info indicators
       .replace(/\[info\]/g, '<span class="hl-info">[info]</span>')
-      // Keys in JSON-like output
-      .replace(/"(\w+)":/g, '<span class="hl-key">"$1"</span>:')
-      // String values
-      .replace(/:\s*"([^"]+)"/g, ': <span class="hl-string">"$1"</span>')
-      // Boolean/special values
+      // Boolean/special values (before other patterns)
       .replace(/:\s*(true|false|null)/g, ': <span class="hl-bool">$1</span>')
+      // Keys in JSON-like output
+      .replace(/&quot;(\w+)&quot;:/g, '<span class="hl-key">"$1"</span>:')
+      .replace(/"(\w+)":/g, '<span class="hl-key">"$1"</span>:')
+      // String values in JSON
+      .replace(/:\s*&quot;([^&]+)&quot;/g, ': <span class="hl-string">"$1"</span>')
+      .replace(/:\s*"([^"]+)"/g, ': <span class="hl-string">"$1"</span>')
       // Numbers with % or /
       .replace(/(\d+%|\d+\/\d+)/g, '<span class="hl-number">$1</span>')
-      // Stack technologies
-      .replace(/(Next\.js|Supabase|Stripe|Algolia|Tailwind|OpenAI|wagmi|viem|TypeScript|Node\.js)/g, '<span class="hl-tech">$1</span>')
-      // Skill names (kebab-case words)
-      .replace(/\b([a-z]+-[a-z]+(?:-[a-z]+)*)\b/g, '<span class="hl-skill">$1</span>')
+      // Stack technologies (word boundaries)
+      .replace(/\b(Next\.js|Supabase|Stripe|Algolia|Tailwind|OpenAI|wagmi|viem|TypeScript|Node\.js)\b/g, '<span class="hl-tech">$1</span>')
       // Likelihood indicators
       .replace(/Likelihood:\s*(High|Medium|Low)/g, 'Likelihood: <span class="hl-likelihood-$1">$1</span>')
       // Line numbers and references
       .replace(/Line\s+(\d+):/g, '<span class="hl-line">Line $1:</span>')
       // Status ready to ship
-      .replace(/Status:\s*(READY TO SHIP.*)/g, '<span class="hl-status">Status: $1</span>');
+      .replace(/Status:\s*(READY TO SHIP[^<]*)/g, '<span class="hl-status">Status: $1</span>');
   }
 </script>
 
