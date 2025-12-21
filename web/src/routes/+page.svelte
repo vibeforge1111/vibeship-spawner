@@ -838,22 +838,14 @@
           {/each}
         </div>
 
-        <div class="directory-stats">
-          <div class="stat">
-            <span class="stat-value">253</span>
-            <span class="stat-label">Sharp Edges</span>
-          </div>
-          <div class="stat">
-            <span class="stat-value">411</span>
-            <span class="stat-label">Validations</span>
-          </div>
-          <div class="stat">
-            <span class="stat-value">200+</span>
-            <span class="stat-label">Patterns</span>
-          </div>
+        <div class="directory-footer">
+          <p class="directory-tagline">Curated, versioned, battle-tested — not AI-generated slop</p>
+          <ul class="directory-bullets">
+            <li>4 YAML files per skill — not a single markdown persona</li>
+            <li>Sharp edges, validations, patterns from real production use</li>
+            <li>Machine-actionable expertise Claude can execute, not just read</li>
+          </ul>
         </div>
-
-        <p class="directory-note">Curated, versioned, battle-tested — not AI-generated slop</p>
       </div>
     </div>
   </section>
@@ -1715,6 +1707,7 @@
     border-radius: 0;
     display: flex;
     flex-direction: column;
+    height: 100%;
   }
 
   .directory-header-preview {
@@ -1747,6 +1740,8 @@
   .category-list {
     flex: 1;
     padding: 0;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   .category-item {
@@ -1911,41 +1906,42 @@
     color: var(--green-dim);
   }
 
-  .directory-stats {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: var(--space-2);
+  .directory-footer {
+    margin-top: auto;
     padding: var(--space-3) var(--space-4);
     border-top: 1px solid var(--border);
     background: var(--bg-tertiary);
   }
 
-  .stat {
-    text-align: center;
-  }
-
-  .stat-value {
-    display: block;
+  .directory-tagline {
     font-family: var(--font-mono);
-    font-size: var(--text-lg);
-    font-weight: 600;
-    color: var(--green-dim);
+    font-size: var(--text-sm);
+    color: var(--text-primary);
+    margin: 0 0 var(--space-2) 0;
+    font-weight: 500;
   }
 
-  .stat-label {
-    font-size: var(--text-xs);
-    color: var(--text-tertiary);
-  }
-
-  .directory-note {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--text-tertiary);
-    text-align: center;
-    padding: var(--space-2) var(--space-4);
+  .directory-bullets {
+    list-style: none;
+    padding: 0;
     margin: 0;
-    font-style: italic;
-    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .directory-bullets li {
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    padding-left: var(--space-3);
+    position: relative;
+  }
+
+  .directory-bullets li::before {
+    content: '→';
+    position: absolute;
+    left: 0;
+    color: var(--green-dim);
   }
 
   /* Comparison Section */
@@ -3223,14 +3219,6 @@
 
     .mini-skill-desc {
       text-align: left;
-    }
-
-    .directory-stats {
-      padding: var(--space-2);
-    }
-
-    .stat-value {
-      font-size: var(--text-base);
     }
 
     .comparison-section {
