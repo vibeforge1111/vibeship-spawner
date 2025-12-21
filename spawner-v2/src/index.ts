@@ -25,6 +25,8 @@ import {
   checkRateLimit,
   createRateLimitError,
   getClientIp,
+  rateLimitHeaders,
+  type RateLimitResult,
 } from './middleware/rate-limit.js';
 
 /**
@@ -46,6 +48,11 @@ interface McpResponse {
     message: string;
     data?: unknown;
   };
+}
+
+interface McpHandlerResult {
+  response: McpResponse;
+  rateLimitInfo?: RateLimitResult;
 }
 
 /**
@@ -73,14 +80,19 @@ export default {
       const body = await request.json() as McpRequest;
 
       // Route to appropriate handler
-      const response = await handleMcpRequest(body, env, request);
+      const { response, rateLimitInfo } = await handleMcpRequest(body, env, request);
 
-      return new Response(JSON.stringify(response), {
-        headers: {
-          'Content-Type': 'application/json',
-          ...corsHeaders(),
-        },
-      });
+      // Build headers with optional rate limit info
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...corsHeaders(),
+      };
+
+      if (rateLimitInfo) {
+        Object.assign(headers, rateLimitHeaders(rateLimitInfo));
+      }
+
+      return new Response(JSON.stringify(response), { headers });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       return new Response(
@@ -108,15 +120,17 @@ async function handleMcpRequest(
   request: McpRequest,
   env: Env,
   httpRequest: Request
-): Promise<McpResponse> {
+): Promise<McpHandlerResult> {
   const { jsonrpc, id, method, params } = request;
 
   // Validate JSON-RPC version
   if (jsonrpc !== '2.0') {
     return {
-      jsonrpc: '2.0',
-      id,
-      error: { code: -32600, message: 'Invalid Request: Must be JSON-RPC 2.0' },
+      response: {
+        jsonrpc: '2.0',
+        id,
+        error: { code: -32600, message: 'Invalid Request: Must be JSON-RPC 2.0' },
+      },
     };
   }
 
@@ -129,22 +143,24 @@ async function handleMcpRequest(
   // Route by method
   switch (method) {
     case 'initialize':
-      return handleInitialize(id);
+      return { response: handleInitialize(id) };
 
     case 'tools/list':
-      return handleListTools(id);
+      return { response: handleListTools(id) };
 
     case 'tools/call':
       return await handleCallTool(id, params, env, userId, clientIp);
 
     case 'ping':
-      return { jsonrpc: '2.0', id, result: { status: 'ok' } };
+      return { response: { jsonrpc: '2.0', id, result: { status: 'ok' } } };
 
     default:
       return {
-        jsonrpc: '2.0',
-        id,
-        error: { code: -32601, message: `Method not found: ${method}` },
+        response: {
+          jsonrpc: '2.0',
+          id,
+          error: { code: -32601, message: `Method not found: ${method}` },
+        },
       };
   }
 }
@@ -196,12 +212,14 @@ async function handleCallTool(
   env: Env,
   userId: string,
   clientIp: string
-): Promise<McpResponse> {
+): Promise<McpHandlerResult> {
   if (!params || typeof params.name !== 'string') {
     return {
-      jsonrpc: '2.0',
-      id,
-      error: { code: -32602, message: 'Invalid params: name required' },
+      response: {
+        jsonrpc: '2.0',
+        id,
+        error: { code: -32602, message: 'Invalid params: name required' },
+      },
     };
   }
 
@@ -211,9 +229,11 @@ async function handleCallTool(
   // Check if tool exists
   if (!hasTool(toolName)) {
     return {
-      jsonrpc: '2.0',
-      id,
-      error: { code: -32602, message: `Unknown tool: ${toolName}` },
+      response: {
+        jsonrpc: '2.0',
+        id,
+        error: { code: -32602, message: `Unknown tool: ${toolName}` },
+      },
     };
   }
 
@@ -221,9 +241,12 @@ async function handleCallTool(
   const rateLimitResult = await checkRateLimit(env, clientIp, toolName);
   if (!rateLimitResult.allowed) {
     return {
-      jsonrpc: '2.0',
-      id,
-      error: createRateLimitError(rateLimitResult),
+      response: {
+        jsonrpc: '2.0',
+        id,
+        error: createRateLimitError(rateLimitResult),
+      },
+      rateLimitInfo: rateLimitResult,
     };
   }
 
@@ -232,23 +255,29 @@ async function handleCallTool(
     const result = await executeTool(toolName, env, toolArgs, userId);
 
     return {
-      jsonrpc: '2.0',
-      id,
-      result: {
-        content: [
-          {
-            type: 'text',
-            text: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
-          },
-        ],
+      response: {
+        jsonrpc: '2.0',
+        id,
+        result: {
+          content: [
+            {
+              type: 'text',
+              text: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
+            },
+          ],
+        },
       },
+      rateLimitInfo: rateLimitResult,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return {
-      jsonrpc: '2.0',
-      id,
-      error: { code: -32603, message: `Internal error: ${message}` },
+      response: {
+        jsonrpc: '2.0',
+        id,
+        error: { code: -32603, message: `Internal error: ${message}` },
+      },
+      rateLimitInfo: rateLimitResult,
     };
   }
 }

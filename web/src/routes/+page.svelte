@@ -18,6 +18,9 @@
   // Skills directory preview state
   let expandedCategory = $state<string | null>(null);
 
+  // Quick Setup tab state
+  let activeSetupTab = $state<'claude-code' | 'claude-desktop'>('claude-code');
+
   function toggleCategory(catId: string) {
     expandedCategory = expandedCategory === catId ? null : catId;
   }
@@ -281,11 +284,12 @@
   }
 
   const copyTexts: Record<string, string> = {
+    'claude-code-cmd': 'claude mcp add spawner -- npx -y mcp-remote https://mcp.vibeship.co',
     config: `{
   "mcpServers": {
     "spawner": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "https://mcp.vibeship.co/sse"]
+      "args": ["-y", "mcp-remote", "https://mcp.vibeship.co"]
     }
   }
 }`,
@@ -1031,56 +1035,110 @@ export async function GET(req: Request) {
   <!-- Divider -->
   <div class="section-divider"></div>
 
-  <!-- Quick Start Section -->
+  <!-- Quick Setup Section -->
   <section class="quickstart-section">
-    <h2 class="section-headline">Looks Like Rocket Science?</h2>
-    <p class="section-subtitle">It's actually just a few prompts. Here's the whole thing.</p>
+    <h2 class="section-headline">Quick Setup</h2>
+    <p class="section-subtitle">Connect Spawner to Claude Desktop or Claude Code in 2 minutes.</p>
+
+    <div class="setup-selector">
+      <span class="setup-label">Select your environment:</span>
+      <div class="setup-tabs">
+        <button class="setup-tab" class:active={activeSetupTab === 'claude-code'} onclick={() => activeSetupTab = 'claude-code'}>
+          Claude Code
+        </button>
+        <span class="setup-or">or</span>
+        <button class="setup-tab" class:active={activeSetupTab === 'claude-desktop'} onclick={() => activeSetupTab = 'claude-desktop'}>
+          Claude Desktop
+        </button>
+      </div>
+    </div>
 
     <div class="quickstart-terminal">
       <div class="terminal-header">
         <span class="terminal-dot"></span>
         <span class="terminal-dot"></span>
         <span class="terminal-dot"></span>
-        <span class="terminal-title">Quick Start Guide</span>
+        <span class="terminal-title">{activeSetupTab === 'claude-code' ? 'Claude Code Setup' : 'Claude Desktop Setup'}</span>
       </div>
       <div class="terminal-body quickstart-body">
-        <div class="qs-step">
-          <span class="qs-step-label">Step 1: Add to Claude Desktop config</span>
-          <div class="qs-code-block">
-            <pre>{`{
+        {#if activeSetupTab === 'claude-code'}
+          <div class="qs-step">
+            <span class="qs-step-number">1</span>
+            <div class="qs-step-content">
+              <span class="qs-step-label">Run the add command</span>
+              <p class="qs-instruction">In your terminal, run:</p>
+              <div class="qs-code-block">
+                <pre>claude mcp add spawner -- npx -y mcp-remote https://mcp.vibeship.co</pre>
+                <button class="copy-btn" onclick={() => copyToClipboard('claude-code-cmd')}>Copy</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="qs-step">
+            <span class="qs-step-number">2</span>
+            <div class="qs-step-content">
+              <span class="qs-step-label">Start Claude Code</span>
+              <p class="qs-instruction">Run <code>claude</code> in your project. Type <code>/mcp</code> to verify Spawner is connected.</p>
+            </div>
+          </div>
+        {:else}
+          <div class="qs-step">
+            <span class="qs-step-number">1</span>
+            <div class="qs-step-content">
+              <span class="qs-step-label">Open Settings in Claude Desktop</span>
+              <p class="qs-instruction">Go to Claude menu → Settings → Developer tab → click Edit Config</p>
+            </div>
+          </div>
+
+          <div class="qs-step">
+            <span class="qs-step-number">2</span>
+            <div class="qs-step-content">
+              <span class="qs-step-label">Add Spawner to your config</span>
+              <p class="qs-instruction">Paste this into your config file:</p>
+              <div class="qs-code-block">
+                <pre>{`{
   "mcpServers": {
     "spawner": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "https://mcp.vibeship.co/sse"]
+      "args": ["-y", "mcp-remote", "https://mcp.vibeship.co"]
     }
   }
 }`}</pre>
-            <button class="copy-btn" onclick={() => copyToClipboard('config')}>Copy</button>
-          </div>
-        </div>
-
-        <div class="qs-step">
-          <span class="qs-step-label">Step 2: Restart Claude Desktop</span>
-          <p class="qs-instruction">Close and reopen Claude Desktop. Done.</p>
-        </div>
-
-        <div class="qs-step">
-          <span class="qs-step-label">Step 3: Start building</span>
-
-          <div class="qs-prompts">
-            <div class="qs-prompt">
-              <span class="prompt-label">New project:</span>
-              <div class="qs-code-block small">
-                <pre>"I want to build [your idea]. Use spawner_plan to help me get started."</pre>
-                <button class="copy-btn small" onclick={() => copyToClipboard('new-project')}>Copy</button>
+                <button class="copy-btn" onclick={() => copyToClipboard('config')}>Copy</button>
               </div>
             </div>
+          </div>
 
-            <div class="qs-prompt">
-              <span class="prompt-label">Existing project:</span>
-              <div class="qs-code-block small">
-                <pre>"Analyze this codebase with spawner_analyze and load the right skills."</pre>
-                <button class="copy-btn small" onclick={() => copyToClipboard('existing-project')}>Copy</button>
+          <div class="qs-step">
+            <span class="qs-step-number">3</span>
+            <div class="qs-step-content">
+              <span class="qs-step-label">Restart Claude Desktop</span>
+              <p class="qs-instruction">Fully quit and reopen. Look for the hammer icon in the chat input - that means Spawner is connected!</p>
+            </div>
+          </div>
+        {/if}
+
+        <div class="qs-divider"></div>
+
+        <div class="qs-step">
+          <span class="qs-step-number">{activeSetupTab === 'claude-code' ? '3' : '4'}</span>
+          <div class="qs-step-content">
+            <span class="qs-step-label">Start building</span>
+            <div class="qs-prompts">
+              <div class="qs-prompt">
+                <span class="prompt-label">New project:</span>
+                <div class="qs-code-block small">
+                  <pre>"I want to build [your idea]. Use spawner_plan to help me get started."</pre>
+                  <button class="copy-btn small" onclick={() => copyToClipboard('new-project')}>Copy</button>
+                </div>
+              </div>
+
+              <div class="qs-prompt">
+                <span class="prompt-label">Existing project:</span>
+                <div class="qs-code-block small">
+                  <pre>"Analyze this codebase with spawner_analyze and load the right skills."</pre>
+                  <button class="copy-btn small" onclick={() => copyToClipboard('existing-project')}>Copy</button>
+                </div>
               </div>
             </div>
           </div>
@@ -3012,12 +3070,91 @@ export async function GET(req: Request) {
     padding: var(--space-6);
   }
 
+  /* Setup Tabs */
+  .setup-selector {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-6);
+  }
+
+  .setup-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-tertiary);
+  }
+
+  .setup-tabs {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .setup-or {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+  }
+
+  .setup-tab {
+    padding: var(--space-3) var(--space-6);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+
+  .setup-tab:hover {
+    border-color: var(--text-secondary);
+    color: var(--text-primary);
+  }
+
+  .setup-tab.active {
+    background: var(--green-dim);
+    border-color: var(--green-dim);
+    color: var(--bg-primary);
+  }
+
   .qs-step {
+    display: flex;
+    gap: var(--space-4);
     margin-bottom: var(--space-6);
   }
 
   .qs-step:last-child {
     margin-bottom: 0;
+  }
+
+  .qs-step-number {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--green-dim);
+    color: var(--bg-primary);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 700;
+    border-radius: 50%;
+  }
+
+  .qs-step-content {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .qs-divider {
+    height: 1px;
+    background: var(--border);
+    margin: var(--space-6) 0;
   }
 
   .qs-step-label {
