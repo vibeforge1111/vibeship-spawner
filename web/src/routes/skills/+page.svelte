@@ -146,11 +146,13 @@
           <div class="flow-pipeline">
             <!-- Stage 1: Input -->
             <div class="pipeline-stage">
-              <div class="flow-node input-node">
-                <div class="node-icon">
-                  <Icon name="folder" size={18} />
+              <div class="flow-node skill-node secondary">
+                <div class="node-content">
+                  <div class="skill-avatar">
+                    <Icon name="folder" size={18} />
+                  </div>
+                  <span class="skill-name">Your Project</span>
                 </div>
-                <span class="node-label">Your Project</span>
               </div>
             </div>
 
@@ -261,17 +263,19 @@
               </div>
             </div>
 
-            <div class="flow-arrow success">
+            <div class="flow-arrow">
               <Icon name="chevron-down" size={16} />
             </div>
 
             <!-- Stage 5: Production -->
             <div class="pipeline-stage">
-              <div class="flow-node output-node success">
-                <div class="node-icon">
-                  <Icon name="rocket" size={18} />
+              <div class="flow-node skill-node production">
+                <div class="node-content">
+                  <div class="skill-avatar">
+                    <Icon name="rocket" size={18} />
+                  </div>
+                  <span class="skill-name">Production</span>
                 </div>
-                <span class="node-label">Production</span>
               </div>
             </div>
           </div>
@@ -659,10 +663,10 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: var(--space-2);
+    gap: 4px;
     padding: var(--space-3) var(--space-4);
     background: var(--bg-primary);
-    border: 1px solid var(--border);
+    border: 1px solid var(--text-tertiary);
     position: relative;
     min-width: 90px;
     min-height: 70px;
@@ -670,23 +674,9 @@
 
   .flow-node.input-node,
   .flow-node.output-node {
-    background: transparent;
-    border: 1px dashed var(--border);
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
     min-width: 120px;
-  }
-
-  .flow-node.output-node.success {
-    border-color: #22c55e;
-    border-style: solid;
-    background: rgba(34, 197, 94, 0.05);
-  }
-
-  .flow-node.output-node.success .node-icon {
-    color: #22c55e;
-  }
-
-  .flow-node.output-node.success .node-label {
-    color: #22c55e;
   }
 
   .flow-node.skill-node.primary {
@@ -707,6 +697,15 @@
 
   .flow-node.skill-node.review .skill-avatar {
     color: #3b82f6;
+  }
+
+  .flow-node.skill-node.production {
+    border-color: #22c55e;
+    border-width: 2px;
+  }
+
+  .flow-node.skill-node.production .skill-avatar {
+    color: #22c55e;
   }
 
   .node-badge {
@@ -737,7 +736,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--space-1);
+    gap: 2px;
   }
 
   .skill-avatar {
