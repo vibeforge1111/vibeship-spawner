@@ -541,21 +541,8 @@ New score: 91/100 (+4)`,
               </div>
               <div class="message claude">
                 <span class="label">Claude + Spawner</span>
-                <p>Uses <code>spawner_plan</code> to understand your idea, detect your skill level, and ask clarifying questions (max 3).</p>
+                <p>Uses <code>spawner_plan</code> to detect your skill level, ask clarifying questions, then recommends the Marketplace template with Next.js + Supabase + Stripe stack and relevant skills.</p>
               </div>
-              <div class="message claude">
-                <span class="label">Claude + Spawner</span>
-                <p>Recommends: Marketplace template, Next.js + Supabase + Stripe stack, plus relevant skills.</p>
-              </div>
-            </div>
-
-            <div class="workflow-tips">
-              <strong>Pro Tips:</strong>
-              <ul>
-                <li>Be specific about your domain - "vintage watches" helps Spawner pick better skills</li>
-                <li>Mention constraints early - "I need it in 2 weeks" or "I have $0 budget"</li>
-                <li>Say if you're technical - Spawner adapts its guidance to your level</li>
-              </ul>
             </div>
           </div>
         </div>
@@ -576,91 +563,8 @@ New score: 91/100 (+4)`,
               </div>
               <div class="message claude">
                 <span class="label">Claude + Spawner</span>
-                <p>Uses <code>spawner_analyze</code> to detect your stack from package.json, file patterns, and imports.</p>
+                <p>Uses <code>spawner_analyze</code> to detect your stack from package.json and imports, identifies missing pieces (no auth detected), and recommends relevant skills.</p>
               </div>
-              <div class="message claude">
-                <span class="label">Claude + Spawner</span>
-                <p>Returns: Detected stack (Next.js + Supabase), missing pieces (no auth detected), recommended skills.</p>
-              </div>
-            </div>
-
-            <div class="workflow-tips">
-              <strong>Pro Tips:</strong>
-              <ul>
-                <li>Share your package.json for accurate detection</li>
-                <li>Mention what you're trying to add - "I want to add payments"</li>
-                <li>Ask about specific problems - "Why is my auth flow breaking?"</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <!-- When Stuck -->
-        <div class="workflow-card">
-          <div class="workflow-header">
-            <Icon name="life-buoy" size={20} />
-            <h3>Getting Unstuck</h3>
-          </div>
-          <div class="workflow-body">
-            <p class="workflow-desc">When you've been stuck on a problem, Spawner offers alternative approaches.</p>
-
-            <div class="conversation">
-              <div class="message user">
-                <span class="label">You</span>
-                <p>"I've been trying to fix this auth redirect for 2 hours"</p>
-              </div>
-              <div class="message claude">
-                <span class="label">Claude + Spawner</span>
-                <p>Uses <code>spawner_unstick</code> to analyze your attempts and generate alternative approaches.</p>
-              </div>
-              <div class="message claude">
-                <span class="label">Claude + Spawner</span>
-                <p>Returns 3-5 different approaches you haven't tried, ordered by likelihood of success.</p>
-              </div>
-            </div>
-
-            <div class="workflow-tips">
-              <strong>Pro Tips:</strong>
-              <ul>
-                <li>Describe what you've already tried - Spawner won't repeat failed approaches</li>
-                <li>Share error messages - they help narrow down the problem</li>
-                <li>Mention your constraints - "I can't change the database schema"</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <!-- Watch Out -->
-        <div class="workflow-card">
-          <div class="workflow-header">
-            <Icon name="alert-triangle" size={20} />
-            <h3>Avoiding Gotchas</h3>
-          </div>
-          <div class="workflow-body">
-            <p class="workflow-desc">Proactively get warnings about common pitfalls before you hit them.</p>
-
-            <div class="conversation">
-              <div class="message user">
-                <span class="label">You</span>
-                <p>"What should I watch out for with Supabase RLS?"</p>
-              </div>
-              <div class="message claude">
-                <span class="label">Claude + Spawner</span>
-                <p>Uses <code>spawner_watch_out</code> to query sharp edges for your stack and situation.</p>
-              </div>
-              <div class="message claude">
-                <span class="label">Claude + Spawner</span>
-                <p>Returns specific gotchas with severity, why they hurt, and how to avoid them.</p>
-              </div>
-            </div>
-
-            <div class="workflow-tips">
-              <strong>Pro Tips:</strong>
-              <ul>
-                <li>Ask before you start implementing - prevention beats debugging</li>
-                <li>Be specific - "Stripe webhooks" gets better results than just "payments"</li>
-                <li>Ask about integrations - "Next.js + Supabase auth" surfaces cross-tech issues</li>
-              </ul>
             </div>
           </div>
         </div>
@@ -968,40 +872,6 @@ New score: 91/100 (+4)`,
     color: var(--green-dim);
     background: rgba(0, 196, 154, 0.1);
     padding: 0 var(--space-1);
-  }
-
-  .workflow-tips {
-    background: var(--bg-tertiary);
-    padding: var(--space-3);
-  }
-
-  .workflow-tips strong {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    color: var(--text-primary);
-    display: block;
-    margin-bottom: var(--space-2);
-  }
-
-  .workflow-tips ul {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-  }
-
-  .workflow-tips li {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    padding: var(--space-1) 0;
-    padding-left: var(--space-4);
-    position: relative;
-  }
-
-  .workflow-tips li::before {
-    content: '+';
-    position: absolute;
-    left: 0;
-    color: var(--green-dim);
   }
 
   /* Tool Explorer */
