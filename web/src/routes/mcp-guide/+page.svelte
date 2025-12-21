@@ -75,7 +75,7 @@
         <!-- New Project -->
         <div class="workflow-card">
           <div class="workflow-header">
-            <span class="workflow-icon">&#128640;</span>
+            <Icon name="rocket" size={20} />
             <h3>Starting a New Project</h3>
           </div>
           <div class="workflow-body">
@@ -110,7 +110,7 @@
         <!-- Existing Project -->
         <div class="workflow-card">
           <div class="workflow-header">
-            <span class="workflow-icon">&#128269;</span>
+            <Icon name="search" size={20} />
             <h3>Analyzing Existing Code</h3>
           </div>
           <div class="workflow-body">
@@ -145,7 +145,7 @@
         <!-- When Stuck -->
         <div class="workflow-card">
           <div class="workflow-header">
-            <span class="workflow-icon">&#128161;</span>
+            <Icon name="life-buoy" size={20} />
             <h3>Getting Unstuck</h3>
           </div>
           <div class="workflow-body">
@@ -180,7 +180,7 @@
         <!-- Watch Out -->
         <div class="workflow-card">
           <div class="workflow-header">
-            <span class="workflow-icon">&#9888;&#65039;</span>
+            <Icon name="alert-triangle" size={20} />
             <h3>Avoiding Gotchas</h3>
           </div>
           <div class="workflow-body">
@@ -369,7 +369,7 @@
       <div class="levels-grid">
         <div class="level-card">
           <div class="level-header">
-            <span class="level-icon">&#127793;</span>
+            <Icon name="user" size={18} />
             <h4>Vibe-Coder</h4>
           </div>
           <p>Non-technical, learning. Gets maximum guidance, step-by-step explanations, and simplified choices.</p>
@@ -378,7 +378,7 @@
 
         <div class="level-card">
           <div class="level-header">
-            <span class="level-icon">&#128736;</span>
+            <Icon name="wrench" size={18} />
             <h4>Builder</h4>
           </div>
           <p>Some tech knowledge, actively learning. Gets helpful context with room to explore.</p>
@@ -387,7 +387,7 @@
 
         <div class="level-card">
           <div class="level-header">
-            <span class="level-icon">&#128187;</span>
+            <Icon name="terminal" size={18} />
             <h4>Developer</h4>
           </div>
           <p>Technical, familiar with patterns. Gets direct answers with less hand-holding.</p>
@@ -396,7 +396,7 @@
 
         <div class="level-card">
           <div class="level-header">
-            <span class="level-icon">&#9889;</span>
+            <Icon name="zap" size={18} />
             <h4>Expert</h4>
           </div>
           <p>Senior developer, strong opinions. Gets concise answers, respects your preferences.</p>
@@ -541,7 +541,6 @@
     color: var(--green-dim);
     background: rgba(0, 196, 154, 0.1);
     padding: var(--space-1) var(--space-3);
-    border-radius: 4px;
   }
 
   .section-header h2 {
@@ -576,7 +575,6 @@
     padding: var(--space-4);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 8px;
   }
 
   .step-number {
@@ -591,7 +589,6 @@
     font-weight: 700;
     color: var(--green-dim);
     background: rgba(0, 196, 154, 0.1);
-    border-radius: 50%;
   }
 
   .step-content h4 {
@@ -611,7 +608,6 @@
   .code-block {
     background: #0d1117;
     border: 1px solid #30363d;
-    border-radius: 6px;
     padding: var(--space-3);
     overflow-x: auto;
   }
@@ -633,7 +629,6 @@
   .workflow-card {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 8px;
     overflow: hidden;
   }
 
@@ -646,8 +641,9 @@
     border-bottom: 1px solid var(--border);
   }
 
-  .workflow-icon {
-    font-size: var(--text-xl);
+  .workflow-header > :global(svg) {
+    color: var(--green-dim);
+    flex-shrink: 0;
   }
 
   .workflow-header h3 {
@@ -677,7 +673,6 @@
 
   .message {
     padding: var(--space-3);
-    border-radius: 8px;
   }
 
   .message.user {
@@ -713,12 +708,10 @@
     color: var(--green-dim);
     background: rgba(0, 196, 154, 0.1);
     padding: 0 var(--space-1);
-    border-radius: 3px;
   }
 
   .workflow-tips {
     background: var(--bg-tertiary);
-    border-radius: 6px;
     padding: var(--space-3);
   }
 
@@ -778,7 +771,6 @@
     padding: var(--space-4);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 8px;
   }
 
   .tool-item code {
@@ -795,7 +787,6 @@
     color: #D97757;
     background: rgba(217, 119, 87, 0.1);
     padding: var(--space-1) var(--space-2);
-    border-radius: 4px;
     margin-left: var(--space-2);
     text-transform: uppercase;
   }
@@ -821,7 +812,6 @@
 
   .practice-card {
     padding: var(--space-5);
-    border-radius: 8px;
   }
 
   .practice-card.do {
@@ -883,7 +873,6 @@
     padding: var(--space-4);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 8px;
   }
 
   .level-header {
@@ -893,8 +882,9 @@
     margin-bottom: var(--space-3);
   }
 
-  .level-icon {
-    font-size: var(--text-xl);
+  .level-header > :global(svg) {
+    color: var(--green-dim);
+    flex-shrink: 0;
   }
 
   .level-card h4 {
@@ -928,7 +918,6 @@
     padding: var(--space-4);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 8px;
   }
 
   .template-card h4 {
@@ -957,7 +946,6 @@
     color: var(--green-dim);
     background: rgba(0, 196, 154, 0.1);
     padding: var(--space-1) var(--space-2);
-    border-radius: 4px;
   }
 
   /* CTA Section */
@@ -998,7 +986,6 @@
     font-weight: 500;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    border-radius: 4px;
     cursor: pointer;
     transition: all var(--transition-fast);
     text-decoration: none;
