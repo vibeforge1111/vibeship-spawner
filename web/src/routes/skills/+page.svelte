@@ -802,29 +802,12 @@
   }
 
   .log-skill {
-    color: var(--green-dim);
+    color: var(--text-primary);
     min-width: 120px;
   }
 
   .log-skill.lead {
-    color: var(--green-dim);
     font-weight: 600;
-  }
-
-  .log-skill.edge {
-    color: #f59e0b;
-  }
-
-  .log-skill.handoff {
-    color: #a855f7;
-  }
-
-  .log-skill.review {
-    color: #3b82f6;
-  }
-
-  .log-skill.success {
-    color: #22c55e;
   }
 
   .log-msg {
