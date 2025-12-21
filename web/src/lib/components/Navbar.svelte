@@ -176,10 +176,6 @@
     position: relative;
   }
 
-  .skills-trigger {
-    border-radius: 4px;
-  }
-
   .skills-dropdown {
     position: absolute;
     top: calc(100% + 4px);
@@ -187,7 +183,6 @@
     min-width: 180px;
     background: var(--bg-primary);
     border: 1px solid var(--border);
-    border-radius: 8px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     padding: 0.5rem 0;
     z-index: 200;
