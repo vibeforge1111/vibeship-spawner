@@ -2,11 +2,19 @@
  * spawner_skill_new Tool
  *
  * Generate world-class skills following our current conventions.
- * Creates complete skill directories with 4 YAML files:
+ * Creates complete skill directories with 8 files (4 YAML + 4 MD):
+ *
+ *   YAML (structured data):
  *   - skill.yaml (identity, patterns, anti_patterns, handoffs)
  *   - sharp-edges.yaml (gotchas with detection patterns)
  *   - validations.yaml (automated code checks)
  *   - collaboration.yaml (prerequisites, delegation, skill interactions)
+ *
+ *   Markdown (deep-dive content):
+ *   - patterns.md (comprehensive patterns guide)
+ *   - anti-patterns.md (what to avoid and why)
+ *   - decisions.md (decision frameworks)
+ *   - sharp-edges.md (detailed gotchas in prose)
  *
  * Skills are organized by category:
  *   - development/ (frontend, backend, devops, cybersecurity, etc.)
@@ -76,7 +84,7 @@ export const skillCreateInputSchema = z.object({
  */
 export const skillCreateToolDefinition = {
   name: 'spawner_skill_new',
-  description: 'Create world-class skills with 4 YAML files: skill.yaml (identity + patterns + anti-patterns + handoffs), sharp-edges.yaml (gotchas with detection), validations.yaml (automated checks), collaboration.yaml (prerequisites + delegation + skill interactions). Skills are organized by category (development, frameworks, integration, etc.).',
+  description: 'Create world-class skills with 8 files (4 YAML + 4 MD): skill.yaml, sharp-edges.yaml, validations.yaml, collaboration.yaml for structured data, plus patterns.md, anti-patterns.md, decisions.md, sharp-edges.md for deep-dive content. Skills work together through collaboration rules - specialized agents that delegate to each other.',
   inputSchema: {
     type: 'object' as const,
     properties: {
@@ -344,7 +352,8 @@ function handleValidate(input: z.infer<typeof skillCreateInputSchema>): SkillCre
 }
 
 /**
- * Generate all skill files (always generates 4 YAML files)
+ * Generate all skill files (4 YAML + 4 MD = 8 files)
+ * This creates comprehensive skills that collaborate well with other specialized agents
  */
 function generateSkillFiles(
   input: z.infer<typeof skillCreateInputSchema>
@@ -363,7 +372,7 @@ function generateSkillFiles(
   const baseDir = `skills/${category}/${id}`;
   const files: { path: string; content: string; description: string }[] = [];
 
-  // Always generate all 4 YAML files
+  // 4 YAML files for structured data
   files.push({
     path: `${baseDir}/skill.yaml`,
     content: generateSkillYaml({
@@ -393,7 +402,32 @@ function generateSkillFiles(
   files.push({
     path: `${baseDir}/collaboration.yaml`,
     content: generateCollaborationYaml(id!, name!, pairs_with),
-    description: 'Skill prerequisites, complementary skills, and delegation triggers',
+    description: 'How this skill collaborates with other specialized agents',
+  });
+
+  // 4 Markdown files for deep-dive prose content
+  files.push({
+    path: `${baseDir}/patterns.md`,
+    content: generatePatternsMd(name!),
+    description: 'Detailed patterns with full code examples',
+  });
+
+  files.push({
+    path: `${baseDir}/anti-patterns.md`,
+    content: generateAntiPatternsMd(name!),
+    description: 'Detailed anti-patterns with why they fail',
+  });
+
+  files.push({
+    path: `${baseDir}/decisions.md`,
+    content: generateDecisionsMd(name!),
+    description: 'Decision frameworks - when to use X vs Y',
+  });
+
+  files.push({
+    path: `${baseDir}/sharp-edges.md`,
+    content: generateSharpEdgesMd(name!),
+    description: 'Detailed sharp edges in prose with real examples',
   });
 
   return files;
@@ -806,6 +840,326 @@ ecosystem:
 }
 
 /**
+ * Generate patterns.md content
+ */
+function generatePatternsMd(name: string): string {
+  return `# Patterns: ${name}
+
+These are the proven approaches that consistently deliver results in ${name}.
+
+---
+
+## 1. [Pattern Name]
+
+**What It Is:**
+[Brief description of the pattern]
+
+**When To Use:**
+- [Situation 1]
+- [Situation 2]
+- [Situation 3]
+
+**The Pattern:**
+
+\`\`\`typescript
+// BEFORE: The problematic approach
+const before = problematicApproach()
+
+// AFTER: The improved pattern
+const after = betterApproach()
+\`\`\`
+
+**Why It Works:**
+[Explanation of why this pattern is effective]
+
+**Watch Out For:**
+- [Common mistake when applying this pattern]
+- [Edge case to consider]
+
+---
+
+## 2. [Second Pattern Name]
+
+**What It Is:**
+[Description]
+
+**When To Use:**
+- [Situations]
+
+**The Pattern:**
+
+\`\`\`typescript
+// Example code
+\`\`\`
+
+**Why It Works:**
+[Explanation]
+
+---
+
+## 3. [Third Pattern Name]
+
+**What It Is:**
+[Description]
+
+**When To Use:**
+- [Situations]
+
+**The Pattern:**
+
+\`\`\`typescript
+// Example code
+\`\`\`
+
+**Why It Works:**
+[Explanation]
+
+---
+
+<!-- Add 5-8 more patterns following this structure -->
+<!-- Each pattern should include real, copy-paste ready code examples -->
+`;
+}
+
+/**
+ * Generate anti-patterns.md content
+ */
+function generateAntiPatternsMd(name: string): string {
+  return `# Anti-Patterns: ${name}
+
+These approaches look reasonable but consistently lead to bugs, poor performance, and maintenance nightmares.
+
+---
+
+## 1. [Anti-Pattern Name]
+
+**The Mistake:**
+\`\`\`typescript
+// Code that looks fine but causes problems
+function problematicCode() {
+  // ...
+}
+\`\`\`
+
+**Why It's Wrong:**
+- [Consequence 1]
+- [Consequence 2]
+- [Consequence 3]
+
+**The Fix:**
+\`\`\`typescript
+// The correct approach
+function fixedCode() {
+  // ...
+}
+\`\`\`
+
+**How To Detect:**
+- [Sign that this anti-pattern is in use]
+- [Code smell to look for]
+
+---
+
+## 2. [Second Anti-Pattern]
+
+**The Mistake:**
+\`\`\`typescript
+// Problematic code
+\`\`\`
+
+**Why It's Wrong:**
+- [Reasons]
+
+**The Fix:**
+\`\`\`typescript
+// Correct code
+\`\`\`
+
+---
+
+## 3. [Third Anti-Pattern]
+
+**The Mistake:**
+\`\`\`typescript
+// Problematic code
+\`\`\`
+
+**Why It's Wrong:**
+- [Reasons]
+
+**The Fix:**
+\`\`\`typescript
+// Correct code
+\`\`\`
+
+---
+
+<!-- Add 5-8 more anti-patterns following this structure -->
+<!-- Focus on mistakes that are commonly made and hard to debug -->
+`;
+}
+
+/**
+ * Generate decisions.md content
+ */
+function generateDecisionsMd(name: string): string {
+  return `# Decisions: ${name}
+
+Critical decision points that determine success in ${name}.
+
+---
+
+## Decision 1: [Decision Title]
+
+**Context:** When [situation that requires this decision].
+
+**Options:**
+
+| Option | Pros | Cons | Choose When |
+|--------|------|------|-------------|
+| **Option A** | [Pros] | [Cons] | [When to choose] |
+| **Option B** | [Pros] | [Cons] | [When to choose] |
+| **Option C** | [Pros] | [Cons] | [When to choose] |
+
+**Decision Framework:**
+\`\`\`
+Decision Tree:
+
+[First question]?
+├── Yes → [Path A]
+└── No → [Path B]
+    ├── [Sub-condition] → [Path C]
+    └── Otherwise → [Path D]
+\`\`\`
+
+**Default Recommendation:** [Option X] for most cases because [reasoning].
+
+---
+
+## Decision 2: [Second Decision Title]
+
+**Context:** When [situation].
+
+**Options:**
+
+| Option | Pros | Cons | Choose When |
+|--------|------|------|-------------|
+| **Option A** | [Pros] | [Cons] | [When] |
+| **Option B** | [Pros] | [Cons] | [When] |
+
+**Default Recommendation:** [Recommendation]
+
+---
+
+## Decision 3: [Third Decision Title]
+
+**Context:** When [situation].
+
+**Options:**
+
+| Option | Pros | Cons | Choose When |
+|--------|------|------|-------------|
+| **Option A** | [Pros] | [Cons] | [When] |
+| **Option B** | [Pros] | [Cons] | [When] |
+
+**Default Recommendation:** [Recommendation]
+
+---
+
+<!-- Add 3-5 more decision frameworks -->
+<!-- Focus on decisions that frequently come up and have non-obvious tradeoffs -->
+`;
+}
+
+/**
+ * Generate sharp-edges.md content
+ */
+function generateSharpEdgesMd(name: string): string {
+  return `# Sharp Edges: ${name}
+
+These are the ${name} mistakes that cause real production incidents, user frustration, and technical debt. Each edge represents lessons learned the hard way.
+
+---
+
+## 1. [Sharp Edge Title]
+
+**Severity:** Critical | High | Medium | Low
+
+**The Trap:**
+[Describe the situation - what developers do that seems reasonable but causes problems]
+
+**Why It Happens:**
+[Root causes - what leads people to make this mistake]
+
+**The Fix:**
+\`\`\`typescript
+// WRONG - What people typically do
+const wrong = badApproach()
+
+// RIGHT - What they should do
+const right = correctApproach()
+\`\`\`
+
+**Detection Signs:**
+- [Observable symptom 1]
+- [Observable symptom 2]
+- [Error message pattern]
+
+**Prevention:**
+- [How to avoid this in the first place]
+- [Code review checklist item]
+
+---
+
+## 2. [Second Sharp Edge]
+
+**Severity:** [Level]
+
+**The Trap:**
+[Description]
+
+**Why It Happens:**
+[Root causes]
+
+**The Fix:**
+\`\`\`typescript
+// WRONG
+// RIGHT
+\`\`\`
+
+**Detection Signs:**
+- [Signs]
+
+---
+
+## 3. [Third Sharp Edge]
+
+**Severity:** [Level]
+
+**The Trap:**
+[Description]
+
+**Why It Happens:**
+[Root causes]
+
+**The Fix:**
+\`\`\`typescript
+// WRONG
+// RIGHT
+\`\`\`
+
+**Detection Signs:**
+- [Signs]
+
+---
+
+<!-- Add 5-10 more sharp edges -->
+<!-- These should be things Claude doesn't know by default -->
+<!-- Include real production incidents when possible -->
+`;
+}
+
+/**
  * Build instruction for missing fields
  */
 function buildMissingFieldsInstruction(missing: string[]): string {
@@ -864,50 +1218,72 @@ function buildScaffoldInstruction(
 **Category:** ${category}
 **Files:** ${files.length}
 
-### IMPORTANT: Create All 4 YAML Files
+### IMPORTANT: Create All 8 Files (4 YAML + 4 MD)
 
-**DO NOT create a single markdown file.** Create a folder with these 4 YAML files:
+**DO NOT create a single markdown file.** Create a folder with this complete structure:
 
 \`\`\`
 ${id}/
 ├── skill.yaml           ← Identity, patterns, anti-patterns, handoffs
-├── sharp-edges.yaml     ← Gotchas with detection patterns
+├── sharp-edges.yaml     ← Gotchas with detection patterns (YAML)
 ├── validations.yaml     ← Automated code checks
-└── collaboration.yaml   ← Prerequisites, delegation, skill interactions
+├── collaboration.yaml   ← How this skill works with other agents
+├── patterns.md          ← Deep-dive patterns with full code examples
+├── anti-patterns.md     ← Detailed anti-patterns with consequences
+├── decisions.md         ← Decision frameworks (when to use X vs Y)
+└── sharp-edges.md       ← Detailed sharp edges in prose
 \`\`\`
 
 ### Next Steps
 
 1. **Create a folder** named \`${id}/\` in your project (or in \`skills/${category}/\` if contributing to VibeShip)
 
-2. **Create all 4 files** using the content provided above:
-   - skill.yaml
-   - sharp-edges.yaml
-   - validations.yaml
-   - collaboration.yaml
+2. **Create all 8 files** using the content provided above:
 
-3. **Fill in the placeholders** in each file:
-   - skill.yaml: Complete identity, add real patterns/anti-patterns/handoffs
-   - sharp-edges.yaml: Document 8-12 real gotchas with detection patterns
-   - validations.yaml: Add 8-12 automated checks with tested regex
-   - collaboration.yaml: Define prerequisites, delegation triggers, skill interactions
+   **YAML files (structured data):**
+   - skill.yaml - Core identity and behavior
+   - sharp-edges.yaml - Machine-readable gotchas
+   - validations.yaml - Automated code checks
+   - collaboration.yaml - Agent collaboration rules
+
+   **Markdown files (deep-dive content):**
+   - patterns.md - Comprehensive patterns guide
+   - anti-patterns.md - What to avoid and why
+   - decisions.md - Decision frameworks
+   - sharp-edges.md - Detailed gotchas in prose
+
+3. **Fill in the placeholders** in each file with real content from your expertise
 
 ### Quality Requirements
 
 - [ ] Identity sounds like a real expert with battle scars
-- [ ] 4-6 patterns with copy-paste ready code
-- [ ] 4-6 anti-patterns with clear "why" and alternatives
+- [ ] 8+ patterns with copy-paste ready code
+- [ ] 8+ anti-patterns with clear "why" and alternatives
 - [ ] 8-12 sharp edges with specific situations and solutions
 - [ ] 8-12 validations with tested regex patterns
-- [ ] Handoffs to related skills defined
+- [ ] Collaboration rules for working with other agents
+- [ ] Decision frameworks for common tradeoffs
 
-### Why 4 Files?
+### Why 8 Files?
 
-Skills with multiple YAML files are more specialized and get more out of Claude's capabilities than a single markdown file. Each file serves a specific purpose:
+Comprehensive skills have 4 YAML + 4 Markdown files. This structure gets more out of Claude's capabilities than a single markdown file:
+
+**YAML files (structured, machine-readable):**
 - **skill.yaml** - Who you are and how you behave
-- **sharp-edges.yaml** - What Claude doesn't know by default
+- **sharp-edges.yaml** - Machine-readable gotchas with detection patterns
 - **validations.yaml** - Automated checks that catch real issues
-- **collaboration.yaml** - How this skill works with others
+- **collaboration.yaml** - How this skill works with other specialized agents
+
+**Markdown files (deep-dive prose):**
+- **patterns.md** - Comprehensive patterns with full code examples
+- **anti-patterns.md** - What to avoid and why it fails
+- **decisions.md** - Decision frameworks for common tradeoffs
+- **sharp-edges.md** - Detailed gotchas in readable prose
+
+This separation allows skills to:
+1. Work together through collaboration rules
+2. Provide both quick reference (YAML) and deep knowledge (MD)
+3. Be specialized experts that delegate to other skills when needed
 
 ---
 
@@ -956,8 +1332,33 @@ function buildValidationChecklist(id: string): string {
 - [ ] Cross-domain insights documented
 - [ ] Ecosystem (tools/alternatives/deprecated) for tech skills
 
+### patterns.md Checklist
+- [ ] 8+ patterns with full code examples
+- [ ] Each pattern has: what, when, example, why
+- [ ] Code is copy-paste ready
+- [ ] Watch-out sections for edge cases
+
+### anti-patterns.md Checklist
+- [ ] 8+ anti-patterns documented
+- [ ] Each has: mistake, why wrong, fix
+- [ ] Real consequences explained
+- [ ] Detection signs listed
+
+### decisions.md Checklist
+- [ ] 5+ decision frameworks
+- [ ] Options table with pros/cons
+- [ ] Decision trees for complex choices
+- [ ] Default recommendations with reasoning
+
+### sharp-edges.md Checklist
+- [ ] Matches sharp-edges.yaml content in prose form
+- [ ] Each edge has: trap, why, fix, detection
+- [ ] Real production incident examples
+- [ ] Prevention strategies
+
 ### Quality Check
 - [ ] Tested on real project
 - [ ] Sharp edges catch real issues
-- [ ] Validations don't cry wolf`;
+- [ ] Validations don't cry wolf
+- [ ] Collaboration enables delegation to specialized agents`;
 }

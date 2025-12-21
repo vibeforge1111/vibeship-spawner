@@ -184,22 +184,25 @@ cross_domain_insights:
   <!-- Folder Structure -->
   <section class="section anatomy-section">
     <h2>The Anatomy of a Skill</h2>
-    <p class="section-desc">Every skill is a folder with 4 YAML files. Each file has a specific purpose.</p>
+    <p class="section-desc">Every skill is a folder with 8 files: 4 YAML for structured data, 4 MD for deep-dive content.</p>
 
     <div class="folder-structure">
       <div class="folder">
         <span class="folder-icon">📁</span>
         <span class="folder-name">my-skill/</span>
       </div>
+      <div class="file-group">
+        <span class="group-label">YAML (structured)</span>
+      </div>
       <div class="file" class:active={currentStep === 0}>
         <span class="file-icon">📄</span>
         <span class="file-name">skill.yaml</span>
-        <span class="file-desc">← who you are</span>
+        <span class="file-desc">← identity & triggers</span>
       </div>
       <div class="file" class:active={currentStep === 2}>
         <span class="file-icon">📄</span>
         <span class="file-name">sharp-edges.yaml</span>
-        <span class="file-desc">← gotchas</span>
+        <span class="file-desc">← gotchas list</span>
       </div>
       <div class="file" class:active={currentStep === 3}>
         <span class="file-icon">📄</span>
@@ -209,7 +212,30 @@ cross_domain_insights:
       <div class="file" class:active={currentStep === 4}>
         <span class="file-icon">📄</span>
         <span class="file-name">collaboration.yaml</span>
-        <span class="file-desc">← handoffs</span>
+        <span class="file-desc">← agent handoffs</span>
+      </div>
+      <div class="file-group">
+        <span class="group-label">Markdown (deep-dive)</span>
+      </div>
+      <div class="file">
+        <span class="file-icon">📝</span>
+        <span class="file-name">patterns.md</span>
+        <span class="file-desc">← best practices</span>
+      </div>
+      <div class="file">
+        <span class="file-icon">📝</span>
+        <span class="file-name">anti-patterns.md</span>
+        <span class="file-desc">← what to avoid</span>
+      </div>
+      <div class="file">
+        <span class="file-icon">📝</span>
+        <span class="file-name">decisions.md</span>
+        <span class="file-desc">← architecture choices</span>
+      </div>
+      <div class="file">
+        <span class="file-icon">📝</span>
+        <span class="file-name">sharp-edges.md</span>
+        <span class="file-desc">← detailed gotchas</span>
       </div>
     </div>
   </section>
@@ -409,7 +435,7 @@ cross_domain_insights:
     <div class="spawner-tools">
       <div class="tool-card">
         <code>spawner_skill_new</code>
-        <p>Generate a skill scaffold from a description. Creates all 4 YAML files with structure ready to fill in.</p>
+        <p>Generate a complete skill scaffold. Creates 8 files (4 YAML + 4 MD) with structure ready to fill in.</p>
         <div class="usage">
           <strong>Usage:</strong> "Create a skill for Next.js App Router patterns"
         </div>
@@ -463,15 +489,15 @@ cross_domain_insights:
   <!-- Getting Started CTA -->
   <section class="section cta-section">
     <h2>Ready to Create?</h2>
-    <p class="cta-desc">Use Spawner to generate world-class skills with all 4 YAML files.</p>
+    <p class="cta-desc">Use Spawner to generate world-class skills with all 8 files.</p>
     <div class="cta-single">
       <div class="terminal">
         <code class="comment"># Step 1: Generate the skill scaffold</code>
         <code>spawner_skill_new(id: "api-rate-limits", name: "API Rate Limits", category: "development")</code>
-        <code class="comment"># Step 2: Spawner returns 4 files - ask Claude to create them</code>
+        <code class="comment"># Step 2: Spawner returns 8 files - ask Claude to create them</code>
         <code>"Create these skill files in my project"</code>
       </div>
-      <p class="cta-note">Spawner generates skill.yaml, sharp-edges.yaml, validations.yaml, and collaboration.yaml with templates ready to fill in.</p>
+      <p class="cta-note">Spawner generates 4 YAML files (skill.yaml, sharp-edges.yaml, validations.yaml, collaboration.yaml) + 4 MD files (patterns.md, anti-patterns.md, decisions.md, sharp-edges.md) with templates ready to fill in.</p>
     </div>
   </section>
 </div>
@@ -572,6 +598,19 @@ cross_domain_insights:
   .file-desc {
     color: var(--text-secondary, #888);
     margin-left: auto;
+  }
+
+  .file-group {
+    padding: 0.75rem 0 0.25rem 0;
+    margin-top: 0.5rem;
+  }
+
+  .group-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-tertiary);
+    font-weight: 600;
   }
 
   /* Step Navigation */

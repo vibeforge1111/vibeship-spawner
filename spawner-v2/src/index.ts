@@ -21,6 +21,11 @@
 
 import type { Env } from './types.js';
 import { getToolDefinitions, executeTool, hasTool } from './tools/index.js';
+import {
+  checkRateLimit,
+  createRateLimitError,
+  getClientIp,
+} from './middleware/rate-limit.js';
 
 /**
  * MCP Protocol types
@@ -118,6 +123,9 @@ async function handleMcpRequest(
   // Extract user ID from header or generate one
   const userId = httpRequest.headers.get('X-User-ID') ?? generateUserId();
 
+  // Extract client IP for rate limiting
+  const clientIp = getClientIp(httpRequest);
+
   // Route by method
   switch (method) {
     case 'initialize':
@@ -127,7 +135,7 @@ async function handleMcpRequest(
       return handleListTools(id);
 
     case 'tools/call':
-      return await handleCallTool(id, params, env, userId);
+      return await handleCallTool(id, params, env, userId, clientIp);
 
     case 'ping':
       return { jsonrpc: '2.0', id, result: { status: 'ok' } };
@@ -186,7 +194,8 @@ async function handleCallTool(
   id: string | number,
   params: Record<string, unknown> | undefined,
   env: Env,
-  userId: string
+  userId: string,
+  clientIp: string
 ): Promise<McpResponse> {
   if (!params || typeof params.name !== 'string') {
     return {
@@ -205,6 +214,16 @@ async function handleCallTool(
       jsonrpc: '2.0',
       id,
       error: { code: -32602, message: `Unknown tool: ${toolName}` },
+    };
+  }
+
+  // Check rate limit before executing tool
+  const rateLimitResult = await checkRateLimit(env, clientIp, toolName);
+  if (!rateLimitResult.allowed) {
+    return {
+      jsonrpc: '2.0',
+      id,
+      error: createRateLimitError(rateLimitResult),
     };
   }
 

@@ -46,6 +46,12 @@ function loadSkill(skillDir: string, category: string): any {
 }
 
 function main() {
+  // Skip if skills directory doesn't exist (e.g., in Railway where only web/ is deployed)
+  if (!fs.existsSync(SKILLS_DIR)) {
+    console.log(`Skills directory not found at ${SKILLS_DIR} - skipping build (using pre-generated skills.json)`);
+    return;
+  }
+
   const categories: any[] = [];
 
   const categoryDirs = fs.readdirSync(SKILLS_DIR).filter(
