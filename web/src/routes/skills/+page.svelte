@@ -143,85 +143,149 @@
 
         <div class="terminal-body">
           <!-- The animated flow -->
-          <div class="flow-container">
-            <!-- Input -->
-            <div class="flow-node input-node">
-              <div class="node-icon">
-                <Icon name="terminal" size={16} />
-              </div>
-              <span class="node-label">Your Task</span>
-            </div>
-
-            <div class="flow-arrow">
-              <div class="arrow-line"></div>
-              <div class="arrow-pulse"></div>
-            </div>
-
-            <!-- Primary Skill -->
-            <div class="flow-node skill-node primary">
-              <div class="node-badge">Lead</div>
-              <div class="node-content">
-                <div class="skill-avatar">
-                  <Icon name="code" size={20} />
+          <div class="flow-pipeline">
+            <!-- Stage 1: Input -->
+            <div class="pipeline-stage">
+              <div class="flow-node input-node">
+                <div class="node-icon">
+                  <Icon name="terminal" size={16} />
                 </div>
-                <span class="skill-name">backend</span>
-              </div>
-              <div class="skill-files">
-                <span class="file-dot identity"></span>
-                <span class="file-dot edges"></span>
-                <span class="file-dot validations"></span>
-                <span class="file-dot collab"></span>
+                <span class="node-label">Your Task</span>
               </div>
             </div>
 
-            <!-- Handoff indicator -->
-            <div class="flow-handoff">
-              <div class="handoff-line"></div>
-              <span class="handoff-label">handoff</span>
-              <div class="handoff-pulse"></div>
+            <div class="stage-connector">
+              <div class="connector-line"></div>
+              <div class="connector-pulse"></div>
             </div>
 
-            <!-- Secondary Skills -->
-            <div class="flow-branch">
-              <div class="flow-node skill-node secondary">
+            <!-- Stage 2: Product Lead -->
+            <div class="pipeline-stage">
+              <div class="stage-label">orchestration</div>
+              <div class="flow-node skill-node primary">
+                <div class="node-badge">Lead</div>
                 <div class="node-content">
                   <div class="skill-avatar">
-                    <Icon name="database" size={18} />
+                    <Icon name="compass" size={20} />
                   </div>
-                  <span class="skill-name">database</span>
+                  <span class="skill-name">product-lead</span>
                 </div>
-              </div>
-
-              <div class="flow-node skill-node secondary">
-                <div class="node-content">
-                  <div class="skill-avatar">
-                    <Icon name="shield" size={18} />
-                  </div>
-                  <span class="skill-name">security</span>
-                </div>
-              </div>
-
-              <div class="flow-node skill-node secondary">
-                <div class="node-content">
-                  <div class="skill-avatar">
-                    <Icon name="git-branch" size={18} />
-                  </div>
-                  <span class="skill-name">devops</span>
+                <div class="skill-files">
+                  <span class="file-dot identity"></span>
+                  <span class="file-dot edges"></span>
+                  <span class="file-dot validations"></span>
+                  <span class="file-dot collab"></span>
                 </div>
               </div>
             </div>
 
-            <!-- Converge arrow -->
-            <div class="flow-arrow converge">
-              <div class="arrow-line"></div>
+            <!-- Branching lines to dev team -->
+            <div class="stage-connector branching">
+              <div class="branch-lines">
+                <div class="branch-line"></div>
+                <div class="branch-line"></div>
+                <div class="branch-line"></div>
+                <div class="branch-line"></div>
+              </div>
             </div>
 
-            <!-- Output -->
-            <div class="flow-node output-node">
-              <div class="node-icon">
-                <Icon name="check-circle" size={16} />
+            <!-- Stage 3: Development Team -->
+            <div class="pipeline-stage wide">
+              <div class="stage-label">development</div>
+              <div class="stage-nodes">
+                <div class="flow-node skill-node secondary">
+                  <div class="node-content">
+                    <div class="skill-avatar">
+                      <Icon name="code" size={18} />
+                    </div>
+                    <span class="skill-name">backend</span>
+                  </div>
+                </div>
+
+                <div class="flow-node skill-node secondary">
+                  <div class="node-content">
+                    <div class="skill-avatar">
+                      <Icon name="layout" size={18} />
+                    </div>
+                    <span class="skill-name">frontend</span>
+                  </div>
+                </div>
+
+                <div class="flow-node skill-node secondary">
+                  <div class="node-content">
+                    <div class="skill-avatar">
+                      <Icon name="database" size={18} />
+                    </div>
+                    <span class="skill-name">database</span>
+                  </div>
+                </div>
+
+                <div class="flow-node skill-node secondary">
+                  <div class="node-content">
+                    <div class="skill-avatar">
+                      <Icon name="git-branch" size={18} />
+                    </div>
+                    <span class="skill-name">devops</span>
+                  </div>
+                </div>
               </div>
-              <span class="node-label">Production Code</span>
+            </div>
+
+            <!-- Converging lines to review -->
+            <div class="stage-connector converging">
+              <div class="branch-lines">
+                <div class="branch-line"></div>
+                <div class="branch-line"></div>
+                <div class="branch-line"></div>
+              </div>
+            </div>
+
+            <!-- Stage 4: Review Team -->
+            <div class="pipeline-stage wide">
+              <div class="stage-label">review</div>
+              <div class="stage-nodes">
+                <div class="flow-node skill-node review">
+                  <div class="node-content">
+                    <div class="skill-avatar">
+                      <Icon name="check-square" size={18} />
+                    </div>
+                    <span class="skill-name">qa</span>
+                  </div>
+                </div>
+
+                <div class="flow-node skill-node review">
+                  <div class="node-content">
+                    <div class="skill-avatar">
+                      <Icon name="eye" size={18} />
+                    </div>
+                    <span class="skill-name">code-review</span>
+                  </div>
+                </div>
+
+                <div class="flow-node skill-node review">
+                  <div class="node-content">
+                    <div class="skill-avatar">
+                      <Icon name="shield" size={18} />
+                    </div>
+                    <span class="skill-name">security</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="stage-connector">
+              <div class="connector-line"></div>
+              <div class="connector-pulse success"></div>
+            </div>
+
+            <!-- Stage 5: Production -->
+            <div class="pipeline-stage">
+              <div class="flow-node output-node">
+                <div class="node-icon success">
+                  <Icon name="rocket" size={16} />
+                </div>
+                <span class="node-label">Production</span>
+              </div>
             </div>
           </div>
 
@@ -229,28 +293,38 @@
           <div class="flow-log">
             <div class="log-line">
               <span class="log-time">00:01</span>
-              <span class="log-skill">backend</span>
-              <span class="log-msg">Analyzing API structure...</span>
+              <span class="log-skill lead">product-lead</span>
+              <span class="log-msg">Breaking down feature requirements...</span>
             </div>
             <div class="log-line">
               <span class="log-time">00:02</span>
-              <span class="log-skill edge">backend</span>
-              <span class="log-msg">Sharp edge detected: Missing rate limiting</span>
+              <span class="log-skill handoff">→ backend, frontend</span>
+              <span class="log-msg">Delegating implementation tasks</span>
             </div>
             <div class="log-line">
               <span class="log-time">00:03</span>
-              <span class="log-skill handoff">backend → security</span>
-              <span class="log-msg">Delegating auth patterns...</span>
+              <span class="log-skill">backend</span>
+              <span class="log-msg">Building API endpoints...</span>
             </div>
             <div class="log-line">
               <span class="log-time">00:04</span>
-              <span class="log-skill">security</span>
-              <span class="log-msg">Applying JWT best practices</span>
+              <span class="log-skill edge">database</span>
+              <span class="log-msg">Sharp edge: Missing index on user_id</span>
+            </div>
+            <div class="log-line">
+              <span class="log-time">00:05</span>
+              <span class="log-skill review">qa</span>
+              <span class="log-msg">Running test suite... 47/47 passed</span>
+            </div>
+            <div class="log-line">
+              <span class="log-time">00:06</span>
+              <span class="log-skill review">security</span>
+              <span class="log-msg">Audit complete. No vulnerabilities.</span>
             </div>
             <div class="log-line typing">
-              <span class="log-time">00:05</span>
-              <span class="log-skill">devops</span>
-              <span class="log-msg">Adding CI/CD checks<span class="cursor">_</span></span>
+              <span class="log-time">00:07</span>
+              <span class="log-skill success">deploy</span>
+              <span class="log-msg">Pushing to production<span class="cursor">_</span></span>
             </div>
           </div>
         </div>
@@ -538,16 +612,142 @@
     padding: var(--space-6);
   }
 
-  /* Flow Container */
-  .flow-container {
+  /* Flow Pipeline */
+  .flow-pipeline {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: var(--space-3);
+    gap: var(--space-2);
     margin-bottom: var(--space-6);
-    flex-wrap: wrap;
-    justify-content: center;
   }
 
+  .pipeline-stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    position: relative;
+  }
+
+  .pipeline-stage.wide {
+    width: 100%;
+  }
+
+  .stage-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: var(--space-1);
+  }
+
+  .stage-nodes {
+    display: flex;
+    justify-content: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+  }
+
+  /* Stage Connectors */
+  .stage-connector {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 30px;
+    position: relative;
+  }
+
+  .connector-line {
+    width: 2px;
+    height: 100%;
+    background: var(--border);
+  }
+
+  .connector-pulse {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    background: var(--green-dim);
+    border-radius: 50%;
+    animation: pulse-down 2s ease-in-out infinite;
+  }
+
+  .connector-pulse.success {
+    background: #22c55e;
+  }
+
+  @keyframes pulse-down {
+    0%, 100% { top: 0; opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { top: 100%; opacity: 0; }
+  }
+
+  /* Branching/Converging Connectors */
+  .stage-connector.branching,
+  .stage-connector.converging {
+    height: 40px;
+    width: 100%;
+    max-width: 400px;
+  }
+
+  .branch-lines {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    height: 100%;
+    position: relative;
+  }
+
+  .branch-line {
+    width: 2px;
+    height: 100%;
+    background: var(--border);
+    position: relative;
+  }
+
+  .branch-line::before {
+    content: '';
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    background: var(--green-dim);
+    border-radius: 50%;
+    left: -2px;
+    animation: branch-pulse 2s ease-in-out infinite;
+  }
+
+  .stage-connector.branching .branch-line::before {
+    top: 0;
+    animation-name: branch-pulse-down;
+  }
+
+  .stage-connector.converging .branch-line::before {
+    bottom: 0;
+    animation-name: branch-pulse-up;
+  }
+
+  .branch-line:nth-child(1)::before { animation-delay: 0s; }
+  .branch-line:nth-child(2)::before { animation-delay: 0.2s; }
+  .branch-line:nth-child(3)::before { animation-delay: 0.4s; }
+  .branch-line:nth-child(4)::before { animation-delay: 0.6s; }
+
+  @keyframes branch-pulse-down {
+    0%, 100% { top: 0; opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { top: calc(100% - 6px); opacity: 0; }
+  }
+
+  @keyframes branch-pulse-up {
+    0%, 100% { bottom: 0; opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { bottom: calc(100% - 6px); opacity: 0; }
+  }
+
+  /* Flow Nodes */
   .flow-node {
     display: flex;
     flex-direction: column;
@@ -574,6 +774,15 @@
     padding: var(--space-2) var(--space-3);
   }
 
+  .flow-node.skill-node.review {
+    padding: var(--space-2) var(--space-3);
+    border-color: #3b82f6;
+  }
+
+  .flow-node.skill-node.review .skill-avatar {
+    color: #3b82f6;
+  }
+
   .node-badge {
     position: absolute;
     top: -8px;
@@ -590,6 +799,10 @@
 
   .node-icon {
     color: var(--text-tertiary);
+  }
+
+  .node-icon.success {
+    color: #22c55e;
   }
 
   .node-label {
@@ -632,98 +845,6 @@
   .file-dot.validations { background: #3b82f6; }
   .file-dot.collab { background: #a855f7; }
 
-  /* Flow Arrows */
-  .flow-arrow {
-    display: flex;
-    align-items: center;
-    position: relative;
-    width: 40px;
-  }
-
-  .arrow-line {
-    width: 100%;
-    height: 2px;
-    background: var(--border);
-    position: relative;
-  }
-
-  .arrow-line::after {
-    content: '';
-    position: absolute;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    border: 4px solid transparent;
-    border-left-color: var(--border);
-  }
-
-  .arrow-pulse {
-    position: absolute;
-    width: 8px;
-    height: 8px;
-    background: var(--green-dim);
-    border-radius: 50%;
-    animation: pulse-move 2s ease-in-out infinite;
-  }
-
-  @keyframes pulse-move {
-    0%, 100% { left: 0; opacity: 0; }
-    10% { opacity: 1; }
-    90% { opacity: 1; }
-    100% { left: 100%; opacity: 0; }
-  }
-
-  /* Flow Handoff */
-  .flow-handoff {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-1);
-    position: relative;
-    padding: 0 var(--space-2);
-  }
-
-  .handoff-line {
-    width: 2px;
-    height: 20px;
-    background: linear-gradient(180deg, var(--border) 0%, var(--green-dim) 100%);
-  }
-
-  .handoff-label {
-    font-family: var(--font-mono);
-    font-size: 9px;
-    color: var(--green-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    background: var(--bg-secondary);
-    padding: 2px 6px;
-    border: 1px solid var(--green-dim);
-  }
-
-  .handoff-pulse {
-    width: 6px;
-    height: 6px;
-    background: var(--green-dim);
-    border-radius: 50%;
-    animation: handoff-blink 1.5s ease-in-out infinite;
-  }
-
-  @keyframes handoff-blink {
-    0%, 100% { opacity: 0.3; }
-    50% { opacity: 1; }
-  }
-
-  /* Flow Branch */
-  .flow-branch {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-
-  .flow-arrow.converge {
-    width: 30px;
-  }
-
   /* Flow Log */
   .flow-log {
     background: rgba(0, 0, 0, 0.3);
@@ -742,10 +863,12 @@
   }
 
   .log-line:nth-child(1) { animation-delay: 0.5s; }
-  .log-line:nth-child(2) { animation-delay: 1.5s; }
-  .log-line:nth-child(3) { animation-delay: 2.5s; }
-  .log-line:nth-child(4) { animation-delay: 3.5s; }
-  .log-line:nth-child(5) { animation-delay: 4.5s; }
+  .log-line:nth-child(2) { animation-delay: 1.2s; }
+  .log-line:nth-child(3) { animation-delay: 1.9s; }
+  .log-line:nth-child(4) { animation-delay: 2.6s; }
+  .log-line:nth-child(5) { animation-delay: 3.3s; }
+  .log-line:nth-child(6) { animation-delay: 4.0s; }
+  .log-line:nth-child(7) { animation-delay: 4.7s; }
 
   @keyframes log-appear {
     from { opacity: 0; transform: translateY(5px); }
@@ -759,7 +882,12 @@
 
   .log-skill {
     color: var(--green-dim);
-    min-width: 100px;
+    min-width: 120px;
+  }
+
+  .log-skill.lead {
+    color: var(--green-dim);
+    font-weight: 600;
   }
 
   .log-skill.edge {
@@ -768,6 +896,14 @@
 
   .log-skill.handoff {
     color: #a855f7;
+  }
+
+  .log-skill.review {
+    color: #3b82f6;
+  }
+
+  .log-skill.success {
+    color: #22c55e;
   }
 
   .log-msg {
@@ -1184,40 +1320,26 @@
       padding: var(--space-4);
     }
 
-    .flow-container {
-      flex-direction: column;
-      gap: var(--space-4);
-    }
-
-    .flow-arrow {
-      transform: rotate(90deg);
-      width: 30px;
-    }
-
-    .flow-handoff {
-      flex-direction: row;
+    .stage-nodes {
       gap: var(--space-2);
     }
 
-    .handoff-line {
-      width: 20px;
-      height: 2px;
-      background: linear-gradient(90deg, var(--border) 0%, var(--green-dim) 100%);
+    .flow-node.skill-node.secondary,
+    .flow-node.skill-node.review {
+      padding: var(--space-2);
     }
 
-    .flow-branch {
-      flex-direction: row;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: var(--space-3);
+    .skill-name {
+      font-size: var(--text-xs);
     }
 
-    .flow-arrow.converge {
-      transform: rotate(90deg);
+    .stage-connector.branching,
+    .stage-connector.converging {
+      max-width: 280px;
     }
 
     .log-skill {
-      min-width: 80px;
+      min-width: 90px;
     }
 
     .anatomy-grid {
