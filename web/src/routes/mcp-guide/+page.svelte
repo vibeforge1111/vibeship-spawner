@@ -813,8 +813,8 @@ New score: 91/100 (+4)`,
   }
 
   .code-block {
-    background: #0d1117;
-    border: 1px solid #30363d;
+    background: var(--terminal-bg);
+    border: 1px solid var(--terminal-border);
     padding: var(--space-3);
     overflow-x: auto;
   }
@@ -822,7 +822,7 @@ New score: 91/100 (+4)`,
   .code-block code, .code-block pre {
     font-family: var(--font-mono);
     font-size: var(--text-sm);
-    color: #c9d1d9;
+    color: var(--terminal-text);
     margin: 0;
   }
 
@@ -1245,13 +1245,14 @@ New score: 91/100 (+4)`,
   }
 
   .btn-primary {
-    background: var(--green-dim);
+    background: transparent;
     border: 1px solid var(--green-dim);
-    color: #0d1117;
+    color: var(--green-dim);
   }
 
   .btn-primary:hover {
-    box-shadow: 0 0 20px rgba(0, 196, 154, 0.4);
+    background: var(--green-dim);
+    color: var(--bg-primary);
   }
 
   .btn-secondary {
