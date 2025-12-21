@@ -768,8 +768,8 @@
 
   /* Flow Log */
   .flow-log {
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid var(--border);
+    background: var(--terminal-bg);
+    border: 1px solid var(--terminal-border);
     padding: var(--space-3);
     font-family: var(--font-mono);
     font-size: var(--text-xs);
@@ -797,21 +797,22 @@
   }
 
   .log-time {
-    color: var(--text-tertiary);
+    color: var(--terminal-muted);
     min-width: 35px;
   }
 
   .log-skill {
-    color: var(--text-primary);
+    color: var(--terminal-heading);
     min-width: 120px;
   }
 
   .log-skill.lead {
     font-weight: 600;
+    color: var(--terminal-command);
   }
 
   .log-msg {
-    color: var(--text-secondary);
+    color: var(--terminal-text);
   }
 
   .log-line.typing .cursor {
