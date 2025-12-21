@@ -194,6 +194,169 @@
     copiedItem = key;
     setTimeout(() => copiedItem = null, 2000);
   }
+
+  // ========== SPAWNER + MIND STORY ANIMATION ==========
+
+  type StoryStep = 'connect' | 'analyze' | 'build' | 'catch' | 'flow';
+
+  interface ChatMessage {
+    id: string;
+    type: 'user' | 'spawner' | 'mind' | 'claude' | 'result';
+    text: string;
+    code?: string;
+    highlight?: string;
+  }
+
+  const storySteps: { id: StoryStep; label: string; duration: number }[] = [
+    { id: 'connect', label: 'Connect', duration: 4000 },
+    { id: 'analyze', label: 'Analyze', duration: 5000 },
+    { id: 'build', label: 'Build', duration: 6000 },
+    { id: 'catch', label: 'Catch', duration: 5000 },
+    { id: 'flow', label: 'Flow', duration: 5000 },
+  ];
+
+  const storyMessages: Record<StoryStep, ChatMessage[]> = {
+    connect: [
+      { id: 'c1', type: 'user', text: 'Analyze this codebase and load the right skills' }
+    ],
+    analyze: [
+      { id: 'a1', type: 'spawner', text: 'Detected: Next.js 14, Supabase, Stripe' },
+      { id: 'a2', type: 'spawner', text: 'Loading supabase-backend, payments-flow, auth-flow...' },
+      { id: 'a3', type: 'mind', text: 'Project indexed. I\'ll remember decisions and context.' }
+    ],
+    build: [
+      { id: 'b1', type: 'user', text: 'Add invoice status updates when payment completes' },
+      { id: 'b2', type: 'claude', text: 'Building webhook handler with status sync...', code: `export async function POST(req: Request) {
+  const event = await stripe.webhooks.construct(
+    await req.text(),
+    req.headers.get('stripe-signature')!,
+    process.env.STRIPE_WEBHOOK_SECRET
+  );
+
+  if (event.type === 'payment_intent.succeeded') {
+    const invoice = await supabase
+      .from('invoices')
+      .update({ status: 'paid' })
+      .eq('payment_id', event.data.object.id);
+  }
+}` }
+    ],
+    catch: [
+      { id: 'ct1', type: 'spawner', text: 'Caught: SUPABASE_KEY was hardcoded on line 12', highlight: 'Fixed: moved to environment variable' }
+    ],
+    flow: [
+      { id: 'f1', type: 'result', text: 'Feature complete. Tests passing. Ready to ship.' },
+      { id: 'f2', type: 'mind', text: 'Session saved. See you next time.' }
+    ]
+  };
+
+  const mindActions: Record<StoryStep, string[]> = {
+    connect: [],
+    analyze: ['Indexing project...', 'Mapping structure...'],
+    build: ['Tracking context...'],
+    catch: [],
+    flow: ['Saving session...', 'Decisions logged']
+  };
+
+  const spawnerActions: Record<StoryStep, string[]> = {
+    connect: ['Connecting...'],
+    analyze: ['Scanning files...', 'Detecting stack...', 'Loading skills...'],
+    build: ['Validating code...'],
+    catch: ['Issue detected!', 'Auto-fixing...'],
+    flow: ['All checks passed']
+  };
+
+  let currentStoryStep = $state<number>(0);
+  let visibleMessages = $state<ChatMessage[]>([]);
+  let storyStarted = $state(false);
+  let typingMessage = $state<string | null>(null);
+
+  function getCurrentStep(): StoryStep {
+    return storySteps[currentStoryStep].id;
+  }
+
+  function startStoryAnimation() {
+    if (storyStarted) return;
+    storyStarted = true;
+    currentStoryStep = 0;
+    visibleMessages = [];
+    runStoryStep();
+  }
+
+  function runStoryStep() {
+    const step = storySteps[currentStoryStep];
+    const messages = storyMessages[step.id];
+
+    // Add messages one by one with typing effect
+    let messageIndex = 0;
+
+    function showNextMessage() {
+      if (messageIndex < messages.length) {
+        const msg = messages[messageIndex];
+        typingMessage = msg.id;
+
+        setTimeout(() => {
+          visibleMessages = [...visibleMessages, msg];
+          typingMessage = null;
+          messageIndex++;
+          setTimeout(showNextMessage, 800);
+        }, 600);
+      } else {
+        // Step complete, wait then move to next
+        setTimeout(() => {
+          if (currentStoryStep < storySteps.length - 1) {
+            currentStoryStep++;
+            runStoryStep();
+          } else {
+            // Story complete, pause then restart
+            setTimeout(() => {
+              currentStoryStep = 0;
+              visibleMessages = [];
+              runStoryStep();
+            }, 3000);
+          }
+        }, step.duration - (messages.length * 1400));
+      }
+    }
+
+    setTimeout(showNextMessage, 500);
+  }
+
+  // Start story when section comes into view
+  function handleStoryIntersection(entries: IntersectionObserverEntry[]) {
+    entries.forEach(entry => {
+      if (entry.isIntersecting && !storyStarted) {
+        startStoryAnimation();
+      }
+    });
+  }
+
+  let storySection: HTMLElement;
+
+  onMount(() => {
+    // Cursor blink (existing)
+    const cursorInterval = setInterval(() => {
+      showCursor = !showCursor;
+    }, 530);
+
+    // Start terminal animation after a short delay (existing)
+    setTimeout(startAnimation, 800);
+
+    // Story intersection observer
+    if (storySection) {
+      const observer = new IntersectionObserver(handleStoryIntersection, {
+        threshold: 0.3
+      });
+      observer.observe(storySection);
+
+      return () => {
+        clearInterval(cursorInterval);
+        observer.disconnect();
+      };
+    }
+
+    return () => clearInterval(cursorInterval);
+  });
 </script>
 
 <Navbar />
@@ -518,116 +681,106 @@
   <div class="section-divider"></div>
 
   <!-- Unified Spawner + Mind Flow Section -->
-  <section class="flow-section">
+  <section class="flow-section" bind:this={storySection}>
     <h2 class="section-headline">Spawner + Mind = Full Stack Claude</h2>
     <p class="section-subtitle">Watch how they work together</p>
 
-    <!-- Animated Flow Diagram -->
-    <div class="flow-diagram">
-      <!-- User Input -->
-      <div class="flow-node user-node">
-        <div class="node-icon"><Icon name="user" size={20} /></div>
-        <span class="node-label">You</span>
-      </div>
-
-      <div class="flow-arrow">
-        <div class="arrow-line"></div>
-        <div class="arrow-pulse"></div>
-      </div>
-
-      <!-- Central Claude -->
-      <div class="flow-node claude-node">
-        <div class="node-icon"><Icon name="terminal" size={24} /></div>
-        <span class="node-label">Claude</span>
-
-        <!-- Spawner Feed -->
-        <div class="capability-feed spawner-feed">
-          <div class="feed-header">
-            <Icon name="zap" size={14} />
-            <span>Spawner</span>
-          </div>
-          <div class="feed-items">
-            <span class="feed-item" style="--delay: 0s">Skills loaded</span>
-            <span class="feed-item" style="--delay: 0.5s">Patterns applied</span>
-            <span class="feed-item" style="--delay: 1s">Code validated</span>
-            <span class="feed-item" style="--delay: 1.5s">Sharp edges checked</span>
-          </div>
+    <!-- Story Animation Stage -->
+    <div class="story-stage">
+      <!-- Mind Panel (Left) -->
+      <div class="side-panel mind-panel" class:active={getCurrentStep() === 'analyze' || getCurrentStep() === 'flow'}>
+        <div class="panel-header">
+          <Icon name="brain" size={16} />
+          <span>Mind</span>
         </div>
+        <div class="panel-actions">
+          {#each mindActions[getCurrentStep()] as action, i}
+            <span class="panel-action" style="--delay: {i * 0.3}s">{action}</span>
+          {/each}
+        </div>
+        <div class="panel-pulse"></div>
+      </div>
 
-        <!-- Mind Feed -->
-        <div class="capability-feed mind-feed">
-          <div class="feed-header">
-            <Icon name="brain" size={14} />
-            <span>Mind</span>
+      <!-- Central Chat Stage -->
+      <div class="chat-stage">
+        <div class="chat-header">
+          <div class="chat-dots">
+            <span class="dot"></span>
+            <span class="dot"></span>
+            <span class="dot"></span>
           </div>
-          <div class="feed-items">
-            <span class="feed-item" style="--delay: 0.2s">Context recalled</span>
-            <span class="feed-item" style="--delay: 0.7s">Decisions loaded</span>
-            <span class="feed-item" style="--delay: 1.2s">Blockers tracked</span>
-            <span class="feed-item" style="--delay: 1.7s">Session continued</span>
-          </div>
+          <span class="chat-title">Claude Session</span>
+        </div>
+        <div class="chat-messages">
+          {#each visibleMessages as msg (msg.id)}
+            <div class="chat-message {msg.type}" class:has-code={msg.code}>
+              <div class="message-badge">
+                {#if msg.type === 'user'}
+                  <Icon name="user" size={12} />
+                {:else if msg.type === 'spawner'}
+                  <Icon name="zap" size={12} />
+                {:else if msg.type === 'mind'}
+                  <Icon name="brain" size={12} />
+                {:else if msg.type === 'claude'}
+                  <Icon name="terminal" size={12} />
+                {:else if msg.type === 'result'}
+                  <Icon name="check-circle" size={12} />
+                {/if}
+              </div>
+              <div class="message-content">
+                <span class="message-text">{msg.text}</span>
+                {#if msg.code}
+                  <pre class="message-code"><code>{msg.code}</code></pre>
+                {/if}
+                {#if msg.highlight}
+                  <span class="message-highlight">
+                    <Icon name="check" size={10} />
+                    {msg.highlight}
+                  </span>
+                {/if}
+              </div>
+            </div>
+          {/each}
+          {#if typingMessage}
+            <div class="typing-indicator">
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+            </div>
+          {/if}
         </div>
       </div>
 
-      <div class="flow-arrow">
-        <div class="arrow-line"></div>
-        <div class="arrow-pulse"></div>
-      </div>
-
-      <!-- Enhanced Output -->
-      <div class="flow-node output-node">
-        <div class="node-icon"><Icon name="check-circle" size={20} /></div>
-        <span class="node-label">Senior Dev Output</span>
+      <!-- Spawner Panel (Right) -->
+      <div class="side-panel spawner-panel" class:active={getCurrentStep() === 'connect' || getCurrentStep() === 'analyze' || getCurrentStep() === 'build' || getCurrentStep() === 'catch' || getCurrentStep() === 'flow'}>
+        <div class="panel-header">
+          <Icon name="zap" size={16} />
+          <span>Spawner</span>
+        </div>
+        <div class="panel-actions">
+          {#each spawnerActions[getCurrentStep()] as action, i}
+            <span class="panel-action" style="--delay: {i * 0.3}s">{action}</span>
+          {/each}
+        </div>
+        <div class="panel-pulse"></div>
       </div>
     </div>
 
-    <!-- Capabilities in Action -->
-    <div class="capabilities-demo">
-      <div class="capability-card mind-capability">
-        <div class="capability-header">
-          <Icon name="brain" size={16} />
-          <span>Mind recalls</span>
+    <!-- Timeline Rail -->
+    <div class="timeline-rail">
+      {#each storySteps as step, i}
+        <div class="timeline-node" class:active={currentStoryStep === i} class:completed={currentStoryStep > i}>
+          <div class="node-dot">
+            {#if currentStoryStep > i}
+              <Icon name="check" size={10} />
+            {/if}
+          </div>
+          <span class="node-label">{step.label}</span>
         </div>
-        <div class="capability-example">
-          "Picking up invoice-app. Last session you fixed the Stripe webhook but invoice status wasn't updating. Want to continue?"
-        </div>
-        <span class="capability-name">Project Memory</span>
-      </div>
-
-      <div class="capability-card spawner-capability">
-        <div class="capability-header">
-          <Icon name="zap" size={16} />
-          <span>Spawner validates</span>
-        </div>
-        <div class="capability-example">
-          <span class="example-alert"><Icon name="alert-triangle" size={12} /> Line 12: SUPABASE_KEY hardcoded</span>
-          Moving to environment variable...
-        </div>
-        <span class="capability-name">Guardrails That Run</span>
-      </div>
-
-      <div class="capability-card spawner-capability">
-        <div class="capability-header">
-          <Icon name="zap" size={16} />
-          <span>Spawner warns</span>
-        </div>
-        <div class="capability-example">
-          <span class="example-warning">Watch out:</span> New users see empty data after signup. RLS policies fail during token refresh window.
-        </div>
-        <span class="capability-name">Sharp Edges</span>
-      </div>
-
-      <div class="capability-card spawner-capability">
-        <div class="capability-header">
-          <Icon name="zap" size={16} />
-          <span>Spawner unsticks</span>
-        </div>
-        <div class="capability-example">
-          We've tried 3 approaches and we're going in circles.
-          <span class="example-options">Options: 1) Move auth to layout 2) Client redirect 3) Switch to Clerk</span>
-        </div>
-        <span class="capability-name">Escape Hatches</span>
-      </div>
+        {#if i < storySteps.length - 1}
+          <div class="timeline-connector" class:active={currentStoryStep > i}></div>
+        {/if}
+      {/each}
     </div>
 
     <!-- Result Summary -->
@@ -1827,6 +1980,423 @@
     margin-bottom: var(--space-6);
   }
 
+  /* Story Stage - 3 Column Layout */
+  .story-stage {
+    display: grid;
+    grid-template-columns: 180px 1fr 180px;
+    gap: var(--space-4);
+    max-width: 1000px;
+    margin: 0 auto var(--space-6);
+    height: 450px;
+    align-items: start;
+  }
+
+  /* Side Panels */
+  .side-panel {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    padding: var(--space-4);
+    position: relative;
+    opacity: 0.5;
+    transition: all 0.4s ease;
+    height: fit-content;
+    max-height: 200px;
+  }
+
+  .side-panel.active {
+    opacity: 1;
+  }
+
+  .mind-panel {
+    border-color: var(--border);
+  }
+
+  .mind-panel.active {
+    border-color: var(--violet);
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.15);
+  }
+
+  .spawner-panel {
+    border-color: var(--border);
+  }
+
+  .spawner-panel.active {
+    border-color: var(--green-dim);
+    box-shadow: 0 0 20px rgba(0, 196, 154, 0.15);
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    margin-bottom: var(--space-3);
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .mind-panel .panel-header {
+    color: var(--violet);
+  }
+
+  .spawner-panel .panel-header {
+    color: var(--green-dim);
+  }
+
+  .panel-actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    min-height: 80px;
+  }
+
+  .panel-action {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+    opacity: 0;
+    transform: translateX(-5px);
+    animation: panel-action-appear 0.5s ease forwards;
+    animation-delay: var(--delay);
+  }
+
+  @keyframes panel-action-appear {
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  .panel-pulse {
+    position: absolute;
+    bottom: var(--space-3);
+    left: 50%;
+    transform: translateX(-50%);
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--border);
+    opacity: 0;
+  }
+
+  .side-panel.active .panel-pulse {
+    opacity: 1;
+    animation: panel-pulse-glow 1.5s ease-in-out infinite;
+  }
+
+  .mind-panel.active .panel-pulse {
+    background: var(--violet);
+  }
+
+  .spawner-panel.active .panel-pulse {
+    background: var(--green-dim);
+  }
+
+  @keyframes panel-pulse-glow {
+    0%, 100% { transform: translateX(-50%) scale(1); opacity: 0.5; }
+    50% { transform: translateX(-50%) scale(1.5); opacity: 1; }
+  }
+
+  /* Chat Stage */
+  .chat-stage {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    height: 450px;
+  }
+
+  .chat-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .chat-dots {
+    display: flex;
+    gap: 6px;
+  }
+
+  .chat-dots .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--border);
+  }
+
+  .chat-dots .dot:nth-child(1) { background: #ff5f56; }
+  .chat-dots .dot:nth-child(2) { background: #ffbd2e; }
+  .chat-dots .dot:nth-child(3) { background: #27ca40; }
+
+  .chat-title {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+    margin-left: auto;
+  }
+
+  .chat-messages {
+    flex: 1;
+    padding: var(--space-4);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  /* Chat Messages */
+  .chat-message {
+    display: flex;
+    gap: var(--space-3);
+    animation: message-appear 0.4s ease;
+    max-width: 90%;
+  }
+
+  .chat-message.user {
+    align-self: flex-end;
+    flex-direction: row-reverse;
+  }
+
+  .chat-message.has-code {
+    max-width: 100%;
+  }
+
+  @keyframes message-appear {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .message-badge {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+  }
+
+  .chat-message.user .message-badge {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+  }
+
+  .chat-message.spawner .message-badge {
+    border-color: var(--green-dim);
+    color: var(--green-dim);
+  }
+
+  .chat-message.mind .message-badge {
+    border-color: var(--violet);
+    color: var(--violet);
+  }
+
+  .chat-message.claude .message-badge {
+    border-color: #D97757;
+    color: #D97757;
+  }
+
+  .chat-message.result .message-badge {
+    border-color: var(--green-dim);
+    color: var(--green-dim);
+    background: rgba(0, 196, 154, 0.1);
+  }
+
+  .message-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .message-text {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    line-height: 1.5;
+    padding: var(--space-3);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+  }
+
+  .chat-message.user .message-text {
+    background: var(--bg-tertiary);
+  }
+
+  .chat-message.spawner .message-text {
+    border-left: 2px solid var(--green-dim);
+  }
+
+  .chat-message.mind .message-text {
+    border-left: 2px solid var(--violet);
+  }
+
+  .chat-message.result .message-text {
+    background: rgba(0, 196, 154, 0.05);
+    border-color: var(--green-dim);
+    color: var(--green-dim);
+  }
+
+  .message-code {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    line-height: 1.6;
+    padding: var(--space-3);
+    background: var(--terminal-bg);
+    border: 1px solid var(--terminal-border);
+    overflow-x: auto;
+    margin: 0;
+  }
+
+  .message-code code {
+    color: var(--terminal-text);
+  }
+
+  .message-highlight {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--green-dim);
+    padding: var(--space-2);
+    background: rgba(0, 196, 154, 0.1);
+    border: 1px solid rgba(0, 196, 154, 0.3);
+  }
+
+  /* Typing Indicator */
+  .typing-indicator {
+    display: flex;
+    gap: 4px;
+    padding: var(--space-3);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    width: fit-content;
+    border-radius: 2px;
+  }
+
+  .typing-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-tertiary);
+    animation: typing-bounce 1.4s ease-in-out infinite;
+  }
+
+  .typing-dot:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+
+  .typing-dot:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+
+  @keyframes typing-bounce {
+    0%, 60%, 100% {
+      transform: translateY(0);
+    }
+    30% {
+      transform: translateY(-4px);
+    }
+  }
+
+  /* Timeline Rail */
+  .timeline-rail {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    max-width: 600px;
+    margin: 0 auto var(--space-8);
+    padding: var(--space-4) 0;
+  }
+
+  .timeline-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .node-dot {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    background: var(--bg-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: transparent;
+    transition: all 0.3s ease;
+  }
+
+  .timeline-node.active .node-dot {
+    border-color: var(--green-dim);
+    background: var(--green-dim);
+    box-shadow: 0 0 12px rgba(0, 196, 154, 0.4);
+  }
+
+  .timeline-node.completed .node-dot {
+    border-color: var(--green-dim);
+    background: rgba(0, 196, 154, 0.2);
+    color: var(--green-dim);
+  }
+
+  .timeline-node .node-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    transition: color 0.3s ease;
+  }
+
+  .timeline-node.active .node-label,
+  .timeline-node.completed .node-label {
+    color: var(--green-dim);
+  }
+
+  .timeline-connector {
+    width: 60px;
+    height: 2px;
+    background: var(--border);
+    margin: 0 var(--space-2);
+    margin-bottom: var(--space-6);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .timeline-connector.active::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 100%;
+    background: var(--green-dim);
+    animation: connector-fill 0.5s ease forwards;
+  }
+
+  @keyframes connector-fill {
+    from { width: 0; }
+    to { width: 100%; }
+  }
+
   /* Quickstart Section */
   .quickstart-section {
     padding: var(--space-12) var(--space-8);
@@ -2301,6 +2871,83 @@
 
     .flow-result {
       text-align: center;
+    }
+
+    /* Story Stage Mobile */
+    .story-stage {
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto auto;
+      gap: var(--space-3);
+      height: auto;
+    }
+
+    .chat-stage {
+      grid-column: 1 / -1;
+      grid-row: 1;
+      height: 350px;
+    }
+
+    .side-panel {
+      max-height: 120px;
+    }
+
+    .mind-panel,
+    .spawner-panel {
+      padding: var(--space-3);
+    }
+
+    .panel-actions {
+      min-height: 50px;
+    }
+
+    .panel-action {
+      font-size: 10px;
+    }
+
+    /* Timeline mobile */
+    .timeline-rail {
+      flex-wrap: wrap;
+      gap: var(--space-2);
+      padding: var(--space-3) 0;
+    }
+
+    .timeline-connector {
+      width: 30px;
+      margin: 0 var(--space-1);
+      margin-bottom: var(--space-5);
+    }
+
+    .timeline-node .node-label {
+      font-size: 9px;
+    }
+
+    .node-dot {
+      width: 20px;
+      height: 20px;
+    }
+
+    /* Chat messages mobile */
+    .chat-messages {
+      padding: var(--space-3);
+    }
+
+    .chat-message {
+      max-width: 95%;
+    }
+
+    .message-text {
+      font-size: var(--text-xs);
+      padding: var(--space-2);
+    }
+
+    .message-code {
+      font-size: 10px;
+      padding: var(--space-2);
+    }
+
+    .message-badge {
+      width: 20px;
+      height: 20px;
     }
 
     .quickstart-section {
