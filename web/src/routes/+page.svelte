@@ -318,62 +318,59 @@
   }
 
   const storySteps: { id: StoryStep; label: string; duration: number }[] = [
-    { id: 'connect', label: 'Connect', duration: 4000 },
-    { id: 'analyze', label: 'Analyze', duration: 5000 },
-    { id: 'build', label: 'Build', duration: 6000 },
-    { id: 'catch', label: 'Catch', duration: 5000 },
-    { id: 'flow', label: 'Flow', duration: 5000 },
+    { id: 'connect', label: 'Request', duration: 3500 },
+    { id: 'analyze', label: 'Orchestrate', duration: 4500 },
+    { id: 'build', label: 'Execute', duration: 5000 },
+    { id: 'catch', label: 'Validate', duration: 4500 },
+    { id: 'flow', label: 'Ship', duration: 4000 },
   ];
 
   const storyMessages: Record<StoryStep, ChatMessage[]> = {
     connect: [
-      { id: 'c1', type: 'user', text: 'Analyze this codebase and load the right skills' }
+      { id: 'c1', type: 'user', text: 'Add user dashboard with activity feed and notifications' }
     ],
     analyze: [
-      { id: 'a1', type: 'spawner', text: 'Detected: Next.js 14, Supabase, Stripe' },
-      { id: 'a2', type: 'spawner', text: 'Loading supabase-backend, payments-flow, auth-flow...' },
-      { id: 'a3', type: 'mind', text: 'Project indexed. I\'ll remember decisions and context.' }
+      { id: 'a1', type: 'spawner', text: '[product-lead] Breaking down feature requirements...' },
+      { id: 'a2', type: 'spawner', text: '→ Delegating to backend, frontend, database' },
+      { id: 'a3', type: 'mind', text: 'Tracking task assignments and decisions.' }
     ],
     build: [
-      { id: 'b1', type: 'user', text: 'Add invoice status updates when payment completes' },
-      { id: 'b2', type: 'claude', text: 'Building webhook handler with status sync...', code: `export async function POST(req: Request) {
-  const event = await stripe.webhooks.construct(
-    await req.text(),
-    req.headers.get('stripe-signature')!,
-    process.env.STRIPE_WEBHOOK_SECRET
-  );
-
-  if (event.type === 'payment_intent.succeeded') {
-    const invoice = await supabase
-      .from('invoices')
-      .update({ status: 'paid' })
-      .eq('payment_id', event.data.object.id);
-  }
-}` }
+      { id: 'b1', type: 'claude', text: '[backend] Building API endpoints...', code: `// Activity feed endpoint
+export async function GET(req: Request) {
+  const activities = await db.activity
+    .findMany({
+      where: { userId: session.user.id },
+      orderBy: { createdAt: 'desc' },
+      take: 20
+    });
+  return Response.json(activities);
+}` },
+      { id: 'b2', type: 'spawner', text: '[database] Sharp edge: Missing index on user_id', highlight: 'Fixed: Added composite index' }
     ],
     catch: [
-      { id: 'ct1', type: 'spawner', text: 'Caught: SUPABASE_KEY was hardcoded on line 12', highlight: 'Fixed: moved to environment variable' }
+      { id: 'ct1', type: 'claude', text: '[qa] Running test suite... 47/47 passed' },
+      { id: 'ct2', type: 'claude', text: '[security] Audit complete. No vulnerabilities.' }
     ],
     flow: [
-      { id: 'f1', type: 'result', text: 'Feature complete. Tests passing. Ready to ship.' },
-      { id: 'f2', type: 'mind', text: 'Session saved. See you next time.' }
+      { id: 'f1', type: 'result', text: '[deploy] Pushing to production...' },
+      { id: 'f2', type: 'mind', text: 'Feature shipped. All decisions logged.' }
     ]
   };
 
   const mindActions: Record<StoryStep, string[]> = {
     connect: [],
-    analyze: ['Indexing project...', 'Mapping structure...'],
-    build: ['Tracking context...'],
-    catch: [],
-    flow: ['Saving session...', 'Decisions logged']
+    analyze: ['Tracking assignments...', 'Logging context...'],
+    build: ['Recording decisions...'],
+    catch: ['Saving test results...'],
+    flow: ['Session complete', 'Ready for next task']
   };
 
   const spawnerActions: Record<StoryStep, string[]> = {
     connect: ['Connecting...'],
-    analyze: ['Scanning files...', 'Detecting stack...', 'Loading skills...'],
-    build: ['Validating code...'],
-    catch: ['Issue detected!', 'Auto-fixing...'],
-    flow: ['All checks passed']
+    analyze: ['product-lead active', 'Delegating tasks...'],
+    build: ['backend building...', 'database optimizing...'],
+    catch: ['qa testing...', 'security scanning...'],
+    flow: ['deploy ready']
   };
 
   let currentStoryStep = $state<number>(0);
