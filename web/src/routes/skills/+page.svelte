@@ -3,7 +3,7 @@
   import Navbar from '$lib/components/Navbar.svelte';
   import Footer from '$lib/components/Footer.svelte';
   import SkillsSidebar from '$lib/components/SkillsSidebar.svelte';
-  import SkillCard from '$lib/components/SkillCard.svelte';
+  import SkillRow from '$lib/components/SkillRow.svelte';
   import Icon from '$lib/components/Icon.svelte';
   import { categories, allSkills, searchSkills, filterSkills } from '$lib/stores/skills';
   import type { SkillFilters } from '$lib/stores/skills';
@@ -225,9 +225,9 @@
               <h3>{group.name}</h3>
               <span class="category-count">{group.skills.length}</span>
             </div>
-            <div class="skills-grid">
+            <div class="skills-list">
               {#each group.skills as skill}
-                <SkillCard {skill} />
+                <SkillRow {skill} />
               {/each}
             </div>
           </div>
@@ -529,10 +529,10 @@
     padding: 2px 8px;
   }
 
-  .skills-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: var(--space-4);
+  .skills-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
   }
 
   /* Guides Section */
@@ -738,8 +738,8 @@
       align-items: flex-start;
     }
 
-    .skills-grid {
-      grid-template-columns: 1fr;
+    .skills-list {
+      gap: var(--space-2);
     }
 
     .guides-grid {

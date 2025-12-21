@@ -59,6 +59,7 @@
 
   .skill-card.compact {
     padding: var(--space-3);
+    min-height: 80px;
   }
 
   .skill-header {
@@ -104,10 +105,15 @@
     color: var(--text-secondary);
     margin: 0;
     line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   .compact .skill-description {
     font-size: var(--text-xs);
+    -webkit-line-clamp: 2;
   }
 
   .skill-meta {
