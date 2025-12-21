@@ -814,9 +814,21 @@ cross_domain_insights:
   /* Rubric Section */
   .rubric-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(3, 1fr);
     gap: 1rem;
     margin-bottom: 1.5rem;
+  }
+
+  @media (max-width: 768px) {
+    .rubric-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (min-width: 769px) and (max-width: 1024px) {
+    .rubric-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
   }
 
   .rubric-category {
@@ -944,10 +956,6 @@ cross_domain_insights:
 
     .step-content {
       padding: 1.5rem;
-    }
-
-    .rubric-grid {
-      grid-template-columns: 1fr;
     }
   }
 </style>
