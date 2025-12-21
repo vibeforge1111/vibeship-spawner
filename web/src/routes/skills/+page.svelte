@@ -500,9 +500,9 @@
       <div class="resources-list">
         <div class="resource-group">
           <h3>External</h3>
-          <a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noopener" class="resource-link">
+          <a href="https://code.claude.com/docs/en/skills" target="_blank" rel="noopener" class="resource-link">
             <Icon name="external-link" size={16} />
-            <span>Claude Code Documentation</span>
+            <span>Claude Code Skills Documentation</span>
           </a>
         </div>
 
@@ -512,9 +512,9 @@
             <Icon name="zap" size={16} />
             <span>Spawner MCP Tools</span>
           </a>
-          <a href="/" class="resource-link">
+          <a href="https://mind.vibeship.co" target="_blank" rel="noopener" class="resource-link">
             <Icon name="brain" size={16} />
-            <span>Mind Memory System</span>
+            <span>Mind - Memory Layer</span>
           </a>
         </div>
       </div>

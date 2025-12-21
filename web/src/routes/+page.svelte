@@ -560,6 +560,52 @@
       <span>Already have a project?</span>
       <span>Spawner analyzes your codebase and spawns the right skills to turbocharge your flow.</span>
     </div>
+
+    <!-- What you get -->
+    <div class="superpowers-grid">
+      <div class="superpower-item">
+        <Icon name="layers" size={20} />
+        <div class="superpower-text">
+          <span class="superpower-label">50+ Skills</span>
+          <span class="superpower-desc">Expert specialists for your stack</span>
+        </div>
+      </div>
+      <div class="superpower-item">
+        <Icon name="brain" size={20} />
+        <div class="superpower-text">
+          <span class="superpower-label">Memory</span>
+          <span class="superpower-desc">Remembers across sessions</span>
+        </div>
+      </div>
+      <div class="superpower-item">
+        <Icon name="check-circle" size={20} />
+        <div class="superpower-text">
+          <span class="superpower-label">Validation</span>
+          <span class="superpower-desc">Catches issues before shipping</span>
+        </div>
+      </div>
+      <div class="superpower-item">
+        <Icon name="alert-triangle" size={20} />
+        <div class="superpower-text">
+          <span class="superpower-label">Sharp Edges</span>
+          <span class="superpower-desc">Warns before you hit gotchas</span>
+        </div>
+      </div>
+      <div class="superpower-item">
+        <Icon name="life-buoy" size={20} />
+        <div class="superpower-text">
+          <span class="superpower-label">Escape Hatches</span>
+          <span class="superpower-desc">Detects loops, offers alternatives</span>
+        </div>
+      </div>
+      <div class="superpower-item">
+        <Icon name="zap" size={20} />
+        <div class="superpower-text">
+          <span class="superpower-label">Auto-Spawning</span>
+          <span class="superpower-desc">Skills matched to your stack</span>
+        </div>
+      </div>
+    </div>
   </section>
 
   <!-- Divider -->
@@ -822,7 +868,7 @@
         </div>
       </div>
 
-      <!-- Right: Skills Directory Preview -->
+      <!-- Skills Directory -->
       <div class="skills-directory-preview">
         <div class="directory-header-preview">
           <span class="directory-count">54 Skills</span>
@@ -868,38 +914,6 @@
             <li>Sharp edges, validations, patterns from real production use</li>
             <li>Machine-actionable expertise Claude can execute, not just read</li>
           </ul>
-        </div>
-      </div>
-    </div>
-
-    <div class="combo-divider"></div>
-
-    <div class="combo-benefits">
-      <h3 class="combo-title">What you get with Spawner + Mind</h3>
-      <div class="combo-boxes">
-        <div class="combo-box">
-          <span class="combo-label">50+ Skills</span>
-          <span class="combo-desc">Expert specialists for your stack</span>
-        </div>
-        <div class="combo-box">
-          <span class="combo-label">Memory</span>
-          <span class="combo-desc">Remembers across sessions</span>
-        </div>
-        <div class="combo-box">
-          <span class="combo-label">Validation</span>
-          <span class="combo-desc">Catches issues before shipping</span>
-        </div>
-        <div class="combo-box">
-          <span class="combo-label">Sharp Edges</span>
-          <span class="combo-desc">Warns before you hit gotchas</span>
-        </div>
-        <div class="combo-box">
-          <span class="combo-label">Escape Hatches</span>
-          <span class="combo-desc">Detects loops, offers alternatives</span>
-        </div>
-        <div class="combo-box">
-          <span class="combo-label">Auto-Spawning</span>
-          <span class="combo-desc">Skills matched to your stack</span>
         </div>
       </div>
     </div>
@@ -1498,6 +1512,69 @@
     line-height: 1.5;
   }
 
+  /* Superpowers Grid */
+  .superpowers-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-4);
+    margin-top: var(--space-8);
+    max-width: 900px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .superpower-item {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    transition: border-color 0.2s;
+  }
+
+  .superpower-item:hover {
+    border-color: var(--green-dim);
+  }
+
+  .superpower-item > :global(svg) {
+    flex-shrink: 0;
+    color: var(--green-dim);
+    margin-top: 2px;
+  }
+
+  .superpower-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .superpower-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .superpower-desc {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+    line-height: 1.4;
+  }
+
+  @media (max-width: 768px) {
+    .superpowers-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (max-width: 500px) {
+    .superpowers-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
   /* Paths Section */
   .paths-section {
     padding: var(--space-12) var(--space-8);
@@ -1744,7 +1821,7 @@
     font-weight: 500;
   }
 
-  /* Skills Directory Preview - Right Side */
+  /* Skills Directory Preview */
   .skills-directory-preview {
     background: var(--bg-primary);
     border: 1px solid var(--border);
@@ -2166,7 +2243,7 @@
   }
 
   .comparison-col.with-col.partial {
-    background: rgba(255, 193, 7, 0.05);
+    background: rgba(0, 196, 154, 0.03);
   }
 
   .comparison-row:hover .comparison-col.without-col,

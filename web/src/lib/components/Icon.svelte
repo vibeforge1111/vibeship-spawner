@@ -163,6 +163,13 @@
     <path d="M7 11V7a5 5 0 0 1 10 0v4" />
   {:else if name === 'shield'}
     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+  {:else if name === 'life-buoy'}
+    <circle cx="12" cy="12" r="10" />
+    <circle cx="12" cy="12" r="4" />
+    <line x1="4.93" y1="4.93" x2="9.17" y2="9.17" />
+    <line x1="14.83" y1="14.83" x2="19.07" y2="19.07" />
+    <line x1="14.83" y1="9.17" x2="19.07" y2="4.93" />
+    <line x1="4.93" y1="19.07" x2="9.17" y2="14.83" />
   {:else if name === 'file-plus'}
     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
     <polyline points="14 2 14 8 20 8" />
