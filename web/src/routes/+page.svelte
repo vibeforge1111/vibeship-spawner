@@ -318,11 +318,11 @@
   }
 
   const storySteps: { id: StoryStep; label: string; duration: number }[] = [
-    { id: 'connect', label: 'Request', duration: 3500 },
-    { id: 'analyze', label: 'Orchestrate', duration: 4500 },
-    { id: 'build', label: 'Execute', duration: 5000 },
-    { id: 'catch', label: 'Validate', duration: 4500 },
-    { id: 'flow', label: 'Ship', duration: 4000 },
+    { id: 'connect', label: 'Request', duration: 2500 },
+    { id: 'analyze', label: 'Orchestrate', duration: 3500 },
+    { id: 'build', label: 'Execute', duration: 4000 },
+    { id: 'catch', label: 'Validate', duration: 3000 },
+    { id: 'flow', label: 'Ship', duration: 2500 },
   ];
 
   const storyMessages: Record<StoryStep, ChatMessage[]> = {
@@ -406,8 +406,8 @@ export async function GET(req: Request) {
           visibleMessages = [...visibleMessages, msg];
           typingMessage = null;
           messageIndex++;
-          setTimeout(showNextMessage, 800);
-        }, 600);
+          setTimeout(showNextMessage, 500);
+        }, 400);
       } else {
         // Step complete, wait then move to next
         setTimeout(() => {
@@ -422,7 +422,7 @@ export async function GET(req: Request) {
               runStoryStep();
             }, 3000);
           }
-        }, step.duration - (messages.length * 1400));
+        }, step.duration - (messages.length * 900));
       }
     }
 
