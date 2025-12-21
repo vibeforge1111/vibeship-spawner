@@ -411,6 +411,43 @@ New score: 91/100 (+4)`,
     { id: 'guidance', label: 'Guidance' },
     { id: 'creation', label: 'Skill Creation' }
   ];
+
+  // Syntax highlighter for terminal output
+  function highlightOutput(text: string): string {
+    return text
+      // Commands (> spawner_...)
+      .replace(/^(&gt;|>)\s*(spawner_\w+.*?)$/gm, '<span class="hl-command">$1 $2</span>')
+      // Headers (## ...)
+      .replace(/^(##\s+.*)$/gm, '<span class="hl-header">$1</span>')
+      // Success indicators
+      .replace(/\[pass\]/g, '<span class="hl-pass">[pass]</span>')
+      .replace(/\[success\]/g, '<span class="hl-pass">[success]</span>')
+      // Fail/Critical indicators
+      .replace(/\[fail\]/g, '<span class="hl-fail">[fail]</span>')
+      .replace(/\[critical\]/g, '<span class="hl-critical">[critical]</span>')
+      // Warning indicators
+      .replace(/\[warning\]/g, '<span class="hl-warning">[warning]</span>')
+      // Info indicators
+      .replace(/\[info\]/g, '<span class="hl-info">[info]</span>')
+      // Keys in JSON-like output
+      .replace(/"(\w+)":/g, '<span class="hl-key">"$1"</span>:')
+      // String values
+      .replace(/:\s*"([^"]+)"/g, ': <span class="hl-string">"$1"</span>')
+      // Boolean/special values
+      .replace(/:\s*(true|false|null)/g, ': <span class="hl-bool">$1</span>')
+      // Numbers with % or /
+      .replace(/(\d+%|\d+\/\d+)/g, '<span class="hl-number">$1</span>')
+      // Stack technologies
+      .replace(/(Next\.js|Supabase|Stripe|Algolia|Tailwind|OpenAI|wagmi|viem|TypeScript|Node\.js)/g, '<span class="hl-tech">$1</span>')
+      // Skill names (kebab-case words)
+      .replace(/\b([a-z]+-[a-z]+(?:-[a-z]+)*)\b/g, '<span class="hl-skill">$1</span>')
+      // Likelihood indicators
+      .replace(/Likelihood:\s*(High|Medium|Low)/g, 'Likelihood: <span class="hl-likelihood-$1">$1</span>')
+      // Line numbers and references
+      .replace(/Line\s+(\d+):/g, '<span class="hl-line">Line $1:</span>')
+      // Status ready to ship
+      .replace(/Status:\s*(READY TO SHIP.*)/g, '<span class="hl-status">Status: $1</span>');
+  }
 </script>
 
 <Navbar />
@@ -664,7 +701,7 @@ New score: 91/100 (+4)`,
               <span class="tool-output-title">{tools[selectedTool].name}</span>
             </div>
             <div class="tool-output-body">
-              <pre>{tools[selectedTool].output}</pre>
+              <pre>{@html highlightOutput(tools[selectedTool].output)}</pre>
             </div>
           </div>
           <div class="tool-explain">
@@ -1097,6 +1134,91 @@ New score: 91/100 (+4)`,
     color: #c9d1d9;
     white-space: pre-wrap;
     line-height: 1.6;
+  }
+
+  /* Syntax highlighting */
+  .tool-output-body :global(.hl-command) {
+    color: #7ee787;
+    font-weight: 600;
+  }
+
+  .tool-output-body :global(.hl-header) {
+    color: #79c0ff;
+    font-weight: 600;
+  }
+
+  .tool-output-body :global(.hl-pass) {
+    color: #3fb950;
+    font-weight: 600;
+  }
+
+  .tool-output-body :global(.hl-fail) {
+    color: #f85149;
+    font-weight: 600;
+  }
+
+  .tool-output-body :global(.hl-critical) {
+    color: #f85149;
+    font-weight: 700;
+    background: rgba(248, 81, 73, 0.15);
+    padding: 0 4px;
+  }
+
+  .tool-output-body :global(.hl-warning) {
+    color: #d29922;
+    font-weight: 600;
+  }
+
+  .tool-output-body :global(.hl-info) {
+    color: #58a6ff;
+  }
+
+  .tool-output-body :global(.hl-key) {
+    color: #79c0ff;
+  }
+
+  .tool-output-body :global(.hl-string) {
+    color: #a5d6ff;
+  }
+
+  .tool-output-body :global(.hl-bool) {
+    color: #ff7b72;
+  }
+
+  .tool-output-body :global(.hl-number) {
+    color: #ffa657;
+    font-weight: 600;
+  }
+
+  .tool-output-body :global(.hl-tech) {
+    color: #d2a8ff;
+  }
+
+  .tool-output-body :global(.hl-skill) {
+    color: #7ee787;
+  }
+
+  .tool-output-body :global(.hl-likelihood-High) {
+    color: #3fb950;
+    font-weight: 600;
+  }
+
+  .tool-output-body :global(.hl-likelihood-Medium) {
+    color: #d29922;
+    font-weight: 600;
+  }
+
+  .tool-output-body :global(.hl-likelihood-Low) {
+    color: #8b949e;
+  }
+
+  .tool-output-body :global(.hl-line) {
+    color: #ffa657;
+  }
+
+  .tool-output-body :global(.hl-status) {
+    color: #3fb950;
+    font-weight: 700;
   }
 
   .tool-explain {
