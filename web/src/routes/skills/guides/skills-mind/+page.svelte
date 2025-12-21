@@ -1,8 +1,29 @@
 <!-- web/src/routes/skills/guides/skills-mind/+page.svelte -->
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import Navbar from '$lib/components/Navbar.svelte';
   import Footer from '$lib/components/Footer.svelte';
+  import SkillsSidebar from '$lib/components/SkillsSidebar.svelte';
   import Icon from '$lib/components/Icon.svelte';
+
+  let activeSection = $state('guides');
+  let activeCategory = $state<string | null>(null);
+  let searchQuery = $state('');
+
+  function handleSectionChange(section: string) {
+    goto(`/skills?section=${section}`);
+  }
+
+  function handleCategoryChange(category: string | null) {
+    goto(`/skills?category=${category || ''}`);
+  }
+
+  function handleSearchChange(query: string) {
+    searchQuery = query;
+    if (query) {
+      goto(`/skills?search=${encodeURIComponent(query)}`);
+    }
+  }
 </script>
 
 <svelte:head>
@@ -12,7 +33,17 @@
 
 <Navbar />
 
-<main class="guide-page">
+<div class="skills-layout">
+  <SkillsSidebar
+    {activeSection}
+    {activeCategory}
+    {searchQuery}
+    onSectionChange={handleSectionChange}
+    onCategoryChange={handleCategoryChange}
+    onSearchChange={handleSearchChange}
+  />
+
+  <main class="guide-page">
   <header class="guide-header">
     <a href="/skills" class="back-link">
       <Icon name="arrow-left" size={16} />
@@ -173,21 +204,28 @@
         </a>
       </div>
     </section>
-  </article>
-</main>
+    </article>
+  </main>
+</div>
 
 <Footer />
 
 <style>
+  .skills-layout {
+    display: flex;
+    min-height: calc(100vh - 52px);
+    gap: 2rem;
+  }
+
   .guide-page {
-    min-height: 100vh;
-    padding-top: 52px;
+    flex: 1;
+    max-width: 800px;
+    padding: var(--space-8) var(--space-6);
   }
 
   .guide-header {
     max-width: 700px;
-    margin: 0 auto;
-    padding: var(--space-8) var(--space-6) var(--space-6);
+    margin-bottom: var(--space-6);
   }
 
   .back-link {
@@ -222,8 +260,6 @@
 
   .guide-content {
     max-width: 700px;
-    margin: 0 auto;
-    padding: 0 var(--space-6) var(--space-12);
   }
 
   .guide-section {
@@ -352,7 +388,7 @@
   .workflow-list li {
     position: relative;
     padding: var(--space-4);
-    padding-left: var(--space-8);
+    padding-left: var(--space-10);
     margin-bottom: var(--space-3);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
@@ -362,7 +398,7 @@
   .workflow-list li::before {
     content: counter(workflow);
     position: absolute;
-    left: var(--space-3);
+    left: var(--space-4);
     top: var(--space-4);
     width: 20px;
     height: 20px;
@@ -485,6 +521,10 @@
   }
 
   @media (max-width: 768px) {
+    .skills-layout {
+      flex-direction: column;
+    }
+
     .guide-header h1 {
       font-size: var(--text-3xl);
     }
