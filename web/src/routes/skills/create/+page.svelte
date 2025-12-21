@@ -1,7 +1,32 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
+  import Navbar from '$lib/components/Navbar.svelte';
+  import Footer from '$lib/components/Footer.svelte';
+  import SkillsSidebar from '$lib/components/SkillsSidebar.svelte';
   import Icon from '$lib/components/Icon.svelte';
 
   let currentStep = $state(0);
+
+  // Sidebar state - 'create' is active on this page
+  let activeSection = $state('create');
+  let activeCategory = $state<string | null>(null);
+  let searchQuery = $state('');
+
+  function handleSectionChange(section: string) {
+    if (section === 'create') return; // Already here
+    goto(`/skills?section=${section}`);
+  }
+
+  function handleCategoryChange(category: string | null) {
+    goto(`/skills?category=${category || ''}`);
+  }
+
+  function handleSearchChange(query: string) {
+    searchQuery = query;
+    if (query) {
+      goto(`/skills?search=${encodeURIComponent(query)}`);
+    }
+  }
 
   const steps = [
     { id: 'identity', title: 'Identity', description: 'Who your skill is and what it owns' },
@@ -170,13 +195,21 @@ cross_domain_insights:
   <meta name="description" content="Learn how to create your own VibeShip skills locally. Step-by-step guide with examples." />
 </svelte:head>
 
-<div class="create-page">
-  <!-- Header -->
-  <header class="page-header">
-    <a href="/skills" class="back-link">
-      <Icon name="arrow-left" size={16} />
-      Back to Skills
-    </a>
+<Navbar />
+
+<div class="skills-layout">
+  <SkillsSidebar
+    {activeSection}
+    {activeCategory}
+    {searchQuery}
+    onSectionChange={handleSectionChange}
+    onCategoryChange={handleCategoryChange}
+    onSearchChange={handleSearchChange}
+  />
+
+  <main class="create-page">
+    <!-- Header -->
+    <header class="page-header">
     <h1>Create Your Own Skills</h1>
     <p class="subtitle">Don't see what you need? Build it locally.</p>
   </header>
@@ -500,10 +533,19 @@ cross_domain_insights:
       <p class="cta-note">Spawner generates 4 YAML files (skill.yaml, sharp-edges.yaml, validations.yaml, collaboration.yaml) + 4 MD files (patterns.md, anti-patterns.md, decisions.md, sharp-edges.md) with templates ready to fill in.</p>
     </div>
   </section>
+  </main>
 </div>
 
+<Footer />
+
 <style>
+  .skills-layout {
+    display: flex;
+    min-height: calc(100vh - 52px);
+  }
+
   .create-page {
+    flex: 1;
     max-width: 900px;
     margin: 0 auto;
     padding: 2rem 1rem;
@@ -511,22 +553,6 @@ cross_domain_insights:
 
   .page-header {
     margin-bottom: 3rem;
-  }
-
-  .back-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    color: var(--text-secondary);
-    text-decoration: none;
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    margin-bottom: 1rem;
-    transition: color var(--transition-fast);
-  }
-
-  .back-link:hover {
-    color: var(--green-dim);
   }
 
   h1 {
@@ -984,6 +1010,10 @@ cross_domain_insights:
 
     .step-content {
       padding: 1.5rem;
+    }
+
+    .skills-layout {
+      flex-direction: column;
     }
   }
 </style>
