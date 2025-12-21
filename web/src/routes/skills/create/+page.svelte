@@ -703,19 +703,19 @@ cross_domain_insights:
 
   /* Code Examples */
   .code-example {
-    background: #1e1e1e;
-    border: 1px solid var(--border);
+    background: var(--terminal-bg);
+    border: 1px solid var(--terminal-border);
     overflow: hidden;
     margin-bottom: 1.5rem;
   }
 
   .code-header {
-    background: #2d2d2d;
+    background: var(--terminal-header);
     padding: 0.5rem 1rem;
     font-family: var(--font-mono);
     font-size: var(--text-xs);
-    color: var(--text-tertiary);
-    border-bottom: 1px solid var(--border);
+    color: var(--terminal-muted);
+    border-bottom: 1px solid var(--terminal-border);
   }
 
   .code-example pre {
@@ -728,7 +728,7 @@ cross_domain_insights:
     font-family: var(--font-mono);
     font-size: 0.8rem;
     line-height: 1.5;
-    color: #d4d4d4;
+    color: var(--terminal-text);
   }
 
   .step-actions {
@@ -911,8 +911,8 @@ cross_domain_insights:
   }
 
   .terminal {
-    background: #1e1e1e;
-    border: 1px solid var(--border);
+    background: var(--terminal-bg);
+    border: 1px solid var(--terminal-border);
     padding: 0.75rem 1rem;
   }
 
@@ -920,7 +920,7 @@ cross_domain_insights:
     display: block;
     font-family: var(--font-mono);
     font-size: 0.8rem;
-    color: var(--green-dim);
+    color: var(--terminal-command);
     line-height: 1.6;
   }
 
