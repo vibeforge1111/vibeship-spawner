@@ -478,19 +478,16 @@ New score: 91/100 (+4)`,
         <div class="step">
           <span class="step-number">1</span>
           <div class="step-content">
-            <h4>Open Claude Desktop Config</h4>
-            <p>Find your MCP configuration file:</p>
-            <div class="code-block">
-              <code>~/Library/Application Support/Claude/claude_desktop_config.json</code>
-            </div>
+            <h4>Open Settings in Claude Desktop</h4>
+            <p>Go to <strong>Claude</strong> menu → <strong>Settings</strong> → <strong>Developer</strong> tab → click <strong>Edit Config</strong></p>
           </div>
         </div>
 
         <div class="step">
           <span class="step-number">2</span>
           <div class="step-content">
-            <h4>Add Spawner</h4>
-            <p>Add this to your mcpServers:</p>
+            <h4>Add Spawner to your config</h4>
+            <p>Paste this into your config file:</p>
             <div class="code-block">
 <pre><code>{`{
   "mcpServers": {
@@ -508,7 +505,7 @@ New score: 91/100 (+4)`,
           <span class="step-number">3</span>
           <div class="step-content">
             <h4>Restart Claude Desktop</h4>
-            <p>Fully quit and reopen Claude Desktop. You'll see Spawner's tools available.</p>
+            <p>Fully quit and reopen. Look for the <strong>hammer icon</strong> in the chat input - that means Spawner is connected!</p>
           </div>
         </div>
       </div>
