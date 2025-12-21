@@ -229,7 +229,6 @@
   .file-card {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 8px;
     padding: var(--space-4);
     text-align: left;
   }
@@ -322,7 +321,6 @@
     color: var(--green-dim);
     background: rgba(0, 196, 154, 0.1);
     padding: 2px 8px;
-    border-radius: 4px;
   }
 
   .skills-grid {
@@ -357,21 +355,23 @@
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-3) var(--space-6);
-    background: var(--green-dim);
-    border: none;
-    border-radius: 4px;
+    background: transparent;
+    border: 1px solid var(--green-dim);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     font-weight: 500;
-    color: #0d1117;
+    color: var(--green-dim);
     text-decoration: none;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     cursor: pointer;
+    transition: all var(--transition-fast);
   }
 
   .cta-btn:hover {
-    box-shadow: 0 0 20px rgba(0, 196, 154, 0.4);
+    background: var(--green-dim);
+    color: var(--bg-primary);
+    box-shadow: var(--shadow-glow-green);
   }
 
   @media (max-width: 768px) {

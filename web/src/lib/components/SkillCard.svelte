@@ -47,11 +47,10 @@
     flex-direction: column;
     gap: var(--space-2);
     padding: var(--space-4);
-    background: var(--bg-primary);
+    background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 6px;
     text-decoration: none;
-    transition: border-color 0.2s, box-shadow 0.2s;
+    transition: border-color var(--transition-fast);
   }
 
   .skill-card:hover {
@@ -81,7 +80,6 @@
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     padding: 2px 6px;
-    border-radius: 3px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
@@ -140,7 +138,6 @@
     padding: 2px 6px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
-    border-radius: 3px;
     color: var(--text-secondary);
   }
 

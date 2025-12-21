@@ -328,7 +328,6 @@
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     padding: 4px 8px;
-    border-radius: 4px;
     text-transform: uppercase;
   }
 
@@ -360,7 +359,6 @@
     padding: 2px 8px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
-    border-radius: 3px;
     color: var(--text-tertiary);
     text-decoration: none;
   }
@@ -411,16 +409,17 @@
     padding: var(--space-2) var(--space-3);
     background: transparent;
     border: 1px solid transparent;
-    border-radius: 4px;
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     color: var(--text-secondary);
     cursor: pointer;
     white-space: nowrap;
+    transition: all var(--transition-fast);
   }
 
   .tab:hover {
     background: var(--bg-secondary);
+    border-color: var(--border);
   }
 
   .tab.active {
@@ -433,7 +432,6 @@
     font-size: var(--text-xs);
     padding: 1px 6px;
     background: var(--bg-tertiary);
-    border-radius: 10px;
   }
 
   /* Tab Content */
@@ -474,7 +472,7 @@
   .identity-content pre {
     background: var(--bg-secondary);
     padding: var(--space-4);
-    border-radius: 6px;
+    border: 1px solid var(--border);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     color: var(--text-secondary);
@@ -494,7 +492,6 @@
     padding: 2px 8px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
-    border-radius: 3px;
     color: var(--text-tertiary);
   }
 
@@ -502,7 +499,6 @@
   .pattern-card, .anti-pattern-card {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 6px;
     padding: var(--space-4);
     margin-bottom: var(--space-4);
   }
@@ -525,7 +521,7 @@
   .pattern-example {
     background: var(--bg-tertiary);
     padding: var(--space-3);
-    border-radius: 4px;
+    border: 1px solid var(--border);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     color: var(--text-secondary);
@@ -543,7 +539,6 @@
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-left: 3px solid var(--severity-color);
-    border-radius: 6px;
     padding: var(--space-4);
     margin-bottom: var(--space-4);
   }
@@ -560,7 +555,7 @@
     font-size: var(--text-xs);
     font-weight: 600;
     padding: 2px 6px;
-    border-radius: 3px;
+    text-transform: uppercase;
     color: var(--severity-color);
     background: color-mix(in srgb, var(--severity-color) 15%, transparent);
   }
@@ -583,7 +578,7 @@
   .edge-solution pre {
     background: var(--bg-tertiary);
     padding: var(--space-3);
-    border-radius: 4px;
+    border: 1px solid var(--border);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     color: var(--text-secondary);
@@ -601,14 +596,13 @@
   .edge-detection code {
     background: var(--bg-tertiary);
     padding: 2px 6px;
-    border-radius: 3px;
+    border: 1px solid var(--border);
   }
 
   /* Validations */
   .validation-card {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 6px;
     padding: var(--space-4);
     margin-bottom: var(--space-4);
   }
@@ -625,7 +619,6 @@
     font-size: var(--text-xs);
     font-weight: 600;
     padding: 2px 6px;
-    border-radius: 3px;
     text-transform: uppercase;
   }
 
@@ -658,14 +651,13 @@
   .validation-pattern code {
     background: var(--bg-tertiary);
     padding: 2px 6px;
-    border-radius: 3px;
+    border: 1px solid var(--border);
   }
 
   /* Handoffs */
   .handoff-card {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 6px;
     padding: var(--space-4);
     margin-bottom: var(--space-3);
   }
@@ -691,9 +683,9 @@
     padding: var(--space-2) var(--space-3);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 4px;
     color: var(--text-secondary);
     text-decoration: none;
+    transition: all var(--transition-fast);
   }
 
   .prereq-link:hover {

@@ -144,7 +144,6 @@
     padding: var(--space-4);
     background: var(--bg-secondary);
     border: 2px solid var(--border);
-    border-radius: 8px;
     color: var(--text-tertiary);
   }
 
@@ -196,10 +195,9 @@
     padding: var(--space-4);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 8px;
     color: var(--text-secondary);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all var(--transition-fast);
   }
 
   .scenario-card:hover {

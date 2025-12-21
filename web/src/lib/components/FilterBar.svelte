@@ -106,7 +106,6 @@
     padding: var(--space-4);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 8px;
   }
 
   .search-wrapper {
@@ -118,7 +117,6 @@
     padding: var(--space-2) var(--space-3);
     background: var(--bg-primary);
     border: 1px solid var(--border);
-    border-radius: 4px;
   }
 
   .search-wrapper:focus-within {
@@ -146,7 +144,6 @@
     padding: var(--space-2) var(--space-3);
     background: var(--bg-primary);
     border: 1px solid var(--border);
-    border-radius: 4px;
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     color: var(--text-secondary);
@@ -175,7 +172,6 @@
     padding: var(--space-2) var(--space-3);
     background: var(--bg-primary);
     border: 1px solid var(--border);
-    border-radius: 4px;
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     color: var(--text-secondary);
@@ -194,11 +190,11 @@
     padding: var(--space-2) var(--space-3);
     background: transparent;
     border: 1px solid var(--border);
-    border-radius: 4px;
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     color: var(--text-tertiary);
     cursor: pointer;
+    transition: all var(--transition-fast);
   }
 
   .clear-btn:hover {
@@ -211,18 +207,19 @@
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-2) var(--space-3);
-    background: rgba(0, 196, 154, 0.1);
+    background: transparent;
     border: 1px solid var(--green-dim);
-    border-radius: 4px;
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     color: var(--green-dim);
     text-decoration: none;
     white-space: nowrap;
+    transition: all var(--transition-fast);
   }
 
   .finder-link:hover {
-    background: rgba(0, 196, 154, 0.2);
+    background: var(--green-dim);
+    color: var(--bg-primary);
   }
 
   @media (max-width: 768px) {
