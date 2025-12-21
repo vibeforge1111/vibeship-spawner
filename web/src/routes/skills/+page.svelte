@@ -148,9 +148,9 @@
             <div class="pipeline-stage">
               <div class="flow-node input-node">
                 <div class="node-icon">
-                  <Icon name="terminal" size={16} />
+                  <Icon name="folder" size={16} />
                 </div>
-                <span class="node-label">Your Task</span>
+                <span class="node-label">Your Project</span>
               </div>
             </div>
 
@@ -179,13 +179,14 @@
               </div>
             </div>
 
-            <!-- Branching lines to dev team -->
-            <div class="stage-connector branching">
-              <div class="branch-lines">
-                <div class="branch-line"></div>
-                <div class="branch-line"></div>
-                <div class="branch-line"></div>
-                <div class="branch-line"></div>
+            <!-- Branching connector with tree structure -->
+            <div class="tree-connector fan-out">
+              <div class="tree-trunk"></div>
+              <div class="tree-branches">
+                <div class="tree-branch"><span class="branch-dot"></span></div>
+                <div class="tree-branch"><span class="branch-dot"></span></div>
+                <div class="tree-branch"><span class="branch-dot"></span></div>
+                <div class="tree-branch"><span class="branch-dot"></span></div>
               </div>
             </div>
 
@@ -196,7 +197,7 @@
                 <div class="flow-node skill-node secondary">
                   <div class="node-content">
                     <div class="skill-avatar">
-                      <Icon name="code" size={18} />
+                      <Icon name="server" size={18} />
                     </div>
                     <span class="skill-name">backend</span>
                   </div>
@@ -205,7 +206,7 @@
                 <div class="flow-node skill-node secondary">
                   <div class="node-content">
                     <div class="skill-avatar">
-                      <Icon name="layout" size={18} />
+                      <Icon name="monitor" size={18} />
                     </div>
                     <span class="skill-name">frontend</span>
                   </div>
@@ -231,13 +232,14 @@
               </div>
             </div>
 
-            <!-- Converging lines to review -->
-            <div class="stage-connector converging">
-              <div class="branch-lines">
-                <div class="branch-line"></div>
-                <div class="branch-line"></div>
-                <div class="branch-line"></div>
+            <!-- Converging connector with tree structure -->
+            <div class="tree-connector fan-in">
+              <div class="tree-branches">
+                <div class="tree-branch"><span class="branch-dot"></span></div>
+                <div class="tree-branch"><span class="branch-dot"></span></div>
+                <div class="tree-branch"><span class="branch-dot"></span></div>
               </div>
+              <div class="tree-trunk"></div>
             </div>
 
             <!-- Stage 4: Review Team -->
@@ -247,7 +249,7 @@
                 <div class="flow-node skill-node review">
                   <div class="node-content">
                     <div class="skill-avatar">
-                      <Icon name="check-square" size={18} />
+                      <Icon name="clipboard-check" size={18} />
                     </div>
                     <span class="skill-name">qa</span>
                   </div>
@@ -256,7 +258,7 @@
                 <div class="flow-node skill-node review">
                   <div class="node-content">
                     <div class="skill-avatar">
-                      <Icon name="eye" size={18} />
+                      <Icon name="file-search" size={18} />
                     </div>
                     <span class="skill-name">code-review</span>
                   </div>
@@ -273,16 +275,16 @@
               </div>
             </div>
 
-            <div class="stage-connector">
+            <div class="stage-connector final">
               <div class="connector-line"></div>
               <div class="connector-pulse success"></div>
             </div>
 
             <!-- Stage 5: Production -->
             <div class="pipeline-stage">
-              <div class="flow-node output-node">
-                <div class="node-icon success">
-                  <Icon name="rocket" size={16} />
+              <div class="flow-node output-node success">
+                <div class="node-icon">
+                  <Icon name="rocket" size={18} />
                 </div>
                 <span class="node-label">Production</span>
               </div>
@@ -684,67 +686,144 @@
     100% { top: 100%; opacity: 0; }
   }
 
-  /* Branching/Converging Connectors */
-  .stage-connector.branching,
-  .stage-connector.converging {
-    height: 40px;
-    width: 100%;
-    max-width: 400px;
-  }
-
-  .branch-lines {
+  /* Tree Connectors - Fan Out/In */
+  .tree-connector {
     display: flex;
-    justify-content: space-between;
+    flex-direction: column;
+    align-items: center;
     width: 100%;
-    height: 100%;
-    position: relative;
+    max-width: 450px;
   }
 
-  .branch-line {
+  .tree-connector.fan-out {
+    padding-bottom: var(--space-2);
+  }
+
+  .tree-connector.fan-in {
+    padding-top: var(--space-2);
+  }
+
+  .tree-trunk {
     width: 2px;
-    height: 100%;
+    height: 20px;
     background: var(--border);
     position: relative;
   }
 
-  .branch-line::before {
+  .tree-trunk::after {
     content: '';
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    background: var(--green-dim);
+    border-radius: 50%;
+    left: -3px;
+    animation: trunk-pulse 2.5s ease-in-out infinite;
+  }
+
+  .fan-out .tree-trunk::after {
+    top: 0;
+    animation-name: pulse-trunk-down;
+  }
+
+  .fan-in .tree-trunk::after {
+    bottom: 0;
+    animation-name: pulse-trunk-up;
+  }
+
+  @keyframes pulse-trunk-down {
+    0%, 100% { top: 0; opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { top: calc(100% - 4px); opacity: 0; }
+  }
+
+  @keyframes pulse-trunk-up {
+    0%, 100% { bottom: 0; opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { bottom: calc(100% - 4px); opacity: 0; }
+  }
+
+  .tree-branches {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    position: relative;
+  }
+
+  /* Horizontal line connecting all branches */
+  .tree-branches::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--border);
+  }
+
+  .fan-out .tree-branches::before {
+    top: 0;
+  }
+
+  .fan-in .tree-branches::before {
+    bottom: 0;
+  }
+
+  .tree-branch {
+    width: 2px;
+    height: 25px;
+    background: var(--border);
+    position: relative;
+  }
+
+  .fan-out .tree-branch {
+    /* Branch goes down from horizontal line */
+  }
+
+  .fan-in .tree-branch {
+    /* Branch goes up to horizontal line */
+  }
+
+  .branch-dot {
     position: absolute;
     width: 6px;
     height: 6px;
     background: var(--green-dim);
     border-radius: 50%;
     left: -2px;
-    animation: branch-pulse 2s ease-in-out infinite;
   }
 
-  .stage-connector.branching .branch-line::before {
-    top: 0;
-    animation-name: branch-pulse-down;
+  .fan-out .branch-dot {
+    animation: dot-down 2s ease-in-out infinite;
   }
 
-  .stage-connector.converging .branch-line::before {
+  .fan-in .branch-dot {
     bottom: 0;
-    animation-name: branch-pulse-up;
+    animation: dot-up 2s ease-in-out infinite;
   }
 
-  .branch-line:nth-child(1)::before { animation-delay: 0s; }
-  .branch-line:nth-child(2)::before { animation-delay: 0.2s; }
-  .branch-line:nth-child(3)::before { animation-delay: 0.4s; }
-  .branch-line:nth-child(4)::before { animation-delay: 0.6s; }
+  .tree-branch:nth-child(1) .branch-dot { animation-delay: 0.1s; }
+  .tree-branch:nth-child(2) .branch-dot { animation-delay: 0.25s; }
+  .tree-branch:nth-child(3) .branch-dot { animation-delay: 0.4s; }
+  .tree-branch:nth-child(4) .branch-dot { animation-delay: 0.55s; }
 
-  @keyframes branch-pulse-down {
+  @keyframes dot-down {
     0%, 100% { top: 0; opacity: 0; }
-    10% { opacity: 1; }
-    90% { opacity: 1; }
+    15% { opacity: 1; }
+    85% { opacity: 1; }
     100% { top: calc(100% - 6px); opacity: 0; }
   }
 
-  @keyframes branch-pulse-up {
+  @keyframes dot-up {
     0%, 100% { bottom: 0; opacity: 0; }
-    10% { opacity: 1; }
-    90% { opacity: 1; }
+    15% { opacity: 1; }
+    85% { opacity: 1; }
     100% { bottom: calc(100% - 6px); opacity: 0; }
+  }
+
+  .stage-connector.final {
+    height: 35px;
   }
 
   /* Flow Nodes */
@@ -759,10 +838,28 @@
     position: relative;
   }
 
-  .flow-node.input-node,
+  .flow-node.input-node {
+    background: transparent;
+    border: 1px dashed var(--border);
+  }
+
   .flow-node.output-node {
     background: transparent;
     border: 1px dashed var(--border);
+  }
+
+  .flow-node.output-node.success {
+    border-color: #22c55e;
+    border-style: solid;
+    background: rgba(34, 197, 94, 0.05);
+  }
+
+  .flow-node.output-node.success .node-icon {
+    color: #22c55e;
+  }
+
+  .flow-node.output-node.success .node-label {
+    color: #22c55e;
   }
 
   .flow-node.skill-node.primary {
@@ -1333,9 +1430,12 @@
       font-size: var(--text-xs);
     }
 
-    .stage-connector.branching,
-    .stage-connector.converging {
-      max-width: 280px;
+    .tree-connector {
+      max-width: 300px;
+    }
+
+    .tree-branch {
+      height: 20px;
     }
 
     .log-skill {
