@@ -542,13 +542,14 @@ cross_domain_insights:
   .skills-layout {
     display: flex;
     min-height: calc(100vh - 52px);
+    gap: 2rem;
   }
 
   .create-page {
     flex: 1;
     max-width: 900px;
     margin: 0 auto;
-    padding: 2rem 1rem;
+    padding: 2rem 2rem 2rem 2rem;
   }
 
   .page-header {

@@ -169,8 +169,8 @@
           <span class="skill-layer layer-{skill.layer}">{LAYER_LABELS[skill.layer]}</span>
         </div>
         <div class="skill-description">
-          {#each skill.description.split('\n\n').filter(p => p.trim()) as paragraph}
-            <p>{paragraph.replace(/\n/g, ' ')}</p>
+          {#each skill.description.split('\n\n').filter(p => p.trim()) as paragraph, i}
+            <p class:lead={i === 0}>{paragraph.replace(/\n/g, ' ')}</p>
           {/each}
         </div>
       </header>
@@ -576,14 +576,22 @@
   .layer-3 { background: rgba(180, 130, 255, 0.15); color: #b482ff; }
 
   .skill-description {
-    max-width: 640px;
+    max-width: 560px;
   }
 
   .skill-description p {
-    font-size: var(--text-base);
-    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    color: var(--text-primary);
     line-height: 1.7;
-    margin: 0 0 var(--space-4) 0;
+    margin: 0 0 var(--space-3) 0;
+  }
+
+  .skill-description p.lead {
+    font-size: 1rem;
+    color: var(--text-primary);
+    line-height: 1.65;
+    margin-bottom: var(--space-4);
   }
 
   .skill-description p:last-child {
@@ -649,14 +657,18 @@
   /* Skill intro - clean single statement */
   .skill-intro {
     margin-bottom: var(--space-6);
+    background: var(--bg-secondary);
+    border-left: 2px solid var(--green-dim);
+    padding: var(--space-3) var(--space-4);
   }
 
   .skill-intro p {
-    font-size: 1.125rem; /* 18px */
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
     color: var(--text-primary);
-    line-height: 1.7;
+    line-height: 1.65;
     margin: 0;
-    max-width: 640px;
+    max-width: 520px;
   }
 
   /* What this skill covers */
