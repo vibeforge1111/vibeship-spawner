@@ -475,6 +475,30 @@ New score: 91/100 (+4)`,
       <p class="section-desc">Connect Spawner to Claude Desktop or Claude Code in 2 minutes.</p>
 
       <div class="setup-tabs">
+        <h4 class="setup-tab-label">Claude Code</h4>
+      </div>
+      <div class="setup-steps">
+        <div class="step">
+          <span class="step-number">1</span>
+          <div class="step-content">
+            <h4>Run the add command</h4>
+            <p>In your terminal, run:</p>
+            <div class="code-block">
+              <code>claude mcp add spawner -- npx -y mcp-remote https://mcp.vibeship.co</code>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <span class="step-number">2</span>
+          <div class="step-content">
+            <h4>Start Claude Code</h4>
+            <p>Run <code>claude</code> in your project. Type <code>/mcp</code> to verify Spawner is connected.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="setup-tabs">
         <h4 class="setup-tab-label">Claude Desktop</h4>
       </div>
       <div class="setup-steps">
@@ -509,30 +533,6 @@ New score: 91/100 (+4)`,
           <div class="step-content">
             <h4>Restart Claude Desktop</h4>
             <p>Fully quit and reopen. Look for the <strong>hammer icon</strong> in the chat input - that means Spawner is connected!</p>
-          </div>
-        </div>
-      </div>
-
-      <div class="setup-tabs">
-        <h4 class="setup-tab-label">Claude Code</h4>
-      </div>
-      <div class="setup-steps">
-        <div class="step">
-          <span class="step-number">1</span>
-          <div class="step-content">
-            <h4>Run the add command</h4>
-            <p>In your terminal, run:</p>
-            <div class="code-block">
-              <code>claude mcp add spawner -- npx -y mcp-remote https://mcp.vibeship.co</code>
-            </div>
-          </div>
-        </div>
-
-        <div class="step">
-          <span class="step-number">2</span>
-          <div class="step-content">
-            <h4>Start Claude Code</h4>
-            <p>Run <code>claude</code> in your project. Type <code>/mcp</code> to verify Spawner is connected.</p>
           </div>
         </div>
       </div>
