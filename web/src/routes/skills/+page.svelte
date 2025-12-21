@@ -123,48 +123,171 @@
     <!-- Overview Section -->
     <section id="section-overview" class="content-section">
       <div class="overview-hero">
-        <h1>Skills: Not Just Prompts</h1>
+        <h1>A Team of World-Class Experts</h1>
         <p class="hero-subtitle">
-          Most AI "skills" are prompts. Ours are 4-file systems with detection patterns,
-          automated checks, and cross-skill collaboration.
+          Each skill is a specialist agent with deep domain knowledge,
+          working together through intelligent handoffs.
         </p>
       </div>
 
-      <div class="files-grid">
-        <div class="file-card">
-          <div class="file-header">
-            <Icon name="file-text" size={18} />
-            <span>skill.yaml</span>
+      <!-- Animated Workflow Terminal -->
+      <div class="workflow-terminal">
+        <div class="terminal-header">
+          <div class="terminal-dots">
+            <span class="dot red"></span>
+            <span class="dot yellow"></span>
+            <span class="dot green"></span>
           </div>
-          <h4>Identity</h4>
-          <p>Who this expert is. Patterns they follow. Anti-patterns they avoid.</p>
+          <span class="terminal-title">skill-collaboration.flow</span>
         </div>
 
-        <div class="file-card">
-          <div class="file-header">
-            <Icon name="alert-triangle" size={18} />
-            <span>sharp-edges.yaml</span>
-          </div>
-          <h4>Sharp Edges</h4>
-          <p>8-12 gotchas with detection patterns. Catches issues in your code.</p>
-        </div>
+        <div class="terminal-body">
+          <!-- The animated flow -->
+          <div class="flow-container">
+            <!-- Input -->
+            <div class="flow-node input-node">
+              <div class="node-icon">
+                <Icon name="terminal" size={16} />
+              </div>
+              <span class="node-label">Your Task</span>
+            </div>
 
-        <div class="file-card">
-          <div class="file-header">
-            <Icon name="shield" size={18} />
-            <span>validations.yaml</span>
-          </div>
-          <h4>Validations</h4>
-          <p>8-12 automated checks that run on your code. Not just advice.</p>
-        </div>
+            <div class="flow-arrow">
+              <div class="arrow-line"></div>
+              <div class="arrow-pulse"></div>
+            </div>
 
-        <div class="file-card">
-          <div class="file-header">
-            <Icon name="git-branch" size={18} />
-            <span>collaboration.yaml</span>
+            <!-- Primary Skill -->
+            <div class="flow-node skill-node primary">
+              <div class="node-badge">Lead</div>
+              <div class="node-content">
+                <div class="skill-avatar">
+                  <Icon name="code" size={20} />
+                </div>
+                <span class="skill-name">backend</span>
+              </div>
+              <div class="skill-files">
+                <span class="file-dot identity"></span>
+                <span class="file-dot edges"></span>
+                <span class="file-dot validations"></span>
+                <span class="file-dot collab"></span>
+              </div>
+            </div>
+
+            <!-- Handoff indicator -->
+            <div class="flow-handoff">
+              <div class="handoff-line"></div>
+              <span class="handoff-label">handoff</span>
+              <div class="handoff-pulse"></div>
+            </div>
+
+            <!-- Secondary Skills -->
+            <div class="flow-branch">
+              <div class="flow-node skill-node secondary">
+                <div class="node-content">
+                  <div class="skill-avatar">
+                    <Icon name="database" size={18} />
+                  </div>
+                  <span class="skill-name">database</span>
+                </div>
+              </div>
+
+              <div class="flow-node skill-node secondary">
+                <div class="node-content">
+                  <div class="skill-avatar">
+                    <Icon name="shield" size={18} />
+                  </div>
+                  <span class="skill-name">security</span>
+                </div>
+              </div>
+
+              <div class="flow-node skill-node secondary">
+                <div class="node-content">
+                  <div class="skill-avatar">
+                    <Icon name="git-branch" size={18} />
+                  </div>
+                  <span class="skill-name">devops</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Converge arrow -->
+            <div class="flow-arrow converge">
+              <div class="arrow-line"></div>
+            </div>
+
+            <!-- Output -->
+            <div class="flow-node output-node">
+              <div class="node-icon">
+                <Icon name="check-circle" size={16} />
+              </div>
+              <span class="node-label">Production Code</span>
+            </div>
           </div>
-          <h4>Collaboration</h4>
-          <p>Prerequisites. Handoffs. When to delegate to other skills.</p>
+
+          <!-- Live log output -->
+          <div class="flow-log">
+            <div class="log-line">
+              <span class="log-time">00:01</span>
+              <span class="log-skill">backend</span>
+              <span class="log-msg">Analyzing API structure...</span>
+            </div>
+            <div class="log-line">
+              <span class="log-time">00:02</span>
+              <span class="log-skill edge">backend</span>
+              <span class="log-msg">Sharp edge detected: Missing rate limiting</span>
+            </div>
+            <div class="log-line">
+              <span class="log-time">00:03</span>
+              <span class="log-skill handoff">backend → security</span>
+              <span class="log-msg">Delegating auth patterns...</span>
+            </div>
+            <div class="log-line">
+              <span class="log-time">00:04</span>
+              <span class="log-skill">security</span>
+              <span class="log-msg">Applying JWT best practices</span>
+            </div>
+            <div class="log-line typing">
+              <span class="log-time">00:05</span>
+              <span class="log-skill">devops</span>
+              <span class="log-msg">Adding CI/CD checks<span class="cursor">_</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- What makes a skill -->
+      <div class="skill-anatomy">
+        <h3>Each Skill Contains</h3>
+        <div class="anatomy-grid">
+          <div class="anatomy-item">
+            <span class="anatomy-dot identity"></span>
+            <div class="anatomy-content">
+              <span class="anatomy-file">skill.yaml</span>
+              <span class="anatomy-desc">Identity & patterns</span>
+            </div>
+          </div>
+          <div class="anatomy-item">
+            <span class="anatomy-dot edges"></span>
+            <div class="anatomy-content">
+              <span class="anatomy-file">sharp-edges.yaml</span>
+              <span class="anatomy-desc">8-12 gotchas to catch</span>
+            </div>
+          </div>
+          <div class="anatomy-item">
+            <span class="anatomy-dot validations"></span>
+            <div class="anatomy-content">
+              <span class="anatomy-file">validations.yaml</span>
+              <span class="anatomy-desc">Automated code checks</span>
+            </div>
+          </div>
+          <div class="anatomy-item">
+            <span class="anatomy-dot collab"></span>
+            <div class="anatomy-content">
+              <span class="anatomy-file">collaboration.yaml</span>
+              <span class="anatomy-desc">Handoffs & delegation</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -373,45 +496,351 @@
     max-width: 600px;
   }
 
-  .files-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: var(--space-4);
+  /* Workflow Terminal */
+  .workflow-terminal {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    margin-bottom: var(--space-6);
+    overflow: hidden;
+  }
+
+  .terminal-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: rgba(0, 0, 0, 0.2);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .terminal-dots {
+    display: flex;
+    gap: 6px;
+  }
+
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+
+  .dot.red { background: #ff5f57; }
+  .dot.yellow { background: #febc2e; }
+  .dot.green { background: #28c840; }
+
+  .terminal-title {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+  }
+
+  .terminal-body {
+    padding: var(--space-6);
+  }
+
+  /* Flow Container */
+  .flow-container {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-6);
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .flow-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    position: relative;
+  }
+
+  .flow-node.input-node,
+  .flow-node.output-node {
+    background: transparent;
+    border: 1px dashed var(--border);
+  }
+
+  .flow-node.skill-node.primary {
+    border-color: var(--green-dim);
+    box-shadow: 0 0 20px rgba(0, 196, 154, 0.1);
+  }
+
+  .flow-node.skill-node.secondary {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .node-badge {
+    position: absolute;
+    top: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 2px 8px;
+    background: var(--green-dim);
+    color: var(--bg-primary);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .node-icon {
+    color: var(--text-tertiary);
+  }
+
+  .node-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+  }
+
+  .node-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  .skill-avatar {
+    color: var(--green-dim);
+  }
+
+  .skill-name {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-primary);
+  }
+
+  .skill-files {
+    display: flex;
+    gap: 4px;
+    margin-top: var(--space-1);
+  }
+
+  .file-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+
+  .file-dot.identity { background: var(--green-dim); }
+  .file-dot.edges { background: #f59e0b; }
+  .file-dot.validations { background: #3b82f6; }
+  .file-dot.collab { background: #a855f7; }
+
+  /* Flow Arrows */
+  .flow-arrow {
+    display: flex;
+    align-items: center;
+    position: relative;
+    width: 40px;
+  }
+
+  .arrow-line {
+    width: 100%;
+    height: 2px;
+    background: var(--border);
+    position: relative;
+  }
+
+  .arrow-line::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    border: 4px solid transparent;
+    border-left-color: var(--border);
+  }
+
+  .arrow-pulse {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    background: var(--green-dim);
+    border-radius: 50%;
+    animation: pulse-move 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-move {
+    0%, 100% { left: 0; opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { left: 100%; opacity: 0; }
+  }
+
+  /* Flow Handoff */
+  .flow-handoff {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-1);
+    position: relative;
+    padding: 0 var(--space-2);
+  }
+
+  .handoff-line {
+    width: 2px;
+    height: 20px;
+    background: linear-gradient(180deg, var(--border) 0%, var(--green-dim) 100%);
+  }
+
+  .handoff-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--green-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: var(--bg-secondary);
+    padding: 2px 6px;
+    border: 1px solid var(--green-dim);
+  }
+
+  .handoff-pulse {
+    width: 6px;
+    height: 6px;
+    background: var(--green-dim);
+    border-radius: 50%;
+    animation: handoff-blink 1.5s ease-in-out infinite;
+  }
+
+  @keyframes handoff-blink {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+  }
+
+  /* Flow Branch */
+  .flow-branch {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .flow-arrow.converge {
+    width: 30px;
+  }
+
+  /* Flow Log */
+  .flow-log {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border);
+    padding: var(--space-3);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+  }
+
+  .log-line {
+    display: flex;
+    gap: var(--space-3);
+    padding: var(--space-1) 0;
+    opacity: 0;
+    animation: log-appear 0.3s ease-out forwards;
+  }
+
+  .log-line:nth-child(1) { animation-delay: 0.5s; }
+  .log-line:nth-child(2) { animation-delay: 1.5s; }
+  .log-line:nth-child(3) { animation-delay: 2.5s; }
+  .log-line:nth-child(4) { animation-delay: 3.5s; }
+  .log-line:nth-child(5) { animation-delay: 4.5s; }
+
+  @keyframes log-appear {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .log-time {
+    color: var(--text-tertiary);
+    min-width: 35px;
+  }
+
+  .log-skill {
+    color: var(--green-dim);
+    min-width: 100px;
+  }
+
+  .log-skill.edge {
+    color: #f59e0b;
+  }
+
+  .log-skill.handoff {
+    color: #a855f7;
+  }
+
+  .log-msg {
+    color: var(--text-secondary);
+  }
+
+  .log-line.typing .cursor {
+    animation: blink 0.8s step-end infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
+  /* Skill Anatomy */
+  .skill-anatomy {
     margin-bottom: var(--space-6);
   }
 
-  .file-card {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    padding: var(--space-4);
+  .skill-anatomy h3 {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin: 0 0 var(--space-3);
   }
 
-  .file-header {
+  .anatomy-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--space-3);
+  }
+
+  .anatomy-item {
     display: flex;
     align-items: center;
-    gap: var(--space-2);
+    gap: var(--space-3);
+    padding: var(--space-3);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+  }
+
+  .anatomy-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .anatomy-dot.identity { background: var(--green-dim); }
+  .anatomy-dot.edges { background: #f59e0b; }
+  .anatomy-dot.validations { background: #3b82f6; }
+  .anatomy-dot.collab { background: #a855f7; }
+
+  .anatomy-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .anatomy-file {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-primary);
+  }
+
+  .anatomy-desc {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
     color: var(--text-tertiary);
-    margin-bottom: var(--space-2);
-  }
-
-  .file-header span {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-  }
-
-  .file-card h4 {
-    font-family: var(--font-mono);
-    font-size: var(--text-base);
-    font-weight: 600;
-    color: var(--green-dim);
-    margin: 0 0 var(--space-2);
-  }
-
-  .file-card p {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    margin: 0;
-    line-height: 1.5;
   }
 
   .stats-bar {
@@ -748,6 +1177,51 @@
 
     .create-cta {
       flex-direction: column;
+    }
+
+    /* Workflow Terminal Mobile */
+    .terminal-body {
+      padding: var(--space-4);
+    }
+
+    .flow-container {
+      flex-direction: column;
+      gap: var(--space-4);
+    }
+
+    .flow-arrow {
+      transform: rotate(90deg);
+      width: 30px;
+    }
+
+    .flow-handoff {
+      flex-direction: row;
+      gap: var(--space-2);
+    }
+
+    .handoff-line {
+      width: 20px;
+      height: 2px;
+      background: linear-gradient(90deg, var(--border) 0%, var(--green-dim) 100%);
+    }
+
+    .flow-branch {
+      flex-direction: row;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: var(--space-3);
+    }
+
+    .flow-arrow.converge {
+      transform: rotate(90deg);
+    }
+
+    .log-skill {
+      min-width: 80px;
+    }
+
+    .anatomy-grid {
+      grid-template-columns: 1fr 1fr;
     }
   }
 </style>
