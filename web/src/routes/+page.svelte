@@ -785,16 +785,8 @@
 
     <!-- Result Summary -->
     <div class="flow-result">
-      <p class="result-text">Spawner gives Claude <strong>expertise</strong>. Mind gives Claude <strong>memory</strong>.</p>
-      <p class="result-tagline">Together, Claude becomes the senior dev who's seen it all and never forgets.</p>
+      <p class="result-text">Spawner gives Claude <strong>expertise</strong>. Mind gives Claude <strong>memory</strong>. Together, they level up every session—seamlessly, right in your terminal. Quick setup below. They run quietly as MCPs—like superpowers you didn't know you needed.</p>
     </div>
-
-    <div class="flow-install-hint">
-      <Icon name="info" size={14} />
-      <span>Both install as MCP servers—just add two config blocks to Claude Desktop</span>
-    </div>
-
-    <a href="/how-it-works" class="cta-button">Get Started</a>
   </section>
 
   <!-- Divider -->
@@ -1952,21 +1944,23 @@
   }
 
   .result-text {
-    font-family: var(--font-mono);
     font-size: var(--text-base);
     color: var(--text-secondary);
-    margin: 0 0 var(--space-2);
+    margin: 0 0 var(--space-3);
+    max-width: 650px;
+    line-height: 1.7;
   }
 
   .result-text strong {
     color: var(--green-dim);
   }
 
-  .result-tagline {
-    font-family: var(--font-serif);
-    font-size: var(--text-xl);
-    color: var(--text-primary);
-    margin: 0;
+  .result-cta {
+    font-size: var(--text-base);
+    color: var(--text-tertiary);
+    margin: var(--space-3) 0 0 0;
+    max-width: 550px;
+    line-height: 1.5;
   }
 
   .flow-install-hint {
@@ -2055,7 +2049,7 @@
   .panel-action {
     font-family: var(--font-mono);
     font-size: var(--text-xs);
-    color: var(--text-tertiary);
+    color: var(--text-secondary);
     opacity: 0;
     transform: translateX(-5px);
     animation: panel-action-appear 0.5s ease forwards;
@@ -2347,8 +2341,24 @@
 
   .timeline-node.active .node-dot {
     border-color: var(--green-dim);
-    background: var(--green-dim);
+    background: var(--bg-primary);
     box-shadow: 0 0 12px rgba(0, 196, 154, 0.4);
+    position: relative;
+  }
+
+  .timeline-node.active .node-dot::before {
+    content: '';
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--green-dim);
+    animation: node-pulse 1.2s ease-in-out infinite;
+  }
+
+  @keyframes node-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.4); opacity: 0.6; }
   }
 
   .timeline-node.completed .node-dot {
