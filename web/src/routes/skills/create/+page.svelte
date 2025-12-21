@@ -463,22 +463,15 @@ cross_domain_insights:
   <!-- Getting Started CTA -->
   <section class="section cta-section">
     <h2>Ready to Create?</h2>
-    <div class="cta-options">
-      <div class="cta-option">
-        <h3>Start from scratch</h3>
-        <p>Create a new folder and add the 4 YAML files manually.</p>
-        <div class="terminal">
-          <code>mkdir my-skill && cd my-skill</code>
-          <code>touch skill.yaml sharp-edges.yaml validations.yaml collaboration.yaml</code>
-        </div>
+    <p class="cta-desc">Use Spawner to generate world-class skills with all 4 YAML files.</p>
+    <div class="cta-single">
+      <div class="terminal">
+        <code class="comment"># Step 1: Generate the skill scaffold</code>
+        <code>spawner_skill_new(id: "api-rate-limits", name: "API Rate Limits", category: "development")</code>
+        <code class="comment"># Step 2: Spawner returns 4 files - ask Claude to create them</code>
+        <code>"Create these skill files in my project"</code>
       </div>
-      <div class="cta-option">
-        <h3>Use Spawner</h3>
-        <p>Let Claude generate a scaffold for you.</p>
-        <div class="terminal">
-          <code>spawner_skill_new("My skill for handling API rate limits")</code>
-        </div>
-      </div>
+      <p class="cta-note">Spawner generates skill.yaml, sharp-edges.yaml, validations.yaml, and collaboration.yaml with templates ready to fill in.</p>
     </div>
   </section>
 </div>
@@ -892,40 +885,32 @@ cross_domain_insights:
   }
 
   .cta-section h2 {
-    margin-bottom: 1.5rem;
+    margin-bottom: 0.5rem;
     color: var(--text-primary);
   }
 
-  .cta-options {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 1.5rem;
+  .cta-desc {
+    color: var(--text-secondary);
+    margin: 0 0 1.5rem 0;
+  }
+
+  .cta-single {
+    max-width: 600px;
+    margin: 0 auto;
     text-align: left;
   }
 
-  .cta-option {
-    background: var(--bg-primary);
-    padding: 1.5rem;
-    border: 1px solid var(--border);
-  }
-
-  .cta-option h3 {
-    font-size: 1rem;
-    font-weight: 600;
-    margin: 0 0 0.5rem 0;
-    color: var(--text-primary);
-  }
-
-  .cta-option p {
+  .cta-note {
     font-size: 0.875rem;
-    color: var(--text-secondary);
-    margin: 0 0 1rem 0;
+    color: var(--text-tertiary);
+    margin: 1rem 0 0 0;
+    text-align: center;
   }
 
   .terminal {
     background: var(--terminal-bg);
     border: 1px solid var(--terminal-border);
-    padding: 0.75rem 1rem;
+    padding: 1rem 1.25rem;
   }
 
   .terminal code {
@@ -933,7 +918,11 @@ cross_domain_insights:
     font-family: var(--font-mono);
     font-size: 0.8rem;
     color: var(--terminal-command);
-    line-height: 1.6;
+    line-height: 1.8;
+  }
+
+  .terminal code.comment {
+    color: var(--terminal-muted);
   }
 
   /* Mobile Responsive */

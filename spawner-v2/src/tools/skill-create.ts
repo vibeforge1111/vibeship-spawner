@@ -864,45 +864,50 @@ function buildScaffoldInstruction(
 **Category:** ${category}
 **Files:** ${files.length}
 
+### IMPORTANT: Create All 4 YAML Files
+
+**DO NOT create a single markdown file.** Create a folder with these 4 YAML files:
+
+\`\`\`
+${id}/
+├── skill.yaml           ← Identity, patterns, anti-patterns, handoffs
+├── sharp-edges.yaml     ← Gotchas with detection patterns
+├── validations.yaml     ← Automated code checks
+└── collaboration.yaml   ← Prerequisites, delegation, skill interactions
+\`\`\`
+
 ### Next Steps
 
-1. **Create the files** in spawner-v2/skills/${category}/${id}/:
-   ${files.map(f => f.path.split('/').pop()).join('\n   ')}
+1. **Create a folder** named \`${id}/\` in your project (or in \`skills/${category}/\` if contributing to VibeShip)
 
-2. **Fill in the placeholders** in each file:
+2. **Create all 4 files** using the content provided above:
+   - skill.yaml
+   - sharp-edges.yaml
+   - validations.yaml
+   - collaboration.yaml
+
+3. **Fill in the placeholders** in each file:
    - skill.yaml: Complete identity, add real patterns/anti-patterns/handoffs
    - sharp-edges.yaml: Document 8-12 real gotchas with detection patterns
    - validations.yaml: Add 8-12 automated checks with tested regex
    - collaboration.yaml: Define prerequisites, delegation triggers, skill interactions
 
-3. **Quality requirements:**
-   - [ ] Identity sounds like a real expert with battle scars
-   - [ ] 4-6 patterns with copy-paste ready code
-   - [ ] 4-6 anti-patterns with clear "why" and alternatives
-   - [ ] 8-12 sharp edges with specific situations and solutions
-   - [ ] 8-12 validations with tested regex patterns
-   - [ ] Handoffs to related skills defined
-   - [ ] 3-5 delegation triggers with context
-   - [ ] 2-3 cross-domain insights
+### Quality Requirements
 
-4. **Upload to KV:**
-   \`\`\`bash
-   cd spawner-v2
-   node scripts/upload-skills.js
-   \`\`\`
+- [ ] Identity sounds like a real expert with battle scars
+- [ ] 4-6 patterns with copy-paste ready code
+- [ ] 4-6 anti-patterns with clear "why" and alternatives
+- [ ] 8-12 sharp edges with specific situations and solutions
+- [ ] 8-12 validations with tested regex patterns
+- [ ] Handoffs to related skills defined
 
-### Quality Checklist
+### Why 4 Files?
 
-Sharp Edges:
-- [ ] Each is a real gotcha learned the hard way
-- [ ] Specific situations, not generic advice
-- [ ] Working code in solutions
-- [ ] Detection patterns tested
-
-Validations:
-- [ ] Regex tested against real code
-- [ ] No excessive false positives
-- [ ] Fix actions are specific and actionable
+Skills with multiple YAML files are more specialized and get more out of Claude's capabilities than a single markdown file. Each file serves a specific purpose:
+- **skill.yaml** - Who you are and how you behave
+- **sharp-edges.yaml** - What Claude doesn't know by default
+- **validations.yaml** - Automated checks that catch real issues
+- **collaboration.yaml** - How this skill works with others
 
 ---
 
