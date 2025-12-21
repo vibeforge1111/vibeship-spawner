@@ -220,6 +220,7 @@
   let visibleLines = $state<ReturnType<typeof getTerminalLines>>([]);
 
   function startAnimation() {
+    if (isAnimating) return; // Prevent double-start
     visibleLines = [];
     isAnimating = true;
     animationComplete = false;
@@ -720,6 +721,36 @@
     <div class="anthropic-quote-banner">
       <blockquote>"Think of Skills as custom onboarding materials that let you package expertise, making Claude a specialist on what matters most to you."</blockquote>
       <cite>— <a href="https://claude.com/blog/skills" target="_blank" rel="noopener">Anthropic, Introducing Agent Skills</a></cite>
+    </div>
+
+    <div class="combo-benefits">
+      <h3 class="combo-title">What you get with Spawner + Mind</h3>
+      <div class="combo-boxes">
+        <div class="combo-box">
+          <span class="combo-label">50+ Skills</span>
+          <span class="combo-desc">Expert specialists for your stack</span>
+        </div>
+        <div class="combo-box">
+          <span class="combo-label">Memory</span>
+          <span class="combo-desc">Remembers across sessions</span>
+        </div>
+        <div class="combo-box">
+          <span class="combo-label">Validation</span>
+          <span class="combo-desc">Catches issues before shipping</span>
+        </div>
+        <div class="combo-box">
+          <span class="combo-label">Sharp Edges</span>
+          <span class="combo-desc">Warns before you hit gotchas</span>
+        </div>
+        <div class="combo-box">
+          <span class="combo-label">Escape Hatches</span>
+          <span class="combo-desc">Detects loops, offers alternatives</span>
+        </div>
+        <div class="combo-box">
+          <span class="combo-label">Auto-Spawning</span>
+          <span class="combo-desc">Right skills loaded for your project</span>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -1968,6 +1999,52 @@
 
   .anthropic-quote-banner cite a:hover {
     text-decoration: underline;
+  }
+
+  /* Spawner + Mind Benefits */
+  .combo-benefits {
+    max-width: 900px;
+    margin: var(--space-6) auto 0;
+  }
+
+  .combo-title {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--green-dim);
+    margin: 0 0 var(--space-4);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    text-align: center;
+  }
+
+  .combo-boxes {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-2);
+  }
+
+  .combo-box {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    padding: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .combo-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .combo-desc {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    line-height: 1.4;
   }
 
   .comparison-table {
@@ -3338,6 +3415,10 @@
 
     .anthropic-quote-banner blockquote {
       font-size: var(--text-lg);
+    }
+
+    .combo-boxes {
+      grid-template-columns: repeat(2, 1fr);
     }
 
     .comparison-header {
