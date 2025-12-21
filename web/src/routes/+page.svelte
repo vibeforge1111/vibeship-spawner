@@ -1631,7 +1631,7 @@
   .yaml-file {
     background: var(--bg-primary);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 0;
     padding: var(--space-3);
   }
 
@@ -1681,7 +1681,7 @@
   .yaml-vs-markdown {
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 0;
     padding: var(--space-3);
     margin-top: var(--space-2);
   }
@@ -1712,7 +1712,7 @@
   .skills-directory-preview {
     background: var(--bg-primary);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 0;
     display: flex;
     flex-direction: column;
   }
@@ -1767,8 +1767,8 @@
 
   .category-row {
     display: grid;
-    grid-template-columns: 1fr 40px 32px;
-    gap: var(--space-3);
+    grid-template-columns: 1fr 28px 28px;
+    gap: var(--space-2);
     padding: var(--space-4);
     align-items: center;
     width: 100%;
@@ -1820,15 +1820,18 @@
   }
 
   .cat-count {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     font-weight: 600;
-    color: var(--green-dim);
-    background: rgba(0, 196, 154, 0.15);
-    padding: 4px 10px;
-    border-radius: 12px;
-    text-align: center;
-    min-width: 32px;
+    color: var(--text-secondary);
+    background: transparent;
+    width: 28px;
+    height: 28px;
+    border-radius: 0;
+    border: 1px solid var(--border);
   }
 
   .cat-toggle {
@@ -1842,7 +1845,8 @@
     font-weight: 700;
     color: var(--green-dim);
     background: rgba(0, 196, 154, 0.1);
-    border-radius: 6px;
+    border-radius: 0;
+    border: 1px solid rgba(0, 196, 154, 0.3);
     transition: transform 0.2s, background 0.15s, color 0.15s;
   }
 
@@ -1874,7 +1878,7 @@
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-1) var(--space-2);
-    border-radius: 4px;
+    border-radius: 0;
     text-decoration: none;
     transition: background 0.15s;
   }
