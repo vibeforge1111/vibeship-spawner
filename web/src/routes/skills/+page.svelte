@@ -340,7 +340,6 @@
   .skills-layout {
     display: flex;
     min-height: calc(100vh - 52px);
-    padding-top: 52px;
   }
 
   .skills-content {

@@ -171,6 +171,7 @@
     background: var(--bg-secondary);
     border-right: 1px solid var(--border);
     overflow-y: auto;
+    align-self: flex-start;
   }
 
   .sidebar-content {
