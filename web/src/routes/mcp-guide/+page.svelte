@@ -1,5 +1,6 @@
 <script lang="ts">
   import Navbar from '$lib/components/Navbar.svelte';
+  import Footer from '$lib/components/Footer.svelte';
   import Icon from '$lib/components/Icon.svelte';
 
   // Tool explorer state
@@ -465,32 +466,66 @@ New score: 91/100 (+4)`,
     <p class="hero-subtitle">How to get the most out of Spawner's 14 tools</p>
   </section>
 
-  <!-- All 14 Tools Overview -->
-  <section class="section tools-overview-section">
+  <!-- Tool Explorer (All 14 Tools) -->
+  <section id="tool-explorer" class="section tools-section">
     <div class="section-header">
       <span class="section-number">01</span>
       <h2>All 14 Tools</h2>
     </div>
     <div class="section-content">
-      <p class="section-desc">Everything Spawner adds to Claude. Click any tool to jump to details.</p>
+      <p class="section-desc">Everything Spawner adds to Claude. Click a tool to see example output and usage.</p>
 
-      <div class="tools-grid">
-        {#each Object.entries(tools) as [key, tool]}
-          <button
-            class="tool-card"
-            class:optional={tool.optional}
-            onclick={() => { selectedTool = key; document.getElementById('tool-explorer')?.scrollIntoView({ behavior: 'smooth' }); }}
-          >
-            <div class="tool-card-header">
-              <code>{tool.name}</code>
-              {#if tool.optional}
-                <span class="optional-tag">Optional</span>
-              {/if}
+      <div class="tool-explorer">
+        <div class="tool-list">
+          {#each categories as cat}
+            <div class="tool-category-section">
+              <div class="tool-category-label">{cat.label}</div>
+              {#each Object.entries(tools).filter(([_, t]) => t.category === cat.id) as [key, tool]}
+                <button
+                  class="tool-btn"
+                  class:active={selectedTool === key}
+                  onclick={() => selectedTool = key}
+                >
+                  <code>{tool.name}</code>
+                  {#if tool.optional}
+                    <span class="optional-badge">Optional</span>
+                  {/if}
+                  <span class="tool-desc">{tool.desc}</span>
+                </button>
+              {/each}
             </div>
-            <p class="tool-card-desc">{tool.desc}</p>
-            <span class="tool-card-category">{tool.category}</span>
-          </button>
-        {/each}
+          {/each}
+        </div>
+        <div class="tool-output-wrapper">
+          <div class="tool-output">
+            <div class="tool-output-header">
+              <span class="tool-output-dot"></span>
+              <span class="tool-output-dot"></span>
+              <span class="tool-output-dot"></span>
+              <span class="tool-output-title">{tools[selectedTool].name}</span>
+            </div>
+            <div class="tool-output-body">
+              <pre>{@html highlightOutput(tools[selectedTool].output)}</pre>
+            </div>
+          </div>
+          <div class="tool-explain">
+            <div class="tool-explain-what">
+              <p>{tools[selectedTool].explain.what}</p>
+            </div>
+            <div class="tool-explain-usage">
+              {#if tools[selectedTool].explain.auto}
+                <div class="usage-tag auto">
+                  <span class="tag-label">Auto</span>
+                  <span class="tag-desc">{tools[selectedTool].explain.autoWhen}</span>
+                </div>
+              {/if}
+              <div class="usage-tag manual">
+                <span class="tag-label">Manual</span>
+                <span class="tag-desc">{tools[selectedTool].explain.manual}</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -626,70 +661,6 @@ New score: 91/100 (+4)`,
     </div>
   </section>
 
-  <!-- Tool Explorer -->
-  <section id="tool-explorer" class="section tools-section">
-    <div class="section-header">
-      <span class="section-number">04</span>
-      <h2>Tool Details</h2>
-    </div>
-    <div class="section-content">
-      <p class="section-desc">Click a tool to see example output and usage. Auto tools run automatically, Manual tools need to be triggered by you.</p>
-
-      <div class="tool-explorer">
-        <div class="tool-list">
-          {#each categories as cat}
-            <div class="tool-category-section">
-              <div class="tool-category-label">{cat.label}</div>
-              {#each Object.entries(tools).filter(([_, t]) => t.category === cat.id) as [key, tool]}
-                <button
-                  class="tool-btn"
-                  class:active={selectedTool === key}
-                  onclick={() => selectedTool = key}
-                >
-                  <code>{tool.name}</code>
-                  {#if tool.optional}
-                    <span class="optional-badge">Optional</span>
-                  {/if}
-                  <span class="tool-desc">{tool.desc}</span>
-                </button>
-              {/each}
-            </div>
-          {/each}
-        </div>
-        <div class="tool-output-wrapper">
-          <div class="tool-output">
-            <div class="tool-output-header">
-              <span class="tool-output-dot"></span>
-              <span class="tool-output-dot"></span>
-              <span class="tool-output-dot"></span>
-              <span class="tool-output-title">{tools[selectedTool].name}</span>
-            </div>
-            <div class="tool-output-body">
-              <pre>{@html highlightOutput(tools[selectedTool].output)}</pre>
-            </div>
-          </div>
-          <div class="tool-explain">
-            <div class="tool-explain-what">
-              <p>{tools[selectedTool].explain.what}</p>
-            </div>
-            <div class="tool-explain-usage">
-              {#if tools[selectedTool].explain.auto}
-                <div class="usage-tag auto">
-                  <span class="tag-label">Auto</span>
-                  <span class="tag-desc">{tools[selectedTool].explain.autoWhen}</span>
-                </div>
-              {/if}
-              <div class="usage-tag manual">
-                <span class="tag-label">Manual</span>
-                <span class="tag-desc">{tools[selectedTool].explain.manual}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
   <!-- CTA -->
   <section class="cta-section">
     <h2>Explore 40+ Skills</h2>
@@ -700,15 +671,9 @@ New score: 91/100 (+4)`,
     </div>
   </section>
 
-  <footer class="footer">
-    <div class="footer-links">
-      <a href="https://github.com/vibeforge1111/vibeship-spawner" target="_blank" rel="noopener">GitHub</a>
-      <a href="/">Home</a>
-      <a href="/skills">Skills</a>
-      <a href="/skill-creation">Skill Creation</a>
-    </div>
-  </footer>
 </main>
+
+<Footer />
 
 <style>
   .mcp-guide {
@@ -778,72 +743,6 @@ New score: 91/100 (+4)`,
     font-size: var(--text-lg);
     color: var(--text-secondary);
     margin: 0 0 var(--space-6);
-  }
-
-  /* Tools Overview Grid */
-  .tools-overview-section {
-    max-width: 1100px;
-  }
-
-  .tools-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    gap: var(--space-3);
-  }
-
-  .tool-card {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    padding: var(--space-4);
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    cursor: pointer;
-    text-align: left;
-    transition: all var(--transition-fast);
-  }
-
-  .tool-card:hover {
-    border-color: var(--green-dim);
-    background: rgba(0, 196, 154, 0.05);
-  }
-
-  .tool-card-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-  }
-
-  .tool-card-header code {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    color: var(--green-dim);
-  }
-
-  .optional-tag {
-    font-family: var(--font-mono);
-    font-size: 9px;
-    font-weight: 600;
-    color: #D97757;
-    background: rgba(217, 119, 87, 0.1);
-    padding: 2px 6px;
-    text-transform: uppercase;
-  }
-
-  .tool-card-desc {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    margin: 0;
-    line-height: 1.5;
-  }
-
-  .tool-card-category {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-top: auto;
   }
 
   /* Setup Steps */
@@ -1359,28 +1258,6 @@ New score: 91/100 (+4)`,
 
   .btn-secondary:hover {
     border-color: var(--green-dim);
-    color: var(--green-dim);
-  }
-
-  /* Footer */
-  .footer {
-    padding: var(--space-8);
-    text-align: center;
-    border-top: 1px solid var(--border);
-  }
-
-  .footer-links {
-    display: flex;
-    justify-content: center;
-    gap: var(--space-6);
-  }
-
-  .footer-links a {
-    font-size: var(--text-sm);
-    color: var(--text-tertiary);
-  }
-
-  .footer-links a:hover {
     color: var(--green-dim);
   }
 
