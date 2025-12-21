@@ -623,8 +623,8 @@
 
   <!-- Skills vs General Claude Section -->
   <section class="comparison-section">
-    <h2 class="section-headline">Why Skills Matter</h2>
-    <p class="section-subtitle">What Anthropic says about Claude Skills</p>
+    <h2 class="section-headline">Why Skills Matter (Claude's Take)</h2>
+    <p class="section-subtitle">We asked Claude itself — here's why Skills, according to Anthropic's own documentation</p>
 
     <div class="comparison-table">
       <div class="comparison-header">
@@ -646,18 +646,6 @@
       </div>
 
       <div class="comparison-row">
-        <div class="comparison-col topic-col">Versioning</div>
-        <div class="comparison-col without-col">
-          <Icon name="x" size={14} />
-          <span>May suggest outdated implementations</span>
-        </div>
-        <div class="comparison-col with-col">
-          <Icon name="check" size={14} />
-          <span>Current version patterns</span>
-        </div>
-      </div>
-
-      <div class="comparison-row">
         <div class="comparison-col topic-col">Sharp Edges</div>
         <div class="comparison-col without-col">
           <Icon name="x" size={14} />
@@ -666,30 +654,6 @@
         <div class="comparison-col with-col">
           <Icon name="check" size={14} />
           <span>Warns you before you hit them</span>
-        </div>
-      </div>
-
-      <div class="comparison-row">
-        <div class="comparison-col topic-col">Code Validation</div>
-        <div class="comparison-col without-col">
-          <Icon name="x" size={14} />
-          <span>Relies on your review to catch issues</span>
-        </div>
-        <div class="comparison-col with-col">
-          <Icon name="check" size={14} />
-          <span>Runs actual checks before shipping</span>
-        </div>
-      </div>
-
-      <div class="comparison-row">
-        <div class="comparison-col topic-col">Security</div>
-        <div class="comparison-col without-col">
-          <Icon name="x" size={14} />
-          <span>General security awareness</span>
-        </div>
-        <div class="comparison-col with-col">
-          <Icon name="check" size={14} />
-          <span>Stack-specific vulnerability detection</span>
         </div>
       </div>
 
@@ -706,14 +670,74 @@
       </div>
 
       <div class="comparison-row">
-        <div class="comparison-col topic-col">Getting Stuck</div>
+        <div class="comparison-col topic-col">Versioning</div>
         <div class="comparison-col without-col">
           <Icon name="x" size={14} />
-          <span>Keeps trying same approach</span>
+          <span>May suggest outdated implementations</span>
+        </div>
+        <div class="comparison-col with-col partial">
+          <Icon name="check" size={14} />
+          <span>Current version patterns <em>(partially—base training still bleeds through)</em></span>
+        </div>
+      </div>
+
+      <div class="comparison-row">
+        <div class="comparison-col topic-col">Context Persistence</div>
+        <div class="comparison-col without-col">
+          <Icon name="x" size={14} />
+          <span>Re-explain your stack every conversation</span>
         </div>
         <div class="comparison-col with-col">
           <Icon name="check" size={14} />
-          <span>Detects loops and offers alternatives</span>
+          <span>Your project structure, preferences, and conventions are just there</span>
+        </div>
+      </div>
+
+      <div class="comparison-row">
+        <div class="comparison-col topic-col">Output Format Control</div>
+        <div class="comparison-col without-col">
+          <Icon name="x" size={14} />
+          <span>Inconsistent component structures, folder patterns</span>
+        </div>
+        <div class="comparison-col with-col">
+          <Icon name="check" size={14} />
+          <span>"Always do it this way" actually sticks across sessions</span>
+        </div>
+      </div>
+
+      <div class="comparison-row">
+        <div class="comparison-col topic-col">Workflow Encoding</div>
+        <div class="comparison-col without-col">
+          <Icon name="x" size={14} />
+          <span>You manually sequence every multi-step task</span>
+        </div>
+        <div class="comparison-col with-col">
+          <Icon name="check" size={14} />
+          <span>Step-by-step procedures survive between conversations</span>
+        </div>
+      </div>
+
+      <div class="comparison-row">
+        <div class="comparison-col topic-col">Tool-Specific Instructions</div>
+        <div class="comparison-col without-col">
+          <Icon name="x" size={14} />
+          <span>Zero knowledge of your internal CLIs, MCPs, custom APIs</span>
+        </div>
+        <div class="comparison-col with-col">
+          <Icon name="check" size={14} />
+          <span>Your proprietary tools documented and usable</span>
+        </div>
+      </div>
+
+      <div class="comparison-row">
+        <div class="comparison-col topic-col">Business Logic</div>
+        <div class="comparison-col without-col">
+          <Icon name="x" size={14} />
+          <span>Guesses at your domain rules</span>
+        </div>
+        <div class="comparison-col with-col">
+          <Icon name="check" size={14} />
+          <span>Knows "users need X before Y because Z"</span>
         </div>
       </div>
     </div>
@@ -721,36 +745,6 @@
     <div class="anthropic-quote-banner">
       <blockquote>"Think of Skills as custom onboarding materials that let you package expertise, making Claude a specialist on what matters most to you."</blockquote>
       <cite>— <a href="https://claude.com/blog/skills" target="_blank" rel="noopener">Anthropic, Introducing Agent Skills</a></cite>
-    </div>
-
-    <div class="combo-benefits">
-      <h3 class="combo-title">What you get with Spawner + Mind</h3>
-      <div class="combo-boxes">
-        <div class="combo-box">
-          <span class="combo-label">50+ Skills</span>
-          <span class="combo-desc">Expert specialists for your stack</span>
-        </div>
-        <div class="combo-box">
-          <span class="combo-label">Memory</span>
-          <span class="combo-desc">Remembers across sessions</span>
-        </div>
-        <div class="combo-box">
-          <span class="combo-label">Validation</span>
-          <span class="combo-desc">Catches issues before shipping</span>
-        </div>
-        <div class="combo-box">
-          <span class="combo-label">Sharp Edges</span>
-          <span class="combo-desc">Warns before you hit gotchas</span>
-        </div>
-        <div class="combo-box">
-          <span class="combo-label">Escape Hatches</span>
-          <span class="combo-desc">Detects loops, offers alternatives</span>
-        </div>
-        <div class="combo-box">
-          <span class="combo-label">Auto-Spawning</span>
-          <span class="combo-desc">Right skills loaded for your project</span>
-        </div>
-      </div>
     </div>
   </section>
 
@@ -874,6 +868,38 @@
             <li>Sharp edges, validations, patterns from real production use</li>
             <li>Machine-actionable expertise Claude can execute, not just read</li>
           </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="combo-divider"></div>
+
+    <div class="combo-benefits">
+      <h3 class="combo-title">What you get with Spawner + Mind</h3>
+      <div class="combo-boxes">
+        <div class="combo-box">
+          <span class="combo-label">50+ Skills</span>
+          <span class="combo-desc">Expert specialists for your stack</span>
+        </div>
+        <div class="combo-box">
+          <span class="combo-label">Memory</span>
+          <span class="combo-desc">Remembers across sessions</span>
+        </div>
+        <div class="combo-box">
+          <span class="combo-label">Validation</span>
+          <span class="combo-desc">Catches issues before shipping</span>
+        </div>
+        <div class="combo-box">
+          <span class="combo-label">Sharp Edges</span>
+          <span class="combo-desc">Warns before you hit gotchas</span>
+        </div>
+        <div class="combo-box">
+          <span class="combo-label">Escape Hatches</span>
+          <span class="combo-desc">Detects loops, offers alternatives</span>
+        </div>
+        <div class="combo-box">
+          <span class="combo-label">Auto-Spawning</span>
+          <span class="combo-desc">Skills matched to your stack</span>
         </div>
       </div>
     </div>
@@ -1993,7 +2019,7 @@
   }
 
   .anthropic-quote-banner cite a {
-    color: var(--green-dim);
+    color: var(--text-primary);
     text-decoration: none;
   }
 
@@ -2002,9 +2028,16 @@
   }
 
   /* Spawner + Mind Benefits */
+  .combo-divider {
+    max-width: 900px;
+    margin: var(--space-8) auto;
+    height: 1px;
+    background: var(--border);
+  }
+
   .combo-benefits {
     max-width: 900px;
-    margin: var(--space-6) auto 0;
+    margin: 0 auto;
   }
 
   .combo-title {
@@ -2021,30 +2054,30 @@
   .combo-boxes {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: var(--space-2);
+    gap: var(--space-3);
   }
 
   .combo-box {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    padding: var(--space-3);
+    padding: var(--space-4) var(--space-5);
     display: flex;
     flex-direction: column;
-    gap: var(--space-1);
+    gap: var(--space-2);
   }
 
   .combo-label {
     font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    font-size: var(--text-base);
     font-weight: 600;
     color: var(--text-primary);
   }
 
   .combo-desc {
     font-family: var(--font-mono);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--text-muted);
-    line-height: 1.4;
+    line-height: 1.5;
   }
 
   .comparison-table {
@@ -2124,6 +2157,16 @@
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     line-height: 1.5;
+  }
+
+  .comparison-col.with-col em {
+    color: var(--text-muted);
+    font-style: normal;
+    font-size: var(--text-xs);
+  }
+
+  .comparison-col.with-col.partial {
+    background: rgba(255, 193, 7, 0.05);
   }
 
   .comparison-row:hover .comparison-col.without-col,
