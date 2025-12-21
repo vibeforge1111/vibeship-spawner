@@ -632,7 +632,7 @@ New score: 91/100 (+4)`,
       <h2>All 14 Tools</h2>
     </div>
     <div class="section-content">
-      <p class="section-desc">Click a command to see what it does</p>
+      <p class="section-desc">Click a command to see what it does and use the commands in your IDEs. Auto commands automatically work, whereas manual ones need to be triggered by you. Try them in your IDE to get familiar with them.</p>
 
       <div class="tool-explorer">
         <div class="tool-list">
