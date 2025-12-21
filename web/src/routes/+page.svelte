@@ -269,9 +269,9 @@
   function copyConfig() {
     navigator.clipboard.writeText(`{
   "mcpServers": {
-    "vibeship-spawner": {
+    "spawner": {
       "command": "npx",
-      "args": ["vibeship-spawner"]
+      "args": ["-y", "mcp-remote", "https://mcp.vibeship.co/sse"]
     }
   }
 }`);
@@ -285,17 +285,15 @@
     "spawner": {
       "command": "npx",
       "args": ["-y", "mcp-remote", "https://mcp.vibeship.co/sse"]
-    },
-    "mind": {
-      "command": "npx",
-      "args": ["-y", "@anthropic/mcp-mind"]
     }
   }
 }`,
     'new-project': 'I want to build [your idea]. Use spawner_plan to help me get started.',
     'existing-project': 'Analyze this codebase with spawner_analyze and load the right skills.',
-    'gotchas': 'Use spawner_watch_out to check for sharp edges before I implement auth.',
-    'unstick': "I'm going in circles. Use spawner_unstick to help me find another approach."
+    'gotchas': 'Use spawner_watch_out to check for sharp edges before I implement [feature].',
+    'unstick': "I'm going in circles. Use spawner_unstick to help me find another approach.",
+    'validate': 'Run spawner_validate on this file to check for issues.',
+    'remember': 'Use spawner_remember to save this decision: [what you decided].'
   };
 
   let copiedItem = $state<string | null>(null);
@@ -986,10 +984,6 @@
     "spawner": {
       "command": "npx",
       "args": ["-y", "mcp-remote", "https://mcp.vibeship.co/sse"]
-    },
-    "mind": {
-      "command": "npx",
-      "args": ["-y", "@anthropic/mcp-mind"]
     }
   }
 }`}</pre>
@@ -1003,7 +997,7 @@
         </div>
 
         <div class="qs-step">
-          <span class="qs-step-label">Step 3: Start building (copy-paste these)</span>
+          <span class="qs-step-label">Step 3: Start building</span>
 
           <div class="qs-prompts">
             <div class="qs-prompt">
@@ -1021,28 +1015,21 @@
                 <button class="copy-btn small" onclick={() => copyToClipboard('existing-project')}>Copy</button>
               </div>
             </div>
-
-            <div class="qs-prompt">
-              <span class="prompt-label">Check for gotchas:</span>
-              <div class="qs-code-block small">
-                <pre>"Use spawner_watch_out to check for sharp edges before I implement auth."</pre>
-                <button class="copy-btn small" onclick={() => copyToClipboard('gotchas')}>Copy</button>
-              </div>
-            </div>
-
-            <div class="qs-prompt">
-              <span class="prompt-label">When stuck:</span>
-              <div class="qs-code-block small">
-                <pre>"I'm going in circles. Use spawner_unstick to help me find another approach."</pre>
-                <button class="copy-btn small" onclick={() => copyToClipboard('unstick')}>Copy</button>
-              </div>
-            </div>
           </div>
         </div>
 
         <div class="qs-result">
           <span class="qs-check">✓</span>
-          <span class="qs-result-text">That's it. You now have a senior dev in Claude.</span>
+          <span class="qs-result-text">That's it. Claude now has 50+ expert skills and real-time validation.</span>
+        </div>
+
+        <div class="mind-recommend">
+          <span class="recommend-text">We recommend pairing Spawner with</span>
+          <a href="https://mind.vibeship.co" target="_blank" rel="noopener" class="mind-link-big">
+            <span class="mind-text">Mind</span>
+            <span class="mind-brain-big">🧠</span>
+          </a>
+          <span class="recommend-text">for persistent memory across sessions.</span>
         </div>
       </div>
     </div>
@@ -2946,6 +2933,126 @@
     color: var(--green-dim);
   }
 
+  /* Mind Recommendation */
+  .mind-recommend {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding: var(--space-4);
+    margin-top: var(--space-4);
+    border-top: 1px solid var(--border);
+    background: var(--bg-tertiary);
+  }
+
+  .recommend-text {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+  }
+
+  .mind-link-big {
+    position: relative;
+    display: inline;
+    color: var(--green-dim);
+    text-decoration: none;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+
+  .mind-link-big:hover {
+    color: var(--green);
+  }
+
+  .mind-text {
+    position: relative;
+    z-index: 1;
+  }
+
+  .mind-brain-big {
+    position: absolute;
+    top: -3.2em;
+    left: 50%;
+    transform: translateX(-50%) scale(0);
+    opacity: 0;
+    font-size: 2rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    padding: 0.4em 0.5em;
+    z-index: 10;
+    transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    pointer-events: none;
+    white-space: nowrap;
+    line-height: 1;
+  }
+
+  .mind-brain-big::after {
+    content: '';
+    position: absolute;
+    bottom: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-top: 8px solid var(--border);
+  }
+
+  .mind-link-big:hover .mind-brain-big {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+  }
+
+  /* Prompts Directory Section */
+  .prompts-section {
+    padding: var(--space-12) var(--space-8);
+    background: var(--bg-primary);
+  }
+
+  .prompts-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-4);
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  .prompt-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    padding: var(--space-4);
+  }
+
+  .prompt-card-label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--space-2);
+  }
+
+  .prompt-card-code {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .prompt-card-code pre {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   /* Agents Section (existing) */
   .agents-section {
     padding: var(--space-16) var(--space-8);
@@ -3418,6 +3525,14 @@
 
     .quickstart-section {
       padding: var(--space-8) var(--space-4);
+    }
+
+    .prompts-section {
+      padding: var(--space-8) var(--space-4);
+    }
+
+    .prompts-grid {
+      grid-template-columns: 1fr;
     }
 
     .section-headline {
