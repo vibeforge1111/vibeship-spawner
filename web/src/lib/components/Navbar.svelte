@@ -1,7 +1,24 @@
 <script lang="ts">
   import ThemeToggle from './ThemeToggle.svelte';
   import Icon from './Icon.svelte';
+
+  let skillsDropdownOpen = $state(false);
+
+  function toggleSkillsDropdown() {
+    skillsDropdownOpen = !skillsDropdownOpen;
+  }
+
+  function closeDropdown() {
+    skillsDropdownOpen = false;
+  }
 </script>
+
+<svelte:window onclick={(e) => {
+  const target = e.target as HTMLElement;
+  if (!target.closest('.skills-dropdown-container')) {
+    skillsDropdownOpen = false;
+  }
+}} />
 
 <nav class="navbar">
   <div class="navbar-content">
@@ -20,10 +37,49 @@
         <Icon name="book" size={14} />
         <span>Guide</span>
       </a>
-      <a href="/skills" class="nav-btn">
-        <Icon name="layers" size={14} />
-        <span>Skills</span>
-      </a>
+
+      <!-- Skills Dropdown -->
+      <div class="skills-dropdown-container">
+        <button class="nav-btn skills-trigger" onclick={toggleSkillsDropdown}>
+          <Icon name="layers" size={14} />
+          <span>Skills</span>
+          <Icon name="chevron-down" size={12} />
+        </button>
+
+        {#if skillsDropdownOpen}
+          <div class="skills-dropdown">
+            <a href="/skills" class="dropdown-item" onclick={closeDropdown}>
+              <Icon name="grid" size={14} />
+              <span>Browse All</span>
+            </a>
+            <a href="/skills/find" class="dropdown-item" onclick={closeDropdown}>
+              <Icon name="compass" size={14} />
+              <span>Find a Skill</span>
+            </a>
+            <a href="/skills/create" class="dropdown-item" onclick={closeDropdown}>
+              <Icon name="plus" size={14} />
+              <span>Create Your Own</span>
+            </a>
+
+            <div class="dropdown-divider"></div>
+
+            <div class="dropdown-label">Categories</div>
+            <a href="/skills?category=development" class="dropdown-item" onclick={closeDropdown}>
+              <span>Development</span>
+            </a>
+            <a href="/skills?category=frameworks" class="dropdown-item" onclick={closeDropdown}>
+              <span>Frameworks</span>
+            </a>
+            <a href="/skills?category=design" class="dropdown-item" onclick={closeDropdown}>
+              <span>Design</span>
+            </a>
+            <a href="/skills?category=strategy" class="dropdown-item" onclick={closeDropdown}>
+              <span>Strategy</span>
+            </a>
+          </div>
+        {/if}
+      </div>
+
       <ThemeToggle />
     </div>
   </div>
@@ -105,11 +161,86 @@
     text-decoration: none;
     color: var(--text-secondary);
     border: 1px solid transparent;
+    background: transparent;
+    cursor: pointer;
     transition: all 0.2s;
   }
 
   .nav-btn:hover {
     color: var(--text-primary);
     border-color: var(--border);
+  }
+
+  /* Skills Dropdown */
+  .skills-dropdown-container {
+    position: relative;
+  }
+
+  .skills-trigger {
+    border-radius: 4px;
+  }
+
+  .skills-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    min-width: 180px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    padding: 0.5rem 0;
+    z-index: 200;
+  }
+
+  .dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    text-decoration: none;
+    transition: all 0.15s;
+  }
+
+  .dropdown-item:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+  }
+
+  .dropdown-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 0.5rem 0;
+  }
+
+  .dropdown-label {
+    padding: 0.25rem 1rem 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-tertiary);
+  }
+
+  /* Mobile: hide text on smaller screens */
+  @media (max-width: 640px) {
+    .nav-btn span {
+      display: none;
+    }
+
+    .nav-btn {
+      padding: 0.4rem 0.5rem;
+    }
+
+    .skills-dropdown {
+      right: -1rem;
+    }
+
+    .dropdown-item span {
+      display: inline;
+    }
   }
 </style>
