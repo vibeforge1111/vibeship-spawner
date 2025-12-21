@@ -15,6 +15,117 @@
   let animationComplete = $state(false);
   let currentExample = $state(0);
 
+  // Skills directory preview state
+  let expandedCategory = $state<string | null>(null);
+
+  function toggleCategory(catId: string) {
+    expandedCategory = expandedCategory === catId ? null : catId;
+  }
+
+  // Skills data for the interactive preview
+  const previewCategories = [
+    {
+      id: 'frameworks',
+      name: 'Frameworks',
+      preview: 'Next.js, React, Supabase, Tailwind, TypeScript',
+      count: 5,
+      skills: [
+        { id: 'nextjs-app-router', name: 'Next.js App Router', desc: 'Server Components, App Router, Server Actions' },
+        { id: 'react-patterns', name: 'React Patterns', desc: 'Hooks, state management, performance' },
+        { id: 'supabase-backend', name: 'Supabase Backend', desc: 'RLS, auth, realtime, storage' },
+        { id: 'tailwind-ui', name: 'Tailwind UI', desc: 'Utility-first CSS, responsive design' },
+        { id: 'typescript-strict', name: 'TypeScript Strict', desc: 'Type safety, generics, strict mode' }
+      ]
+    },
+    {
+      id: 'development',
+      name: 'Development',
+      preview: 'Frontend, Backend, DevOps, Security, QA, AI...',
+      count: 12,
+      skills: [
+        { id: 'frontend', name: 'Frontend', desc: 'UI development, component architecture' },
+        { id: 'backend', name: 'Backend', desc: 'API design, database operations' },
+        { id: 'devops', name: 'DevOps', desc: 'CI/CD, infrastructure, deployment' },
+        { id: 'cybersecurity', name: 'Cybersecurity', desc: 'App security, OWASP, encryption' },
+        { id: 'qa-engineering', name: 'QA Engineering', desc: 'Testing strategies, automation' },
+        { id: 'ai-product', name: 'AI Product', desc: 'LLM integration, prompting' }
+      ]
+    },
+    {
+      id: 'integration',
+      name: 'Integration',
+      preview: 'Stripe, Auth, Vercel, Email Systems',
+      count: 4,
+      skills: [
+        { id: 'stripe-integration', name: 'Stripe Integration', desc: 'Payments, subscriptions, webhooks' },
+        { id: 'nextjs-supabase-auth', name: 'Next.js + Supabase Auth', desc: 'Auth flow, session management' },
+        { id: 'vercel-deployment', name: 'Vercel Deployment', desc: 'Deploy, env vars, edge functions' },
+        { id: 'email-systems', name: 'Email Systems', desc: 'Transactional email, templates' }
+      ]
+    },
+    {
+      id: 'design',
+      name: 'Design',
+      preview: 'UI, UX, Branding, Landing Pages',
+      count: 4,
+      skills: [
+        { id: 'ui-design', name: 'UI Design', desc: 'Visual design, component systems' },
+        { id: 'ux-design', name: 'UX Design', desc: 'User research, flows, usability' },
+        { id: 'branding', name: 'Branding', desc: 'Brand identity, voice, visual language' },
+        { id: 'landing-page-design', name: 'Landing Page Design', desc: 'Conversion-focused design, CTAs' }
+      ]
+    },
+    {
+      id: 'marketing',
+      name: 'Marketing',
+      preview: 'Copy, Content, SEO, Viral, Blog Writing...',
+      count: 8,
+      skills: [
+        { id: 'copywriting', name: 'Copywriting', desc: 'Headlines, CTAs, conversion copy' },
+        { id: 'content-strategy', name: 'Content Strategy', desc: 'Planning, audience, distribution' },
+        { id: 'seo', name: 'SEO', desc: 'Search optimization, technical SEO' },
+        { id: 'viral-marketing', name: 'Viral Marketing', desc: 'Viral loops, growth hacking' },
+        { id: 'blog-writing', name: 'Blog Writing', desc: 'Technical writing, thought leadership' }
+      ]
+    },
+    {
+      id: 'product',
+      name: 'Product',
+      preview: 'PM, Analytics, A/B Testing, Customer Success',
+      count: 4,
+      skills: [
+        { id: 'product-management', name: 'Product Management', desc: 'Roadmaps, prioritization' },
+        { id: 'analytics', name: 'Analytics', desc: 'Metrics, dashboards, data-driven' },
+        { id: 'a-b-testing', name: 'A/B Testing', desc: 'Experimentation, hypothesis testing' },
+        { id: 'customer-success', name: 'Customer Success', desc: 'Onboarding, retention' }
+      ]
+    },
+    {
+      id: 'strategy',
+      name: 'Strategy',
+      preview: 'Growth, Brand, Founder OS, Idea Maze, Pivot...',
+      count: 10,
+      skills: [
+        { id: 'growth-strategy', name: 'Growth Strategy', desc: 'Growth models, channels, scaling' },
+        { id: 'brand-positioning', name: 'Brand Positioning', desc: 'Market positioning, differentiation' },
+        { id: 'founder-operating-system', name: 'Founder OS', desc: 'Productivity, decision-making' },
+        { id: 'idea-maze', name: 'Idea Maze', desc: 'Problem exploration, opportunity sizing' },
+        { id: 'pivot-patterns', name: 'Pivot Patterns', desc: 'When to pivot, how to pivot' }
+      ]
+    },
+    {
+      id: 'startup',
+      name: 'Startup',
+      preview: 'YC Playbook, Founder Mode, Burn Rate',
+      count: 3,
+      skills: [
+        { id: 'yc-playbook', name: 'YC Playbook', desc: 'Y Combinator tactics, launch, feedback' },
+        { id: 'founder-mode', name: 'Founder Mode', desc: 'When to delegate vs. dive deep' },
+        { id: 'burn-rate-management', name: 'Burn Rate', desc: 'Runway, costs, financial planning' }
+      ]
+    }
+  ];
+
   const examples = [
     // Web3 NFT Marketplace
     {
@@ -619,60 +730,130 @@
 
   <!-- Skills System Section -->
   <section class="skills-deep-section">
-    <h2 class="section-headline">The Claude Skills System</h2>
-    <p class="section-subtitle">Structured knowledge, not prompt hacks</p>
+    <h2 class="section-headline">The Skill System</h2>
+    <p class="section-subtitle">YAML-powered expertise, not markdown fluff</p>
 
-    <div class="skills-anatomy">
-      <div class="skill-card-example">
-        <div class="skill-header-example">
-          <span class="skill-icon-example">📦</span>
-          <div>
-            <span class="skill-name-example">supabase-backend</span>
-            <span class="skill-type-example">Core Skill</span>
+    <div class="skills-two-col">
+      <!-- Left: YAML Anatomy -->
+      <div class="yaml-anatomy">
+        <div class="yaml-intro">
+          <p>Each skill is a structured YAML package with <strong>4 files</strong> that give Claude real expertise:</p>
+        </div>
+
+        <div class="yaml-files">
+          <div class="yaml-file">
+            <div class="yaml-file-header">
+              <Icon name="file-text" size={16} />
+              <span class="yaml-filename">skill.yaml</span>
+            </div>
+            <ul class="yaml-contents">
+              <li><strong>Identity</strong> — Who is this expert? Core principles, battle scars</li>
+              <li><strong>Patterns</strong> — Proven approaches with code examples</li>
+              <li><strong>Anti-patterns</strong> — What NOT to do and why</li>
+              <li><strong>Handoffs</strong> — When to delegate to other skills</li>
+            </ul>
+          </div>
+
+          <div class="yaml-file">
+            <div class="yaml-file-header">
+              <Icon name="alert-triangle" size={16} />
+              <span class="yaml-filename">sharp-edges.yaml</span>
+            </div>
+            <ul class="yaml-contents">
+              <li><strong>8-12 gotchas</strong> — Real pitfalls that catch developers</li>
+              <li><strong>Detection patterns</strong> — Regex to spot issues in code</li>
+              <li><strong>Severity levels</strong> — Critical, high, medium warnings</li>
+              <li><strong>Solutions</strong> — Exact fix with code examples</li>
+            </ul>
+          </div>
+
+          <div class="yaml-file">
+            <div class="yaml-file-header">
+              <Icon name="check-circle" size={16} />
+              <span class="yaml-filename">validations.yaml</span>
+            </div>
+            <ul class="yaml-contents">
+              <li><strong>8-12 automated checks</strong> — Run against your code</li>
+              <li><strong>Pattern matching</strong> — Catches bugs before shipping</li>
+              <li><strong>Fix actions</strong> — What to do when check fails</li>
+              <li><strong>File targeting</strong> — Knows which files to scan</li>
+            </ul>
+          </div>
+
+          <div class="yaml-file">
+            <div class="yaml-file-header">
+              <Icon name="git-branch" size={16} />
+              <span class="yaml-filename">collaboration.yaml</span>
+            </div>
+            <ul class="yaml-contents">
+              <li><strong>Prerequisites</strong> — What skills this needs</li>
+              <li><strong>Delegation triggers</strong> — When to hand off</li>
+              <li><strong>Cross-domain insights</strong> — Shared knowledge</li>
+            </ul>
           </div>
         </div>
-        <div class="skill-body-example">
-          <div class="skill-section-example">
-            <span class="section-label">Owns</span>
-            <span class="section-value">Database setup, RLS policies, auth hooks, realtime</span>
-          </div>
-          <div class="skill-section-example">
-            <span class="section-label">Sharp Edges</span>
-            <span class="section-value">12 gotchas like "RLS auth.uid() timing race condition"</span>
-          </div>
-          <div class="skill-section-example">
-            <span class="section-label">Patterns</span>
-            <span class="section-value">Server client vs browser client, service role usage</span>
-          </div>
-          <div class="skill-section-example">
-            <span class="section-label">Anti-patterns</span>
-            <span class="section-value">Exposing service key, skipping RLS, sync operations</span>
-          </div>
-          <div class="skill-section-example">
-            <span class="section-label">Validations</span>
-            <span class="section-value">Check for hardcoded keys, missing RLS, exposed routes</span>
-          </div>
-          <div class="skill-section-example">
-            <span class="section-label">Hands off to</span>
-            <span class="section-value">auth-flow for login UI, payments-flow for billing</span>
-          </div>
+
+        <div class="yaml-vs-markdown">
+          <span class="vs-label">vs Basic Skills:</span>
+          <span class="vs-text">Markdown docs are human-readable. YAML skills are <em>machine-actionable</em> — Claude can match situations, scan code, and warn proactively.</span>
         </div>
       </div>
 
-      <div class="skills-list-example">
-        <h3 class="skills-list-title">Available Skills</h3>
-        <div class="skill-chips">
-          <span class="skill-chip core">nextjs-app-router</span>
-          <span class="skill-chip core">supabase-backend</span>
-          <span class="skill-chip core">auth-flow</span>
-          <span class="skill-chip core">payments-flow</span>
-          <span class="skill-chip integration">tailwind-ui</span>
-          <span class="skill-chip integration">ai-integration</span>
-          <span class="skill-chip pattern">typescript-strict</span>
-          <span class="skill-chip pattern">react-patterns</span>
-          <span class="skill-chip pattern">api-design</span>
+      <!-- Right: Skills Directory Preview -->
+      <div class="skills-directory-preview">
+        <div class="directory-header-preview">
+          <span class="directory-count">54 Skills</span>
+          <a href="/skills" class="directory-link">View All →</a>
         </div>
-        <p class="skills-note">Skills are curated, versioned, and battle-tested—not AI-generated slop</p>
+
+        <div class="category-list">
+          {#each previewCategories as cat}
+            <div class="category-item" class:expanded={expandedCategory === cat.id}>
+              <button class="category-row" onclick={() => toggleCategory(cat.id)}>
+                <div class="cat-info">
+                  <span class="cat-name">{cat.name}</span>
+                  <span class="cat-skills">{cat.preview}</span>
+                </div>
+                <span class="cat-count">{cat.count}</span>
+                <span class="cat-toggle">{expandedCategory === cat.id ? '−' : '+'}</span>
+              </button>
+
+              {#if expandedCategory === cat.id}
+                <div class="category-skills">
+                  {#each cat.skills as skill}
+                    <a href="/skills#{skill.id}" class="mini-skill">
+                      <span class="mini-skill-name">{skill.name}</span>
+                      <span class="mini-skill-desc">{skill.desc}</span>
+                    </a>
+                  {/each}
+                  {#if cat.skills.length < cat.count}
+                    <a href="/skills#{cat.id}" class="mini-skill more">
+                      <span class="mini-skill-name">+ {cat.count - cat.skills.length} more</span>
+                      <span class="mini-skill-desc">View all in Skills Directory</span>
+                    </a>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          {/each}
+        </div>
+
+        <div class="directory-stats">
+          <div class="stat">
+            <span class="stat-value">253</span>
+            <span class="stat-label">Sharp Edges</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value">411</span>
+            <span class="stat-label">Validations</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value">200+</span>
+            <span class="stat-label">Patterns</span>
+          </div>
+        </div>
+
+        <p class="directory-note">Curated, versioned, battle-tested — not AI-generated slop</p>
       </div>
     </div>
   </section>
@@ -1415,126 +1596,352 @@
     background: var(--bg-secondary);
   }
 
-  .skills-anatomy {
+  .skills-two-col {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: var(--space-8);
-    max-width: 1000px;
+    max-width: 1100px;
     margin: 0 auto;
   }
 
-  .skill-card-example {
+  /* YAML Anatomy - Left Side */
+  .yaml-anatomy {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .yaml-intro p {
+    font-size: var(--text-base);
+    color: var(--text-secondary);
+    margin: 0;
+    line-height: 1.6;
+  }
+
+  .yaml-intro strong {
+    color: var(--green-dim);
+  }
+
+  .yaml-files {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .yaml-file {
     background: var(--bg-primary);
     border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: var(--space-3);
   }
 
-  .skill-header-example {
+  .yaml-file-header {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-4);
-    border-bottom: 1px solid var(--border);
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+    color: var(--green-dim);
   }
 
-  .skill-icon-example {
-    font-size: var(--text-xl);
+  .yaml-filename {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 600;
   }
 
-  .skill-name-example {
+  .yaml-contents {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .yaml-contents li {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    line-height: 1.4;
+    padding-left: var(--space-4);
+    position: relative;
+  }
+
+  .yaml-contents li::before {
+    content: '•';
+    position: absolute;
+    left: 0;
+    color: var(--text-tertiary);
+  }
+
+  .yaml-contents strong {
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+
+  .yaml-vs-markdown {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: var(--space-3);
+    margin-top: var(--space-2);
+  }
+
+  .vs-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
     display: block;
+    margin-bottom: var(--space-1);
+  }
+
+  .vs-text {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+
+  .vs-text em {
+    color: var(--green-dim);
+    font-style: normal;
+    font-weight: 500;
+  }
+
+  /* Skills Directory Preview - Right Side */
+  .skills-directory-preview {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .directory-header-preview {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-tertiary);
+  }
+
+  .directory-count {
     font-family: var(--font-mono);
     font-size: var(--text-base);
     font-weight: 600;
     color: var(--text-primary);
   }
 
-  .skill-type-example {
-    display: block;
+  .directory-link {
     font-family: var(--font-mono);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
+    color: var(--green-dim);
+    text-decoration: none;
+  }
+
+  .directory-link:hover {
+    text-decoration: underline;
+  }
+
+  .category-list {
+    flex: 1;
+    padding: 0;
+  }
+
+  .category-item {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .category-item:last-child {
+    border-bottom: none;
+  }
+
+  .category-item.expanded {
+    background: var(--bg-secondary);
+  }
+
+  .category-item.expanded .category-row {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .category-row {
+    display: grid;
+    grid-template-columns: 1fr 40px 32px;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    align-items: center;
+    width: 100%;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    text-align: left;
+    min-height: 56px;
+    transition: background 0.15s, border-color 0.15s;
+    border-left: 3px solid transparent;
+  }
+
+  .category-row:hover {
+    background: rgba(0, 196, 154, 0.08);
+    border-left-color: var(--green-dim);
+  }
+
+  .category-row:hover .cat-name {
     color: var(--green-dim);
   }
 
-  .skill-body-example {
-    padding: var(--space-4);
+  .category-row:hover .cat-toggle {
+    background: rgba(0, 196, 154, 0.2);
+    transform: scale(1.1);
+  }
+
+  .cat-info {
     display: flex;
     flex-direction: column;
-    gap: var(--space-3);
+    gap: 4px;
+    min-width: 0;
   }
 
-  .skill-section-example {
-    display: flex;
-    gap: var(--space-3);
-  }
-
-  .section-label {
-    flex-shrink: 0;
-    width: 80px;
+  .cat-name {
     font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    font-weight: 600;
-    color: var(--text-tertiary);
-    text-transform: uppercase;
-  }
-
-  .section-value {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    line-height: 1.4;
-  }
-
-  .skills-list-example {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  .skills-list-title {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    font-size: var(--text-base);
     font-weight: 600;
     color: var(--text-primary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin: 0;
+    transition: color 0.15s;
   }
 
-  .skill-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
+  .cat-skills {
+    font-size: var(--text-sm);
+    color: var(--text-tertiary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .skill-chip {
+  .cat-count {
     font-family: var(--font-mono);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--green-dim);
+    background: rgba(0, 196, 154, 0.15);
+    padding: 4px 10px;
+    border-radius: 12px;
+    text-align: center;
+    min-width: 32px;
+  }
+
+  .cat-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    font-family: var(--font-mono);
+    font-size: var(--text-lg);
+    font-weight: 700;
+    color: var(--green-dim);
+    background: rgba(0, 196, 154, 0.1);
+    border-radius: 6px;
+    transition: transform 0.2s, background 0.15s, color 0.15s;
+  }
+
+  .category-item.expanded .category-row {
+    background: rgba(0, 196, 154, 0.05);
+    border-left-color: var(--green-dim);
+  }
+
+  .category-item.expanded .cat-toggle {
+    background: var(--green-dim);
+    color: var(--bg-primary);
+    transform: rotate(0deg);
+  }
+
+  /* Expanded category skills */
+  .category-skills {
     padding: var(--space-2) var(--space-3);
-    border: 1px solid var(--border);
+    padding-left: var(--space-6);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    background: var(--bg-tertiary);
+    border-top: 1px solid var(--border);
+  }
+
+  .mini-skill {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+    border-radius: 4px;
+    text-decoration: none;
+    transition: background 0.15s;
+  }
+
+  .mini-skill:hover {
     background: var(--bg-primary);
   }
 
-  .skill-chip.core {
-    border-color: var(--green-dim);
+  .mini-skill-name {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .mini-skill-desc {
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .mini-skill.more {
+    border-top: 1px dashed var(--border);
+    margin-top: var(--space-1);
+    padding-top: var(--space-2);
+  }
+
+  .mini-skill.more .mini-skill-name {
     color: var(--green-dim);
   }
 
-  .skill-chip.integration {
-    border-color: var(--blue);
-    color: var(--blue);
+  .directory-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    border-top: 1px solid var(--border);
+    background: var(--bg-tertiary);
   }
 
-  .skill-chip.pattern {
-    border-color: var(--violet);
-    color: var(--violet);
+  .stat {
+    text-align: center;
   }
 
-  .skills-note {
+  .stat-value {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: var(--text-lg);
+    font-weight: 600;
+    color: var(--green-dim);
+  }
+
+  .stat-label {
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+  }
+
+  .directory-note {
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     color: var(--text-tertiary);
+    text-align: center;
+    padding: var(--space-2) var(--space-4);
     margin: 0;
     font-style: italic;
+    border-top: 1px solid var(--border);
   }
 
   /* Comparison Section */
@@ -2760,9 +3167,66 @@
       padding: var(--space-8) var(--space-4);
     }
 
-    .skills-anatomy {
+    .skills-two-col {
       grid-template-columns: 1fr;
       gap: var(--space-6);
+    }
+
+    .yaml-file {
+      padding: var(--space-2);
+    }
+
+    .yaml-contents li {
+      font-size: var(--text-xs);
+    }
+
+    .category-row {
+      grid-template-columns: 1fr 36px 28px;
+      gap: var(--space-2);
+      padding: var(--space-3);
+      min-height: 52px;
+    }
+
+    .cat-name {
+      font-size: var(--text-sm);
+    }
+
+    .cat-skills {
+      font-size: var(--text-xs);
+    }
+
+    .cat-count {
+      font-size: var(--text-xs);
+      padding: 3px 8px;
+    }
+
+    .cat-toggle {
+      width: 24px;
+      height: 24px;
+      font-size: var(--text-base);
+    }
+
+    .category-skills {
+      padding: var(--space-2);
+      padding-left: var(--space-4);
+    }
+
+    .mini-skill {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+    }
+
+    .mini-skill-desc {
+      text-align: left;
+    }
+
+    .directory-stats {
+      padding: var(--space-2);
+    }
+
+    .stat-value {
+      font-size: var(--text-base);
     }
 
     .comparison-section {
