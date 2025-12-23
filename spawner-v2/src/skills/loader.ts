@@ -46,7 +46,10 @@ export interface AntiPattern {
 export interface Handoff {
   trigger: string;
   to: string;
-  context: string;
+  context?: string;
+  context_template?: string;
+  priority?: number;
+  exclude_from?: string[];
 }
 
 // Re-export SharpEdge and Validation from types for convenience
@@ -339,36 +342,167 @@ export async function getValidationsForFile(
 }
 
 /**
+ * Render the handoff protocol section for a skill
+ */
+export function renderHandoffProtocol(skill: Skill, previousSkill?: string): string {
+  if (!skill.handoffs || skill.handoffs.length === 0) {
+    return '';
+  }
+
+  // Sort handoffs by priority (higher first)
+  const sortedHandoffs = [...skill.handoffs].sort(
+    (a, b) => (b.priority ?? 0) - (a.priority ?? 0)
+  );
+
+  // Build trigger table rows
+  const triggerRows = sortedHandoffs
+    .map(h => {
+      // Show first 4 trigger keywords for readability
+      const triggers = h.trigger.split('|').slice(0, 4).join(', ');
+      const suffix = h.trigger.split('|').length > 4 ? '...' : '';
+      return `| ${triggers}${suffix} | \`spawner_load({ skill_id: "${h.to}" })\` |`;
+    })
+    .join('\n');
+
+  // Build the owns list (first 5 items)
+  const ownsList = skill.owns.slice(0, 5).join(', ');
+
+  // Build handoff history section if coming from another skill
+  let historySection = '';
+  if (previousSkill) {
+    historySection = `
+### Handoff History
+
+You received this from: **${previousSkill}**
+Do NOT hand back to: ${previousSkill}
+`;
+  }
+
+  return `## HANDOFF PROTOCOL
+
+You are operating as: **${skill.name}**
+
+Your specialty: ${skill.description}
+
+---
+
+### BOUNDARY CHECK (Run this on every user message)
+
+Before responding, quickly assess:
+1. Is this clearly within my domain (${ownsList})? → Continue
+2. Does this match a handoff trigger? → Execute handoff
+3. Ambiguous? → Ask user for clarification
+
+---
+
+### HANDOFF TRIGGERS
+
+| If user mentions... | Action |
+|---------------------|--------|
+${triggerRows}
+
+---
+
+### HANDOFF EXECUTION
+
+When you detect a handoff trigger:
+
+**Step 1: Acknowledge**
+> "This involves [topic area]. Let me bring in the [specialist name] who handles this specifically."
+
+**Step 2: Summarize Context**
+Prepare a brief context for the new skill:
+- What has been built so far
+- Current file/component being worked on
+- User's immediate goal
+- Any constraints or preferences mentioned
+
+**Step 3: Execute**
+\`\`\`
+spawner_load({
+  skill_id: "[target-skill-id]",
+  context: "Your context summary here"
+})
+\`\`\`
+
+**Step 4: Stop**
+Do not continue answering in your domain. The new skill will take over.
+
+---
+
+### STAYING IN YOUR LANE
+
+Continue WITHOUT handoff when:
+- Question is clearly about ${ownsList}
+- User is asking for clarification on your previous answer
+- User explicitly says "don't switch" or "stay with current"
+- It's a code review of code in your domain
+
+---
+
+### GRACEFUL UNCERTAINTY
+
+If you're unsure whether to hand off:
+
+> "This touches on [topic]. I can give you general guidance, or I can bring in the [specialist] for deeper expertise. Which would you prefer?"
+
+Let user decide. Don't block on uncertainty.
+${historySection}`;
+}
+
+/**
  * Format a skill for display in context
  */
-export function formatSkillContext(skill: Skill, edges: SharpEdge[]): string {
-  let context = `## ${skill.name}\n\n`;
-  context += skill.identity + '\n\n';
+export function formatSkillContext(
+  skill: Skill,
+  edges: SharpEdge[],
+  options?: { previousSkill?: string; includeHandoffs?: boolean }
+): string {
+  const sections: string[] = [];
 
+  // 1. Identity section
+  sections.push(`## ${skill.name}\n\n${skill.identity}`);
+
+  // 2. HANDOFF PROTOCOL (critical for collaboration)
+  if (options?.includeHandoffs !== false && skill.handoffs && skill.handoffs.length > 0) {
+    sections.push(renderHandoffProtocol(skill, options?.previousSkill));
+  }
+
+  // 3. Domain ownership
+  if (skill.owns && skill.owns.length > 0) {
+    sections.push(`## Your Domain\n\nYou are authoritative on:\n${skill.owns.map(o => `- ${o}`).join('\n')}`);
+  }
+
+  // 4. Patterns
   if (skill.patterns && skill.patterns.length > 0) {
-    context += '### Patterns\n\n';
+    let patternsSection = '## Patterns\n\n';
     for (const pattern of skill.patterns) {
-      context += `**${pattern.name}**: ${pattern.description}\n`;
-      context += `When: ${pattern.when}\n\n`;
+      patternsSection += `**${pattern.name}**: ${pattern.description}\n`;
+      patternsSection += `When: ${pattern.when}\n\n`;
     }
+    sections.push(patternsSection);
   }
 
+  // 5. Anti-patterns
   if (skill.anti_patterns && skill.anti_patterns.length > 0) {
-    context += '### Anti-Patterns\n\n';
+    let antiSection = '## Anti-Patterns\n\n';
     for (const ap of skill.anti_patterns) {
-      context += `**${ap.name}**: ${ap.description}\n`;
-      context += `Why: ${ap.why}\n`;
-      context += `Instead: ${ap.instead}\n\n`;
+      antiSection += `**${ap.name}**: ${ap.description}\n`;
+      antiSection += `Why: ${ap.why}\n`;
+      antiSection += `Instead: ${ap.instead}\n\n`;
     }
+    sections.push(antiSection);
   }
 
+  // 6. Sharp edges
   if (edges.length > 0) {
-    context += '### Sharp Edges (Gotchas)\n\n';
+    let edgesSection = '## Sharp Edges (Gotchas)\n\n';
     for (const edge of edges) {
-      context += `**[${edge.severity.toUpperCase()}] ${edge.summary}**\n`;
-      context += `${edge.situation}\n\n`;
+      edgesSection += `**[${edge.severity.toUpperCase()}] ${edge.summary}**\n`;
+      edgesSection += `${edge.situation}\n\n`;
     }
+    sections.push(edgesSection);
   }
 
-  return context;
+  return sections.join('\n\n---\n\n');
 }

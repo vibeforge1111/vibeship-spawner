@@ -7,6 +7,7 @@
 
 import { z } from 'zod';
 import type { Env } from '../types';
+import { loadSkill, loadSkillEdges, formatSkillContext, type Skill } from '../skills/loader';
 
 /**
  * V1 Skill Registry structure (from /skills/registry.json)
@@ -93,6 +94,12 @@ export const skillsInputSchema = z.object({
   source: z.enum(['all', 'v1', 'v2']).optional().describe(
     'Filter by source: all (default), v1 (markdown), v2 (yaml)'
   ),
+  context: z.string().optional().describe(
+    'Context from previous skill when handing off - describes what was being built'
+  ),
+  previous_skill: z.string().optional().describe(
+    'ID of the skill that initiated the handoff - prevents circular handoffs'
+  ),
 });
 
 /**
@@ -100,7 +107,7 @@ export const skillsInputSchema = z.object({
  */
 export const skillsToolDefinition = {
   name: 'spawner_skills',
-  description: 'Search, list, and retrieve specialist skills. Searches both V1 (markdown) and V2 (YAML) skill formats.',
+  description: 'Search, list, and retrieve specialist skills. Skills include handoff protocols for seamless collaboration between specialists.',
   inputSchema: {
     type: 'object' as const,
     properties: {
@@ -115,7 +122,7 @@ export const skillsToolDefinition = {
       },
       name: {
         type: 'string',
-        description: 'Skill name for get action (e.g., "auth-flow", "supabase-backend")',
+        description: 'Skill name for get action (e.g., "nextjs-app-router", "supabase-backend")',
       },
       tag: {
         type: 'string',
@@ -134,6 +141,14 @@ export const skillsToolDefinition = {
         type: 'string',
         enum: ['all', 'v1', 'v2'],
         description: 'Filter by source: all (default), v1 (markdown skills), v2 (yaml skills with validations)',
+      },
+      context: {
+        type: 'string',
+        description: 'Context from previous skill when handing off - describes what was being built, current state, user goal',
+      },
+      previous_skill: {
+        type: 'string',
+        description: 'ID of the skill that initiated the handoff - prevents circular handoffs back to the originating skill',
       },
     },
     required: [],
@@ -174,7 +189,16 @@ export async function executeSkills(
     throw new Error(`Invalid input: ${parsed.error.message}`);
   }
 
-  const { query, name, tag, layer, squad, source = 'all' } = parsed.data;
+  const {
+    query,
+    name,
+    tag,
+    layer,
+    squad,
+    source = 'all',
+    context,
+    previous_skill,
+  } = parsed.data;
 
   // Infer action from provided params if not specified
   let action = parsed.data.action;
@@ -205,7 +229,10 @@ export async function executeSkills(
       if (!name) {
         throw new Error('name is required for get action');
       }
-      return await handleGet(env, v1Registry, v2Skills, name);
+      return await handleGet(env, v1Registry, v2Skills, name, {
+        context,
+        previousSkill: previous_skill,
+      });
 
     case 'squad':
       if (!squad) {
@@ -377,27 +404,54 @@ function handleList(
 }
 
 /**
- * Handle get action - retrieve full skill content
+ * Handle get action - retrieve full skill content with handoff protocol
  */
 async function handleGet(
   env: Env,
   v1Registry: V1SkillRegistry | null,
   v2Skills: V2Skill[],
-  name: string
+  name: string,
+  options?: { context?: string; previousSkill?: string }
 ): Promise<SkillsOutput> {
   // Check V2 first (preferred)
-  const v2Skill = v2Skills.find(s => s.name === name || s.id === name);
-  if (v2Skill) {
-    const content = await env.SKILLS.get(`skill:${v2Skill.id}`);
-    if (content) {
+  const v2SkillMeta = v2Skills.find(s => s.name === name || s.id === name);
+  if (v2SkillMeta) {
+    // Load full skill object for rendering
+    const skill = await loadSkill(env, v2SkillMeta.id);
+    if (skill) {
+      // Load sharp edges for this skill
+      const edges = await loadSkillEdges(env, skill.id);
+
+      // Render skill with handoff protocol
+      let content = formatSkillContext(skill, edges, {
+        previousSkill: options?.previousSkill,
+        includeHandoffs: true,
+      });
+
+      // Add context from previous skill if provided
+      if (options?.context) {
+        content += `\n\n---\n\n## Context From Previous Skill\n\n${options.context}`;
+      }
+
+      const hasHandoffs = skill.handoffs && skill.handoffs.length > 0;
+      const instruction = [
+        `Loaded skill: **${skill.name}**`,
+        '',
+        hasHandoffs ? '✓ Handoff protocol active - will route to specialists when needed' : '',
+        edges.length > 0 ? `✓ ${edges.length} sharp edge${edges.length !== 1 ? 's' : ''} loaded` : '',
+        skill.patterns?.length ? `✓ ${skill.patterns.length} pattern${skill.patterns.length !== 1 ? 's' : ''} available` : '',
+        '',
+        'Use spawner_validate to check code against this skill\'s validations.',
+      ].filter(Boolean).join('\n');
+
       return {
         skill_content: content,
-        _instruction: `Loaded V2 skill: ${v2Skill.name}\n\nThis skill has structured validations and sharp edges that spawner_validate can use.`,
+        _instruction: instruction,
       };
     }
   }
 
-  // Check V1
+  // Check V1 (legacy markdown skills - no handoff protocol)
   if (v1Registry) {
     const v1Skill = v1Registry.specialists.find(s => s.name === name);
     if (v1Skill) {
@@ -405,7 +459,7 @@ async function handleGet(
       if (content) {
         return {
           skill_content: content,
-          _instruction: `Loaded V1 skill: ${v1Skill.name}\n\nThis is a markdown skill without structured validations. Use spawner_watch_out for gotchas.`,
+          _instruction: `Loaded V1 skill: ${v1Skill.name}\n\nThis is a markdown skill without handoff protocol. Use spawner_watch_out for gotchas.`,
         };
       }
     }

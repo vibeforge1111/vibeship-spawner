@@ -15,7 +15,13 @@ import {
 import { getLastSession } from '../db/sessions';
 import { getOpenIssues } from '../db/issues';
 import { getRecentDecisions } from '../db/decisions';
-import { loadRelevantSkills, loadSkillEdges, type Skill } from '../skills/loader';
+import {
+  loadRelevantSkills,
+  loadSkillEdges,
+  loadSkill,
+  formatSkillContext,
+  type Skill,
+} from '../skills/loader';
 import { emitEvent } from '../telemetry/events';
 
 /**
@@ -31,6 +37,16 @@ export const loadInputSchema = z.object({
   stack_hints: z.array(z.string()).optional().describe(
     'Technology hints to help load relevant skills (e.g., ["nextjs", "supabase"])'
   ),
+  // Handoff parameters - for loading a specific skill during collaboration
+  skill_id: z.string().optional().describe(
+    'Load a specific skill by ID - used for handoffs between specialists'
+  ),
+  context: z.string().optional().describe(
+    'Context from previous skill - what was being built, current state, user goal'
+  ),
+  previous_skill: z.string().optional().describe(
+    'ID of the skill that initiated the handoff - prevents circular handoffs'
+  ),
 });
 
 /**
@@ -38,7 +54,7 @@ export const loadInputSchema = z.object({
  */
 export const loadToolDefinition = {
   name: 'spawner_load',
-  description: 'Load project context and relevant skills for this session. Use this at the start of a session or when switching contexts.',
+  description: 'Load project context and skills, or load a specific skill for handoffs between specialists. Use skill_id for handoffs.',
   inputSchema: {
     type: 'object' as const,
     properties: {
@@ -55,9 +71,29 @@ export const loadToolDefinition = {
         items: { type: 'string' },
         description: 'Technology hints to help load relevant skills (e.g., ["nextjs", "supabase"])',
       },
+      skill_id: {
+        type: 'string',
+        description: 'Load a specific skill by ID - used for handoffs between specialists (e.g., "nextjs-supabase-auth")',
+      },
+      context: {
+        type: 'string',
+        description: 'Context from previous skill - what was being built, current state, user goal',
+      },
+      previous_skill: {
+        type: 'string',
+        description: 'ID of the skill that initiated the handoff - prevents circular handoffs',
+      },
     },
   },
 };
+
+/**
+ * Output type for skill handoff loading
+ */
+interface SkillHandoffOutput {
+  skill_content: string;
+  _instruction: string;
+}
 
 /**
  * Execute the spawner_load tool
@@ -66,7 +102,7 @@ export async function executeLoad(
   env: Env,
   input: ContextInput,
   userId: string
-): Promise<ContextOutput | { message: string; error?: boolean }> {
+): Promise<ContextOutput | SkillHandoffOutput | { message: string; error?: boolean }> {
   // Validate input
   const parsed = loadInputSchema.safeParse(input);
   if (!parsed.success) {
@@ -76,7 +112,19 @@ export async function executeLoad(
     };
   }
 
-  const { project_id, project_description, stack_hints } = parsed.data;
+  const {
+    project_id,
+    project_description,
+    stack_hints,
+    skill_id,
+    context,
+    previous_skill,
+  } = parsed.data;
+
+  // HANDOFF MODE: If skill_id is provided, load that specific skill
+  if (skill_id) {
+    return await executeSkillHandoff(env, skill_id, context, previous_skill);
+  }
 
   // 1. Load or create project
   let project: Project | null = null;
@@ -185,6 +233,58 @@ export async function executeLoad(
     })),
     skills: skillsSummary,
     sharp_edges: sharpEdges.slice(0, 10), // Top 10 most relevant
+    _instruction: instruction,
+  };
+}
+
+/**
+ * Execute skill handoff - load a specific skill with handoff protocol
+ */
+async function executeSkillHandoff(
+  env: Env,
+  skillId: string,
+  context?: string,
+  previousSkill?: string
+): Promise<SkillHandoffOutput | { message: string; error?: boolean }> {
+  // Load the requested skill
+  const skill = await loadSkill(env, skillId);
+  if (!skill) {
+    return {
+      message: `Skill "${skillId}" not found. Use spawner_skills to search for available skills.`,
+      error: true,
+    };
+  }
+
+  // Load sharp edges for this skill
+  const edges = await loadSkillEdges(env, skillId);
+
+  // Render skill with handoff protocol
+  let skillContent = formatSkillContext(skill, edges, {
+    previousSkill,
+    includeHandoffs: true,
+  });
+
+  // Add context from previous skill if provided
+  if (context) {
+    skillContent += `\n\n---\n\n## Context From Previous Skill\n\n${context}`;
+  }
+
+  // Build instruction
+  const hasHandoffs = skill.handoffs && skill.handoffs.length > 0;
+  const instruction = [
+    previousSkill
+      ? `🔄 **Handoff received from ${previousSkill}**`
+      : `✓ Loaded skill: **${skill.name}**`,
+    '',
+    hasHandoffs ? '✓ Handoff protocol active - will route to specialists when needed' : '',
+    edges.length > 0 ? `✓ ${edges.length} sharp edge${edges.length !== 1 ? 's' : ''} loaded` : '',
+    skill.patterns?.length ? `✓ ${skill.patterns.length} pattern${skill.patterns.length !== 1 ? 's' : ''} available` : '',
+    '',
+    'You are now operating as this specialist. Follow the handoff protocol when topics go outside your domain.',
+  ].filter(Boolean).join('\n');
+
+  return {
+    skill_content: skillContent,
     _instruction: instruction,
   };
 }
