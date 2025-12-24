@@ -41,6 +41,7 @@ function createMockEnv(kv = createMockKV()): Env {
     SKILLS: {} as KVNamespace,
     SHARP_EDGES: {} as KVNamespace,
     DB: {} as D1Database,
+    ENVIRONMENT: 'development',
   };
 }
 

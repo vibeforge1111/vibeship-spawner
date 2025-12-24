@@ -126,7 +126,7 @@ export async function executeSkillUpgrade(
 
   // Extract skill name from content if possible
   const skillNameMatch = skill_content.skill_yaml?.match(/name:\s*(.+)/);
-  const skillName = skillNameMatch ? skillNameMatch[1].trim() : skill_id;
+  const skillName = skillNameMatch?.[1]?.trim() ?? skill_id;
 
   // Process based on focus area
   if (focus === 'identity' || focus === 'all') {

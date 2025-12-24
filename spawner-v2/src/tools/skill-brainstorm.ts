@@ -624,8 +624,8 @@ spawner_skill_brainstorm({
   skill_idea: "${input.skill_idea}",
   area: "${input.area}",
   answers: {
-    "${questions[0].id}": "Your answer here",
-    "${questions[1].id}": "Your answer here",
+    "${questions[0]?.id ?? 'q1'}": "Your answer here",
+    "${questions[1]?.id ?? 'q2'}": "Your answer here",
     ...
   }
 })
@@ -760,37 +760,37 @@ spawner_skill_brainstorm({
       lowerInsight.includes('expert') ||
       lowerInsight.includes('opinion')
     ) {
-      categorizedInsights.identity.push(insight.replace(/\[identity\]/i, '').trim());
+      categorizedInsights.identity!.push(insight.replace(/\[identity\]/i, '').trim());
     } else if (
       lowerInsight.includes('[boundaries]') ||
       lowerInsight.includes('owns') ||
       lowerInsight.includes('delegate') ||
       lowerInsight.includes('hand off')
     ) {
-      categorizedInsights.boundaries.push(insight.replace(/\[boundaries\]/i, '').trim());
+      categorizedInsights.boundaries!.push(insight.replace(/\[boundaries\]/i, '').trim());
     } else if (
       lowerInsight.includes('[edges]') ||
       lowerInsight.includes('gotcha') ||
       lowerInsight.includes('mistake') ||
       lowerInsight.includes('painful')
     ) {
-      categorizedInsights.edges.push(insight.replace(/\[edges\]/i, '').trim());
+      categorizedInsights.edges!.push(insight.replace(/\[edges\]/i, '').trim());
     } else if (
       lowerInsight.includes('[collaboration]') ||
       lowerInsight.includes('pairs') ||
       lowerInsight.includes('works with') ||
       lowerInsight.includes('other skill')
     ) {
-      categorizedInsights.collaboration.push(insight.replace(/\[collaboration\]/i, '').trim());
+      categorizedInsights.collaboration!.push(insight.replace(/\[collaboration\]/i, '').trim());
     } else if (
       lowerInsight.includes('[audience]') ||
       lowerInsight.includes('user') ||
       lowerInsight.includes('developer') ||
       lowerInsight.includes('target')
     ) {
-      categorizedInsights.audience.push(insight.replace(/\[audience\]/i, '').trim());
+      categorizedInsights.audience!.push(insight.replace(/\[audience\]/i, '').trim());
     } else {
-      categorizedInsights.uncategorized.push(insight);
+      categorizedInsights.uncategorized!.push(insight);
     }
   });
 

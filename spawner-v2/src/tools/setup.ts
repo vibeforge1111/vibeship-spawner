@@ -638,18 +638,19 @@ function handleCheck(configuredTools: string[]): SetupOutput {
   }
 
   // Build capabilities based on level
-  const capabilities = currentLevel > 0 ? currentLevelInfo.capabilities : ['None - setup required'];
+  const capabilities = currentLevel > 0 && currentLevelInfo ? currentLevelInfo.capabilities : ['None - setup required'];
+  const levelName = currentLevel > 0 && currentLevelInfo ? currentLevelInfo.name : 'Not Configured';
 
   return {
     status: {
       level: currentLevel,
-      levelName: currentLevel > 0 ? currentLevelInfo.name : 'Not Configured',
+      levelName,
       configuredTools,
       missingForNextLevel,
       capabilities,
       recommendations,
     },
-    _instruction: buildCheckInstruction(currentLevel, currentLevelInfo, configuredTools, missingForNextLevel),
+    _instruction: buildCheckInstruction(currentLevel, currentLevelInfo ?? null, configuredTools, missingForNextLevel),
   };
 }
 
@@ -748,13 +749,13 @@ function handleLevel(level: number): SetupOutput {
  */
 function buildCheckInstruction(
   level: number,
-  levelInfo: typeof SETUP_LEVELS[0],
+  levelInfo: typeof SETUP_LEVELS[0] | null,
   configured: string[],
   missing: string[]
 ): string {
   const lines: string[] = [];
 
-  if (level === 0) {
+  if (level === 0 || !levelInfo) {
     lines.push('## Setup Required');
     lines.push('');
     lines.push('No tools configured yet. Start with:');
@@ -800,10 +801,11 @@ function buildToolListInstruction(): string {
 
   const byCategory: Record<string, ToolConfig[]> = {};
   for (const tool of MARKETING_TOOLS) {
-    if (!byCategory[tool.category]) {
-      byCategory[tool.category] = [];
+    const category = tool.category;
+    if (!byCategory[category]) {
+      byCategory[category] = [];
     }
-    byCategory[tool.category].push(tool);
+    byCategory[category]!.push(tool);
   }
 
   for (const [category, tools] of Object.entries(byCategory)) {

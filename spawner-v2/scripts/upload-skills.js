@@ -68,7 +68,7 @@ async function uploadToKV(binding, key, value) {
     const tempFile = path.join(__dirname, '.temp-kv-value');
     await fs.writeFile(tempFile, valueStr);
     try {
-      const cmd = `npx wrangler kv:key put --binding=${binding} "${key}" --path="${tempFile}" --local`;
+      const cmd = `npx wrangler kv key put "${key}" --binding ${binding} --path "${tempFile}" --local`;
       await execAsync(cmd, { cwd: path.join(__dirname, '..') });
       console.log(`  ✓ ${key}`);
     } finally {
