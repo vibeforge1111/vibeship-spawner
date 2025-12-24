@@ -27,6 +27,9 @@ export interface Skill {
   handoffs?: Handoff[];
   sharp_edges_count: number;
   validations_count: number;
+  // Collaboration data for bulletproof handoffs
+  collaboration?: Collaboration | null;
+  has_collaboration?: boolean;
 }
 
 export interface Pattern {
@@ -50,6 +53,51 @@ export interface Handoff {
   context_template?: string;
   priority?: number;
   exclude_from?: string[];
+}
+
+// Collaboration types for bulletproof skill handoffs
+export interface ReceivesFrom {
+  skill: string;
+  context: string;
+  receives: string[];
+  provides: string;
+}
+
+export interface DelegationTrigger {
+  trigger: string;
+  delegate_to: string;
+  pattern: 'sequential' | 'parallel';
+  context: string;
+  handoff_data: string[];
+  receive: string;
+}
+
+export interface FeedbackLoop {
+  skill: string;
+  signal: string;
+  action: string;
+}
+
+export interface CrossDomainInsight {
+  domain: string;
+  insight: string;
+  applies_when: string;
+}
+
+export interface Collaboration {
+  receives_from: ReceivesFrom[];
+  delegation_triggers: DelegationTrigger[];
+  feedback_loops: {
+    receives_feedback_from?: FeedbackLoop[];
+    sends_feedback_to?: FeedbackLoop[];
+  };
+  prerequisites: Record<string, unknown>;
+  common_combinations: Array<{
+    name: string;
+    skills: string[];
+    workflow: string;
+  }>;
+  cross_domain_insights: CrossDomainInsight[];
 }
 
 // Re-export SharpEdge and Validation from types for convenience
@@ -451,6 +499,94 @@ ${historySection}`;
 }
 
 /**
+ * Render the collaboration protocol section for a skill
+ * This shows WHO might delegate TO this skill and WHAT data to expect
+ * BULLETPROOF: Ensures Claude never forgets handoff context
+ */
+export function renderCollaborationProtocol(skill: Skill, previousSkill?: string): string {
+  const collab = skill.collaboration;
+  if (!collab) {
+    return '';
+  }
+
+  // Check if there's any collaboration data to show
+  const hasReceivesFrom = collab.receives_from && collab.receives_from.length > 0;
+  const hasFeedback = collab.feedback_loops?.receives_feedback_from?.length || collab.feedback_loops?.sends_feedback_to?.length;
+  const hasInsights = collab.cross_domain_insights && collab.cross_domain_insights.length > 0;
+
+  if (!hasReceivesFrom && !hasFeedback && !hasInsights) {
+    return '';
+  }
+
+  const sections: string[] = [];
+  sections.push('## COLLABORATION PROTOCOL\n\nYou are part of a skill network. Other skills may delegate TO you.\n\n**MANDATORY:** Follow handoff data requirements. Do not proceed without expected inputs.');
+
+  // CRITICAL: Incoming handoff context when called from another skill
+  if (previousSkill && hasReceivesFrom) {
+    const matchingReceive = collab.receives_from.find(r => r.skill === previousSkill);
+    if (matchingReceive) {
+      sections.push(`### ⚠️ INCOMING HANDOFF FROM ${previousSkill.toUpperCase()}
+
+You were delegated to by **${previousSkill}**.
+
+**Data you MUST have received:**
+${matchingReceive.receives.map(d => `- [ ] ${d}`).join('\n')}
+
+**What you MUST provide back:**
+${matchingReceive.provides}
+
+**STOP:** Verify you have all required data above. If any item is missing, ask for it before proceeding.`);
+    }
+  }
+
+  // Build receives_from table (who might call this skill)
+  if (hasReceivesFrom) {
+    const receivesRows = collab.receives_from
+      .map(r => `| ${r.skill} | ${r.context} | ${r.receives.slice(0, 2).join(', ')}${r.receives.length > 2 ? '...' : ''} |`)
+      .join('\n');
+
+    sections.push(`### SKILLS THAT MAY CALL YOU
+
+| From Skill | When | They Provide |
+|------------|------|--------------|
+${receivesRows}`);
+  }
+
+  // Build feedback loops section
+  if (hasFeedback) {
+    let feedbackContent = '### FEEDBACK LOOPS\n\n';
+
+    if (collab.feedback_loops?.receives_feedback_from?.length) {
+      feedbackContent += '**Listen for signals from:**\n';
+      for (const fb of collab.feedback_loops.receives_feedback_from) {
+        feedbackContent += `- **${fb.skill}**: "${fb.signal}" → ${fb.action}\n`;
+      }
+      feedbackContent += '\n';
+    }
+
+    if (collab.feedback_loops?.sends_feedback_to?.length) {
+      feedbackContent += '**Send signals to:**\n';
+      for (const fb of collab.feedback_loops.sends_feedback_to) {
+        feedbackContent += `- **${fb.skill}**: "${fb.signal}" → ${fb.action}\n`;
+      }
+    }
+
+    sections.push(feedbackContent);
+  }
+
+  // Build cross-domain insights
+  if (hasInsights) {
+    let insightsContent = '### CROSS-DOMAIN INSIGHTS\n\n';
+    for (const insight of collab.cross_domain_insights.slice(0, 2)) {
+      insightsContent += `**From ${insight.domain}:** ${insight.applies_when}\n`;
+    }
+    sections.push(insightsContent);
+  }
+
+  return sections.join('\n\n---\n\n');
+}
+
+/**
  * Format a skill for display in context
  */
 export function formatSkillContext(
@@ -463,9 +599,18 @@ export function formatSkillContext(
   // 1. Identity section
   sections.push(`## ${skill.name}\n\n${skill.identity}`);
 
-  // 2. HANDOFF PROTOCOL (critical for collaboration)
+  // 2. HANDOFF PROTOCOL - OUTBOUND (who you delegate TO)
   if (options?.includeHandoffs !== false && skill.handoffs && skill.handoffs.length > 0) {
     sections.push(renderHandoffProtocol(skill, options?.previousSkill));
+  }
+
+  // 2.5. COLLABORATION PROTOCOL - INBOUND (who might delegate TO YOU)
+  // This creates bulletproof handoffs by showing expected data from calling skills
+  if (options?.includeHandoffs !== false && skill.collaboration) {
+    const collaborationSection = renderCollaborationProtocol(skill, options?.previousSkill);
+    if (collaborationSection) {
+      sections.push(collaborationSection);
+    }
   }
 
   // 3. Domain ownership

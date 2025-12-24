@@ -10,6 +10,7 @@
  *         skill.yaml
  *         sharp-edges.yaml
  *         validations.yaml
+ *         collaboration.yaml   <-- NEW: Integration data
  *     integration/
  *       skill-id/
  *         ...
@@ -170,6 +171,24 @@ async function loadValidations(skillDir) {
 }
 
 /**
+ * Load collaboration data for a skill (integration enhancement)
+ */
+async function loadCollaboration(skillDir) {
+  const collaborationPath = path.join(skillDir, 'collaboration.yaml');
+  const data = await readYaml(collaborationPath);
+  if (!data) return null;
+
+  return {
+    receives_from: data.receives_from || [],
+    delegation_triggers: data.delegation_triggers || [],
+    feedback_loops: data.feedback_loops || {},
+    prerequisites: data.prerequisites || {},
+    common_combinations: data.common_combinations || [],
+    cross_domain_insights: data.cross_domain_insights || [],
+  };
+}
+
+/**
  * Build the skill index for fast lookup
  */
 function buildSkillIndex(skills) {
@@ -252,15 +271,17 @@ async function main() {
   // Collect all edges for the index
   const allEdges = [];
   const allValidations = [];
+  let collaborationCount = 0;
 
   // Upload each skill
   console.log('📤 Uploading skills...\n');
   for (const skill of skills) {
     console.log(`  ${skill.name} (${skill.id}):`);
 
-    // Load sharp edges
+    // Load all skill components
     const edges = await loadSharpEdges(skill.dir);
     const validations = await loadValidations(skill.dir);
+    const collaboration = await loadCollaboration(skill.dir);
 
     // Tag edges with skill_id
     const taggedEdges = edges.map(e => ({ ...e, skill_id: skill.id }));
@@ -273,11 +294,14 @@ async function main() {
     // Prepare skill data for KV (without dir)
     const { dir, category: skillCategory, ...skillData } = skill;
 
-    // Upload skill definition
+    // Upload skill definition with collaboration data embedded
     await uploadToKV(SKILLS_NS, `skill:${skill.id}`, {
       ...skillData,
       sharp_edges_count: edges.length,
       validations_count: validations.length,
+      // Collaboration data for bulletproof handoffs
+      collaboration: collaboration,
+      has_collaboration: !!collaboration,
     });
 
     // Upload skill's sharp edges
@@ -290,7 +314,17 @@ async function main() {
       await uploadToKV(SKILLS_NS, `validations:${skill.id}`, taggedValidations);
     }
 
-    console.log(`     ${edges.length} edges, ${validations.length} validations\n`);
+    // Upload skill's collaboration separately for easy lookup
+    if (collaboration) {
+      await uploadToKV(SKILLS_NS, `collaboration:${skill.id}`, {
+        skill_id: skill.id,
+        ...collaboration,
+      });
+      collaborationCount++;
+    }
+
+    const collabStatus = collaboration ? '✓ collab' : '○ no collab';
+    console.log(`     ${edges.length} edges, ${validations.length} validations, ${collabStatus}\n`);
   }
 
   // Upload skill index
@@ -316,6 +350,7 @@ async function main() {
   console.log(`   Skills: ${skills.length}`);
   console.log(`   Sharp Edges: ${allEdges.length}`);
   console.log(`   Validations: ${allValidations.length}`);
+  console.log(`   Collaborations: ${collaborationCount} (${Math.round(collaborationCount/skills.length*100)}% coverage)`);
   console.log('');
 }
 
