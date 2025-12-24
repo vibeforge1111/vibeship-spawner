@@ -1,0 +1,524 @@
+id: ai-video-generation-sharp-edges
+skill: ai-video-generation
+version: 1.0.0
+
+edges:
+  - id: model-mismatch-for-use-case
+    summary: Using wrong AI video model for specific use case wastes time and credits
+    severity: high
+    situation: |
+      User generates with Runway when they need photorealism (should use Veo3), or uses
+      Sora for quick iterations (should use Kling for speed). Each model has sweet spots.
+    why: |
+      AI video generation is expensive ($0.05-0.50 per generation). Wrong model = multiple
+      retries = blown budget. Veo3 excels at photorealism, Runway at style, Kling at speed.
+      Using the wrong tool means 3-5x more generations to get usable output.
+    solution: |
+      MODEL SELECTION MATRIX:
+
+      PHOTOREALISM (products, people, environments):
+      → Veo3 (Google) - Best photorealism, 8 seconds max
+      → Sora (OpenAI) - Good realism, longer clips
+
+      STYLIZED/ARTISTIC:
+      → Runway Gen-3 Alpha - Best for artistic styles, great control
+      → Pika - Good for animated/illustrated styles
+
+      SPEED/ITERATION:
+      → Kling - Fastest generation, good for prototyping
+      → Luma Dream Machine - Quick turnaround, decent quality
+
+      IMPOSSIBLE SHOTS:
+      → Runway - Best camera control
+      → Veo3 - Best physics simulation
+
+      # MCP Tool Selection
+      Use spawner_tools to check model availability:
+      ```
+      spawner_tools({ action: "check", tool: "veo3" })
+      ```
+    symptoms:
+      - Multiple failed generations
+      - "This doesn't look right" feedback
+      - Switching models mid-project
+      - Budget overruns
+    detection_pattern: null
+
+  - id: prompt-too-vague
+    summary: Vague prompts produce unusable AI video output
+    severity: critical
+    situation: |
+      Prompts like "a person walking" or "product shot" without specifics about
+      lighting, camera angle, movement, style, duration, or environment.
+    why: |
+      AI video models interpret vague prompts randomly. Each generation costs money.
+      Vague prompt = random output = multiple retries = wasted budget and time.
+      Specific prompts get usable output in 1-2 tries vs 10+ for vague ones.
+    solution: |
+      PROMPT STRUCTURE (CAPS framework):
+
+      C - Camera: "tracking shot", "static wide", "dolly zoom", "POV"
+      A - Action: Specific movement, "walks left to right", "rotates 180 degrees"
+      P - Production: Lighting, color grade, "golden hour, cinematic color grade"
+      S - Subject: Detailed description with specifics
+
+      # BAD
+      "a woman in a cafe"
+
+      # GOOD
+      "Medium shot, 35mm lens. A woman in her 30s with short dark hair sits at
+      a wooden cafe table, lifting a white ceramic cup to her lips. Soft morning
+      light from window camera left. She smiles slightly. Shallow depth of field.
+      Cinematic color grade, warm tones. 4 seconds."
+
+      # Use prompt engineering skill
+      Always invoke prompt-engineering-creative for complex generations.
+    symptoms:
+      - "Not what I wanted" feedback
+      - 5+ generations for single shot
+      - Inconsistent outputs
+      - Random camera movements
+    detection_pattern: 'generate.*video.*"[^"]{1,50}"'
+
+  - id: ignoring-temporal-coherence
+    summary: Multi-shot sequences break visual continuity
+    severity: high
+    situation: |
+      Generating multiple shots for a sequence without maintaining character appearance,
+      lighting, environment, or style consistency across generations.
+    why: |
+      AI models don't remember previous generations. Each is independent. Without
+      explicit consistency measures, your "sequence" looks like random clips edited
+      together. Unusable for anything professional.
+    solution: |
+      CONSISTENCY TECHNIQUES:
+
+      1. SEED FRAME METHOD:
+         - Generate a hero image first (use ai-image-generation)
+         - Use image-to-video with that frame
+         - All shots start from consistent reference
+
+      2. STYLE REFERENCE:
+         - Create a style reference image
+         - Include in every prompt via IP-Adapter or reference
+         - "Match the style of [reference image]"
+
+      3. CHARACTER SHEET:
+         - Generate character turnaround
+         - Reference in every prompt
+         - Use LoRA for important recurring characters
+
+      4. PROMPT ANCHORING:
+         - Use identical descriptive phrases across shots
+         - "The same woman from previous shot, now..."
+         - Include lighting/color descriptions consistently
+
+      # MCP Workflow
+      ```
+      // Save reference for session
+      spawner_remember({
+        type: "reference",
+        key: "hero-character",
+        data: { description: "...", seed: 12345 }
+      })
+      ```
+    symptoms:
+      - Characters look different between shots
+      - Lighting changes randomly
+      - Style inconsistency
+      - "Frankenstein edit" look
+    detection_pattern: null
+
+  - id: aspect-ratio-platform-mismatch
+    summary: Generating wrong aspect ratio for target platform
+    severity: medium
+    situation: |
+      Creating 16:9 video for TikTok (needs 9:16) or vice versa. Or generating
+      at wrong resolution for final delivery format.
+    why: |
+      Re-cropping AI video loses quality and composition. AI models compose shots
+      for the aspect ratio you specify. Wrong ratio = re-generate everything.
+    solution: |
+      PLATFORM → ASPECT RATIO:
+
+      YouTube/Website: 16:9 (1920x1080 or 3840x2160)
+      TikTok/Reels/Shorts: 9:16 (1080x1920)
+      Instagram Feed: 1:1 (1080x1080) or 4:5 (1080x1350)
+      Twitter/X: 16:9 or 1:1
+      LinkedIn: 16:9 or 1:1
+
+      ALWAYS specify in prompt:
+      "9:16 vertical format, composed for mobile viewing"
+      "16:9 widescreen, cinematic composition"
+
+      # MCP Tool
+      ```
+      spawner_validate({
+        type: "aspect-ratio",
+        target: "tiktok",
+        file: "output.mp4"
+      })
+      ```
+    symptoms:
+      - Awkward cropping in final delivery
+      - Heads cut off in vertical crops
+      - Wasted composition elements
+      - Re-generation required
+    detection_pattern: '(tiktok|reels|shorts).*16:9|youtube.*9:16'
+
+  - id: audio-afterthought
+    summary: Treating audio as post-production afterthought
+    severity: high
+    situation: |
+      Generating video without considering how audio (music, VO, SFX) will sync.
+      Creating shots that don't have natural sound design moments.
+    why: |
+      AI video is silent. Audio integration is critical. If you generate a
+      speaking scene without lip-sync capability, or action without considering
+      SFX timing, the final product feels broken.
+    solution: |
+      AUDIO-AWARE GENERATION:
+
+      1. MUSIC-DRIVEN:
+         - Select/generate music FIRST (use ai-audio-production)
+         - Plan shots to music beats
+         - Generate videos matching beat timing
+         - "4-second shot, dramatic reveal at 2.5 seconds"
+
+      2. DIALOGUE SCENES:
+         - Use digital-humans skill for lip-sync
+         - Or plan for voice-over, not dialogue
+         - Generate "listening" shots and reaction shots
+
+      3. SFX PLANNING:
+         - Identify SFX moments in prompt
+         - "Door slams shut" - ensure door is visible
+         - Leave room for SFX in pacing
+
+      # Cross-skill workflow
+      ```
+      // Generate music first
+      spawner_skills({ action: "invoke", skill: "ai-audio-production" })
+      // Then generate video to match
+      ```
+    symptoms:
+      - Video feels "off" with audio
+      - Lip-sync attempts fail
+      - SFX don't match visuals
+      - Music and visuals fight each other
+    detection_pattern: null
+
+  - id: cost-blindness
+    summary: Not tracking generation costs until budget is blown
+    severity: critical
+    situation: |
+      Running dozens of generations without tracking spend. Suddenly hitting
+      API limits or getting a surprise bill.
+    why: |
+      AI video is the most expensive generative AI. Veo3 and Sora can cost
+      $0.25-1.00 per generation. 50 iterations = $50. Without tracking,
+      teams blow monthly budgets in days.
+    solution: |
+      COST TRACKING SYSTEM:
+
+      Approximate costs per generation (2024):
+      - Veo3: $0.25-0.50
+      - Sora: $0.20-0.40
+      - Runway Gen-3: $0.10-0.25
+      - Kling: $0.05-0.15
+      - Pika: $0.05-0.10
+
+      BUDGET RULES:
+      1. Set per-project generation budget
+      2. Track generations in spreadsheet/tool
+      3. Use cheaper models for iteration
+      4. Save premium models for final
+
+      # MCP Cost Tracking
+      ```
+      spawner_remember({
+        type: "cost",
+        project: "campaign-x",
+        model: "veo3",
+        generations: 5,
+        estimated_cost: 1.25
+      })
+
+      spawner_analyze({
+        action: "cost-report",
+        project: "campaign-x"
+      })
+      ```
+    symptoms:
+      - Surprise bills
+      - API rate limits hit
+      - "We're out of credits" mid-project
+      - Budget overruns
+    detection_pattern: null
+
+  - id: clip-length-overreach
+    summary: Trying to generate clips longer than model supports
+    severity: medium
+    situation: |
+      Requesting 30-second or 60-second clips when models max out at 4-10 seconds.
+      Or expecting one generation to produce a complete scene.
+    why: |
+      Current AI video models have strict length limits. Veo3 = 8s, Runway = 10s,
+      Kling = 5s. Longer requests either fail or produce degraded quality.
+      AI video is clip-based, not long-form.
+    solution: |
+      MODEL LENGTH LIMITS (2024):
+      - Veo3: 8 seconds max
+      - Sora: 20 seconds (but quality degrades)
+      - Runway Gen-3: 10 seconds
+      - Kling: 5 seconds
+      - Pika: 4 seconds
+      - Luma: 5 seconds
+
+      WORKFLOW FOR LONGER CONTENT:
+      1. Storyboard into 4-8 second shots
+      2. Generate each shot separately
+      3. Edit together in traditional NLE
+      4. Add transitions, audio, graphics
+
+      # Think like a film editor, not a magic wand user
+      AI video = raw footage
+      Final video = edited, graded, mixed
+    symptoms:
+      - Failed generations
+      - Quality degradation at end of clips
+      - Temporal inconsistency
+      - "It starts good then gets weird"
+    detection_pattern: '(30|60)\s*seconds?|one\s*minute'
+
+  - id: no-negative-prompts
+    summary: Not using negative prompts to exclude unwanted elements
+    severity: medium
+    situation: |
+      Getting unwanted elements in generations (watermarks, text, artifacts,
+      wrong style elements) without specifying what to avoid.
+    why: |
+      AI models benefit from knowing what NOT to include. Without negative
+      prompts, you get default model behaviors which often include unwanted
+      elements like text overlays, logos, or style artifacts.
+    solution: |
+      NEGATIVE PROMPT ESSENTIALS:
+
+      Always include:
+      - "no text, no watermarks, no logos"
+      - "no blur, no artifacts, no distortion"
+      - "no extra limbs, anatomically correct"
+
+      Style-specific:
+      - "not cartoonish" (for realism)
+      - "not photorealistic" (for stylized)
+      - "no lens flare" (if unwanted)
+
+      # Format varies by model
+      Runway: Use negative prompt field
+      Veo3: Include "avoid:" in prompt
+      Kling: Separate negative prompt input
+
+      # Example
+      Prompt: "Product shot of sneakers on white background"
+      Negative: "no text, no watermarks, no shadows, no reflections,
+                 no background elements, no people, no hands"
+    symptoms:
+      - Random text appearing in video
+      - Watermarks from training data
+      - Unwanted style elements
+      - Artifacts and distortions
+    detection_pattern: null
+
+  - id: api-rate-limit-ignorance
+    summary: Hitting API rate limits without retry logic
+    severity: high
+    situation: |
+      Batch generating many videos without respecting rate limits, causing
+      failed jobs, lost progress, or account restrictions.
+    why: |
+      All AI video APIs have rate limits. Veo3 and Sora have strict limits due
+      to compute costs. Hitting limits without proper handling = lost work,
+      failed pipelines, potential account issues.
+    solution: |
+      RATE LIMIT HANDLING:
+
+      Known limits (approximate, check current docs):
+      - Veo3: ~10 concurrent, 100/hour
+      - Runway: ~5 concurrent, 50/hour
+      - Kling: ~20 concurrent, 200/hour
+
+      IMPLEMENTATION:
+      ```typescript
+      // Exponential backoff
+      async function generateWithRetry(prompt, maxRetries = 3) {
+        for (let i = 0; i < maxRetries; i++) {
+          try {
+            return await generate(prompt);
+          } catch (e) {
+            if (e.code === 'RATE_LIMIT') {
+              await sleep(Math.pow(2, i) * 1000);
+              continue;
+            }
+            throw e;
+          }
+        }
+      }
+
+      // Queue system for batch
+      const queue = new PQueue({ concurrency: 5, interval: 60000 });
+      ```
+
+      # MCP Integration
+      ```
+      spawner_tools({
+        action: "batch-generate",
+        model: "runway",
+        prompts: [...],
+        rate_limit: { concurrent: 5, per_minute: 10 }
+      })
+      ```
+    symptoms:
+      - 429 errors
+      - Failed batch jobs
+      - Incomplete generations
+      - Account warnings
+    detection_pattern: 'for.*generate|\.map.*generate|Promise\.all.*generate'
+
+  - id: local-storage-neglect
+    summary: Not saving generation metadata and seeds for reproducibility
+    severity: medium
+    situation: |
+      Getting a great generation but not saving the exact prompt, seed,
+      model version, and settings used. Unable to reproduce or iterate.
+    why: |
+      AI video generation has randomness. Without exact parameters saved,
+      you cannot recreate successful outputs, iterate on them, or maintain
+      consistency for future shots in the same project.
+    solution: |
+      SAVE FOR EVERY GENERATION:
+
+      ```yaml
+      generation_log:
+        id: "gen_abc123"
+        timestamp: "2024-01-15T10:30:00Z"
+        model: "runway-gen3-alpha"
+        model_version: "2024-01-10"
+        prompt: "Full prompt text..."
+        negative_prompt: "..."
+        seed: 42
+        duration: 5
+        aspect_ratio: "16:9"
+        settings:
+          motion_amount: 5
+          camera_motion: "zoom-in"
+        output_url: "..."
+        status: "success"
+        cost: 0.15
+      ```
+
+      # MCP Logging
+      ```
+      spawner_remember({
+        type: "generation",
+        data: { prompt, seed, model, settings, output }
+      })
+      ```
+
+      Use version control for prompt libraries.
+      Tag successful generations for easy retrieval.
+    symptoms:
+      - "How did we make that?"
+      - Can't iterate on success
+      - Inconsistent series
+      - Lost institutional knowledge
+    detection_pattern: null
+
+  - id: render-queue-abandonment
+    summary: Starting generations and not monitoring completion
+    severity: medium
+    situation: |
+      Queuing multiple generations and walking away without monitoring.
+      Coming back to find failures, expired outputs, or missing files.
+    why: |
+      AI video generation takes 1-10 minutes per clip. APIs have output
+      expiration windows (often 24-48 hours). Unmonitored queues lead to
+      lost work when outputs expire or silent failures.
+    solution: |
+      MONITORING SYSTEM:
+
+      1. Set up webhooks for completion
+      2. Implement status polling for APIs without webhooks
+      3. Auto-download outputs immediately on completion
+      4. Alert on failures
+
+      ```typescript
+      // Webhook handler
+      app.post('/webhook/video-complete', async (req) => {
+        const { id, status, url } = req.body;
+        if (status === 'complete') {
+          await downloadAndStore(url, id);
+          await notify('Video complete: ' + id);
+        } else {
+          await alert('Video failed: ' + id);
+        }
+      });
+      ```
+
+      # MCP Background Task
+      ```
+      spawner_tools({
+        action: "monitor",
+        jobs: ["job_123", "job_456"],
+        on_complete: "download",
+        on_fail: "alert"
+      })
+      ```
+    symptoms:
+      - Expired download links
+      - Missing outputs
+      - Silent failures
+      - Wasted generations
+    detection_pattern: null
+
+  - id: upscaling-as-fix
+    summary: Using upscaling to fix low-quality generations
+    severity: medium
+    situation: |
+      Generating at low quality to save money, then expecting upscaling
+      to magically fix artifacts, blur, or composition issues.
+    why: |
+      Upscaling enhances detail, it doesn't create it. If the generation
+      has bad composition, wrong content, or artifacts, upscaling makes
+      those problems bigger, not better. Garbage in, larger garbage out.
+    solution: |
+      UPSCALING REALITY:
+
+      Upscaling CAN fix:
+      - Resolution/sharpness
+      - Some noise/grain
+      - Minor compression artifacts
+
+      Upscaling CANNOT fix:
+      - Wrong content
+      - Bad composition
+      - Major artifacts
+      - Temporal inconsistency
+      - Motion blur
+
+      WORKFLOW:
+      1. Generate at model's native resolution
+      2. Review for content/composition
+      3. If good, THEN upscale with Topaz Video AI
+      4. If bad, re-generate (don't waste upscale compute)
+
+      # Use ai-visual-effects skill for upscaling
+      ```
+      spawner_skills({ action: "invoke", skill: "ai-visual-effects" })
+      ```
+    symptoms:
+      - Upscaled garbage
+      - Wasted upscaling compute
+      - "Why does it look worse bigger?"
+      - Artifacts more visible
+    detection_pattern: null

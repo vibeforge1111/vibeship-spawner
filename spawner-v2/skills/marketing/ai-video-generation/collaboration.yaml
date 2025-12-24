@@ -1,0 +1,421 @@
+id: ai-video-generation-collaboration
+skill: ai-video-generation
+version: 1.0.0
+
+# ============================================================================
+# PREREQUISITES - What you need before using this skill
+# ============================================================================
+prerequisites:
+  required:
+    - name: API Access (at least one)
+      options:
+        - provider: Google Veo3
+          signup: https://aistudio.google.com/
+          env_var: VEO3_API_KEY
+          pricing: $0.25-0.50/generation
+        - provider: Runway Gen-3
+          signup: https://runwayml.com/
+          env_var: RUNWAY_API_KEY
+          pricing: $0.10-0.25/generation
+        - provider: Fal.ai (hosts multiple models)
+          signup: https://fal.ai/
+          env_var: FAL_KEY
+          pricing: Varies by model
+        - provider: Replicate
+          signup: https://replicate.com/
+          env_var: REPLICATE_API_TOKEN
+          pricing: Pay per compute
+
+    - name: Node.js or Python
+      version: "Node >=18 or Python >=3.9"
+      check: "node --version || python --version"
+      reason: API clients require modern runtime
+
+  recommended:
+    - name: Video editing software
+      options:
+        - DaVinci Resolve (free)
+        - Premiere Pro
+        - CapCut (free)
+      reason: AI generates clips; editing assembles final video
+
+    - name: Topaz Video AI
+      url: https://www.topazlabs.com/topaz-video-ai
+      reason: Best-in-class upscaling for AI video output
+
+    - name: Prompt engineering knowledge
+      skill: prompt-engineering-creative
+      reason: Quality prompts = quality output, fewer iterations
+
+# ============================================================================
+# MCP TOOL CONFIGURATIONS - Direct IDE integration
+# ============================================================================
+mcp_tools:
+  # Fal.ai MCP Server - Multi-model access
+  - name: fal-ai
+    description: Access to Runway, Kling, Luma, and other models via Fal.ai
+    install: npx -y @anthropic/mcp-installer install fal-ai
+    config:
+      server:
+        command: npx
+        args: ["-y", "@fal-ai/mcp-server"]
+        env:
+          FAL_KEY: "${FAL_KEY}"
+    capabilities:
+      - text-to-video
+      - image-to-video
+      - video-to-video
+      - upscaling
+    models_available:
+      - fal-ai/runway-gen3/turbo/image-to-video
+      - fal-ai/kling-video/v1/standard/image-to-video
+      - fal-ai/luma-dream-machine
+      - fal-ai/stable-video
+    example_usage: |
+      // In Claude Code with MCP
+      Use the fal-ai tool to generate a video:
+      - Model: runway-gen3
+      - Prompt: "Cinematic shot of coffee being poured..."
+      - Duration: 5 seconds
+
+  # Runway MCP Server (if available)
+  - name: runway-ml
+    description: Direct Runway Gen-3 access
+    install: npm install -g @runwayml/mcp-server
+    config:
+      server:
+        command: runway-mcp
+        env:
+          RUNWAY_API_KEY: "${RUNWAY_API_KEY}"
+    capabilities:
+      - gen3-alpha-generation
+      - image-to-video
+      - motion-brush
+      - extend-video
+    example_usage: |
+      // Runway-specific features
+      Use runway-ml to generate with motion brush:
+      - Input image: product.jpg
+      - Motion mask: mask.png
+      - Direction: zoom-in
+
+  # ComfyUI MCP for advanced workflows
+  - name: comfyui
+    description: Advanced video workflows with ComfyUI
+    install: npx -y @anthropic/mcp-installer install comfyui
+    config:
+      server:
+        command: python
+        args: ["-m", "comfyui_mcp"]
+        env:
+          COMFYUI_URL: "http://localhost:8188"
+    capabilities:
+      - custom-workflows
+      - video-to-video
+      - controlnet
+      - ip-adapter
+      - batch-processing
+    example_usage: |
+      // ComfyUI workflow execution
+      Use comfyui to run workflow:
+      - Workflow: video_upscale_4x.json
+      - Input: raw_generation.mp4
+      - Output: upscaled_4k.mp4
+
+# ============================================================================
+# API CONFIGURATIONS - Direct API integration patterns
+# ============================================================================
+api_integrations:
+  # Fal.ai (recommended - multi-model)
+  fal:
+    base_url: https://fal.run
+    auth_header: "Authorization: Key ${FAL_KEY}"
+    sdk: "@fal-ai/serverless-client"
+    example: |
+      import * as fal from "@fal-ai/serverless-client";
+
+      fal.config({ credentials: process.env.FAL_KEY });
+
+      const result = await fal.subscribe("fal-ai/runway-gen3/turbo/image-to-video", {
+        input: {
+          prompt: "Cinematic dolly shot...",
+          image_url: "https://...",
+          duration: "5"
+        },
+        logs: true,
+        onQueueUpdate: (update) => console.log(update.status)
+      });
+
+  # Runway API
+  runway:
+    base_url: https://api.runwayml.com/v1
+    auth_header: "Authorization: Bearer ${RUNWAY_API_KEY}"
+    sdk: "@runwayml/sdk"
+    example: |
+      import Runway from "@runwayml/sdk";
+
+      const runway = new Runway({ apiKey: process.env.RUNWAY_API_KEY });
+
+      const generation = await runway.imageToVideo.create({
+        model: "gen3a_turbo",
+        promptImage: imageUrl,
+        promptText: "Camera slowly zooms in...",
+        duration: 5,
+        ratio: "16:9"
+      });
+
+      // Poll for completion
+      let status = await runway.tasks.retrieve(generation.id);
+      while (status.status === "RUNNING") {
+        await sleep(5000);
+        status = await runway.tasks.retrieve(generation.id);
+      }
+
+  # Replicate (Sora, Kling, others)
+  replicate:
+    base_url: https://api.replicate.com/v1
+    auth_header: "Authorization: Token ${REPLICATE_API_TOKEN}"
+    sdk: "replicate"
+    example: |
+      import Replicate from "replicate";
+
+      const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
+
+      const output = await replicate.run(
+        "stability-ai/stable-video-diffusion:model_id",
+        {
+          input: {
+            input_image: imageUrl,
+            motion_bucket_id: 127,
+            fps: 24
+          }
+        }
+      );
+
+  # Google Veo3 (via Vertex AI)
+  veo3:
+    base_url: https://us-central1-aiplatform.googleapis.com/v1
+    auth: Google Cloud Service Account
+    sdk: "@google-cloud/aiplatform"
+    example: |
+      import { PredictionServiceClient } from "@google-cloud/aiplatform";
+
+      const client = new PredictionServiceClient();
+
+      // Veo3 API structure (check latest docs)
+      const [response] = await client.predict({
+        endpoint: `projects/${project}/locations/us-central1/publishers/google/models/veo-3`,
+        instances: [{
+          prompt: "A photorealistic video of..."
+        }]
+      });
+
+# ============================================================================
+# DELEGATION TRIGGERS - When to hand off to other skills
+# ============================================================================
+delegation_triggers:
+  - trigger: "generate image|seed frame|reference image|concept art"
+    delegate_to: ai-image-generation
+    pattern: sequential
+    context: "Need starting image for image-to-video generation"
+    handoff_data:
+      - "AI video works best with image-to-video using quality seed frames"
+      - "Generate image at same aspect ratio as target video"
+      - "Include prompt details about lighting, style, subject"
+    receive: "Seed image URL for image-to-video input"
+
+  - trigger: "digital human|AI presenter|avatar|talking head|lip sync"
+    delegate_to: digital-humans
+    pattern: sequential
+    context: "Video needs human presenter with speech"
+    handoff_data:
+      - "AI video doesn't do lip sync well"
+      - "Use HeyGen/Synthesia for talking heads"
+      - "Combine AI video backgrounds with digital human foregrounds"
+    receive: "Digital human video clip"
+
+  - trigger: "upscale|enhance|4K|8K|visual effects|compositing"
+    delegate_to: ai-visual-effects
+    pattern: sequential
+    context: "Raw generation needs enhancement"
+    handoff_data:
+      - "AI video typically outputs 720p-1080p"
+      - "Use Topaz Video AI for upscaling"
+      - "ComfyUI for advanced post-processing"
+    receive: "Enhanced/upscaled video file"
+
+  - trigger: "music|soundtrack|audio|sound design|background music"
+    delegate_to: ai-audio-production
+    pattern: parallel
+    context: "Video needs audio track"
+    handoff_data:
+      - "AI video is silent"
+      - "Generate music to match video mood/pacing"
+      - "Consider beat sync for cuts"
+    receive: "Audio track for video"
+
+  - trigger: "voiceover|narration|voice|VO"
+    delegate_to: voiceover
+    pattern: parallel
+    context: "Video needs voice narration"
+    handoff_data:
+      - "Consider timing/pacing of video when writing VO"
+      - "ElevenLabs for AI voice generation"
+      - "Plan pauses and emphasis to match visuals"
+    receive: "Voice-over audio track"
+
+  - trigger: "prompt optimization|better prompts|prompt help"
+    delegate_to: prompt-engineering-creative
+    pattern: sequential
+    context: "Need better prompts for quality output"
+    handoff_data:
+      - "Video prompts need: camera, action, subject, lighting, duration"
+      - "Model-specific prompt patterns differ"
+      - "Include negative prompts for cleaner output"
+    receive: "Optimized prompt for generation"
+
+  - trigger: "ad creative|advertisement|commercial|performance"
+    delegate_to: ai-ad-creative
+    pattern: parallel
+    context: "Video is for advertising"
+    handoff_data:
+      - "Consider platform requirements (duration, aspect)"
+      - "Hook in first 3 seconds critical"
+      - "Multiple variants for testing"
+    receive: "Ad strategy and variant plan"
+
+  - trigger: "orchestrate|full production|multi-tool|campaign"
+    delegate_to: ai-creative-director
+    pattern: sequential
+    context: "Complex production needs orchestration"
+    handoff_data:
+      - "Multiple AI tools needed"
+      - "Coordinate image, video, audio, effects"
+      - "Production pipeline management"
+    receive: "Production plan and coordination"
+
+# ============================================================================
+# CROSS-DOMAIN INSIGHTS - Knowledge from adjacent fields
+# ============================================================================
+cross_domain_insights:
+  - domain: Traditional filmmaking
+    insight: |
+      The 180-degree rule, match cuts, and continuity editing still apply to AI video.
+      AI can generate impossible shots, but editing grammar remains the same.
+      Study Hitchcock, Spielberg, Fincher for camera movement purpose.
+    applies_when: "Planning shot sequences and editing AI clips together"
+
+  - domain: Motion graphics
+    insight: |
+      Easing curves and timing from After Effects apply to AI video motion.
+      12 principles of animation (Disney) create natural-feeling movement.
+      "Slow in, slow out" makes AI camera moves feel intentional.
+    applies_when: "Directing camera movement and object motion in prompts"
+
+  - domain: Photography
+    insight: |
+      Focal length, aperture, and depth of field concepts translate directly.
+      "35mm lens, shallow depth of field, f/1.8" in prompts improves output.
+      Lighting ratios and quality (hard/soft) are understood by models.
+    applies_when: "Writing detailed visual prompts"
+
+  - domain: Music production
+    insight: |
+      Video pacing often follows music beat structure (4, 8, 16 bar phrases).
+      Generate video clips in durations that fit musical timing.
+      The "drop" in music = the reveal in video.
+    applies_when: "Creating music-driven video content"
+
+  - domain: UX design
+    insight: |
+      Attention follows F-pattern and Z-pattern in static compositions.
+      Motion draws attention - animate what matters.
+      Cognitive load limits apply - don't overwhelm with movement.
+    applies_when: "Creating marketing or explainer videos"
+
+  - domain: Game development
+    insight: |
+      Frame-rate optimization techniques apply to video render decisions.
+      Real-time rendering concepts help understand AI model constraints.
+      Procedural generation patterns parallel AI generation approaches.
+    applies_when: "Working with batch generation and pipelines"
+
+# ============================================================================
+# COMMON COMBINATIONS - Skill stacks for typical projects
+# ============================================================================
+common_combinations:
+  - name: Product Video
+    skills:
+      - ai-video-generation
+      - ai-image-generation
+      - ai-audio-production
+      - ai-visual-effects
+    workflow: |
+      1. Generate product images (ai-image-generation)
+      2. Animate to video (ai-video-generation) - image-to-video
+      3. Add music (ai-audio-production)
+      4. Upscale and color grade (ai-visual-effects)
+      5. Export for platforms
+
+  - name: Social Ad
+    skills:
+      - ai-video-generation
+      - ai-ad-creative
+      - copywriting
+      - real-time-content
+    workflow: |
+      1. Strategy and variants (ai-ad-creative)
+      2. Generate multiple video variants (ai-video-generation)
+      3. Add text overlays and CTAs (copywriting)
+      4. Optimize for platform and timing (real-time-content)
+
+  - name: Explainer Video
+    skills:
+      - ai-video-generation
+      - digital-humans
+      - voiceover
+      - ai-audio-production
+    workflow: |
+      1. Script and storyboard (voiceover planning)
+      2. Generate presenter with HeyGen (digital-humans)
+      3. Generate B-roll and visuals (ai-video-generation)
+      4. Add background music (ai-audio-production)
+      5. Edit together with VO and music
+
+  - name: Brand World
+    skills:
+      - ai-world-building
+      - ai-video-generation
+      - ai-image-generation
+      - ai-creative-director
+    workflow: |
+      1. Define brand world bible (ai-world-building)
+      2. Generate consistent character images (ai-image-generation)
+      3. Animate characters and environments (ai-video-generation)
+      4. Orchestrate production (ai-creative-director)
+
+# ============================================================================
+# VERSION COMPATIBILITY
+# ============================================================================
+version_compatibility:
+  models:
+    veo3: "2024.12+"
+    runway_gen3: "gen3a_turbo, gen3a"
+    sora: "Access via waitlist as of 2024"
+    kling: "v1, v1.5"
+    pika: "v1.5, v2"
+    luma: "dream-machine-v1"
+
+  apis:
+    fal_ai: "v1"
+    runway: "v1"
+    replicate: "v1"
+
+  notes: |
+    AI video models evolve rapidly. Check provider documentation for:
+    - Latest model versions
+    - New capabilities (longer duration, better consistency)
+    - Pricing changes
+    - Rate limit updates
+
+    This skill is current as of December 2024.

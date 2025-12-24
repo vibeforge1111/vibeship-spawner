@@ -1,0 +1,172 @@
+id: ai-video-generation-validations
+skill: ai-video-generation
+version: 1.0.0
+
+validations:
+  # Critical: API and Security
+  - id: no-api-keys-in-prompts
+    name: No API keys in prompt files
+    severity: critical
+    description: API keys must never be hardcoded in prompt templates or generation scripts
+    pattern:
+      file_glob: "**/*.{ts,js,py,yaml,json}"
+      match: "(RUNWAY_API|VEO3_API|SORA_API|KLING_API|PIKA_API|FAL_API).*=.*['\"][^'\"]{20,}['\"]"
+      exclude: "process\\.env|import\\.meta\\.env|os\\.environ"
+    message: "API key hardcoded in file. Use environment variables instead."
+    autofix: false
+
+  - id: rate-limit-handling
+    name: API calls need rate limit handling
+    severity: high
+    description: AI video API calls should have retry logic for rate limits
+    pattern:
+      file_glob: "**/*.{ts,js,py}"
+      match: "(runway|fal|replicate)\\.generate|fetch.*api\\.(runway|fal|replicate)"
+      exclude: "retry|backoff|RateLimit|sleep|delay"
+    message: "API call without rate limit handling. Add exponential backoff retry logic."
+    autofix: false
+
+  - id: generation-cost-tracking
+    name: Track generation costs
+    severity: medium
+    description: Video generations should log estimated costs for budget tracking
+    pattern:
+      file_glob: "**/*.{ts,js,py}"
+      match: "generate.*video|createVideo|runway\\.run|fal\\.subscribe"
+      exclude: "cost|budget|track|log.*price|estimate"
+    message: "Video generation without cost tracking. Add cost logging for budget management."
+    autofix: false
+
+  # High: Prompt Quality
+  - id: prompt-minimum-detail
+    name: Prompts need sufficient detail
+    severity: high
+    description: AI video prompts under 50 characters are too vague for quality output
+    pattern:
+      file_glob: "**/*.{ts,js,py,yaml,json}"
+      match: 'prompt["\']?\\s*[:=]\\s*["\'][^"\']{1,50}["\']'
+      exclude: "example|test|mock|placeholder"
+    message: "Prompt too short. Include camera, action, lighting, subject, and duration details."
+    autofix: false
+
+  - id: prompt-has-duration
+    name: Prompts should specify duration
+    severity: medium
+    description: AI video prompts should include target duration for better results
+    pattern:
+      file_glob: "**/*.{ts,js,yaml}"
+      match: 'prompt.*[:=].*"[^"]*"'
+      exclude: "second|duration|\\ds\\b|\\d\\s*sec"
+    message: "Prompt missing duration. Add '4 seconds' or similar for consistent output."
+    autofix: false
+
+  - id: prompt-has-camera
+    name: Prompts should specify camera
+    severity: medium
+    description: Specifying camera movement/angle improves AI video consistency
+    pattern:
+      file_glob: "**/*.{ts,js,yaml}"
+      match: 'prompt.*video.*[:=]'
+      exclude: "camera|shot|pan|zoom|dolly|tracking|wide|close|medium|POV|angle"
+    message: "Prompt missing camera specification. Add camera type/movement for better control."
+    autofix: false
+
+  # Medium: Workflow Quality
+  - id: aspect-ratio-specified
+    name: Aspect ratio should be explicit
+    severity: medium
+    description: Generation calls should specify aspect ratio for target platform
+    pattern:
+      file_glob: "**/*.{ts,js,py}"
+      match: "generate.*video|createVideo"
+      exclude: "aspect|ratio|16:9|9:16|1:1|4:5|width|height"
+    message: "Generation without explicit aspect ratio. Specify for target platform."
+    autofix: false
+
+  - id: output-saved-with-metadata
+    name: Save generation metadata with output
+    severity: medium
+    description: Video outputs should be saved with prompt, seed, and settings for reproducibility
+    pattern:
+      file_glob: "**/*.{ts,js,py}"
+      match: "download.*video|save.*output|writeFile.*\\.mp4"
+      exclude: "metadata|prompt|seed|settings|log|json"
+    message: "Saving video without metadata. Store prompt, seed, and settings for reproducibility."
+    autofix: false
+
+  - id: webhook-or-polling
+    name: Long-running generations need status handling
+    severity: high
+    description: AI video generation is async; implement webhook or polling for status
+    pattern:
+      file_glob: "**/*.{ts,js,py}"
+      match: "(runway|fal|replicate)\\.(generate|run|subscribe)"
+      exclude: "webhook|poll|status|await.*complete|onComplete|callback"
+    message: "Async generation without completion handling. Add webhook or polling."
+    autofix: false
+
+  # Low: Best Practices
+  - id: negative-prompt-used
+    name: Consider negative prompts
+    severity: low
+    description: Negative prompts help exclude unwanted elements from generations
+    pattern:
+      file_glob: "**/*.{ts,js,yaml}"
+      match: 'prompt.*[:=].*"[^"]{100,}"'
+      exclude: "negative|avoid|without|no text|no watermark|not"
+    message: "Long prompt without negative specifications. Consider adding what to avoid."
+    autofix: false
+
+  - id: batch-uses-queue
+    name: Batch generation needs queue management
+    severity: medium
+    description: Multiple generations should use a queue to respect rate limits
+    pattern:
+      file_glob: "**/*.{ts,js,py}"
+      match: "Promise\\.all.*generate|for.*await.*generate|\\.map.*generate"
+      exclude: "queue|PQueue|limit|concurrent|batch|throttle"
+    message: "Batch generation without queue. Use PQueue or similar for rate limiting."
+    autofix: false
+
+  - id: error-handling-present
+    name: Generation calls need error handling
+    severity: high
+    description: AI generation calls should handle failures gracefully
+    pattern:
+      file_glob: "**/*.{ts,js,py}"
+      match: "await.*(generate|runway|fal|replicate)"
+      exclude: "try|catch|error|Error|except|finally"
+    message: "Generation call without error handling. Wrap in try/catch."
+    autofix: false
+
+  - id: seed-saved-for-consistency
+    name: Save seeds for reproducibility
+    severity: low
+    description: When seed is used, it should be logged for future reference
+    pattern:
+      file_glob: "**/*.{ts,js,py}"
+      match: "seed.*[:=].*\\d+"
+      exclude: "log|save|store|console|metadata"
+    message: "Seed used but not logged. Save for reproducibility."
+    autofix: false
+
+# Pre-commit checks - run before committing generation code
+pre_commit:
+  - id: no-api-keys-in-prompts
+  - id: rate-limit-handling
+  - id: error-handling-present
+  - id: webhook-or-polling
+
+# CI checks - run in CI/CD pipeline
+ci_checks:
+  - id: no-api-keys-in-prompts
+  - id: generation-cost-tracking
+  - id: batch-uses-queue
+  - id: output-saved-with-metadata
+
+# Quality gates for prompt libraries
+prompt_library_checks:
+  - id: prompt-minimum-detail
+  - id: prompt-has-duration
+  - id: prompt-has-camera
+  - id: negative-prompt-used
