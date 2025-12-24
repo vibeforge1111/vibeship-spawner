@@ -476,6 +476,9 @@ async function handleGet(
     ...v2Skills.map(s => s.name),
   ].filter((v, i, a) => a.indexOf(v) === i).sort();
 
+  if (available.length === 0) {
+    throw new Error(`Skill "${name}" not found. No skills loaded - run 'node scripts/upload-skills.js' to populate KV.`);
+  }
   throw new Error(`Skill "${name}" not found. Available: ${available.join(', ')}`);
 }
 
