@@ -511,10 +511,13 @@ export function renderCollaborationProtocol(skill: Skill, previousSkill?: string
 
   // Check if there's any collaboration data to show
   const hasReceivesFrom = collab.receives_from && collab.receives_from.length > 0;
+  const hasDelegation = collab.delegation_triggers && collab.delegation_triggers.length > 0;
   const hasFeedback = collab.feedback_loops?.receives_feedback_from?.length || collab.feedback_loops?.sends_feedback_to?.length;
   const hasInsights = collab.cross_domain_insights && collab.cross_domain_insights.length > 0;
+  const hasCombinations = collab.common_combinations && collab.common_combinations.length > 0;
+  const hasPrerequisites = collab.prerequisites && Object.keys(collab.prerequisites).length > 0;
 
-  if (!hasReceivesFrom && !hasFeedback && !hasInsights) {
+  if (!hasReceivesFrom && !hasDelegation && !hasFeedback && !hasInsights && !hasCombinations) {
     return '';
   }
 
@@ -552,6 +555,35 @@ ${matchingReceive.provides}
 ${receivesRows}`);
   }
 
+  // Build delegation_triggers section (when to delegate OUT to other skills)
+  if (hasDelegation) {
+    const delegationRows = collab.delegation_triggers
+      .map(d => {
+        const triggers = d.trigger.split('|').slice(0, 3).join(', ');
+        const suffix = d.trigger.split('|').length > 3 ? '...' : '';
+        return `| ${triggers}${suffix} | **${d.delegate_to}** | ${d.pattern} | ${d.handoff_data.slice(0, 2).join(', ')}${d.handoff_data.length > 2 ? '...' : ''} |`;
+      })
+      .join('\n');
+
+    sections.push(`### WHEN TO DELEGATE (Outbound Handoffs)
+
+**IMPORTANT:** When you detect these triggers, delegate to the specified skill.
+
+| If user mentions... | Delegate To | Pattern | Required Data |
+|---------------------|-------------|---------|---------------|
+${delegationRows}
+
+**How to Delegate:**
+1. Detect trigger pattern in user message
+2. Prepare required handoff data (see table above)
+3. Execute: \`spawner_load({ skill_id: "target-skill", context: "your context" })\`
+4. Include ALL required data in context
+
+**Pattern Types:**
+- \`sequential\`: Complete your work first, then hand off
+- \`parallel\`: Hand off immediately, can work concurrently`);
+  }
+
   // Build feedback loops section
   if (hasFeedback) {
     let feedbackContent = '### FEEDBACK LOOPS\n\n';
@@ -577,10 +609,39 @@ ${receivesRows}`);
   // Build cross-domain insights
   if (hasInsights) {
     let insightsContent = '### CROSS-DOMAIN INSIGHTS\n\n';
-    for (const insight of collab.cross_domain_insights.slice(0, 2)) {
-      insightsContent += `**From ${insight.domain}:** ${insight.applies_when}\n`;
+    for (const insight of collab.cross_domain_insights.slice(0, 3)) {
+      insightsContent += `**From ${insight.domain}:** ${insight.insight}\n`;
+      insightsContent += `_Applies when: ${insight.applies_when}_\n\n`;
     }
     sections.push(insightsContent);
+  }
+
+  // Build common_combinations section (pre-defined skill workflows)
+  if (hasCombinations) {
+    let combosContent = '### COMMON SKILL COMBINATIONS\n\n';
+    combosContent += 'These pre-tested workflows are known to work well together:\n\n';
+    for (const combo of collab.common_combinations.slice(0, 3)) {
+      combosContent += `**${combo.name}**\n`;
+      combosContent += `Skills: ${combo.skills.join(' → ')}\n`;
+      combosContent += `Workflow: ${combo.workflow}\n\n`;
+    }
+    sections.push(combosContent);
+  }
+
+  // Build prerequisites section
+  if (hasPrerequisites) {
+    let prereqContent = '### PREREQUISITES\n\n';
+    prereqContent += '**Before using this skill, ensure:**\n\n';
+
+    const prereqs = collab.prerequisites as Record<string, string | string[]>;
+    for (const [key, value] of Object.entries(prereqs)) {
+      if (Array.isArray(value)) {
+        prereqContent += `- **${key}:** ${value.join(', ')}\n`;
+      } else if (typeof value === 'string') {
+        prereqContent += `- **${key}:** ${value}\n`;
+      }
+    }
+    sections.push(prereqContent);
   }
 
   return sections.join('\n\n---\n\n');
