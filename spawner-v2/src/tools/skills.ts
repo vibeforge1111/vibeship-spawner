@@ -434,6 +434,10 @@ async function handleGet(
       }
 
       const hasHandoffs = skill.handoffs && skill.handoffs.length > 0;
+
+      // Check if this is a marketing skill that may need tool setup
+      const setupHint = getSetupHintForSkill(skill.id, skill.tags ?? []);
+
       const instruction = [
         `Loaded skill: **${skill.name}**`,
         '',
@@ -442,6 +446,7 @@ async function handleGet(
         skill.patterns?.length ? `✓ ${skill.patterns.length} pattern${skill.patterns.length !== 1 ? 's' : ''} available` : '',
         '',
         'Use spawner_validate to check code against this skill\'s validations.',
+        setupHint ? `\n---\n\n${setupHint}` : '',
       ].filter(Boolean).join('\n');
 
       return {
@@ -628,6 +633,73 @@ function buildListInstruction(
   lines.push('[V1] = Markdown format');
 
   return lines.join('\n');
+}
+
+/**
+ * Skills that need specific tools for full functionality
+ */
+const SKILL_TOOL_REQUIREMENTS: Record<string, {
+  tools: string[];
+  message: string;
+}> = {
+  // Image generation skills
+  'ai-image-generation': {
+    tools: ['fal-ai', 'midjourney'],
+    message: 'This skill works best with image generation tools. Run `spawner_setup({ tool: "fal-ai" })` for setup.',
+  },
+  'prompt-engineering-creative': {
+    tools: ['fal-ai', 'midjourney', 'runway'],
+    message: 'For hands-on prompt testing, configure generation tools via `spawner_setup({ action: "check" })`.',
+  },
+  // Video generation skills
+  'ai-video-generation': {
+    tools: ['runway', 'fal-ai'],
+    message: 'Video generation requires Runway or Fal.ai. Run `spawner_setup({ tool: "runway" })` for setup.',
+  },
+  'video-production': {
+    tools: ['runway', 'heygen'],
+    message: 'For AI video features, configure Runway. Run `spawner_setup({ tool: "runway" })` for setup.',
+  },
+  // Audio/voice skills
+  'voiceover': {
+    tools: ['elevenlabs'],
+    message: 'AI voiceover requires ElevenLabs. Run `spawner_setup({ tool: "elevenlabs" })` for setup.',
+  },
+  'ai-audio-production': {
+    tools: ['elevenlabs', 'suno'],
+    message: 'AI audio tools enhance this skill. Run `spawner_setup({ tool: "elevenlabs" })` to start.',
+  },
+  'digital-humans': {
+    tools: ['heygen', 'elevenlabs'],
+    message: 'AI avatar creation requires HeyGen. Run `spawner_setup({ tool: "heygen" })` for setup.',
+  },
+  // Creative direction skills
+  'ai-creative-director': {
+    tools: ['fal-ai', 'runway', 'elevenlabs'],
+    message: 'Full creative orchestration benefits from all generation tools. Run `spawner_setup({ action: "level", level: 3 })` for full setup.',
+  },
+};
+
+/**
+ * Get setup hint for a skill based on its ID and tags
+ */
+function getSetupHintForSkill(skillId: string, tags: string[]): string | null {
+  // Check direct skill ID match
+  const directMatch = SKILL_TOOL_REQUIREMENTS[skillId];
+  if (directMatch) {
+    return `**Tool Setup:** ${directMatch.message}`;
+  }
+
+  // Check if it's a marketing/AI skill that might need tools
+  const isAISkill = tags.some(t =>
+    ['ai', 'generation', 'video', 'audio', 'image', 'voice', 'avatar'].includes(t.toLowerCase())
+  );
+
+  if (isAISkill) {
+    return '**Note:** This skill may work better with AI generation tools configured. Run `spawner_setup({ action: "check" })` to see your current setup.';
+  }
+
+  return null;
 }
 
 /**

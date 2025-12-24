@@ -21,6 +21,9 @@
  *
  * Orchestration Tool:
  * - orchestrate (main entry point - auto-detects context)
+ *
+ * Onboarding Tool:
+ * - setup (check configuration, get setup guides, verify requirements)
  */
 
 import {
@@ -48,6 +51,7 @@ import { skillScoreToolDefinition, executeSkillScore } from './skill-score.js';
 import { skillUpgradeToolDefinition, executeSkillUpgrade } from './skill-upgrade.js';
 import { skillBrainstormToolDefinition, executeSkillBrainstorm } from './skill-brainstorm.js';
 import { orchestrateToolDefinition, executeOrchestrate } from './orchestrate.js';
+import { setupToolDefinition, executeSetup } from './setup.js';
 
 // =============================================================================
 // Register all tools
@@ -133,6 +137,12 @@ registerTool({
   execute: (env, args, _userId) => executeOrchestrate(env, args as Parameters<typeof executeOrchestrate>[1]),
 });
 
+// Onboarding Tool
+registerTool({
+  definition: setupToolDefinition,
+  execute: (env, args, _userId) => executeSetup(env, args as Parameters<typeof executeSetup>[1]),
+});
+
 // =============================================================================
 // Re-exports for backwards compatibility
 // =============================================================================
@@ -158,6 +168,7 @@ export {
   skillUpgradeToolDefinition,
   skillBrainstormToolDefinition,
   orchestrateToolDefinition,
+  setupToolDefinition,
 };
 
 // Re-export executors for direct access if needed
@@ -177,4 +188,5 @@ export {
   executeSkillUpgrade,
   executeSkillBrainstorm,
   executeOrchestrate,
+  executeSetup,
 };
