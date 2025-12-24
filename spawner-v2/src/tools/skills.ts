@@ -524,7 +524,7 @@ function matchesFilters(
     const q = query.toLowerCase();
     return (
       skill.name.includes(q) ||
-      skill.description.toLowerCase().includes(q) ||
+      (skill.description?.toLowerCase().includes(q) ?? false) ||
       skill.tags.some(t => t.includes(q)) ||
       skill.triggers.some(t => t.toLowerCase().includes(q))
     );
@@ -550,7 +550,7 @@ function matchesFiltersV2(
     return (
       skill.name.includes(q) ||
       skill.id.includes(q) ||
-      skill.description.toLowerCase().includes(q) ||
+      (skill.description?.toLowerCase().includes(q) ?? false) ||
       skill.tags.some(t => t.includes(q)) ||
       skill.triggers.some(t => t.toLowerCase().includes(q))
     );
