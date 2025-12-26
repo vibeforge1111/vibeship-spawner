@@ -6,7 +6,7 @@
  */
 import { loadState, saveState, clearState, handleComplete, handleProgress, handleHandoff, allAgentsComplete, } from './state.js';
 import { renderAgentLane, renderHandoff, renderDashboard, } from './renderer/index.js';
-import { colorize, COLORS, ICONS, getAgentIcon } from './utils.js';
+import { colorize, COLORS, ICONS } from './utils.js';
 /**
  * Read JSON input from stdin
  */
@@ -23,18 +23,10 @@ async function readStdin() {
     });
 }
 /**
- * Output to terminal
+ * Output to terminal (stderr so Claude Code doesn't capture it)
  */
 function output(text) {
-    console.log(text);
-}
-/**
- * Render completion inline
- */
-function renderCompleteInline(name, duration) {
-    const icon = getAgentIcon(name);
-    const durationStr = duration > 0 ? ` (${Math.round(duration / 1000)}s)` : '';
-    return colorize(`${ICONS.check} ${icon} ${name} agent complete${durationStr}`, COLORS.success);
+    console.error(text);
 }
 /**
  * Render skill loaded confirmation
@@ -146,7 +138,7 @@ async function main() {
                         const completedAgent = handleComplete(state, completeData);
                         if (completedAgent) {
                             output('');
-                            output(renderCompleteInline(completedAgent.name, completedAgent.duration));
+                            output(renderAgentLane(completedAgent));
                         }
                     }
                     break;
@@ -166,7 +158,7 @@ async function main() {
                 const completedAgent = handleComplete(state, completeData);
                 if (completedAgent) {
                     output('');
-                    output(renderCompleteInline(completedAgent.name, completedAgent.duration));
+                    output(renderAgentLane(completedAgent));
                 }
             }
         }

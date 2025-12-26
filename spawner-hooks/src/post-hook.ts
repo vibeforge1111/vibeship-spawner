@@ -29,7 +29,7 @@ import {
   renderDashboard,
 } from './renderer/index.js';
 
-import { colorize, COLORS, ICONS, getAgentIcon } from './utils.js';
+import { colorize, COLORS, ICONS } from './utils.js';
 
 /**
  * Read JSON input from stdin
@@ -48,23 +48,12 @@ async function readStdin(): Promise<string> {
 }
 
 /**
- * Output to terminal
+ * Output to terminal (stderr so Claude Code doesn't capture it)
  */
 function output(text: string): void {
-  console.log(text);
+  console.error(text);
 }
 
-/**
- * Render completion inline
- */
-function renderCompleteInline(name: string, duration: number): string {
-  const icon = getAgentIcon(name);
-  const durationStr = duration > 0 ? ` (${Math.round(duration / 1000)}s)` : '';
-  return colorize(
-    `${ICONS.check} ${icon} ${name} agent complete${durationStr}`,
-    COLORS.success
-  );
-}
 
 /**
  * Render skill loaded confirmation
@@ -193,7 +182,7 @@ async function main(): Promise<void> {
             const completedAgent = handleComplete(state, completeData);
             if (completedAgent) {
               output('');
-              output(renderCompleteInline(completedAgent.name, completedAgent.duration));
+              output(renderAgentLane(completedAgent));
             }
           }
           break;
@@ -213,7 +202,7 @@ async function main(): Promise<void> {
         const completedAgent = handleComplete(state, completeData);
         if (completedAgent) {
           output('');
-          output(renderCompleteInline(completedAgent.name, completedAgent.duration));
+          output(renderAgentLane(completedAgent));
         }
       }
     }

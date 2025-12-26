@@ -39,7 +39,7 @@ import {
   renderDashboard,
 } from './renderer/index.js';
 
-import { colorize, COLORS, ICONS, getAgentIcon, BOX_WIDTH, drawBox } from './utils.js';
+import { colorize, COLORS, ICONS } from './utils.js';
 
 /**
  * Read JSON input from stdin
@@ -58,10 +58,10 @@ async function readStdin(): Promise<string> {
 }
 
 /**
- * Output to terminal (stdout)
+ * Output to terminal (stderr so Claude Code doesn't capture it)
  */
 function output(text: string): void {
-  console.log(text);
+  console.error(text);
 }
 
 /**
@@ -81,17 +81,6 @@ function renderSkillLoading(skillName: string): string {
   return lines.join('\n');
 }
 
-/**
- * Render agent spawn notification inline
- */
-function renderSpawnInline(name: string, task: string, skills: string[]): string {
-  const icon = getAgentIcon(name);
-  const skillsStr = skills.length > 0 ? ` [${skills.slice(0, 3).join(', ')}]` : '';
-  return colorize(
-    `${ICONS.lightning} ${icon} ${name} agent spawned${skillsStr}`,
-    COLORS.info
-  ) + '\n' + colorize(`   ${ICONS.arrow} ${task}`, COLORS.dim);
-}
 
 /**
  * Check if tool input contains a spawner event
@@ -311,14 +300,13 @@ async function main(): Promise<void> {
     // Try to detect agent from Task tool call
     const agentData = detectAgentFromTask(toolInput, toolUseId);
     if (agentData) {
-      // Show inline spawn notification (lighter than full lane)
-      output('');
-      output(renderSpawnInline(agentData.name, agentData.task, agentData.skills));
-
-      // Also track in state
+      // Track in state and render full agent lane with box
       const state = loadState();
-      handleSpawn(state, agentData);
+      const agent = handleSpawn(state, agentData);
       saveState(state);
+
+      output('');
+      output(renderAgentLane(agent));
     }
 
     process.exit(0);

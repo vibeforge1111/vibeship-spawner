@@ -143,6 +143,29 @@ export function stripAnsi(str) {
     return str.replace(/\x1b\[[0-9;]*m/g, '');
 }
 /**
+ * Calculate visual width of a string (accounting for emojis which are 2 chars wide)
+ */
+export function visualWidth(str) {
+    const stripped = stripAnsi(str);
+    let width = 0;
+    for (const char of stripped) {
+        const code = char.codePointAt(0) || 0;
+        // Emoji ranges and other wide characters
+        if ((code >= 0x1F300 && code <= 0x1F9FF) || // Misc Symbols, Emoticons, etc.
+            (code >= 0x2600 && code <= 0x26FF) || // Misc symbols
+            (code >= 0x2700 && code <= 0x27BF) || // Dingbats
+            (code >= 0xFE00 && code <= 0xFE0F) || // Variation selectors
+            (code >= 0x1F000 && code <= 0x1FFFF) // Extended emoji
+        ) {
+            width += 2;
+        }
+        else {
+            width += 1;
+        }
+    }
+    return width;
+}
+/**
  * Draw a single-line box around content
  */
 export function drawBox(content, width = BOX_WIDTH, title, titleColor) {
@@ -151,7 +174,7 @@ export function drawBox(content, width = BOX_WIDTH, title, titleColor) {
     // Top border with optional title
     if (title) {
         const coloredTitle = titleColor ? colorize(` ${title} `, titleColor) : ` ${title} `;
-        const titleLen = stripAnsi(coloredTitle).length;
+        const titleLen = visualWidth(coloredTitle);
         const remainingWidth = innerWidth - titleLen - 1;
         lines.push(BOX.topLeft +
             BOX.horizontal +
@@ -185,7 +208,7 @@ export function drawDoubleBox(content, width = BOX_WIDTH, title, titleColor) {
     // Top border with optional title
     if (title) {
         const coloredTitle = titleColor ? colorize(` ${title} `, titleColor) : ` ${title} `;
-        const titleLen = stripAnsi(coloredTitle).length;
+        const titleLen = visualWidth(coloredTitle);
         const remainingWidth = innerWidth - titleLen - 1;
         lines.push(DBOX.topLeft +
             DBOX.horizontal +
@@ -219,7 +242,7 @@ export function drawDoubleBoxWithDivider(topContent, bottomContent, width = BOX_
     // Top border with optional title
     if (title) {
         const coloredTitle = titleColor ? colorize(` ${title} `, titleColor) : ` ${title} `;
-        const titleLen = stripAnsi(coloredTitle).length;
+        const titleLen = visualWidth(coloredTitle);
         const remainingWidth = innerWidth - titleLen - 1;
         lines.push(DBOX.topLeft +
             DBOX.horizontal +

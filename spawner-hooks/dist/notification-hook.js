@@ -7,7 +7,7 @@
  */
 import { loadState, saveState, clearState, handleSpawn, handleProgress, handleWaiting, handleHandoff, handleComplete, handleError, allAgentsComplete, } from './state.js';
 import { renderAgentLane, renderHandoff, renderBlocker, renderWarning, renderDashboard, } from './renderer/index.js';
-import { colorize, COLORS, ICONS, getAgentIcon } from './utils.js';
+import { colorize, COLORS, ICONS } from './utils.js';
 /**
  * Read JSON input from stdin
  */
@@ -24,10 +24,10 @@ async function readStdin() {
     });
 }
 /**
- * Output to terminal (stdout)
+ * Output to terminal (stderr so Claude Code doesn't capture it)
  */
 function output(text) {
-    console.log(text);
+    console.error(text);
 }
 /**
  * Output error (stderr)
@@ -43,14 +43,6 @@ function renderSkillLoading(skillName) {
         colorize(`${ICONS.spinner} Loading skill: ${skillName}`, COLORS.info),
     ];
     return lines.join('\n');
-}
-/**
- * Render agent spawn notification inline
- */
-function renderSpawnInline(name, task, skills) {
-    const icon = getAgentIcon(name);
-    const skillsStr = skills.length > 0 ? ` [${skills.slice(0, 3).join(', ')}]` : '';
-    return colorize(`${ICONS.lightning} ${icon} ${name} agent spawned${skillsStr}`, COLORS.info) + '\n' + colorize(`   ${ICONS.arrow} ${task}`, COLORS.dim);
 }
 /**
  * Check if tool input contains a spawner event
@@ -245,13 +237,12 @@ async function main() {
         // Try to detect agent from Task tool call
         const agentData = detectAgentFromTask(toolInput, toolUseId);
         if (agentData) {
-            // Show inline spawn notification (lighter than full lane)
-            output('');
-            output(renderSpawnInline(agentData.name, agentData.task, agentData.skills));
-            // Also track in state
+            // Track in state and render full agent lane with box
             const state = loadState();
-            handleSpawn(state, agentData);
+            const agent = handleSpawn(state, agentData);
             saveState(state);
+            output('');
+            output(renderAgentLane(agent));
         }
         process.exit(0);
     }

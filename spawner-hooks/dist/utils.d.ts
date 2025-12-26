@@ -95,6 +95,10 @@ export declare function padEnd(str: string, width: number): string;
  */
 export declare function stripAnsi(str: string): string;
 /**
+ * Calculate visual width of a string (accounting for emojis which are 2 chars wide)
+ */
+export declare function visualWidth(str: string): number;
+/**
  * Draw a single-line box around content
  */
 export declare function drawBox(content: string[], width?: number, title?: string, titleColor?: string): string;
