@@ -52,6 +52,7 @@ import { skillUpgradeToolDefinition, executeSkillUpgrade } from './skill-upgrade
 import { skillBrainstormToolDefinition, executeSkillBrainstorm } from './skill-brainstorm.js';
 import { orchestrateToolDefinition, executeOrchestrate } from './orchestrate.js';
 import { setupToolDefinition, executeSetup } from './setup.js';
+import { emitToolDefinition, executeEmit } from './emit.js';
 
 // =============================================================================
 // Register all tools
@@ -143,6 +144,12 @@ registerTool({
   execute: (env, args, _userId) => executeSetup(env, args as Parameters<typeof executeSetup>[1]),
 });
 
+// Agent Notification Tool
+registerTool({
+  definition: emitToolDefinition,
+  execute: (env, args, _userId) => executeEmit(env, args as Parameters<typeof executeEmit>[1]),
+});
+
 // =============================================================================
 // Re-exports for backwards compatibility
 // =============================================================================
@@ -169,6 +176,7 @@ export {
   skillBrainstormToolDefinition,
   orchestrateToolDefinition,
   setupToolDefinition,
+  emitToolDefinition,
 };
 
 // Re-export executors for direct access if needed
@@ -189,4 +197,5 @@ export {
   executeSkillBrainstorm,
   executeOrchestrate,
   executeSetup,
+  executeEmit,
 };

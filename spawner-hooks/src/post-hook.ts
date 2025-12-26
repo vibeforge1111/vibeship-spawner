@@ -1,0 +1,260 @@
+#!/usr/bin/env node
+/**
+ * Spawner Post-Tool Hook
+ *
+ * Runs after Task/Skill tools complete to handle agent completion and results.
+ */
+
+import type {
+  HookInput,
+  SpawnerEvent,
+  CompleteData,
+  ProgressData,
+  HandoffData,
+} from './types.js';
+
+import {
+  loadState,
+  saveState,
+  clearState,
+  handleComplete,
+  handleProgress,
+  handleHandoff,
+  allAgentsComplete,
+} from './state.js';
+
+import {
+  renderAgentLane,
+  renderHandoff,
+  renderDashboard,
+} from './renderer/index.js';
+
+import { colorize, COLORS, ICONS, getAgentIcon } from './utils.js';
+
+/**
+ * Read JSON input from stdin
+ */
+async function readStdin(): Promise<string> {
+  return new Promise((resolve) => {
+    let data = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => {
+      data += chunk;
+    });
+    process.stdin.on('end', () => {
+      resolve(data);
+    });
+  });
+}
+
+/**
+ * Output to terminal
+ */
+function output(text: string): void {
+  console.log(text);
+}
+
+/**
+ * Render completion inline
+ */
+function renderCompleteInline(name: string, duration: number): string {
+  const icon = getAgentIcon(name);
+  const durationStr = duration > 0 ? ` (${Math.round(duration / 1000)}s)` : '';
+  return colorize(
+    `${ICONS.check} ${icon} ${name} agent complete${durationStr}`,
+    COLORS.success
+  );
+}
+
+/**
+ * Render skill loaded confirmation
+ */
+function renderSkillLoaded(skillName: string): string {
+  return colorize(
+    `${ICONS.check} Skill loaded: ${skillName}`,
+    COLORS.success
+  );
+}
+
+/**
+ * Parse subagent response for embedded events
+ */
+function parseResponseForEvents(response: unknown): SpawnerEvent[] {
+  const events: SpawnerEvent[] = [];
+
+  if (typeof response !== 'object' || response === null) {
+    return events;
+  }
+
+  // Check for string content that might contain event markers
+  const responseStr = JSON.stringify(response);
+
+  // Find all event markers
+  const eventMatches = responseStr.matchAll(/\[SPAWNER_EVENT\](.*?)\[\/SPAWNER_EVENT\]/gs);
+  for (const match of eventMatches) {
+    try {
+      const event = JSON.parse(match[1]) as SpawnerEvent;
+      events.push(event);
+    } catch {
+      // Invalid JSON, skip
+    }
+  }
+
+  return events;
+}
+
+/**
+ * Main handler
+ */
+async function main(): Promise<void> {
+  try {
+    const input = await readStdin();
+    if (!input.trim()) {
+      process.exit(0);
+    }
+
+    const hookInput = JSON.parse(input) as HookInput;
+    const toolInput = hookInput.tool_input || {};
+    const toolUseId = hookInput.tool_use_id || '';
+    const toolResponse = hookInput.tool_response || {};
+
+    // Handle Skill tool completion
+    if (hookInput.tool_name === 'Skill') {
+      const skillName = toolInput.skill ? String(toolInput.skill) : null;
+      if (skillName && !toolResponse.error) {
+        output('');
+        output(renderSkillLoaded(skillName));
+      }
+      process.exit(0);
+    }
+
+    // Handle spawner_emit MCP tool - parse event from response
+    if (hookInput.tool_name.includes('spawner_emit')) {
+      const embeddedEvents = parseResponseForEvents(toolResponse);
+      const state = loadState();
+
+      for (const event of embeddedEvents) {
+        switch (event.type) {
+          case 'agent:progress': {
+            const data = event.data as ProgressData;
+            const progressAgent = handleProgress(state, data);
+            if (progressAgent) {
+              output('');
+              output(renderAgentLane(progressAgent));
+            }
+            break;
+          }
+          case 'agent:handoff': {
+            const data = event.data as HandoffData;
+            handleHandoff(state, data);
+            output('');
+            output(renderHandoff(data));
+            break;
+          }
+          case 'agent:waiting': {
+            // Handle waiting state
+            break;
+          }
+          case 'agent:error': {
+            // Handle error
+            break;
+          }
+        }
+      }
+
+      saveState(state);
+      process.exit(0);
+    }
+
+    // Only process Task tool
+    if (hookInput.tool_name !== 'Task') {
+      process.exit(0);
+    }
+
+    const state = loadState();
+
+    // Find agent by tool_use_id
+    const agent = state.activeAgents.get(toolUseId);
+    if (!agent) {
+      // Try to find by matching description
+      const description = String(toolInput.description || '');
+      for (const [id, a] of state.activeAgents) {
+        if (a.task.toLowerCase().includes(description.toLowerCase().substring(0, 20))) {
+          // Found a match
+          const isSuccess = !toolResponse.error;
+          if (isSuccess) {
+            const completeData: CompleteData = {
+              id,
+              result: 'Task completed',
+              duration: Date.now() - a.startTime,
+              tasks_completed: a.completed.length + 1,
+            };
+
+            const completedAgent = handleComplete(state, completeData);
+            if (completedAgent) {
+              output('');
+              output(renderCompleteInline(completedAgent.name, completedAgent.duration));
+            }
+          }
+          break;
+        }
+      }
+    } else {
+      // Direct match by ID
+      const isSuccess = !toolResponse.error;
+      if (isSuccess) {
+        const completeData: CompleteData = {
+          id: toolUseId,
+          result: 'Task completed',
+          duration: Date.now() - agent.startTime,
+          tasks_completed: agent.completed.length + 1,
+        };
+
+        const completedAgent = handleComplete(state, completeData);
+        if (completedAgent) {
+          output('');
+          output(renderCompleteInline(completedAgent.name, completedAgent.duration));
+        }
+      }
+    }
+
+    // Parse response for embedded events
+    const embeddedEvents = parseResponseForEvents(toolResponse);
+    for (const event of embeddedEvents) {
+      switch (event.type) {
+        case 'agent:progress': {
+          const data = event.data as ProgressData;
+          const progressAgent = handleProgress(state, data);
+          if (progressAgent) {
+            output('');
+            output(renderAgentLane(progressAgent));
+          }
+          break;
+        }
+        case 'agent:handoff': {
+          const data = event.data as HandoffData;
+          handleHandoff(state, data);
+          output('');
+          output(renderHandoff(data));
+          break;
+        }
+      }
+    }
+
+    // Check if all done
+    if (allAgentsComplete(state)) {
+      output('');
+      output(renderDashboard(state));
+      clearState();
+      process.exit(0);
+    }
+
+    saveState(state);
+    process.exit(0);
+  } catch (err) {
+    // Silent failure
+    process.exit(0);
+  }
+}
+
+main();
