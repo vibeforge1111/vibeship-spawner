@@ -3,6 +3,7 @@
  *
  * Consistent terminal rendering with proper box alignment
  */
+import stringWidth from 'string-width';
 // ANSI color codes
 export const COLORS = {
     reset: '\x1b[0m',
@@ -126,13 +127,11 @@ export function progressBar(percent, width = 20) {
     return `${bar} ${clamped}%`;
 }
 /**
- * Pad string to width, accounting for emoji/unicode
+ * Pad string to width, accounting for emoji/unicode visual width
  */
 export function padEnd(str, width) {
-    // Simple approach - just use standard padEnd
-    // For proper unicode width, would need a library like string-width
-    const visibleLength = stripAnsi(str).length;
-    const padding = Math.max(0, width - visibleLength);
+    const visWidth = visualWidth(str);
+    const padding = Math.max(0, width - visWidth);
     return str + ' '.repeat(padding);
 }
 /**
@@ -143,27 +142,11 @@ export function stripAnsi(str) {
     return str.replace(/\x1b\[[0-9;]*m/g, '');
 }
 /**
- * Calculate visual width of a string (accounting for emojis which are 2 chars wide)
+ * Calculate visual width of a string (accounting for emojis, unicode, etc.)
+ * Uses string-width library for accurate terminal width calculation
  */
 export function visualWidth(str) {
-    const stripped = stripAnsi(str);
-    let width = 0;
-    for (const char of stripped) {
-        const code = char.codePointAt(0) || 0;
-        // Emoji ranges and other wide characters
-        if ((code >= 0x1F300 && code <= 0x1F9FF) || // Misc Symbols, Emoticons, etc.
-            (code >= 0x2600 && code <= 0x26FF) || // Misc symbols
-            (code >= 0x2700 && code <= 0x27BF) || // Dingbats
-            (code >= 0xFE00 && code <= 0xFE0F) || // Variation selectors
-            (code >= 0x1F000 && code <= 0x1FFFF) // Extended emoji
-        ) {
-            width += 2;
-        }
-        else {
-            width += 1;
-        }
-    }
-    return width;
+    return stringWidth(stripAnsi(str));
 }
 /**
  * Draw a single-line box around content
@@ -187,10 +170,10 @@ export function drawBox(content, width = BOX_WIDTH, title, titleColor) {
     }
     // Content lines
     for (const line of content) {
-        const stripped = stripAnsi(line);
         const contentWidth = innerWidth - 2; // Account for padding
-        const truncated = stripped.length > contentWidth
-            ? line.substring(0, contentWidth - 3) + '...'
+        const lineWidth = visualWidth(line);
+        const truncated = lineWidth > contentWidth
+            ? truncateVisual(line, contentWidth - 3) + '...'
             : line;
         const padded = padEnd(truncated, contentWidth);
         lines.push(BOX.vertical + ' ' + padded + ' ' + BOX.vertical);
@@ -221,10 +204,10 @@ export function drawDoubleBox(content, width = BOX_WIDTH, title, titleColor) {
     }
     // Content lines
     for (const line of content) {
-        const stripped = stripAnsi(line);
         const contentWidth = innerWidth - 2;
-        const truncated = stripped.length > contentWidth
-            ? line.substring(0, contentWidth - 3) + '...'
+        const lineWidth = visualWidth(line);
+        const truncated = lineWidth > contentWidth
+            ? truncateVisual(line, contentWidth - 3) + '...'
             : line;
         const padded = padEnd(truncated, contentWidth);
         lines.push(DBOX.vertical + ' ' + padded + ' ' + DBOX.vertical);
@@ -290,4 +273,23 @@ export function truncate(str, maxLength) {
     if (str.length <= maxLength)
         return str;
     return str.substring(0, maxLength - 3) + '...';
+}
+/**
+ * Truncate string to visual width (accounting for emojis)
+ * Uses string-width for accurate width calculation
+ */
+export function truncateVisual(str, maxWidth) {
+    const stripped = stripAnsi(str);
+    if (stringWidth(stripped) <= maxWidth) {
+        return str;
+    }
+    // Binary search for the right cutoff point
+    let result = '';
+    for (const char of stripped) {
+        const test = result + char;
+        if (stringWidth(test) > maxWidth)
+            break;
+        result = test;
+    }
+    return result;
 }

@@ -19,34 +19,29 @@ import {
  * Render a handoff callout
  */
 export function renderHandoff(handoff: HandoffData): string {
-  const fromIcon = getAgentIcon(handoff.from);
-  const toIcon = getAgentIcon(handoff.to);
-
   const lines: string[] = [
     '',
-    `${fromIcon} ${handoff.from} ${ICONS.arrow}${ICONS.arrow} ${toIcon} ${handoff.to}`,
+    `${handoff.from}  -->  ${handoff.to}`,
     '',
   ];
 
   // Payload description
   if (handoff.description) {
-    lines.push(colorize(`Payload: ${handoff.description}`, COLORS.dim));
+    lines.push(colorize(truncate(handoff.description, 48), COLORS.dim));
   }
 
   // Payload content (truncated)
   if (handoff.payload) {
-    const payloadLines = handoff.payload.split('\n').slice(0, 3);
+    lines.push('');
+    const payloadLines = handoff.payload.split('\n').slice(0, 2);
     for (const line of payloadLines) {
       lines.push(colorize(truncate(line, 48), COLORS.info));
-    }
-    if (handoff.payload.split('\n').length > 3) {
-      lines.push(colorize('...', COLORS.dim));
     }
   }
 
   lines.push('');
 
-  const title = `${ICONS.lightning} HANDOFF`;
+  const title = 'HANDOFF';
   return drawDoubleBox(lines, BOX_WIDTH, title, COLORS.info);
 }
 

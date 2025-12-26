@@ -88,12 +88,12 @@ export function renderAgentLane(agent: AgentState): string {
     ));
   }
 
-  // Complete indicator
+  // Complete indicator (duration only, tasks already have checkmarks)
   if (agent.status === 'complete') {
     lines.push('');
     lines.push(colorize(
-      `${ICONS.check} Complete (${Math.round(agent.duration / 1000)}s)`,
-      COLORS.success
+      `Done in ${Math.round(agent.duration / 1000)}s`,
+      COLORS.dim
     ));
   }
 

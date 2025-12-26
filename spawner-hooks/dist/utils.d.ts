@@ -87,7 +87,7 @@ export declare function dim(text: string): string;
  */
 export declare function progressBar(percent: number, width?: number): string;
 /**
- * Pad string to width, accounting for emoji/unicode
+ * Pad string to width, accounting for emoji/unicode visual width
  */
 export declare function padEnd(str: string, width: number): string;
 /**
@@ -95,7 +95,8 @@ export declare function padEnd(str: string, width: number): string;
  */
 export declare function stripAnsi(str: string): string;
 /**
- * Calculate visual width of a string (accounting for emojis which are 2 chars wide)
+ * Calculate visual width of a string (accounting for emojis, unicode, etc.)
+ * Uses string-width library for accurate terminal width calculation
  */
 export declare function visualWidth(str: string): number;
 /**
@@ -118,3 +119,8 @@ export declare function formatDuration(ms: number): string;
  * Truncate string with ellipsis
  */
 export declare function truncate(str: string, maxLength: number): string;
+/**
+ * Truncate string to visual width (accounting for emojis)
+ * Uses string-width for accurate width calculation
+ */
+export declare function truncateVisual(str: string, maxWidth: number): string;

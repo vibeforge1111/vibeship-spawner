@@ -60,10 +60,10 @@ export function renderAgentLane(agent) {
         lines.push('');
         lines.push(colorize(`${ICONS.warning} ${truncate(agent.error, 45)}`, COLORS.error));
     }
-    // Complete indicator
+    // Complete indicator (duration only, tasks already have checkmarks)
     if (agent.status === 'complete') {
         lines.push('');
-        lines.push(colorize(`${ICONS.check} Complete (${Math.round(agent.duration / 1000)}s)`, COLORS.success));
+        lines.push(colorize(`Done in ${Math.round(agent.duration / 1000)}s`, COLORS.dim));
     }
     // Build title with icon and name
     const title = `${icon} ${agent.name}`;
