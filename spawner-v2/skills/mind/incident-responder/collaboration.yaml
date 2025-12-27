@@ -1,0 +1,354 @@
+# Incident Responder Collaboration Patterns
+# How incident response integrates with other foundational skills
+
+collaboration:
+  # Lead role - Incident Responder drives these workflows
+  leads:
+    - workflow: active-incident
+      description: Coordinating response to production incidents
+      involves:
+        - debugging-master: Root cause investigation
+        - performance-thinker: Performance-related incidents
+        - system-designer: Architecture-related decisions
+      handoff_points:
+        - to: debugging-master
+          when: Incident mitigated, need root cause
+          context_to_share: Timeline, symptoms, what was tried
+        - to: performance-thinker
+          when: Performance degradation incident
+          context_to_share: Metrics, affected components, timeline
+
+    - workflow: post-incident-review
+      description: Leading blameless post-mortem and action item follow-up
+      involves:
+        - tech-debt-manager: If incident reveals debt
+        - system-designer: If architecture changes needed
+        - decision-maker: For prioritizing action items
+      handoff_points:
+        - to: tech-debt-manager
+          when: Incident caused by underlying debt
+          context_to_share: Debt identified, impact, urgency
+        - to: decision-maker
+          when: Action items need prioritization
+          context_to_share: Options, effort, impact
+
+    - workflow: on-call-improvement
+      description: Improving on-call experience and processes
+      involves:
+        - tech-debt-manager: Alert debt and automation
+        - test-strategist: Testing monitoring
+      handoff_points:
+        - to: tech-debt-manager
+          when: Alert fatigue or monitoring debt identified
+          context_to_share: Noisy alerts, missing alerts, priorities
+
+  # Support role - Incident Responder assists these workflows
+  supports:
+    - workflow: system-design
+      led_by: system-designer
+      contribution: Failure mode analysis, observability requirements
+      when_called: Design review, architecture decisions
+
+    - workflow: deployment
+      led_by: system-designer
+      contribution: Rollback procedures, deployment safety
+      when_called: Deployment planning, CI/CD design
+
+    - workflow: tech-debt-prioritization
+      led_by: tech-debt-manager
+      contribution: Incident history informing debt priorities
+      when_called: Prioritizing which debt to address
+
+  # Escalation patterns
+  escalations:
+    - situation: Can't find root cause during incident
+      escalate_to: debugging-master
+      with_context: Symptoms, timeline, what's been tried
+      reason: Need systematic debugging approach
+
+    - situation: Performance incident with unclear cause
+      escalate_to: performance-thinker
+      with_context: Metrics, affected systems, timeline
+      reason: Need performance investigation expertise
+
+    - situation: Incident requires architectural fix
+      escalate_to: system-designer
+      with_context: Root cause, current constraints, requirements
+      reason: Beyond code-level fixes
+
+    - situation: Multiple action items competing for resources
+      escalate_to: decision-maker
+      with_context: Action items, effort estimates, risk assessments
+      reason: Need prioritization framework
+
+  # Integration contracts
+  contracts:
+    with_debugging_master:
+      incident_responder_provides:
+        - Incident timeline and symptoms
+        - What mitigation was applied
+        - Relevant logs and metrics
+        - What's already been tried
+      debugging_master_provides:
+        - Root cause analysis
+        - Systematic investigation results
+        - Recommendations for prevention
+      interface_example: |
+        # After incident mitigated, handoff to debugging master:
+        """
+        INCIDENT SUMMARY:
+
+        INCIDENT: Orders API 500 errors
+        DURATION: 45 minutes
+        MITIGATION: Rolled back deploy abc123
+
+        TIMELINE:
+        14:30 - Errors start
+        14:35 - Rollback initiated
+        14:45 - Errors stop
+
+        OBSERVATIONS:
+        - Errors started exactly with deploy
+        - Database connection errors in logs
+        - CPU spike on API servers
+
+        ALREADY TRIED:
+        - Checked DB health (looked fine)
+        - Checked recent DB migrations (none)
+
+        NEED: Root cause to prevent recurrence
+        """
+
+    with_performance_thinker:
+      incident_responder_provides:
+        - Performance incident details
+        - Metrics and timelines
+        - Affected components
+      performance_thinker_provides:
+        - Performance root cause
+        - Bottleneck identification
+        - Optimization recommendations
+      interface_example: |
+        # Performance incident handoff:
+        """
+        PERFORMANCE INCIDENT:
+
+        SYMPTOM: API latency p95 jumped 5x
+        DURATION: 2 hours
+        IMPACT: 30% timeout rate
+
+        METRICS:
+        - Latency: Normal 200ms → 1000ms
+        - Database: Query time doubled
+        - Memory: Normal
+        - CPU: Slightly elevated
+
+        MITIGATION: Scaled up DB read replicas (helped partially)
+
+        NEED: Root cause and long-term fix
+        """
+
+    with_system_designer:
+      incident_responder_provides:
+        - Failure modes observed
+        - Observability gaps
+        - Reliability requirements
+      system_designer_provides:
+        - Architectural resilience patterns
+        - Component design for reliability
+        - Observability architecture
+      interface_example: |
+        # Incident reveals architectural issue:
+        """
+        INCIDENT PATTERN:
+
+        RECURRING ISSUE: Payment service failures cascade to all services
+
+        ROOT CAUSE: Synchronous dependency chain
+        - Order → Payment → Inventory → Shipping
+        - Payment slow → Everything slow
+
+        CURRENT: Retry with timeout
+
+        NEED: Architecture change to isolate failures
+        """
+
+        # System designer responds:
+        """
+        ARCHITECTURAL RECOMMENDATION:
+
+        Pattern: Circuit breaker + async decoupling
+
+        1. Add circuit breaker to payment calls
+           - Open circuit after 5 failures
+           - Return graceful degradation
+
+        2. Decouple inventory/shipping
+           - Move to async queue
+           - Order completes after payment
+           - Fulfillment happens async
+
+        3. Add bulkheads
+           - Separate thread pools per service
+           - One slow service can't exhaust resources
+        """
+
+    with_tech_debt_manager:
+      incident_responder_provides:
+        - Incidents caused by debt
+        - Alert fatigue issues
+        - Monitoring gaps
+      tech_debt_manager_provides:
+        - Debt prioritization considering incident risk
+        - Alert debt inventory
+        - Observability debt tracking
+      interface_example: |
+        # Incident reveals tech debt:
+        """
+        INCIDENT LEARNINGS:
+
+        1. No circuit breaker → Cascade failures
+           Debt: Missing resilience patterns
+           Impact: 3 incidents this quarter
+
+        2. Alert fired but was noise → Ignored
+           Debt: 40 noisy alerts in rotation
+           Impact: Delayed detection
+
+        3. No runbook → 20 min to understand system
+           Debt: Missing documentation
+           Impact: Extended MTTR
+        """
+
+        # Tech debt manager integrates:
+        """
+        DEBT PRIORITIZATION UPDATE:
+
+        HIGH (incident-driven):
+        1. Circuit breakers for payment (3 incidents)
+        2. Alert cleanup (detection delay)
+
+        MEDIUM:
+        3. Runbooks for top 5 incident types
+
+        ACTION:
+        - Circuit breakers in next sprint
+        - Alert cleanup allocated 2 days/week
+        """
+
+    with_decision_maker:
+      incident_responder_provides:
+        - Post-incident action items
+        - Effort estimates
+        - Risk if not addressed
+      decision_maker_provides:
+        - Prioritized action list
+        - Resource allocation
+        - Timeline decisions
+      interface_example: |
+        # Post-incident prioritization request:
+        """
+        POST-INCIDENT ACTION ITEMS:
+
+        1. Add database connection pool monitoring
+           Effort: 2 days
+           Risk if not done: Repeat incident (high)
+
+        2. Improve deploy rollback speed
+           Effort: 1 week
+           Risk: Longer MTTR in future
+
+        3. Add circuit breaker to payment
+           Effort: 3 days
+           Risk: Cascade failures (medium)
+
+        4. Document payment service runbook
+           Effort: 1 day
+           Risk: Longer MTTR
+
+        CONSTRAINT: Team has 5 days available this sprint
+        """
+
+        # Decision maker prioritizes:
+        """
+        PRIORITIZED ACTION ITEMS:
+
+        This sprint (5 days):
+        1. DB connection monitoring (2d) - Prevent repeat
+        2. Circuit breaker (3d) - High value/effort ratio
+
+        Next sprint:
+        3. Runbook (1d)
+        4. Rollback speed (1w)
+
+        RATIONALE: Prevent repeat > speed recovery
+        """
+
+# Prerequisites for using this skill effectively
+prerequisites:
+  skills: []  # Foundational skill, no prerequisites
+  knowledge:
+    - Basic system operations
+    - Understanding of logging and monitoring
+    - Team communication
+  tools:
+    - Alerting system (PagerDuty, OpsGenie, etc.)
+    - Logging system
+    - Communication channel (Slack, etc.)
+
+# When to delegate to this skill
+delegation_triggers:
+  - phrase: "incident"
+    confidence: high
+  - phrase: "outage"
+    confidence: high
+  - phrase: "production issue"
+    confidence: high
+  - phrase: "site down"
+    confidence: high
+  - phrase: "on-call"
+    confidence: high
+  - phrase: "post-mortem"
+    confidence: high
+  - phrase: "war room"
+    confidence: high
+  - phrase: "severity"
+    confidence: medium
+  - phrase: "paged"
+    confidence: high
+  - phrase: "alert"
+    confidence: medium
+  - phrase: "rollback"
+    confidence: high
+
+# Skill maturity indicators
+maturity_levels:
+  beginner:
+    characteristics:
+      - Responds to alerts
+      - Basic communication
+      - Follows runbooks
+    common_mistakes:
+      - Hero debugging alone
+      - No communication during incident
+      - Premature all-clear
+
+  intermediate:
+    characteristics:
+      - Leads war rooms
+      - Writes post-mortems
+      - Improves processes
+    common_mistakes:
+      - Blame in post-mortems
+      - Incomplete action items
+      - Alert fatigue acceptance
+
+  advanced:
+    characteristics:
+      - Blameless culture
+      - Proactive prevention
+      - Team training
+    common_mistakes:
+      - Over-engineering incident processes
+      - Not delegating to team
+      - Burnout from carrying too much

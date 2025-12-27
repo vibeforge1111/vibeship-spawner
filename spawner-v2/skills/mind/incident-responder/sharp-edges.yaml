@@ -1,0 +1,285 @@
+# Incident Responder Sharp Edges
+# Real gotchas from production incident response - the traps that make outages worse
+
+sharp_edges:
+  - id: cascade-investigation
+    title: Cascade Investigation - Chasing Symptoms
+    severity: high
+    situation: |
+      Alert fires. Team investigates. They find the API is slow. They find the
+      database is slow. They find the disk is slow. They find the storage system
+      is overloaded. 45 minutes in, they finally find that a batch job was
+      accidentally running during peak hours. The cascade of symptoms hid the cause.
+    why: |
+      In distributed systems, symptoms cascade. One problem causes many downstream
+      effects. Teams often chase the most visible symptom instead of working back
+      to the source. Each hop takes time while users continue to be affected.
+    solution: |
+      1. Ask: "What changed?"
+         - Recent deploys?
+         - Configuration changes?
+         - Traffic patterns?
+         - External dependencies?
+
+      2. Work backward from symptoms:
+         - If API is slow because DB is slow because disk is slow...
+         - ...what's causing the disk to be slow?
+
+      3. Use the "Five Minutes Rule":
+         - If you haven't found the root in 5 minutes of investigating symptoms...
+         - Stop and look at changes instead
+
+      4. Mitigate while investigating:
+         - Don't wait for root cause to act
+         - Rollback, scale up, or failover first
+    symptoms:
+      - 30+ minutes investigating without mitigation
+      - Jumping between systems following symptoms
+      - Everyone looking at different things
+      - "The database is slow" as the conclusion
+    detection_pattern: "investigating|looking at|checking|seems slow"
+
+  - id: alert-storm-paralysis
+    title: Alert Storm Paralysis - Too Many Alerts
+    severity: critical
+    situation: |
+      One thing breaks. 50 monitors fire. Team is overwhelmed by alerts. They
+      can't tell which alert is the cause and which are effects. By the time
+      they figure out what's happening, the incident has been going for 30 minutes.
+    why: |
+      Alert dependencies aren't configured. Every downstream effect has its own
+      alert. When the root causes the cascade, all alerts fire simultaneously.
+      The signal is lost in the noise.
+    solution: |
+      1. During incident:
+         - Acknowledge and mute non-actionable alerts
+         - Focus on the earliest alert
+         - Look for the common thread
+
+      2. After incident (prevention):
+         - Configure alert dependencies
+         - If A causes B, only alert on A
+         - Group related alerts
+         - Reduce to actionable only
+
+      3. The "earliest alert" heuristic:
+         - Which alert fired first?
+         - Often (not always) the root cause
+    symptoms:
+      - 20+ alerts at once
+      - Team confused about where to start
+      - Muting alerts one by one
+      - "I don't know which to look at"
+    detection_pattern: "many alerts|alert storm|which alert|so many"
+
+  - id: keyboard-cowboy
+    title: Keyboard Cowboy - Untested Fixes in Production
+    severity: critical
+    situation: |
+      Under pressure, engineer makes a "quick fix" directly in production.
+      Doesn't test. Doesn't review. Makes the incident worse. Now there are
+      two problems: the original incident and the broken fix.
+    why: |
+      Pressure leads to shortcuts. The desire to "just fix it" overrides caution.
+      But production is not the place for experiments. Untested changes often fail.
+      In an incident, a failed fix compounds the problem.
+    solution: |
+      1. No cowboy fixes:
+         - Even in incidents, test changes
+         - Use staging if possible
+         - Have someone review
+
+      2. Safe change patterns:
+         - Rollback (known good state)
+         - Feature flag off
+         - Scale horizontally
+         - Failover to backup
+
+      3. The "confidence check":
+         - "Have we tested this change?"
+         - "What's the worst case if it fails?"
+         - "Can we easily undo it?"
+
+      4. If you must hotfix:
+         - Pair with someone
+         - Review the diff together
+         - Have rollback ready
+    symptoms:
+      - "I'll just fix it quick"
+      - Changes without testing
+      - Multiple failed fix attempts
+      - Incident getting worse
+    detection_pattern: "just fix|quick change|try this|hotfix"
+
+  - id: post-mortem-theater
+    title: Post-Mortem Theater - Going Through the Motions
+    severity: medium
+    situation: |
+      Post-mortem is scheduled. Template is filled out. Meeting happens. Action
+      items are created. But nothing actually changes. Same type of incident
+      happens again next month. The post-mortem was a ritual, not a learning.
+    why: |
+      Post-mortems become bureaucracy when they lack teeth. Action items aren't
+      prioritized. Owners aren't held accountable. The process exists but doesn't
+      create improvement. Teams become cynical about the whole thing.
+    solution: |
+      1. Make action items real:
+         - Specific and actionable
+         - Owner assigned
+         - Due date set
+         - Tracked in real backlog
+
+      2. Follow up:
+         - Weekly check on incident AIs
+         - Block other work if needed
+         - Escalate if not completed
+
+      3. Close the loop:
+         - "We had an incident. Here's what we fixed."
+         - Share improvements with team
+         - Celebrate prevention
+
+      4. Quality over quantity:
+         - 3 real action items > 10 vague ones
+         - "Add monitoring" → "Add alert for X threshold"
+    symptoms:
+      - Same incidents repeating
+      - Action items never completed
+      - Post-mortems feel like chores
+      - "We already had a post-mortem for this"
+    detection_pattern: "post-mortem|retro|action items|follow up"
+
+  - id: severity-inflation
+    title: Severity Inflation - Everything Is SEV1
+    severity: medium
+    situation: |
+      Every incident is marked SEV1. Teams are constantly in war rooms. On-call
+      is exhausted. When a real SEV1 happens, nobody takes it seriously because
+      SEV1 is the normal state. The boy cried wolf.
+    why: |
+      Without clear severity criteria, everything gets elevated "to be safe."
+      This devalues severity. Teams become desensitized. Genuine emergencies
+      don't get appropriate response because everything is an "emergency."
+    solution: |
+      1. Clear severity definitions:
+         - SEV1: Total service outage, security breach, data loss
+         - SEV2: Major feature broken, significant impact
+         - SEV3: Limited feature impact, workaround exists
+         - SEV4: Minor, can wait
+
+      2. Challenge severity during incidents:
+         - "Is this really SEV1 or SEV2?"
+         - "Who's actually affected?"
+         - "Is there a workaround?"
+
+      3. Review severity post-incident:
+         - Was the severity appropriate?
+         - Adjust for future similar incidents
+    symptoms:
+      - Most incidents are SEV1
+      - Team always in "emergency" mode
+      - On-call burnout
+      - Stakeholders ignore severity
+    detection_pattern: "SEV1|critical|emergency|all hands"
+
+  - id: missing-timeline
+    title: Missing Timeline - "What Actually Happened?"
+    severity: medium
+    situation: |
+      Incident is resolved. Post-mortem starts. Nobody can remember the sequence
+      of events. The slack channel is full of messages but no clear timeline.
+      Key decisions aren't documented. The post-mortem is based on fuzzy memories.
+    why: |
+      Without real-time documentation, the timeline is reconstructed from memory.
+      Memory is unreliable under stress. Important details are lost. The post-
+      mortem is less useful because it's based on incomplete information.
+    solution: |
+      1. Designate a scribe during incidents:
+         - Someone's job is to document
+         - Not the person debugging
+         - Timestamps on everything
+
+      2. Use consistent format:
+         - 14:30 - Alert fired for API errors
+         - 14:35 - Alice began investigating
+         - 14:40 - Decision to rollback
+
+      3. Key moments to capture:
+         - When incident started
+         - When each person joined
+         - Each hypothesis and result
+         - Each decision and reason
+         - When mitigated
+         - When resolved
+    symptoms:
+      - "When did we first notice it?"
+      - Fuzzy timeline in post-mortem
+      - Conflicting memories
+      - Missing decision rationale
+    detection_pattern: "timeline|sequence|when did|first notice"
+
+  - id: communication-blackout
+    title: Communication Blackout - Where's the Update?
+    severity: high
+    situation: |
+      Incident has been going for an hour. Stakeholders are panicking. Customers
+      are asking "is it fixed?" The engineering team is heads-down debugging,
+      nobody is communicating. Leadership has to ask for updates.
+    why: |
+      Engineers focus on fixing, not communicating. But stakeholders need to know
+      what's happening. Customers need status. Sales needs to talk to affected
+      accounts. Silence breeds anxiety and speculation.
+    solution: |
+      1. Assign communication role:
+         - Someone owns external updates
+         - Not the same person debugging
+         - Updates every 30 minutes minimum
+
+      2. Update template:
+         - Status: What's happening now
+         - Impact: Who's affected
+         - ETA: When do we expect resolution (even if "unknown")
+         - Next update: When will we post again
+
+      3. Channels for updates:
+         - Internal: Incident channel, leadership DM
+         - External: Status page, Twitter, customer email
+    symptoms:
+      - Stakeholders asking "what's going on?"
+      - No updates for 30+ minutes
+      - Leadership paging into incident
+      - Customers finding out from Twitter
+    detection_pattern: "update|status|what's happening|any news"
+
+  - id: rollback-fear
+    title: Rollback Fear - "But We'll Lose the Feature"
+    severity: high
+    situation: |
+      Recent deploy caused the incident. Team knows it. But they hesitate to
+      rollback because they don't want to "lose" the new feature. They spend
+      30 minutes trying to hotfix instead. Users continue to be affected.
+    why: |
+      Emotional attachment to new code. Fear of "wasted work." Sunk cost fallacy.
+      But every minute spent trying to save the feature is a minute users are
+      impacted. The feature can be re-deployed after fixing.
+    solution: |
+      1. Rollback is not failure:
+         - It's a professional response
+         - The feature will come back
+         - User impact is what matters
+
+      2. The 10-minute rule:
+         - If you haven't fixed it in 10 minutes
+         - And rollback is possible
+         - Rollback first, fix later
+
+      3. Make rollback easy:
+         - Fast deployment pipeline
+         - One-click rollback
+         - Practiced regularly
+    symptoms:
+      - "Let's try to fix it first"
+      - 20+ minutes without mitigation
+      - Hotfix attempts failing
+      - Reluctance to undo work
+    detection_pattern: "fix first|save the deploy|can we patch"

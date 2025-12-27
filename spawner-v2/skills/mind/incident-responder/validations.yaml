@@ -1,0 +1,226 @@
+# Incident Responder Validations
+# Checks for patterns that affect incident response capability
+
+validations:
+  - id: no-error-logging
+    name: Missing Error Context in Logging
+    severity: warning
+    type: regex
+    pattern:
+      - "console\\.error\\(['\"][^'\"]+['\"]\\)"
+      - "logger\\.error\\(['\"][^'\"]+['\"]\\)"
+      - "log\\.error\\(['\"][^'\"]+['\"]\\)"
+    message: "Error logged without context. Include error object and relevant state."
+    fix_action: "Add context: logger.error('Payment failed', { orderId, error, userId })"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+    exceptions:
+      - "\\{|error:|err:|e:|ex:|exception"
+
+  - id: silent-failure
+    name: Error Caught and Ignored
+    severity: error
+    type: regex
+    pattern:
+      - "catch\\s*\\([^)]*\\)\\s*\\{\\s*\\}"
+      - "\\.catch\\(\\(\\)\\s*=>\\s*\\{\\}\\)"
+      - "\\.catch\\(\\s*\\(\\)\\s*=>\\s*null\\)"
+    message: "Silent error handling hides failures. At minimum, log the error."
+    fix_action: "Log errors: catch(e) { logger.error('Operation failed', { error: e }); }"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: generic-error-message
+    name: Generic Error Message
+    severity: info
+    type: regex
+    pattern:
+      - "throw new Error\\(['\"]Error['\"]\\)"
+      - "throw new Error\\(['\"]Something went wrong['\"]\\)"
+      - "throw new Error\\(['\"]An error occurred['\"]\\)"
+    message: "Generic error message provides no debugging context."
+    fix_action: "Include specific context: throw new Error(`Failed to process order ${orderId}: ${reason}`)"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: no-request-id
+    name: HTTP Response Without Request ID
+    severity: info
+    type: regex
+    pattern:
+      - "res\\.status\\(\\d{3}\\)\\.json\\(\\{(?!.*requestId)"
+      - "res\\.send\\(\\{(?!.*requestId)"
+    message: "Response without request ID makes incident correlation difficult."
+    fix_action: "Include request ID in error responses for easy log correlation"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: missing-health-check
+    name: No Health Check Endpoint
+    severity: info
+    type: regex
+    pattern:
+      - "app\\.listen\\("
+      - "createServer\\("
+    message: "Server without health check. Add /health endpoint for monitoring."
+    fix_action: "Add health check: app.get('/health', (req, res) => res.json({ status: 'ok' }))"
+    applies_to:
+      - "**/server.ts"
+      - "**/server.js"
+      - "**/app.ts"
+      - "**/app.js"
+      - "**/index.ts"
+    exceptions:
+      - "/health|/healthz|/ready|/ping"
+
+  - id: no-timeout
+    name: External Call Without Timeout
+    severity: warning
+    type: regex
+    pattern:
+      - "fetch\\([^)]+\\)(?!.*timeout)"
+      - "axios\\.get\\([^)]+\\)(?!.*timeout)"
+      - "axios\\.post\\([^)]+\\)(?!.*timeout)"
+    message: "External call without timeout can hang indefinitely during incidents."
+    fix_action: "Add timeout: fetch(url, { signal: AbortSignal.timeout(5000) })"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+    exceptions:
+      - "timeout|signal|AbortController"
+
+  - id: no-circuit-breaker
+    name: External Dependency Without Circuit Breaker
+    severity: info
+    type: regex
+    pattern:
+      - "fetch\\(['\"]https?://(?!localhost)"
+      - "axios\\.[a-z]+\\(['\"]https?://(?!localhost)"
+    message: "External API call without circuit breaker. Failure can cascade."
+    fix_action: "Consider circuit breaker pattern for critical external dependencies"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: hardcoded-retry-count
+    name: Hardcoded Retry Count
+    severity: info
+    type: regex
+    pattern:
+      - "retry.*[35]\\s*times"
+      - "maxRetries.*=.*[35]"
+      - "for\\s*\\(.*<\\s*[35].*retry"
+    message: "Hardcoded retry count. Consider configurable retry with backoff."
+    fix_action: "Make retry configurable and add exponential backoff"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: missing-alert-threshold
+    name: Alert Without Clear Threshold
+    severity: info
+    type: regex
+    pattern:
+      - "alert\\s*\\{"
+      - "createAlert\\("
+    message: "Alert configuration found. Verify thresholds are appropriate."
+    fix_action: "Ensure thresholds prevent alert fatigue while catching real issues"
+    applies_to:
+      - "**/*.yaml"
+      - "**/*.yml"
+      - "**/alerts/**"
+      - "**/monitoring/**"
+
+  - id: no-graceful-shutdown
+    name: Missing Graceful Shutdown Handler
+    severity: warning
+    type: regex
+    pattern:
+      - "app\\.listen\\("
+      - "server\\.listen\\("
+    message: "Server without graceful shutdown handling. Active requests may fail on deploy."
+    fix_action: "Add SIGTERM handler to complete in-flight requests before shutdown"
+    applies_to:
+      - "**/server.ts"
+      - "**/server.js"
+      - "**/app.ts"
+      - "**/app.js"
+    exceptions:
+      - "SIGTERM|gracefulShutdown|closeServer"
+
+  - id: sync-logging
+    name: Synchronous Logging in Hot Path
+    severity: info
+    type: regex
+    pattern:
+      - "writeFileSync.*log"
+      - "appendFileSync.*log"
+    message: "Sync file logging can block during incidents. Use async logging."
+    fix_action: "Use async logging or buffered logging library"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: no-rate-limiting
+    name: API Endpoint Without Rate Limiting
+    severity: info
+    type: regex
+    pattern:
+      - "app\\.post\\(['\"]/"
+      - "router\\.post\\(['\"]/"
+    message: "POST endpoint may need rate limiting to prevent abuse during incidents."
+    fix_action: "Consider rate limiting on public endpoints"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+    exceptions:
+      - "rateLimit|throttle|limit"
+
+  - id: missing-correlation-id
+    name: Async Operation Without Correlation
+    severity: info
+    type: regex
+    pattern:
+      - "queue\\.publish\\((?!.*correlationId)"
+      - "emit\\(['\"]\\w+['\"],(?!.*traceId)"
+    message: "Async operation without correlation ID. Hard to trace during incidents."
+    fix_action: "Pass correlation/trace ID through async boundaries"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: catch-all-error
+    name: Catch-All Error Handler Too Generic
+    severity: info
+    type: regex
+    pattern:
+      - "catch\\s*\\(\\s*\\w+\\s*\\)\\s*\\{[^}]*res\\.status\\(500\\)"
+    message: "Generic 500 response hides specific error types. Consider error classification."
+    fix_action: "Classify errors: 400 for validation, 503 for downstream, 500 for unknown"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
