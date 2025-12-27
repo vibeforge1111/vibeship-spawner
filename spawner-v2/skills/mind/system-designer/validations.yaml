@@ -1,0 +1,222 @@
+# System Designer Validations
+# Checks for code patterns that indicate architectural issues
+
+validations:
+  - id: hardcoded-url
+    name: Hardcoded Service URL
+    severity: error
+    type: regex
+    pattern:
+      - "https?://(?:localhost|127\\.0\\.0\\.1|\\d+\\.\\d+\\.\\d+\\.\\d+):\\d+"
+      - "https?://[a-z-]+\\.(?:internal|local|corp)\\.[a-z]+/"
+    message: "Hardcoded service URL. This breaks when services move or scale."
+    fix_action: "Use environment variables or service discovery for URLs."
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+      - "**/*.py"
+
+  - id: missing-timeout
+    name: Network Call Without Timeout
+    severity: warning
+    type: regex
+    pattern:
+      - "fetch\\([^)]*\\)(?![^;]*timeout)"
+      - "axios\\.(?:get|post|put|delete)\\([^)]*\\)(?![^;]*timeout)"
+      - "http\\.(?:get|post)\\([^)]*\\)(?![^;]*timeout)"
+    message: "Network call without explicit timeout. Will hang forever if remote is slow."
+    fix_action: "Add timeout: fetch(url, { signal: AbortSignal.timeout(5000) })"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: unbounded-query
+    name: Query Without Limit
+    severity: warning
+    type: regex
+    pattern:
+      - "\\.findMany\\(\\s*\\{(?![^}]*take:)"
+      - "\\.find\\(\\s*\\{\\}\\s*\\)"
+      - "SELECT\\s+\\*\\s+FROM\\s+\\w+(?!.*LIMIT)"
+    message: "Query without limit. Will cause memory issues as data grows."
+    fix_action: "Add pagination: .findMany({ take: 50, skip: offset })"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: sequential-await
+    name: Sequential Awaits That Could Be Parallel
+    severity: info
+    type: regex
+    pattern:
+      - "await\\s+\\w+\\([^)]*\\);\\s*await\\s+\\w+\\("
+    message: "Sequential awaits may be parallelizable with Promise.all()."
+    fix_action: "If independent, use: const [a, b] = await Promise.all([fn1(), fn2()])"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: sync-in-request
+    name: Slow Sync Operation in Request Handler
+    severity: warning
+    type: regex
+    pattern:
+      - "await\\s+sendEmail"
+      - "await\\s+sendNotification"
+      - "await\\s+generatePDF"
+      - "await\\s+generateReport"
+    message: "Slow operation blocking request. Consider async processing with queue."
+    fix_action: "Queue for background processing: queue.add({ type: 'email', data })"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: missing-idempotency
+    name: Mutable Operation Without Idempotency
+    severity: warning
+    type: regex
+    pattern:
+      - "\\+\\+|\\+=|-=|--"
+      - "\\.increment\\("
+      - "\\.push\\("
+    message: "Mutable operation may cause duplicates on retry. Consider idempotency."
+    fix_action: "Use idempotency keys or idempotent operations (SET instead of INCREMENT)."
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: no-retry-logic
+    name: External Call Without Retry
+    severity: info
+    type: regex
+    pattern:
+      - "await\\s+stripe\\."
+      - "await\\s+twilio\\."
+      - "await\\s+sendgrid\\."
+      - "await\\s+s3Client\\."
+    message: "External service call without retry logic. Transient failures will fail permanently."
+    fix_action: "Wrap in retry with exponential backoff for transient errors."
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: money-as-float
+    name: Money Stored or Calculated as Float
+    severity: error
+    type: regex
+    pattern:
+      - "price:\\s*number"
+      - "amount:\\s*number"
+      - "price\\s*=\\s*\\d+\\.\\d+"
+      - "amount\\s*\\*\\s*\\d+\\.\\d+"
+    message: "Money handled as float can cause rounding errors. Use cents (integer)."
+    fix_action: "Store money as cents (integer): price_cents: 1999 for $19.99"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: no-circuit-breaker
+    name: Multiple Services Without Circuit Breaker
+    severity: info
+    type: regex
+    pattern:
+      - "services\\s*=\\s*\\["
+      - "Promise\\.all\\(\\[.*http"
+    message: "Multiple service calls without circuit breaker. Slow service can cascade."
+    fix_action: "Implement circuit breaker pattern to fail fast when downstream is unhealthy."
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: http-not-https
+    name: HTTP Instead of HTTPS
+    severity: error
+    type: regex
+    pattern:
+      - "http://(?!localhost|127\\.0\\.0\\.1)"
+      - "protocol:\\s*['\"]http['\"]"
+    message: "HTTP used instead of HTTPS. Data in transit is not encrypted."
+    fix_action: "Use HTTPS for all non-localhost connections."
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+      - "**/*.py"
+
+  - id: shared-state-web
+    name: Shared State in Stateless Server
+    severity: warning
+    type: regex
+    pattern:
+      - "let\\s+\\w+\\s*=\\s*\\{\\}"
+      - "const\\s+cache\\s*=\\s*new\\s+Map"
+      - "global\\.\\w+\\s*="
+    message: "Module-level mutable state in web server. Won't work with multiple instances."
+    fix_action: "Use external state store (Redis, database) for shared state."
+    applies_to:
+      - "**/api/**/*.ts"
+      - "**/routes/**/*.ts"
+      - "**/handlers/**/*.ts"
+
+  - id: cascade-delete-missing
+    name: Delete Without Cascade Consideration
+    severity: warning
+    type: regex
+    pattern:
+      - "\\.delete\\(\\{\\s*where:"
+      - "DELETE\\s+FROM\\s+\\w+\\s+WHERE"
+    message: "Delete operation may leave orphaned related records."
+    fix_action: "Consider cascade delete or check for dependent records first."
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: no-health-check
+    name: Service Without Health Check Endpoint
+    severity: info
+    type: regex
+    pattern:
+      - "app\\.listen|server\\.listen|createServer"
+    message: "Server created but no health check endpoint found."
+    fix_action: "Add /health endpoint for load balancer and monitoring."
+    applies_to:
+      - "**/server.ts"
+      - "**/index.ts"
+      - "**/app.ts"
+
+  - id: env-in-code
+    name: Environment-Specific Logic in Code
+    severity: warning
+    type: regex
+    pattern:
+      - "if.*process\\.env\\.NODE_ENV.*===.*production"
+      - "if.*development.*\\{.*else.*production"
+    message: "Environment-specific branching in code. Prefer environment variables."
+    fix_action: "Use environment variables for config, not conditionals in code."
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+

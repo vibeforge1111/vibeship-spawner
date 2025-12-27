@@ -50,7 +50,7 @@ export const orchestrateInputSchema = z.object({
  */
 export const orchestrateToolDefinition = {
   name: 'spawner_orchestrate',
-  description: 'Start a Spawner session. Auto-detects context and routes to appropriate mode: resume (known project), analyze (existing codebase), or brainstorm (new project). Call this first when starting.',
+  description: 'CALL THIS FIRST in every new session. Sets up local skills (105 skills, zero cost), detects project context, and routes to: resume (known project), analyze (existing codebase), or brainstorm (new project). Returns skills_setup with clone instructions if local skills not installed.',
   inputSchema: {
     type: 'object' as const,
     properties: {
@@ -102,6 +102,25 @@ export interface OrchestrateOutput {
   path: 'resume' | 'analyze' | 'brainstorm';
   // Greeting to show user
   greeting: string;
+  // Local skills setup info - CRITICAL for new users
+  skills_setup: {
+    // Message for Claude to check if local skills exist
+    check_instruction: string;
+    // Clone command for the user's platform
+    clone_command: {
+      windows: string;
+      unix: string;
+    };
+    // Path where skills should exist
+    expected_path: {
+      windows: string;
+      unix: string;
+    };
+    // How to load skills locally
+    usage_instruction: string;
+    // GitHub repo URL
+    repo_url: string;
+  };
   // Loaded skills
   loaded_skills: {
     id: string;
@@ -147,6 +166,23 @@ export interface OrchestrateOutput {
   // Instruction for Claude
   _instruction: string;
 }
+
+/**
+ * Local skills setup info - helps Claude guide users to set up skills
+ */
+const SKILLS_SETUP = {
+  check_instruction: 'Check if ~/.spawner/skills exists. If not, help user clone the skills repo before proceeding.',
+  clone_command: {
+    windows: 'git clone https://github.com/vibeforge1111/vibeship-spawner-skills %USERPROFILE%\\.spawner\\skills',
+    unix: 'git clone https://github.com/vibeforge1111/vibeship-spawner-skills ~/.spawner/skills',
+  },
+  expected_path: {
+    windows: '%USERPROFILE%\\.spawner\\skills',
+    unix: '~/.spawner/skills',
+  },
+  usage_instruction: 'Read skill YAML files directly: ~/.spawner/skills/{category}/{skill}/skill.yaml',
+  repo_url: 'https://github.com/vibeforge1111/vibeship-spawner-skills',
+};
 
 /**
  * Execute the spawner_orchestrate tool
@@ -197,6 +233,7 @@ export async function executeOrchestrate(
   return {
     path: result.path,
     greeting: result.greeting,
+    skills_setup: SKILLS_SETUP,
     loaded_skills: result.loadedSkills.map(s => ({
       id: s.id,
       name: s.name,
@@ -233,8 +270,34 @@ function buildInstruction(result: Awaited<ReturnType<typeof orchestrate>>): stri
   lines.push(`**Mode:** ${result.path}`);
   lines.push('');
 
-  // Show greeting
+  // CRITICAL: Skills setup check - do this FIRST
   lines.push('---');
+  lines.push('');
+  lines.push('## FIRST: Check Local Skills');
+  lines.push('');
+  lines.push('Before proceeding, check if local skills are installed:');
+  lines.push('');
+  lines.push('1. Check if `~/.spawner/skills` directory exists');
+  lines.push('2. If NOT, help user run the clone command:');
+  lines.push('');
+  lines.push('**Windows:**');
+  lines.push('```');
+  lines.push('git clone https://github.com/vibeforge1111/vibeship-spawner-skills %USERPROFILE%\\.spawner\\skills');
+  lines.push('```');
+  lines.push('');
+  lines.push('**macOS/Linux:**');
+  lines.push('```');
+  lines.push('git clone https://github.com/vibeforge1111/vibeship-spawner-skills ~/.spawner/skills');
+  lines.push('```');
+  lines.push('');
+  lines.push('3. Once cloned, load skills by reading YAML files directly:');
+  lines.push('   `~/.spawner/skills/{category}/{skill}/skill.yaml`');
+  lines.push('');
+  lines.push('**105 skills available** across: development, data, ai, design, frameworks, marketing, startup');
+  lines.push('');
+  lines.push('---');
+
+  // Show greeting
   lines.push('');
   lines.push(result.greeting);
   lines.push('');

@@ -1,0 +1,403 @@
+# System Designer Sharp Edges
+# Real gotchas from production systems - the traps that bring down architectures
+
+sharp_edges:
+  # The 8 Fallacies of Distributed Computing
+  - id: fallacy-network-reliable
+    title: "Fallacy #1: The Network is Reliable"
+    severity: critical
+    situation: |
+      System assumes network calls always succeed. No retry logic, no timeout
+      handling, no circuit breakers. Works fine in development, fails in production
+      when network has transient issues.
+    why: |
+      Networks fail. Packets drop. Connections timeout. Routers restart. DNS fails.
+      Your "never fails" network will fail at 3am on launch day. Murphy's Law is
+      the only law that's never been broken.
+    solution: |
+      1. Assume every network call can fail:
+         - Add timeouts to all network operations (no default is safe)
+         - Implement retry with exponential backoff
+         - Use circuit breakers to fail fast when downstream is unhealthy
+
+      2. Design for partial failure:
+         - What if payment service is down? Can user still browse?
+         - What if search is slow? Show cached results?
+         - Graceful degradation over complete failure
+
+      3. Test failure modes:
+         - Use chaos engineering (Netflix Chaos Monkey)
+         - Inject network delays in staging
+         - Practice failure recovery regularly
+    symptoms:
+      - Hanging requests with no timeout
+      - Cascading failures from one slow service
+      - No retry logic in API clients
+      - App completely down when one dependency fails
+    detection_pattern: "fetch\\(|axios\\.|http\\.|request\\(|client\\."
+
+  - id: fallacy-latency-zero
+    title: "Fallacy #2: Latency is Zero"
+    severity: critical
+    situation: |
+      System designed assuming network calls are instant. Makes many small calls
+      that work fine locally but are painfully slow across network. N+1 queries
+      to remote services. Chatty APIs.
+    why: |
+      Even same-datacenter calls are 0.5-1ms minimum. Cross-region is 50-100ms.
+      Make 100 calls in sequence and you've added 5-10 seconds. Latency kills
+      user experience and makes debugging a nightmare.
+    solution: |
+      1. Minimize network round trips:
+         - Batch requests where possible
+         - Use GraphQL or batch endpoints
+         - Prefetch data before it's needed
+
+      2. Make latency visible in development:
+         - Add artificial delay in local testing (100ms per call)
+         - Measure P50, P95, P99 latency, not just average
+         - Alert on latency spikes, not just errors
+
+      3. Design for latency:
+         - New York to London: ~80ms RTT
+         - Use CDN for static content
+         - Consider data locality (keep data close to compute)
+    symptoms:
+      - Page takes seconds to load in production
+      - Works fast locally, slow in staging/prod
+      - Many sequential network calls in a request
+      - Loading spinners everywhere
+    detection_pattern: "await.*await.*await|for.*await|loop.*fetch"
+
+  - id: fallacy-bandwidth-infinite
+    title: "Fallacy #3: Bandwidth is Infinite"
+    severity: high
+    situation: |
+      System sends large payloads without considering network capacity. Pushes
+      full objects when deltas would suffice. No compression. Mobile users on
+      slow connections suffer.
+    why: |
+      Bandwidth costs money and has limits. Mobile networks are especially
+      constrained. Large payloads increase latency (time to transmit) and cost
+      (data transfer charges). What's fine at 1000 users breaks at 100,000.
+    solution: |
+      1. Minimize payload size:
+         - Send only needed fields (sparse fieldsets)
+         - Use pagination for large lists
+         - Compress responses (gzip, brotli)
+
+      2. Optimize for different clients:
+         - Mobile gets smaller images
+         - API clients can request reduced payloads
+         - Consider GraphQL for client-driven queries
+
+      3. Monitor bandwidth:
+         - Track response size distribution
+         - Alert on unusually large responses
+         - Measure data transfer costs
+    symptoms:
+      - Slow on mobile networks
+      - High data transfer costs
+      - Large JSON responses with unused fields
+      - Timeout issues on large requests
+    detection_pattern: "toJSON|serialize|JSON\\.stringify"
+
+  - id: fallacy-network-secure
+    title: "Fallacy #4: The Network is Secure"
+    severity: critical
+    situation: |
+      System trusts data from network without validation. Assumes internal
+      network is safe. Uses HTTP instead of HTTPS internally. Doesn't encrypt
+      sensitive data in transit.
+    why: |
+      The network is hostile territory. Even "internal" networks can be
+      compromised. Man-in-the-middle attacks are real. Assuming security
+      is a matter of "when compromised" not "if compromised."
+    solution: |
+      1. Encrypt everything:
+         - HTTPS everywhere, even internal
+         - TLS 1.3 minimum
+         - Certificate validation (don't skip!)
+
+      2. Validate all input:
+         - Don't trust data from any source
+         - Validate at service boundaries
+         - Sanitize before database or display
+
+      3. Defense in depth:
+         - Network segmentation
+         - Service mesh with mTLS
+         - Regular security audits
+    symptoms:
+      - HTTP instead of HTTPS anywhere
+      - Trust based on source IP
+      - Sensitive data logged or transmitted plain
+      - No input validation on internal APIs
+    detection_pattern: "http://|trustAllCerts|InsecureSkipVerify|verify=False"
+
+  - id: fallacy-topology-static
+    title: "Fallacy #5: Topology Doesn't Change"
+    severity: high
+    situation: |
+      Hardcoded IP addresses, hostnames, or service locations. System breaks
+      when services move, scale, or failover. Can't add new instances without
+      config changes.
+    why: |
+      In cloud environments, everything moves. Instances come and go. IPs change.
+      Services scale up and down. Hardcoding locations creates brittleness that
+      contradicts the whole point of cloud-native design.
+    solution: |
+      1. Use service discovery:
+         - DNS-based discovery (Kubernetes services)
+         - Service registry (Consul, Eureka)
+         - Environment variables for endpoints
+
+      2. Design for dynamic topology:
+         - Health checks to detect failed instances
+         - Load balancing across instances
+         - Graceful handling of instance changes
+
+      3. Never hardcode:
+         - IPs belong in config, not code
+         - Use DNS names, not raw IPs
+         - Support runtime reconfiguration
+    symptoms:
+      - Hardcoded IPs or hostnames in code
+      - Deployment requires code changes
+      - Manual config updates when scaling
+      - Failures after infrastructure changes
+    detection_pattern: "\\d+\\.\\d+\\.\\d+\\.\\d+|localhost:\\d+"
+
+  - id: fallacy-one-admin
+    title: "Fallacy #6: There is One Administrator"
+    severity: medium
+    situation: |
+      System assumes single owner with full control. No multi-tenancy
+      considerations. No access control granularity. One person's mistake
+      affects everyone.
+    why: |
+      Large systems have multiple stakeholders, teams, and operational roles.
+      Different people need different access. Changes in one area shouldn't
+      require coordinating with everyone. Blast radius must be limited.
+    solution: |
+      1. Design for multiple operators:
+         - Role-based access control
+         - Team-scoped resources
+         - Audit logging for changes
+
+      2. Limit blast radius:
+         - Namespace isolation
+         - Resource quotas per team
+         - Change approval workflows
+
+      3. Enable self-service:
+         - Teams can manage their resources
+         - Reduce centralized bottlenecks
+         - Clear ownership and responsibility
+    symptoms:
+      - Single admin account for everything
+      - No audit trail of changes
+      - All-or-nothing permissions
+      - Changes require central team approval
+    detection_pattern: "admin|root|superuser"
+
+  - id: fallacy-transport-free
+    title: "Fallacy #7: Transport Cost is Zero"
+    severity: medium
+    situation: |
+      System doesn't account for data transfer costs. Shuffles large amounts
+      of data between regions or clouds. Ignores egress charges that add up
+      to significant monthly bills.
+    why: |
+      Cloud providers charge for data egress. Cross-region transfer costs more
+      than in-region. Cross-cloud is most expensive. What seems like free
+      network calls becomes significant at scale.
+    solution: |
+      1. Minimize cross-region traffic:
+         - Keep related services in same region
+         - Cache aggressively at the edge
+         - Use CDN for static content
+
+      2. Monitor and optimize:
+         - Track data transfer by source/destination
+         - Identify largest flows
+         - Consider data locality in architecture
+
+      3. Design for cost:
+         - Estimate transfer costs before architecture decisions
+         - Multi-region adds cost, not just complexity
+         - Compress large payloads
+    symptoms:
+      - Unexpectedly high cloud bills
+      - Lots of cross-region API calls
+      - No visibility into data flow
+      - Cost surprises at scale
+    detection_pattern: "region|cross-region|multi-region|egress"
+
+  - id: fallacy-network-homogeneous
+    title: "Fallacy #8: The Network is Homogeneous"
+    severity: medium
+    situation: |
+      Assumes all parts of network are equal. Ignores differences between
+      datacenter network, public internet, mobile networks, international
+      connectivity. Same timeout for all calls.
+    why: |
+      Network characteristics vary wildly. Datacenter: 0.1ms, 10Gbps. Home:
+      20ms, 100Mbps. Mobile: 100ms, 1Mbps with packet loss. International:
+      200ms+. One-size-fits-all settings fail somewhere.
+    solution: |
+      1. Know your network segments:
+         - Internal DC: aggressive timeouts, high throughput
+         - Internet: longer timeouts, retry logic
+         - Mobile: compression, offline support
+
+      2. Adapt to conditions:
+         - Client-side: detect network type
+         - Server-side: different timeouts for different targets
+         - Graceful degradation for poor conditions
+
+      3. Test across conditions:
+         - Test on slow networks (Chrome DevTools throttling)
+         - Test with packet loss
+         - Test from different geographic locations
+    symptoms:
+      - Works in datacenter, fails from mobile
+      - International users complain about slowness
+      - Timeouts not tuned to network conditions
+      - No consideration of network diversity
+    detection_pattern: "timeout.*1000|timeout.*5000"
+
+  # Additional System Design Gotchas
+  - id: shared-database-coupling
+    title: The Shared Database Trap
+    severity: critical
+    situation: |
+      Multiple services share a database directly. Seems convenient - no need
+      for APIs. But now every service is coupled to the schema. Can't change
+      one without coordinating with all.
+    why: |
+      Shared database = shared coupling. Schema changes require coordinated
+      deploys. Performance problems in one service affect all. No way to
+      scale services independently. This is a distributed monolith.
+    solution: |
+      1. Each service owns its data:
+         - One service = one database (or schema)
+         - Other services call APIs, not tables
+         - Service is responsible for its data integrity
+
+      2. When you need data from another service:
+         - Call their API
+         - Cache if needed for performance
+         - Accept eventual consistency for some reads
+
+      3. Migration path:
+         - Identify which service owns which tables
+         - Create APIs for cross-service data access
+         - Gradually remove direct table access
+    symptoms:
+      - Multiple services write to same tables
+      - Schema changes require multi-team coordination
+      - Can't deploy one service without others
+      - Database is the integration layer
+    detection_pattern: "shared.*database|common.*schema|cross.*service.*query"
+
+  - id: sync-over-async
+    title: Synchronous When You Need Async
+    severity: high
+    situation: |
+      User request waits for slow operation to complete. Sending email blocks
+      checkout. Generating report blocks the API. System is only as fast as
+      its slowest synchronous call.
+    why: |
+      Not everything needs an immediate response. Email can be sent in 30 seconds
+      instead of blocking checkout for 2 seconds. Report can be generated async
+      and user notified when ready. Sync blocks resources, async frees them.
+    solution: |
+      1. Identify async candidates:
+         - Notifications (email, SMS, push)
+         - Report generation
+         - Data processing
+         - Third-party integrations
+
+      2. Implement async patterns:
+         - Message queue (Redis, SQS, RabbitMQ)
+         - Background workers
+         - Webhook callbacks for completion
+
+      3. Design UX for async:
+         - "Your report is being generated"
+         - Progress indicators
+         - Notifications when complete
+    symptoms:
+      - API times out on complex operations
+      - User waits for non-essential operations
+      - Single slow service blocks entire flow
+      - Horizontal scaling doesn't help response time
+    detection_pattern: "await sendEmail|await generateReport|await notify"
+
+  - id: missing-idempotency
+    title: Non-Idempotent Operations
+    severity: critical
+    situation: |
+      Network hiccup during payment. Client retries. Two charges created.
+      User clicks submit twice. Two orders created. No way to safely retry
+      failed operations.
+    why: |
+      Networks fail. Users double-click. Clients retry. If your operations
+      aren't idempotent, duplicates happen. For payments and orders, duplicates
+      are expensive mistakes.
+    solution: |
+      1. Use idempotency keys:
+         - Client generates unique key per operation
+         - Server deduplicates using the key
+         - Same key = same result (cached response)
+
+      2. Design idempotent operations:
+         - "Set X to 5" is idempotent
+         - "Add 5 to X" is not
+         - Prefer set/replace over increment/append
+
+      3. Implement deduplication:
+         - Store operation results with their keys
+         - Return cached result on duplicate key
+         - Key expiry after safe window
+    symptoms:
+      - Duplicate records after retries
+      - Double charges/orders
+      - "Click once" warnings needed
+      - Fear of retrying failed operations
+    detection_pattern: "increment|append|push|add|+=|\\+\\+"
+
+  - id: missing-pagination
+    title: Unbounded Query Results
+    severity: high
+    situation: |
+      API returns all results. Works with 100 users, crashes with 100,000.
+      Memory spikes, timeouts, database locks. What was instant becomes
+      impossible.
+    why: |
+      Data grows. What's 100 rows today is 10 million tomorrow. Without
+      pagination, queries eventually timeout or OOM. And you won't know
+      until production at scale.
+    solution: |
+      1. Always paginate list endpoints:
+         - Limit + offset (simple, inefficient for large offsets)
+         - Cursor-based (efficient, more complex)
+         - Default limit (e.g., 50), max limit (e.g., 500)
+
+      2. Design for large datasets from start:
+         - Index columns used for sorting
+         - Consider search/filter to reduce result size
+         - Stream results for exports
+
+      3. Protect against abuse:
+         - Rate limiting
+         - Maximum page size
+         - Timeout for expensive queries
+    symptoms:
+      - API endpoint times out at scale
+      - Memory spikes on list endpoints
+      - "Just add limit" refactoring
+      - Database performance degradation
+    detection_pattern: "SELECT \\* FROM|findAll\\(\\)|find\\(\\{\\}\\)"
+
