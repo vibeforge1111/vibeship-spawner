@@ -1,0 +1,328 @@
+# MCP Developer Collaboration Patterns
+# How this skill integrates with others for complex MCP implementations
+
+collaboration:
+  # Lead role - MCP Developer drives these workflows
+  leads:
+    - workflow: mcp-server-creation
+      description: Building a complete MCP server from scratch
+      involves:
+        - api-designer: Tool and resource schema design
+        - typescript-engineer: TypeScript implementation patterns
+        - security-engineer: Input validation and security review
+      handoff_points:
+        - to: api-designer
+          when: Designing tool schemas and resource URIs
+          context_to_share: MCP schema requirements, JSON Schema format, tool naming conventions
+        - to: typescript-engineer
+          when: Complex type inference or generics needed
+          context_to_share: Zod schema types, SDK type interfaces
+        - to: security-engineer
+          when: Tool handles user input or sensitive operations
+          context_to_share: Input validation patterns, prompt injection risks
+
+    - workflow: claude-code-extension
+      description: Building extensions for Claude Code (Claude's CLI)
+      involves:
+        - typescript-engineer: Node.js implementation
+        - infra-architect: Package distribution and installation
+      handoff_points:
+        - to: typescript-engineer
+          when: Complex async patterns or Node.js APIs needed
+          context_to_share: Claude Code hooks, MCP SDK patterns
+        - to: infra-architect
+          when: Publishing npm package or deployment
+          context_to_share: Package structure, binary distribution
+
+    - workflow: mcp-client-integration
+      description: Integrating MCP client into applications
+      involves:
+        - api-designer: Application API design
+        - auth-specialist: Authentication for MCP connections
+        - realtime-engineer: Connection management and reconnection
+      handoff_points:
+        - to: auth-specialist
+          when: Need authentication for MCP server connections
+          context_to_share: Transport layer, token passing, session management
+        - to: realtime-engineer
+          when: Connection stability and reconnection needed
+          context_to_share: Transport types (stdio, SSE), connection lifecycle
+
+    - workflow: tool-library
+      description: Creating reusable tool libraries for MCP servers
+      involves:
+        - api-designer: Tool interface design
+        - typescript-engineer: Generic type patterns
+      handoff_points:
+        - to: api-designer
+          when: Designing composable tool interfaces
+          context_to_share: Tool registration patterns, schema composition
+
+  # Support role - MCP Developer assists these workflows
+  supports:
+    - workflow: ai-application
+      led_by: llm-architect
+      contribution: MCP server for tool execution, resource access
+      when_called: Application needs to give LLM access to tools or data
+
+    - workflow: developer-tooling
+      led_by: devops-engineer
+      contribution: MCP server for development tool access
+      when_called: Building Claude Code extensions or AI-powered dev tools
+
+    - workflow: documentation-system
+      led_by: technical-writer
+      contribution: MCP resources for documentation access
+      when_called: Making documentation searchable by LLM
+
+    - workflow: data-pipeline
+      led_by: data-engineer
+      contribution: MCP tools for data operations
+      when_called: LLM needs to query or transform data
+
+  # Escalation patterns
+  escalations:
+    - situation: Complex authentication flows for MCP connections
+      escalate_to: auth-specialist
+      with_context: Transport type, token format, session requirements
+      reason: Auth patterns beyond basic token passing
+
+    - situation: High-volume tool calls causing performance issues
+      escalate_to: performance-hunter
+      with_context: Tool call frequency, response sizes, latency metrics
+      reason: Need profiling and optimization expertise
+
+    - situation: SSE transport scaling beyond single server
+      escalate_to: infra-architect
+      with_context: Connection count, message volume, deployment model
+      reason: Need load balancing and horizontal scaling
+
+    - situation: Security vulnerability in tool implementation
+      escalate_to: security-engineer
+      with_context: Tool inputs, operations performed, data accessed
+      reason: Security audit and remediation
+
+    - situation: LLM not using tools correctly
+      escalate_to: llm-architect
+      with_context: Tool descriptions, schema, error patterns
+      reason: May need prompt engineering or tool redesign
+
+    - situation: Complex state synchronization across sessions
+      escalate_to: realtime-engineer
+      with_context: State requirements, session lifecycle, sync patterns
+      reason: Distributed state management expertise
+
+  # Integration contracts
+  contracts:
+    with_api_designer:
+      mcp_developer_provides:
+        - MCP protocol constraints (JSON-RPC, content types)
+        - Tool naming conventions and schema format
+        - Resource URI patterns
+      api_designer_provides:
+        - RESTful naming conventions adapted to tools
+        - Schema design patterns
+        - Error response formats
+      interface_example: |
+        # API Designer provides schema patterns
+        const userSchema = z.object({
+          id: z.string().uuid(),
+          name: z.string().min(1).max(100),
+          email: z.string().email()
+        });
+
+        # MCP Developer converts to tool
+        const getUser = {
+          name: 'users_get',
+          description: 'Get user by ID',
+          inputSchema: zodToJsonSchema(z.object({
+            user_id: z.string().uuid().describe('User ID from users_list')
+          }))
+        };
+
+    with_auth_specialist:
+      mcp_developer_provides:
+        - Transport authentication hooks
+        - Session lifecycle events
+        - Tool authorization checks
+      auth_specialist_provides:
+        - Token validation middleware
+        - Permission checking logic
+        - Session management patterns
+      interface_example: |
+        # Auth Specialist provides validation
+        async function validateToken(token: string): Promise<User | null> {
+          try {
+            const payload = await jwt.verify(token, SECRET);
+            return await db.getUser(payload.userId);
+          } catch {
+            return null;
+          }
+        }
+
+        # MCP Developer integrates
+        server.setRequestHandler('tools/call', async (request) => {
+          const token = request.transport.auth?.token;
+          const user = await validateToken(token);
+
+          if (!user) {
+            return {
+              content: [{ type: 'text', text: 'Authentication required' }],
+              isError: true
+            };
+          }
+
+          // Check tool-specific permissions
+          if (!hasPermission(user, request.params.name)) {
+            return {
+              content: [{ type: 'text', text: 'Permission denied for this tool' }],
+              isError: true
+            };
+          }
+
+          // Proceed with authorized user...
+        });
+
+    with_typescript_engineer:
+      mcp_developer_provides:
+        - MCP SDK types and interfaces
+        - Handler registration patterns
+        - Transport abstractions
+      typescript_engineer_provides:
+        - Generic type inference patterns
+        - Async error handling patterns
+        - Type-safe builder patterns
+      interface_example: |
+        # TypeScript Engineer provides type-safe patterns
+        type ToolHandler<T extends z.ZodType> = (
+          args: z.infer<T>,
+          context: { sessionId: string; user?: User }
+        ) => Promise<ToolResponse>;
+
+        function createTool<T extends z.ZodType>(
+          name: string,
+          description: string,
+          schema: T,
+          handler: ToolHandler<T>
+        ): Tool {
+          return {
+            name,
+            description,
+            inputSchema: zodToJsonSchema(schema),
+            handler: async (args, ctx) => {
+              const parsed = schema.safeParse(args);
+              if (!parsed.success) {
+                return { content: [{ type: 'text', text: parsed.error.message }], isError: true };
+              }
+              return handler(parsed.data, ctx);
+            }
+          };
+        }
+
+        # MCP Developer uses
+        const getTool = createTool(
+          'get_item',
+          'Get an item by ID',
+          z.object({ id: z.string() }),
+          async ({ id }, { user }) => {
+            // Type-safe args and context
+          }
+        );
+
+    with_infra_architect:
+      mcp_developer_provides:
+        - Resource requirements (memory, connections)
+        - Transport protocol requirements
+        - Session state storage needs
+      infra_architect_provides:
+        - Deployment configuration
+        - Load balancing for SSE
+        - Container/serverless setup
+      interface_example: |
+        # Infra Architect provides deployment config
+
+        # For stdio transport (Claude Desktop)
+        # package.json binary entry
+        {
+          "bin": {
+            "my-mcp-server": "./dist/index.js"
+          }
+        }
+
+        # For SSE transport (web deployment)
+        # Docker/kubernetes config
+        resources:
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+          requests:
+            memory: "128Mi"
+            cpu: "250m"
+
+        # MCP Developer adapts
+        const PORT = process.env.PORT || 3000;
+        const MAX_CONNECTIONS = parseInt(process.env.MAX_CONNECTIONS || '100');
+
+    with_llm_architect:
+      mcp_developer_provides:
+        - Tool definitions and schemas
+        - Error patterns from LLM misuse
+        - Resource content format
+      llm_architect_provides:
+        - Tool description optimization
+        - Parameter naming guidance
+        - Output format recommendations
+      interface_example: |
+        # LLM Architect recommends description patterns
+
+        // BEFORE: Vague description
+        const tool = {
+          name: 'search',
+          description: 'Search for things'
+        };
+
+        // AFTER: Action-oriented, example-rich
+        const tool = {
+          name: 'docs_search',
+          description: 'Search documentation by keyword or phrase. ' +
+            'Returns matching sections with context. ' +
+            'Example: docs_search({ query: "authentication", limit: 5 })'
+        };
+
+# Prerequisites for using this skill effectively
+prerequisites:
+  skills:
+    - typescript-engineer  # For TypeScript implementation
+    - api-designer        # For schema design
+  knowledge:
+    - JSON-RPC 2.0 protocol basics
+    - JSON Schema format
+    - Async/await patterns
+    - Zod validation library
+  tools:
+    - "@modelcontextprotocol/sdk"
+    - zod
+    - zod-to-json-schema
+
+# When to delegate to this skill
+delegation_triggers:
+  - phrase: "MCP server"
+    confidence: high
+  - phrase: "model context protocol"
+    confidence: high
+  - phrase: "claude code extension"
+    confidence: high
+  - phrase: "MCP tool"
+    confidence: high
+  - phrase: "MCP resource"
+    confidence: high
+  - phrase: "stdio transport"
+    confidence: high
+  - phrase: "SSE transport"
+    confidence: medium
+  - phrase: "tool for claude"
+    confidence: high
+  - phrase: "extend claude"
+    confidence: medium
+  - phrase: "LLM tools"
+    confidence: medium

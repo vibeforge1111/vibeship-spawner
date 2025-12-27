@@ -1,0 +1,290 @@
+# Redis Specialist Collaboration Patterns
+# How this skill integrates with others for complex data architecture
+
+collaboration:
+  # Lead role - Redis Specialist drives these workflows
+  leads:
+    - workflow: caching-architecture
+      description: Designing application-wide caching strategy
+      involves:
+        - postgres-wizard: Query optimization to reduce what needs caching
+        - performance-hunter: Measuring cache effectiveness and latency
+        - infra-architect: Redis cluster sizing and deployment
+      handoff_points:
+        - to: postgres-wizard
+          when: Cache misses reveal slow underlying queries
+          context_to_share: Most common cache miss patterns, query frequency
+        - to: performance-hunter
+          when: Need to measure cache hit rates and latency percentiles
+          context_to_share: Key patterns, expected hit rates, SLA requirements
+
+    - workflow: distributed-locking
+      description: Implementing coordination primitives for distributed systems
+      involves:
+        - event-architect: Event sourcing as alternative to locking
+        - infra-architect: Redis cluster for lock reliability
+      handoff_points:
+        - to: event-architect
+          when: Locking becomes bottleneck, consider event-driven approach
+          context_to_share: Lock contention metrics, operation patterns
+        - to: infra-architect
+          when: Need multi-node Redis for Redlock algorithm
+          context_to_share: Lock TTLs, failure modes, quorum requirements
+
+    - workflow: rate-limiting-system
+      description: Implementing API rate limiting with Redis
+      involves:
+        - api-designer: Rate limit headers and error responses
+        - auth-specialist: User tier detection for different limits
+        - performance-hunter: Rate limit latency budget
+      handoff_points:
+        - to: api-designer
+          when: Defining rate limit response format and headers
+          context_to_share: Limit values, reset times, retry-after calculation
+        - to: auth-specialist
+          when: Different rate limits for different user tiers
+          context_to_share: How to detect tier, where to store tier info
+
+    - workflow: session-management
+      description: Storing and managing user sessions in Redis
+      involves:
+        - auth-specialist: Session security and token strategy
+        - realtime-engineer: Session-based presence tracking
+      handoff_points:
+        - to: auth-specialist
+          when: Session token generation, rotation, or security concerns
+          context_to_share: Session structure, TTL strategy, invalidation triggers
+        - to: realtime-engineer
+          when: Need real-time presence based on session state
+          context_to_share: Session key patterns, how to detect active sessions
+
+    - workflow: leaderboard-system
+      description: Real-time rankings and scoreboards
+      involves:
+        - realtime-engineer: Live leaderboard updates to clients
+        - performance-hunter: Score update latency optimization
+      handoff_points:
+        - to: realtime-engineer
+          when: Need to push leaderboard changes to connected clients
+          context_to_share: Update frequency, data shape, subscription patterns
+
+  # Support role - Redis Specialist assists these workflows
+  supports:
+    - workflow: real-time-messaging
+      led_by: realtime-engineer
+      contribution: Pub/sub infrastructure, message persistence with Streams
+      when_called: Need horizontal scaling for WebSocket servers or message persistence
+
+    - workflow: search-caching
+      led_by: search-engineer
+      contribution: Caching search results, query deduplication
+      when_called: Search latency too high, need to cache common queries
+
+    - workflow: queue-processing
+      led_by: event-architect
+      contribution: Redis Lists/Streams as lightweight queue
+      when_called: Need simple queue without full message broker complexity
+
+    - workflow: feature-flags
+      led_by: product-engineer
+      contribution: Fast flag lookup with Redis caching
+      when_called: Flag evaluation latency is too high for hot paths
+
+  # Escalation patterns
+  escalations:
+    - situation: Redis cluster split-brain or data loss
+      escalate_to: infra-architect
+      with_context: Cluster topology, persistence settings, failure timeline
+      reason: Need infrastructure expertise for cluster recovery
+
+    - situation: Cache hit rate below 80% despite tuning
+      escalate_to: postgres-wizard
+      with_context: Query patterns, cache key design, miss reasons
+      reason: May need query optimization or different data access pattern
+
+    - situation: Memory growing despite TTL on all keys
+      escalate_to: performance-hunter
+      with_context: Memory breakdown by key type, growth rate, eviction stats
+      reason: Need profiling to identify memory leak source
+
+    - situation: Pub/sub messages being dropped
+      escalate_to: realtime-engineer
+      with_context: Message volume, subscriber count, slow subscriber patterns
+      reason: May need backpressure or different transport
+
+    - situation: Lock contention causing timeouts
+      escalate_to: event-architect
+      with_context: Lock patterns, wait times, contention hotspots
+      reason: May need to redesign as event-driven to avoid locking
+
+    - situation: Redis latency spikes affecting user experience
+      escalate_to: performance-hunter
+      with_context: Slowlog output, command frequency, key sizes
+      reason: Need latency profiling and optimization expertise
+
+  # Integration contracts
+  contracts:
+    with_postgres_wizard:
+      redis_specialist_provides:
+        - Cache key naming conventions
+        - TTL strategy aligned with data update frequency
+        - Invalidation triggers on data changes
+      postgres_wizard_provides:
+        - Query patterns that benefit most from caching
+        - Data update notifications for cache invalidation
+        - Read replica strategy as alternative to caching
+      interface_example: |
+        # Redis Specialist provides caching layer
+        async function getCachedUser(userId: string): Promise<User> {
+          const cached = await redis.get(`user:${userId}`);
+          if (cached) return JSON.parse(cached);
+
+          const user = await getUserFromDB(userId);  // Postgres Wizard's domain
+          await redis.setex(`user:${userId}`, 3600, JSON.stringify(user));
+          return user;
+        }
+
+        # Postgres Wizard calls this on update
+        async function invalidateUserCache(userId: string): Promise<void> {
+          await redis.del(`user:${userId}`);
+        }
+
+    with_realtime_engineer:
+      redis_specialist_provides:
+        - Pub/sub channel structure
+        - Presence state storage with TTL
+        - Horizontal scaling for WebSocket servers
+      realtime_engineer_provides:
+        - Message format and subscription patterns
+        - Presence update frequency and lifecycle
+        - Reconnection and state recovery needs
+      interface_example: |
+        # Redis Specialist configures pub/sub
+        const pub = redis.duplicate();
+        const sub = redis.duplicate();
+
+        # Realtime Engineer publishes
+        await pub.publish(`room:${roomId}`, JSON.stringify(message));
+
+        # Redis Specialist manages presence
+        await redis.setex(`presence:${userId}`, 30, JSON.stringify({
+          status: 'online',
+          lastSeen: Date.now()
+        }));
+
+    with_auth_specialist:
+      redis_specialist_provides:
+        - Session storage with appropriate TTL
+        - Token blacklist for revocation
+        - Rate limiting for auth endpoints
+      auth_specialist_provides:
+        - Session data structure and security requirements
+        - Token rotation and refresh strategy
+        - Rate limit thresholds for auth operations
+      interface_example: |
+        # Auth Specialist defines session structure
+        interface Session {
+          userId: string;
+          createdAt: number;
+          lastActive: number;
+          deviceId: string;
+        }
+
+        # Redis Specialist stores securely
+        async function createSession(session: Session): Promise<string> {
+          const sessionId = crypto.randomUUID();
+          await redis.setex(
+            `session:${sessionId}`,
+            86400,  // 24 hour TTL
+            JSON.stringify(session)
+          );
+          // Add to user's session set for multi-device tracking
+          await redis.sadd(`user:${session.userId}:sessions`, sessionId);
+          return sessionId;
+        }
+
+    with_performance_hunter:
+      redis_specialist_provides:
+        - Cache hit/miss metrics exposure
+        - Slowlog and latency data
+        - Memory usage breakdown
+      performance_hunter_provides:
+        - Latency budgets and SLAs
+        - Profiling methodology
+        - Optimization recommendations
+      interface_example: |
+        # Redis Specialist exposes metrics
+        async function getCacheMetrics(): Promise<CacheMetrics> {
+          const info = await redis.info('stats');
+          return {
+            hits: parseHits(info),
+            misses: parseMisses(info),
+            hitRate: calculateHitRate(info),
+            evictedKeys: parseEvicted(info)
+          };
+        }
+
+        # Performance Hunter analyzes
+        const metrics = await getCacheMetrics();
+        if (metrics.hitRate < 0.8) {
+          // Investigate cache key design
+        }
+
+    with_infra_architect:
+      redis_specialist_provides:
+        - Memory requirements and growth projections
+        - Cluster topology needs (sharding, replication)
+        - Persistence requirements (RDB, AOF)
+      infra_architect_provides:
+        - Redis deployment (managed vs self-hosted)
+        - Failover and high availability configuration
+        - Monitoring and alerting setup
+      interface_example: |
+        # Redis Specialist specifies requirements
+        const requirements = {
+          memoryGB: 8,
+          persistence: 'AOF',
+          replication: 'master-replica',
+          maxConnections: 1000,
+          evictionPolicy: 'volatile-lru'
+        };
+
+        # Infra Architect provisions
+        // AWS ElastiCache, Redis Cloud, or self-hosted
+        // with appropriate instance size and config
+
+# Prerequisites for using this skill effectively
+prerequisites:
+  skills:
+    - api-designer  # For cache key naming aligned with API resources
+  knowledge:
+    - Redis data structures (Strings, Hashes, Lists, Sets, Sorted Sets, Streams)
+    - CAP theorem and eventual consistency
+    - TCP connection pooling
+  tools:
+    - Redis client library (ioredis, redis)
+    - Redis CLI for debugging
+    - Optional: RedisInsight for visualization
+
+# When to delegate to this skill
+delegation_triggers:
+  - phrase: "caching"
+    confidence: high
+  - phrase: "redis"
+    confidence: high
+  - phrase: "cache invalidation"
+    confidence: high
+  - phrase: "rate limiting"
+    confidence: high
+  - phrase: "distributed lock"
+    confidence: high
+  - phrase: "session storage"
+    confidence: high
+  - phrase: "pub/sub"
+    confidence: medium
+  - phrase: "leaderboard"
+    confidence: high
+  - phrase: "sorted set"
+    confidence: high
+  - phrase: "upstash"
+    confidence: high

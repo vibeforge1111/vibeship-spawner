@@ -1,0 +1,234 @@
+# Realtime Engineer Collaboration Patterns
+# How this skill integrates with others for complex real-time system builds
+
+collaboration:
+  # Lead role - Realtime Engineer drives these workflows
+  leads:
+    - workflow: collaborative-editing
+      description: Building multiplayer document editing (Google Docs style)
+      involves:
+        - event-architect: Event sourcing for operation history and undo
+        - performance-hunter: Latency optimization for responsive editing
+        - auth-specialist: User permissions and document access control
+      handoff_points:
+        - to: event-architect
+          when: Need persistent operation history or undo/redo capability
+          context_to_share: Operation types, conflict resolution strategy (CRDT/OT)
+        - to: performance-hunter
+          when: Cursor sync latency exceeds 50ms or typing feels laggy
+          context_to_share: Current p50/p95 latencies, message sizes, update frequency
+
+    - workflow: live-dashboard
+      description: Real-time analytics dashboards with streaming data
+      involves:
+        - api-designer: REST API for initial load, SSE for updates
+        - redis-specialist: Pub/sub for multi-server broadcast
+        - performance-hunter: Aggregation and sampling for high-volume data
+      handoff_points:
+        - to: redis-specialist
+          when: Need pub/sub for horizontal scaling or presence state
+          context_to_share: Message patterns, expected subscribers, state size
+        - to: api-designer
+          when: Designing initial data load and update subscription endpoints
+          context_to_share: Data shape, update frequency, client reconnection needs
+
+    - workflow: presence-system
+      description: Who is online, typing indicators, live cursors
+      involves:
+        - redis-specialist: Distributed presence state and pub/sub
+        - auth-specialist: User identity and session management
+        - infra-architect: Sticky sessions or stateless architecture decision
+      handoff_points:
+        - to: redis-specialist
+          when: Need distributed presence across multiple servers
+          context_to_share: Expected user count, update frequency, state per user
+        - to: infra-architect
+          when: Scaling beyond single server or need load balancer config
+          context_to_share: Connection patterns, sticky session requirements
+
+    - workflow: notification-system
+      description: Real-time push notifications to web and mobile
+      involves:
+        - event-architect: Event sourcing for notification delivery tracking
+        - api-designer: Notification preferences and delivery endpoints
+        - auth-specialist: Device registration and user targeting
+      handoff_points:
+        - to: event-architect
+          when: Need delivery tracking, retry logic, or notification history
+          context_to_share: Delivery requirements, retry strategy, storage needs
+
+  # Support role - Realtime Engineer assists these workflows
+  supports:
+    - workflow: chat-implementation
+      led_by: api-designer
+      contribution: WebSocket transport, message ordering, reconnection
+      when_called: Need real-time message delivery, typing indicators, read receipts
+
+    - workflow: multiplayer-game
+      led_by: game-developer
+      contribution: State synchronization, latency hiding, server reconciliation
+      when_called: Need authoritative server, client prediction, or lag compensation
+
+    - workflow: live-streaming
+      led_by: video-architect
+      contribution: Chat overlay, viewer presence, live reactions
+      when_called: Need chat alongside video stream or viewer engagement features
+
+    - workflow: iot-dashboard
+      led_by: data-engineer
+      contribution: Device status streaming, sensor data visualization
+      when_called: Need real-time device updates or sensor data display
+
+  # Escalation patterns
+  escalations:
+    - situation: Cannot scale WebSocket servers horizontally
+      escalate_to: redis-specialist
+      with_context: Current architecture, message patterns, state requirements
+      reason: Need Redis pub/sub for cross-server message broadcast
+
+    - situation: Load balancer dropping WebSocket connections
+      escalate_to: infra-architect
+      with_context: LB type, connection duration, upgrade headers
+      reason: May need sticky sessions, different LB, or proxy configuration
+
+    - situation: Authentication tokens expiring mid-session
+      escalate_to: auth-specialist
+      with_context: Token type, refresh flow, session duration
+      reason: Need token refresh strategy that works with persistent connections
+
+    - situation: Message ordering issues across reconnections
+      escalate_to: event-architect
+      with_context: Current ordering strategy, reconnection pattern
+      reason: May need event sourcing or persistent sequence tracking
+
+    - situation: Presence system showing stale data
+      escalate_to: redis-specialist
+      with_context: TTL settings, update frequency, cache invalidation
+      reason: Need better cache strategy or pub/sub configuration
+
+  # Integration contracts
+  contracts:
+    with_event_architect:
+      realtime_engineer_provides:
+        - Real-time event stream to clients
+        - Reconnection with last-event-id
+        - Client-side event buffering
+      event_architect_provides:
+        - Event storage and replay
+        - Ordered event log with IDs
+        - Event schema and versioning
+      interface_example: |
+        # Realtime Engineer consumes Event Architect's stream
+        const events = eventStore.subscribe({
+          since: lastEventId,
+          filter: { roomId }
+        });
+
+        for await (const event of events) {
+          // Forward to connected clients
+          room.broadcast(event);
+        }
+
+    with_redis_specialist:
+      realtime_engineer_provides:
+        - Pub/sub message format
+        - Subscription patterns (rooms, users)
+        - Presence update frequency
+      redis_specialist_provides:
+        - Distributed pub/sub infrastructure
+        - Presence state storage with TTL
+        - Connection to multiple servers
+      interface_example: |
+        # Realtime Engineer publishes through Redis
+        await redis.publish(`room:${roomId}`, JSON.stringify(message));
+
+        # Redis Specialist configures
+        const sub = redis.subscribe(`room:${roomId}`);
+        sub.on('message', (channel, message) => {
+          // Broadcast to local WebSocket clients
+          localClients.forEach(ws => ws.send(message));
+        });
+
+    with_auth_specialist:
+      realtime_engineer_provides:
+        - Connection auth requirements (token in query/header)
+        - Channel/room authorization checks
+        - Session duration expectations
+      auth_specialist_provides:
+        - Token validation middleware
+        - Permission checking for channels
+        - Token refresh mechanism
+      interface_example: |
+        # Auth Specialist provides validation
+        async function validateConnection(token: string): Promise<User> {
+          const payload = await jwt.verify(token);
+          return db.getUser(payload.userId);
+        }
+
+        # Realtime Engineer uses it
+        ws.on('connection', async (socket, req) => {
+          const token = req.query.token;
+          const user = await validateConnection(token);
+          socket.userId = user.id;
+        });
+
+    with_api_designer:
+      realtime_engineer_provides:
+        - WebSocket endpoint requirements
+        - Message schemas (client-to-server, server-to-client)
+        - Connection lifecycle events
+      api_designer_provides:
+        - REST endpoints for initial state
+        - OpenAPI schema for messages
+        - Error response formats
+      interface_example: |
+        # API Designer defines message schemas
+        interface ClientMessage {
+          type: 'subscribe' | 'unsubscribe' | 'message';
+          channel?: string;
+          data?: any;
+        }
+
+        interface ServerMessage {
+          type: 'event' | 'error' | 'ack';
+          channel?: string;
+          data?: any;
+          id?: string;
+        }
+
+        # Realtime Engineer implements transport
+        ws.on('message', (raw) => {
+          const msg: ClientMessage = JSON.parse(raw);
+          // Handle according to schema
+        });
+
+# Prerequisites for using this skill effectively
+prerequisites:
+  skills:
+    - api-designer  # For REST + WebSocket API design
+  knowledge:
+    - HTTP upgrade mechanism
+    - TCP connection lifecycle
+    - Browser EventSource API
+  tools:
+    - WebSocket library (ws, socket.io)
+    - Redis for pub/sub (optional for scaling)
+
+# When to delegate to this skill
+delegation_triggers:
+  - phrase: "real-time updates"
+    confidence: high
+  - phrase: "WebSocket"
+    confidence: high
+  - phrase: "live collaboration"
+    confidence: high
+  - phrase: "presence indicator"
+    confidence: high
+  - phrase: "server-sent events"
+    confidence: high
+  - phrase: "push notification"
+    confidence: medium
+  - phrase: "live cursor"
+    confidence: high
+  - phrase: "typing indicator"
+    confidence: high

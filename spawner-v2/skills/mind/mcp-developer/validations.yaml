@@ -1,0 +1,202 @@
+# MCP Developer Validations
+# Automated checks for MCP server and tool implementations
+
+validations:
+  - id: generic-tool-name
+    name: Generic Tool Name Without Namespace
+    severity: warning
+    type: regex
+    pattern:
+      - "name:\\s*['\"](?:search|query|get|list|create|update|delete|read|write)['\"]"
+    message: "Generic tool name without namespace. May collide with other MCP servers."
+    fix_action: "Prefix tool name with server namespace (e.g., 'docs_search' instead of 'search')"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: missing-input-schema
+    name: Tool Without Input Schema
+    severity: error
+    type: regex
+    pattern:
+      - "name:\\s*['\"][^'\"]+['\"](?!.*inputSchema)"
+    message: "Tool defined without inputSchema. LLM cannot know what parameters to pass."
+    fix_action: "Add inputSchema with JSON Schema or Zod-to-JSON-Schema conversion"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: zod-as-input-schema
+    name: Zod Schema Passed Directly as inputSchema
+    severity: error
+    type: regex
+    pattern:
+      - "inputSchema:\\s*z\\."
+      - "inputSchema:\\s*[a-zA-Z]+Schema(?!.*zodToJsonSchema)"
+    message: "Zod schema passed directly. MCP expects JSON Schema format."
+    fix_action: "Use zodToJsonSchema() to convert Zod schema to JSON Schema"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: console-log-in-server
+    name: Console.log in MCP Server
+    severity: error
+    type: regex
+    pattern:
+      - "console\\.log\\("
+    message: "console.log writes to stdout, corrupting MCP protocol messages."
+    fix_action: "Use process.stderr.write() for debugging or remove logging"
+    applies_to:
+      - "**/mcp/**/*.ts"
+      - "**/mcp/**/*.js"
+      - "**/*-mcp-server*.ts"
+      - "**/*-mcp-server*.js"
+
+  - id: unhandled-async-in-handler
+    name: Async Handler Without Try/Catch
+    severity: warning
+    type: regex
+    pattern:
+      - "setRequestHandler.*async.*=>\\s*\\{"
+    message: "Async handler without visible error handling. Unhandled errors crash server."
+    fix_action: "Wrap handler body in try/catch and return error response"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: missing-tool-description
+    name: Tool Without Description
+    severity: warning
+    type: regex
+    pattern:
+      - "name:\\s*['\"][^'\"]+['\"](?!.*description)"
+    message: "Tool without description. LLM uses descriptions to understand when to use tools."
+    fix_action: "Add clear description explaining what the tool does and when to use it"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: missing-parameter-descriptions
+    name: Schema Parameters Without Descriptions
+    severity: info
+    type: regex
+    pattern:
+      - "properties:\\s*\\{[^}]+\\}(?!.*description)"
+    message: "Schema parameters without descriptions. Descriptions help LLM use tools correctly."
+    fix_action: "Add .describe() in Zod or 'description' field in JSON Schema for each parameter"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: hardcoded-uri-scheme
+    name: Hardcoded URI Without Encoding
+    severity: warning
+    type: regex
+    pattern:
+      - "uri.*`[^`]*\\$\\{[^}]+\\}[^`]*`(?!.*encode|URI)"
+    message: "URI with interpolated values may need encoding for special characters."
+    fix_action: "Use encodeURIComponent() for path segments in URIs"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: secrets-in-response
+    name: Potential Secrets in Tool Response
+    severity: error
+    type: regex
+    pattern:
+      - "content.*text.*(?:key|secret|token|password|apiKey|api_key)"
+    message: "Potential secrets in tool response. Secrets may leak to LLM output."
+    fix_action: "Never include secrets in tool responses. Store server-side."
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: mega-tool-enum
+    name: Tool With Mode/Action Enum
+    severity: info
+    type: regex
+    pattern:
+      - "action.*enum.*create.*update.*delete"
+      - "mode.*enum.*list.*get.*create"
+      - "operation.*enum.*read.*write"
+    message: "Tool with mode/action enum detected. Consider splitting into atomic tools."
+    fix_action: "Create separate tools for each action for better LLM comprehension"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: missing-error-flag
+    name: Error Response Without isError Flag
+    severity: warning
+    type: regex
+    pattern:
+      - "content.*type.*text.*[Ee]rror(?!.*isError)"
+    message: "Error message returned without isError flag. Client may not recognize as error."
+    fix_action: "Add 'isError: true' to error responses"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: blocking-sync-operation
+    name: Blocking Sync Operation in Handler
+    severity: warning
+    type: regex
+    pattern:
+      - "readFileSync|writeFileSync|execSync"
+    message: "Synchronous blocking operation in handler. May timeout clients."
+    fix_action: "Use async versions (readFile, writeFile, exec) with await"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: missing-transport-close
+    name: Transport Without Close Handler
+    severity: warning
+    type: regex
+    pattern:
+      - "new.*Transport(?!.*on.*close|onclose)"
+    message: "Transport created without close handler. Resources may leak."
+    fix_action: "Add transport.on('close', ...) to clean up session state"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: resource-without-mimetype
+    name: Resource Without MIME Type
+    severity: info
+    type: regex
+    pattern:
+      - "uri:.*(?!.*mimeType)"
+    message: "Resource defined without mimeType. Client may not render correctly."
+    fix_action: "Add mimeType field to resource definition"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"

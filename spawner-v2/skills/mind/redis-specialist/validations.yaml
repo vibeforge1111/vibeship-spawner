@@ -1,0 +1,214 @@
+# Redis Specialist Validations
+# Automated checks for Redis usage patterns
+
+validations:
+  - id: missing-ttl
+    name: Redis SET Without TTL
+    severity: error
+    type: regex
+    pattern:
+      - "redis\\.set\\([^)]+\\)(?!.*[Ee][Xx]|setex)"
+      - "\\.set\\(['\"][^'\"]+['\"],\\s*[^,]+\\)(?!.*[Ee][Xx])"
+    message: "Redis SET without TTL. Keys without expiration fill memory until eviction or OOM."
+    fix_action: "Use setex() or set() with EX option to ensure keys expire"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: keys-command
+    name: KEYS Command in Production Code
+    severity: error
+    type: regex
+    pattern:
+      - "redis\\.keys\\("
+      - "\\.keys\\(['\"]\\*"
+      - "KEYS ['\"]\\*"
+    message: "KEYS command blocks Redis during scan. O(n) on entire keyspace."
+    fix_action: "Use SCAN with cursor for non-blocking iteration"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: pubsub-for-critical-data
+    name: Pub/Sub for Critical Messages
+    severity: error
+    type: regex
+    pattern:
+      - "publish.*order|payment|transaction"
+      - "subscribe.*order|payment|transaction"
+    message: "Using pub/sub for critical data. Messages lost if subscriber disconnects."
+    fix_action: "Use Redis Streams with consumer groups for reliable messaging"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: no-cache-invalidation
+    name: Cache Write Without Invalidation Plan
+    severity: warning
+    type: regex
+    pattern:
+      - "setex.*user|profile|settings(?!.*del|invalidate)"
+      - "cache.*set(?!.*on.*update|invalidat)"
+    message: "Caching data without clear invalidation strategy leads to stale data."
+    fix_action: "Implement explicit cache invalidation on data updates"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: lock-without-finally
+    name: Distributed Lock Without Finally Block
+    severity: error
+    type: regex
+    pattern:
+      - "acquire.*lock(?!.*finally.*release)"
+      - "setnx.*lock(?!.*finally.*del)"
+      - "redlock\\.acquire(?!.*finally)"
+    message: "Lock acquired without guaranteed release in finally block."
+    fix_action: "Always release locks in finally block to prevent deadlocks"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: large-json-stringify
+    name: Large Object Serialization
+    severity: warning
+    type: regex
+    pattern:
+      - "JSON\\.stringify.*\\[.*\\.map|filter|reduce"
+      - "setex.*JSON\\.stringify.*array|list|history"
+    message: "Storing large serialized arrays. Consider splitting or using Redis lists."
+    fix_action: "Use Redis native data structures (LPUSH, ZADD) or split large objects"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: connection-per-request
+    name: New Redis Connection Per Request
+    severity: error
+    type: regex
+    pattern:
+      - "new Redis\\(.*\\)(?=.*req|request|handler)"
+      - "createClient\\(\\)(?=.*async.*req)"
+    message: "Creating new Redis connection per request. Use connection pool."
+    fix_action: "Create single Redis client at module level and reuse"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: multi-without-exec
+    name: MULTI Without EXEC
+    severity: error
+    type: regex
+    pattern:
+      - "\\.multi\\(\\)(?!.*\\.exec\\()"
+    message: "MULTI transaction started but EXEC not called. Commands never execute."
+    fix_action: "Always call exec() to execute transaction"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: rate-limit-naive
+    name: Naive Rate Limiting Implementation
+    severity: warning
+    type: regex
+    pattern:
+      - "incr.*expire(?!.*multi|pipeline)"
+      - "incr.*ttl(?!.*multi|atomic)"
+    message: "Non-atomic rate limiting. INCR and EXPIRE should be in transaction."
+    fix_action: "Use MULTI/EXEC or Lua script for atomic rate limiting"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: hgetall-large-hash
+    name: HGETALL on Potentially Large Hash
+    severity: warning
+    type: regex
+    pattern:
+      - "hgetall.*user|session|product|order"
+      - "HGETALL ['\"][^'\"]+['\"]"
+    message: "HGETALL returns entire hash. For large hashes, use HSCAN or HMGET."
+    fix_action: "Use HMGET for specific fields or HSCAN for iteration"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: smembers-large-set
+    name: SMEMBERS on Potentially Large Set
+    severity: warning
+    type: regex
+    pattern:
+      - "smembers.*all|users|members|followers"
+      - "SMEMBERS ['\"][^'\"]+['\"]"
+    message: "SMEMBERS returns entire set. For large sets, use SSCAN."
+    fix_action: "Use SSCAN for iteration or SISMEMBER for membership check"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: no-error-handler
+    name: Redis Client Without Error Handler
+    severity: warning
+    type: regex
+    pattern:
+      - "new Redis\\((?!.*on.*error)"
+      - "createClient\\((?!.*on.*error)"
+    message: "Redis client without error handler. Unhandled errors crash Node process."
+    fix_action: "Add redis.on('error', handler) to prevent process crash"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: blocking-operation-no-timeout
+    name: Blocking Operation Without Timeout
+    severity: warning
+    type: regex
+    pattern:
+      - "blpop|brpop|brpoplpush(?!.*\\d{3,})"
+      - "BLPOP|BRPOP(?!.*TIMEOUT)"
+    message: "Blocking operation without timeout can hang indefinitely."
+    fix_action: "Always specify timeout for blocking operations (0 means forever)"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: lua-script-inline
+    name: Lua Script Defined Inline
+    severity: info
+    type: regex
+    pattern:
+      - "eval\\(['\"](?:local|redis\\.call)"
+      - "\\.eval\\(`.*redis\\.call"
+    message: "Lua script defined inline. Consider loading scripts with SCRIPT LOAD for reuse."
+    fix_action: "Use SCRIPT LOAD and EVALSHA for frequently used scripts"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"

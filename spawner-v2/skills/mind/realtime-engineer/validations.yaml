@@ -1,0 +1,213 @@
+# Realtime Engineer Validations
+# Automated checks for real-time system code quality
+
+validations:
+  - id: missing-reconnection-logic
+    name: WebSocket Without Reconnection
+    severity: error
+    type: regex
+    pattern:
+      - "new WebSocket\\([^)]+\\)(?!.*reconnect|Reconnect)"
+      - "WebSocket\\([^)]+\\)(?!.*onclose.*reconnect)"
+    message: "WebSocket created without reconnection handling. Connections WILL drop."
+    fix_action: "Implement reconnection with exponential backoff and jitter"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: missing-heartbeat
+    name: WebSocket Without Heartbeat
+    severity: error
+    type: regex
+    pattern:
+      - "WebSocket(?!.*ping|heartbeat|keepalive)"
+    message: "WebSocket without heartbeat. Half-open connections will go undetected."
+    fix_action: "Add ping/pong heartbeat every 25-30 seconds"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: reconnect-without-jitter
+    name: Reconnection Without Jitter
+    severity: error
+    type: regex
+    pattern:
+      - "reconnect.*setTimeout\\(.*\\d{4}\\)(?!.*random|jitter|Math\\.random)"
+      - "backoff(?!.*jitter|random)"
+    message: "Reconnection without jitter causes thundering herd on server restart."
+    fix_action: "Add 0-30% random jitter to reconnection delay"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: presence-immediate-removal
+    name: Presence Without Grace Period
+    severity: warning
+    type: regex
+    pattern:
+      - "disconnect.*delete.*user(?!.*timeout|setTimeout|grace)"
+      - "disconnect.*emit.*leave(?!.*delay|timeout)"
+    message: "User removed immediately on disconnect. Causes flickering during network blips."
+    fix_action: "Add 5-10 second grace period before removing user from presence"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: unbounded-message-queue
+    name: Message Queue Without Size Limit
+    severity: warning
+    type: regex
+    pattern:
+      - "queue\\.push\\((?!.*length|size|max|limit)"
+      - "messages\\.push\\((?!.*limit|max)"
+    message: "Unbounded message queue. Slow clients will cause memory exhaustion."
+    fix_action: "Implement queue size limit with drop strategy (oldest or newest)"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: broadcast-n-queries
+    name: Database Query Inside Broadcast Loop
+    severity: warning
+    type: regex
+    pattern:
+      - "for.*members.*await.*db\\."
+      - "forEach.*user.*await.*query"
+      - "map.*member.*await.*fetch"
+    message: "O(n) database queries in broadcast loop. Will not scale."
+    fix_action: "Cache user data, batch queries, or precompute permissions"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: sse-missing-retry
+    name: SSE Without Retry Header
+    severity: warning
+    type: regex
+    pattern:
+      - "text/event-stream(?!.*retry:)"
+      - "Content-Type.*event-stream(?!.*retry)"
+    message: "SSE stream without retry header. Browser may flood server on error."
+    fix_action: "Send 'retry: 10000' header to control reconnection interval"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: sse-missing-event-id
+    name: SSE Without Event IDs
+    severity: warning
+    type: regex
+    pattern:
+      - "res\\.write\\(['\"]data:(?!.*id:)"
+      - "event-stream(?!.*lastEventId|Last-Event-ID)"
+    message: "SSE without event IDs. Clients cannot resume after reconnection."
+    fix_action: "Include 'id:' field with each event for resumable streams"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: missing-message-ordering
+    name: Multi-client Without Message Ordering
+    severity: warning
+    type: regex
+    pattern:
+      - "broadcast(?!.*seq|order|clock|timestamp)"
+      - "emit\\(['\"]message(?!.*order)"
+    message: "No message ordering. Concurrent edits may arrive out of order."
+    fix_action: "Add sequence numbers or vector clocks for causal ordering"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: join-without-backfill
+    name: Room Join Without Message Backfill
+    severity: warning
+    type: regex
+    pattern:
+      - "join.*room.*subscribe(?!.*history|recent|backfill)"
+      - "addMember(?!.*getMessages|loadHistory)"
+    message: "Room join without backfill. Messages during join window will be lost."
+    fix_action: "Subscribe first, then backfill recent messages with deduplication"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: websocket-binary-json
+    name: Sending Large Binary as JSON
+    severity: info
+    type: regex
+    pattern:
+      - "JSON\\.stringify.*buffer|binary|image"
+      - "send\\(JSON.*base64"
+    message: "Sending binary data as JSON wastes bandwidth (33% overhead from base64)."
+    fix_action: "Use WebSocket binary frames for images, files, or audio"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: socket-io-no-adapter
+    name: Socket.IO Without Redis Adapter
+    severity: info
+    type: regex
+    pattern:
+      - "new Server\\((?!.*adapter|redis)"
+      - "io\\((?!.*adapter)"
+    message: "Socket.IO without Redis adapter. Will not scale horizontally."
+    fix_action: "Use @socket.io/redis-adapter for multi-server deployment"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: polling-as-realtime
+    name: Polling Instead of Push
+    severity: info
+    type: regex
+    pattern:
+      - "setInterval.*fetch\\(|axios\\."
+      - "poll.*setInterval"
+    message: "Polling API every N seconds is not real-time. Consider SSE or WebSocket."
+    fix_action: "Use SSE for server push, WebSocket only if bidirectional needed"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: cursor-high-frequency
+    name: Cursor Updates Too Frequent
+    severity: info
+    type: regex
+    pattern:
+      - "mousemove.*send\\(|emit\\("
+      - "on.*move.*broadcast"
+    message: "Sending cursor on every mousemove will flood the server."
+    fix_action: "Throttle cursor updates to 10-20ms using requestAnimationFrame"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
