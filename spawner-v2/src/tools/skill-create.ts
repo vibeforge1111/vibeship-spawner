@@ -77,6 +77,9 @@ export const skillCreateInputSchema = z.object({
   tags: z.array(z.string()).optional().describe(
     'Searchable tags (e.g., ["nextjs", "react", "ssr"])'
   ),
+  dry_run: z.boolean().optional().describe(
+    'When true, check if skill exists and show what would be created without generating full content'
+  ),
 });
 
 /**
@@ -130,6 +133,10 @@ export const skillCreateToolDefinition = {
         items: { type: 'string' },
         description: 'Searchable tags',
       },
+      dry_run: {
+        type: 'boolean',
+        description: 'Check if skill exists and show what would be created without generating full content',
+      },
     },
     required: [],
   },
@@ -157,6 +164,13 @@ export interface SkillCreateOutput {
     description: string;
     examples: string[];
   }[];
+  // For dry_run mode
+  dry_run?: {
+    would_create: string[];
+    skill_exists: boolean;
+    existing_skill_source?: 'v1' | 'v2';
+    warnings: string[];
+  };
   _instruction: string;
 }
 
@@ -164,7 +178,7 @@ export interface SkillCreateOutput {
  * Execute the spawner_skill_new tool
  */
 export async function executeSkillCreate(
-  _env: Env,
+  env: Env,
   input: z.infer<typeof skillCreateInputSchema>
 ): Promise<SkillCreateOutput> {
   const parsed = skillCreateInputSchema.safeParse(input);
@@ -173,6 +187,12 @@ export async function executeSkillCreate(
   }
 
   const action = parsed.data.action ?? 'scaffold';
+  const dryRun = parsed.data.dry_run ?? false;
+
+  // If dry_run is true, handle it regardless of action
+  if (dryRun) {
+    return await handleDryRun(env, parsed.data);
+  }
 
   switch (action) {
     case 'list-categories':
@@ -182,7 +202,7 @@ export async function executeSkillCreate(
       return handlePreview(parsed.data);
 
     case 'scaffold':
-      return handleScaffold(parsed.data);
+      return await handleScaffold(env, parsed.data);
 
     case 'validate':
       return handleValidate(parsed.data);
@@ -298,9 +318,123 @@ function handlePreview(input: z.infer<typeof skillCreateInputSchema>): SkillCrea
 }
 
 /**
+ * Handle dry run - check if skill exists and show what would be created
+ */
+async function handleDryRun(
+  env: Env,
+  input: z.infer<typeof skillCreateInputSchema>
+): Promise<SkillCreateOutput> {
+  const { id, name, category } = input;
+
+  if (!id || !name || !category) {
+    return {
+      action: 'dry_run',
+      _instruction: buildMissingFieldsInstruction(['id', 'name', 'category'].filter(f => !input[f as keyof typeof input])),
+    };
+  }
+
+  const warnings: string[] = [];
+  let skillExists = false;
+  let existingSource: 'v1' | 'v2' | undefined;
+
+  // Check if skill already exists in V2
+  const v2Index = await env.SKILLS.get<{ skills: { id: string; name: string }[] }>('skill_index', 'json');
+  if (v2Index?.skills) {
+    const normalizedId = id.toLowerCase();
+    const normalizedName = name.toLowerCase();
+    const v2Match = v2Index.skills.find(s =>
+      s.id.toLowerCase() === normalizedId ||
+      s.name.toLowerCase() === normalizedName
+    );
+    if (v2Match) {
+      skillExists = true;
+      existingSource = 'v2';
+      warnings.push(`WARNING: Skill "${v2Match.name}" (${v2Match.id}) already exists in V2 format`);
+      warnings.push('Creating this skill would overwrite the existing one');
+    }
+  }
+
+  // Check if skill exists in V1
+  if (!skillExists) {
+    const v1Registry = await env.SKILLS.get<{ specialists: { name: string; path: string }[] }>('v1:registry', 'json');
+    if (v1Registry?.specialists) {
+      const normalizedName = name.toLowerCase();
+      const v1Match = v1Registry.specialists.find(s =>
+        s.name.toLowerCase() === normalizedName
+      );
+      if (v1Match) {
+        skillExists = true;
+        existingSource = 'v1';
+        warnings.push(`WARNING: Skill "${v1Match.name}" exists in V1 format at ${v1Match.path}`);
+        warnings.push('Consider upgrading the V1 skill rather than creating a new one');
+      }
+    }
+  }
+
+  // Generate file paths (without content)
+  const baseDir = `skills/${category}/${id}`;
+  const wouldCreate = [
+    `${baseDir}/skill.yaml`,
+    `${baseDir}/sharp-edges.yaml`,
+    `${baseDir}/validations.yaml`,
+    `${baseDir}/collaboration.yaml`,
+    `${baseDir}/patterns.md`,
+    `${baseDir}/anti-patterns.md`,
+    `${baseDir}/decisions.md`,
+    `${baseDir}/sharp-edges.md`,
+  ];
+
+  // Build instruction
+  const lines: string[] = [
+    '## Dry Run: Skill Creation Check',
+    '',
+    `**Skill ID:** ${id}`,
+    `**Skill Name:** ${name}`,
+    `**Category:** ${category}`,
+    '',
+  ];
+
+  if (skillExists) {
+    lines.push('⚠️ **SKILL EXISTS**');
+    lines.push('');
+    for (const warning of warnings) {
+      lines.push(`  ${warning}`);
+    }
+    lines.push('');
+    lines.push('**Recommendation:** Use `spawner_skills({ action: "get_files", name: "..." })` to get the existing skill.');
+    lines.push('Or use `spawner_skill_upgrade` to enhance an existing skill.');
+  } else {
+    lines.push('✓ **No existing skill found** - safe to create');
+    lines.push('');
+    lines.push('**Would create these files:**');
+    for (const file of wouldCreate) {
+      lines.push(`  - ${file}`);
+    }
+    lines.push('');
+    lines.push('Run without `dry_run: true` to generate the full skill scaffold.');
+  }
+
+  return {
+    action: 'dry_run',
+    skill_id: id,
+    category,
+    dry_run: {
+      would_create: wouldCreate,
+      skill_exists: skillExists,
+      existing_skill_source: existingSource,
+      warnings,
+    },
+    _instruction: lines.join('\n'),
+  };
+}
+
+/**
  * Generate skill scaffold
  */
-function handleScaffold(input: z.infer<typeof skillCreateInputSchema>): SkillCreateOutput {
+async function handleScaffold(
+  env: Env,
+  input: z.infer<typeof skillCreateInputSchema>
+): Promise<SkillCreateOutput> {
   const { id, name, category } = input;
 
   if (!id || !name || !category) {
@@ -308,6 +442,29 @@ function handleScaffold(input: z.infer<typeof skillCreateInputSchema>): SkillCre
       action: 'scaffold',
       _instruction: buildMissingFieldsInstruction(['id', 'name', 'category'].filter(f => !input[f as keyof typeof input])),
     };
+  }
+
+  // Check if skill already exists (this is the backup/overwrite protection)
+  const v2Index = await env.SKILLS.get<{ skills: { id: string; name: string }[] }>('skill_index', 'json');
+  if (v2Index?.skills) {
+    const normalizedId = id.toLowerCase();
+    const v2Match = v2Index.skills.find(s => s.id.toLowerCase() === normalizedId);
+    if (v2Match) {
+      return {
+        action: 'scaffold',
+        skill_id: id,
+        _instruction: `⚠️ **Skill Already Exists**
+
+Skill "${v2Match.name}" (${v2Match.id}) already exists in the V2 skill library.
+
+**Options:**
+1. Use \`spawner_skills({ action: "get_files", name: "${v2Match.id}" })\` to get the existing skill
+2. Use \`spawner_skill_upgrade({ id: "${v2Match.id}" })\` to enhance the existing skill
+3. Choose a different ID for your new skill
+
+To force creation anyway, first delete the existing skill or use a unique ID.`,
+      };
+    }
   }
 
   const files = generateSkillFiles(input);

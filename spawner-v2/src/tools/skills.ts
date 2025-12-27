@@ -120,8 +120,8 @@ function findSimilarSkills(
  * Input schema for spawner_skills
  */
 export const skillsInputSchema = z.object({
-  action: z.enum(['search', 'list', 'get', 'squad', 'exists', 'get_files']).optional().describe(
-    'Action: search (default), list (all skills), get (specific skill content), squad (get skill squad), exists (check if skill exists), get_files (get raw skill files)'
+  action: z.enum(['search', 'list', 'get', 'squad', 'exists', 'get_files', 'health', 'sync']).optional().describe(
+    'Action: search (default), list, get, squad, exists, get_files, health (scan completeness), sync (export all skills)'
   ),
   query: z.string().optional().describe(
     'Search query - matches names, descriptions, tags, triggers'
@@ -154,14 +154,14 @@ export const skillsInputSchema = z.object({
  */
 export const skillsToolDefinition = {
   name: 'spawner_skills',
-  description: 'Search, list, and retrieve specialist skills. Use exists to check before creating. Use get_files for raw YAML access.',
+  description: 'Search, list, and retrieve specialist skills. Use exists to check before creating. Use get_files for raw YAML. Use health to scan all skills.',
   inputSchema: {
     type: 'object' as const,
     properties: {
       action: {
         type: 'string',
-        enum: ['search', 'list', 'get', 'squad', 'exists', 'get_files'],
-        description: 'Action: search (default), list, get (skill content), squad, exists (check if exists), get_files (raw YAML files)',
+        enum: ['search', 'list', 'get', 'squad', 'exists', 'get_files', 'health', 'sync'],
+        description: 'Action: search (default), list, get, squad, exists, get_files, health (scan completeness), sync (export all skills)',
       },
       query: {
         type: 'string',
@@ -231,6 +231,32 @@ export interface SkillsOutput {
   // For get_files action
   files?: Record<string, string>;
   source_path?: string;
+  // For health action
+  health?: {
+    total: number;
+    healthy: number;
+    incomplete: number;
+    issues: Array<{
+      skill_id: string;
+      skill_name: string;
+      source: 'v1' | 'v2';
+      missing_files: string[];
+      warnings: string[];
+    }>;
+    summary: string;
+  };
+  // For sync action
+  sync?: {
+    skills: Array<{
+      id: string;
+      name: string;
+      source: 'v1' | 'v2';
+      path: string;
+      files: Record<string, string>;
+    }>;
+    total_skills: number;
+    total_files: number;
+  };
   _instruction: string;
 }
 
@@ -308,6 +334,12 @@ export async function executeSkills(
         throw new Error('name is required for get_files action');
       }
       return await handleGetFiles(env, v1Registry, v2Skills, name);
+
+    case 'health':
+      return await handleHealth(env, v1Registry, v2Skills);
+
+    case 'sync':
+      return await handleSync(env, v1Registry, v2Skills);
 
     default:
       throw new Error(`Unknown action: ${action}`);
@@ -739,6 +771,287 @@ async function handleGetFiles(
   // Not found
   const similar = findSimilarSkills(name, v1Registry, v2Skills);
   throw new Error(`Skill "${name}" not found. Similar: ${similar.join(', ') || 'none'}`);
+}
+
+/**
+ * Handle health action - scan all skills for completeness
+ */
+async function handleHealth(
+  env: Env,
+  v1Registry: V1SkillRegistry | null,
+  v2Skills: V2Skill[]
+): Promise<SkillsOutput> {
+  const issues: Array<{
+    skill_id: string;
+    skill_name: string;
+    source: 'v1' | 'v2';
+    missing_files: string[];
+    warnings: string[];
+  }> = [];
+
+  // Check V2 skills (expected: skill.yaml, sharp-edges.yaml, validations.yaml, collaboration.yaml)
+  for (const skill of v2Skills) {
+    const skillIssue = {
+      skill_id: skill.id,
+      skill_name: skill.name,
+      source: 'v2' as const,
+      missing_files: [] as string[],
+      warnings: [] as string[],
+    };
+
+    // Check for each expected file
+    const skillData = await env.SKILLS.get(`skill:${skill.id}`);
+    if (!skillData) {
+      skillIssue.missing_files.push('skill.yaml');
+    }
+
+    const edgesData = await env.SHARP_EDGES.get(`edges:${skill.id}`);
+    if (!edgesData) {
+      skillIssue.missing_files.push('sharp-edges.yaml');
+    }
+
+    const validationsData = await env.SKILLS.get(`validations:${skill.id}`);
+    if (!validationsData) {
+      skillIssue.missing_files.push('validations.yaml');
+    }
+
+    const collabData = await env.SKILLS.get(`collaboration:${skill.id}`);
+    if (!collabData) {
+      skillIssue.missing_files.push('collaboration.yaml');
+    }
+
+    // Check metadata quality
+    if (!skill.description || skill.description.length < 10) {
+      skillIssue.warnings.push('Description too short or missing');
+    }
+    if (!skill.tags || skill.tags.length === 0) {
+      skillIssue.warnings.push('No tags defined');
+    }
+    if (!skill.triggers || skill.triggers.length === 0) {
+      skillIssue.warnings.push('No triggers defined');
+    }
+    if (!skill.has_validations) {
+      skillIssue.warnings.push('No validations (has_validations=false)');
+    }
+    if (!skill.has_sharp_edges) {
+      skillIssue.warnings.push('No sharp edges (has_sharp_edges=false)');
+    }
+
+    // Only add to issues if there are problems
+    if (skillIssue.missing_files.length > 0 || skillIssue.warnings.length > 0) {
+      issues.push(skillIssue);
+    }
+  }
+
+  // Check V1 skills
+  if (v1Registry) {
+    for (const skill of v1Registry.specialists) {
+      const skillIssue = {
+        skill_id: normalizeSkillId(skill.name),
+        skill_name: skill.name,
+        source: 'v1' as const,
+        missing_files: [] as string[],
+        warnings: [] as string[],
+      };
+
+      // Check if skill content exists
+      const content = await env.SKILLS.get(`v1:skill:${skill.name}`);
+      if (!content) {
+        skillIssue.missing_files.push('skill.md');
+      }
+
+      // Check metadata quality
+      if (!skill.description || skill.description.length < 10) {
+        skillIssue.warnings.push('Description too short or missing');
+      }
+      if (!skill.tags || skill.tags.length === 0) {
+        skillIssue.warnings.push('No tags defined');
+      }
+
+      // V1 skills inherently lack structured validations
+      skillIssue.warnings.push('V1 format - consider upgrading to V2');
+
+      if (skillIssue.missing_files.length > 0 || skillIssue.warnings.length > 0) {
+        issues.push(skillIssue);
+      }
+    }
+  }
+
+  // Calculate totals
+  const totalV1 = v1Registry?.specialists.length ?? 0;
+  const totalV2 = v2Skills.length;
+  const total = totalV1 + totalV2;
+  const incomplete = issues.filter(i => i.missing_files.length > 0).length;
+  const healthy = total - incomplete;
+
+  const summary = `${healthy}/${total} skills healthy, ${incomplete} incomplete`;
+
+  // Build instruction with details
+  const lines: string[] = [
+    `**Skill Health Check**`,
+    '',
+    `Total skills: ${total} (V1: ${totalV1}, V2: ${totalV2})`,
+    `Healthy: ${healthy}`,
+    `Incomplete: ${incomplete}`,
+    '',
+  ];
+
+  if (issues.length > 0) {
+    lines.push('**Issues Found:**');
+    lines.push('');
+
+    // Group by severity (missing files first)
+    const critical = issues.filter(i => i.missing_files.length > 0);
+    const warnings = issues.filter(i => i.missing_files.length === 0);
+
+    if (critical.length > 0) {
+      lines.push('*Missing Files (Critical):*');
+      for (const issue of critical) {
+        lines.push(`  - [${issue.source.toUpperCase()}] ${issue.skill_name}`);
+        lines.push(`    Missing: ${issue.missing_files.join(', ')}`);
+      }
+      lines.push('');
+    }
+
+    if (warnings.length > 0) {
+      lines.push('*Warnings:*');
+      for (const issue of warnings) {
+        lines.push(`  - [${issue.source.toUpperCase()}] ${issue.skill_name}: ${issue.warnings.join('; ')}`);
+      }
+    }
+  } else {
+    lines.push('All skills are complete and healthy!');
+  }
+
+  return {
+    health: {
+      total,
+      healthy,
+      incomplete,
+      issues,
+      summary,
+    },
+    _instruction: lines.join('\n'),
+  };
+}
+
+/**
+ * Handle sync action - export all skills with their files
+ */
+async function handleSync(
+  env: Env,
+  v1Registry: V1SkillRegistry | null,
+  v2Skills: V2Skill[]
+): Promise<SkillsOutput> {
+  const syncedSkills: Array<{
+    id: string;
+    name: string;
+    source: 'v1' | 'v2';
+    path: string;
+    files: Record<string, string>;
+  }> = [];
+
+  let totalFiles = 0;
+
+  // Export V2 skills
+  for (const skill of v2Skills) {
+    const files: Record<string, string> = {};
+
+    // Load all files
+    const skillData = await env.SKILLS.get(`skill:${skill.id}`, 'text');
+    if (skillData) {
+      files['skill.yaml'] = skillData;
+      totalFiles++;
+    }
+
+    const edgesData = await env.SHARP_EDGES.get(`edges:${skill.id}`, 'text');
+    if (edgesData) {
+      files['sharp-edges.yaml'] = edgesData;
+      totalFiles++;
+    }
+
+    const validationsData = await env.SKILLS.get(`validations:${skill.id}`, 'text');
+    if (validationsData) {
+      files['validations.yaml'] = validationsData;
+      totalFiles++;
+    }
+
+    const collabData = await env.SKILLS.get(`collaboration:${skill.id}`, 'text');
+    if (collabData) {
+      files['collaboration.yaml'] = collabData;
+      totalFiles++;
+    }
+
+    // Determine path based on layer
+    const layerFolder = skill.layer === 1 ? 'development' :
+      skill.layer === 2 ? 'frameworks' : 'marketing';
+
+    syncedSkills.push({
+      id: skill.id,
+      name: skill.name,
+      source: 'v2',
+      path: `skills/${layerFolder}/${skill.id}/`,
+      files,
+    });
+  }
+
+  // Export V1 skills
+  if (v1Registry) {
+    for (const skill of v1Registry.specialists) {
+      const content = await env.SKILLS.get(`v1:skill:${skill.name}`, 'text');
+      if (content) {
+        syncedSkills.push({
+          id: normalizeSkillId(skill.name),
+          name: skill.name,
+          source: 'v1',
+          path: skill.path,
+          files: {
+            'skill.md': content,
+          },
+        });
+        totalFiles++;
+      }
+    }
+  }
+
+  const lines: string[] = [
+    `**Skill Sync Export**`,
+    '',
+    `Total skills: ${syncedSkills.length}`,
+    `Total files: ${totalFiles}`,
+    '',
+    'Skills by source:',
+    `  V2: ${syncedSkills.filter(s => s.source === 'v2').length}`,
+    `  V1: ${syncedSkills.filter(s => s.source === 'v1').length}`,
+    '',
+    'To sync to local directory:',
+    '1. Parse the sync.skills array',
+    '2. For each skill, create the directory at skill.path',
+    '3. Write each file in skill.files to that directory',
+    '',
+    'Example paths:',
+  ];
+
+  // Show first few examples
+  for (const skill of syncedSkills.slice(0, 3)) {
+    lines.push(`  ${skill.path}`);
+    for (const file of Object.keys(skill.files)) {
+      lines.push(`    └─ ${file}`);
+    }
+  }
+
+  if (syncedSkills.length > 3) {
+    lines.push(`  ... and ${syncedSkills.length - 3} more skills`);
+  }
+
+  return {
+    sync: {
+      skills: syncedSkills,
+      total_skills: syncedSkills.length,
+      total_files: totalFiles,
+    },
+    _instruction: lines.join('\n'),
+  };
 }
 
 /**
