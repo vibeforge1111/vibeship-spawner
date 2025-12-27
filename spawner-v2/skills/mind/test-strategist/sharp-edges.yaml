@@ -1,0 +1,315 @@
+# Test Strategist Sharp Edges
+# Real gotchas from production testing - the traps that create false confidence or wasted effort
+
+sharp_edges:
+  - id: coverage-theater
+    title: Coverage Theater - High Numbers, Low Value
+    severity: critical
+    situation: |
+      Team has 95% code coverage. Management is happy. But production bugs keep
+      happening. Tests pass, bugs ship. The coverage number is a lie - it measures
+      lines executed, not behavior verified.
+    why: |
+      Coverage measures "did this line run during tests" not "did we verify this
+      line behaves correctly." You can have 100% coverage with zero assertions.
+      Tests that run code without verifying outputs create false confidence.
+    solution: |
+      1. Review what assertions actually test:
+         - Does the assertion verify the important behavior?
+         - Would the test fail if the code was wrong?
+         - Are edge cases covered, not just happy path?
+
+      2. Use mutation testing:
+         - Introduces bugs into code
+         - Checks if tests catch the bugs
+         - Low mutation score = tests don't verify behavior
+
+      3. Focus on risk, not coverage:
+         - 90% coverage with money calculation tested = good
+         - 100% coverage with money calculation untested = bad
+         - Test what matters, not what's easy
+    symptoms:
+      - High coverage, frequent production bugs
+      - Tests pass after breaking changes
+      - Lots of tests, few assertions
+      - Coverage as a metric in performance reviews
+    detection_pattern: "expect\\(.*\\)\\.toBeTruthy|assert.*!= null|coverage.*\\d{2}%"
+
+  - id: test-induced-damage
+    title: Test-Induced Damage - Code Warped for Testability
+    severity: high
+    situation: |
+      Code has been refactored to be "testable." Now simple operations require
+      dependency injection, factories, and interfaces. The production code is
+      harder to understand because it's optimized for tests, not for readers.
+    why: |
+      Testability is good, but not at any cost. Over-engineering for tests creates
+      code that's easy to test but hard to understand. The tests are for the code,
+      not the other way around. When tests drive design too far, you've inverted
+      the relationship.
+    solution: |
+      1. Question the test design first:
+         - Is the test testing the right thing?
+         - Can we use integration tests instead of mocking?
+         - Is the complexity in the test or the code?
+
+      2. Simple production code beats testable complex code:
+         - If adding DI makes code worse, don't add it
+         - Sometimes duplicated test setup is OK
+         - Accept some test awkwardness for production clarity
+
+      3. Use real dependencies when practical:
+         - Real database (in-memory)
+         - Real HTTP (to local server)
+         - Less mocking = less test infrastructure
+    symptoms:
+      - Interfaces with only one implementation
+      - Factories that just call constructors
+      - Production code hard to follow
+      - "We need this for testing"
+    detection_pattern: "interface I\\w+Provider|Factory|TestDouble|MockBuilder"
+
+  - id: flaky-test-tolerance
+    title: Flaky Test Tolerance - The Boy Who Cried Wolf
+    severity: critical
+    situation: |
+      Test fails. Developer reruns. Passes. "Oh, it's just flaky." Ships the code.
+      Over time, team stops investigating failures. Real bugs start hiding behind
+      "it's just flaky." Test suite becomes meaningless.
+    why: |
+      Flaky tests train developers to ignore failures. Every ignored failure is
+      a potential real bug that slipped through. Once the habit forms, the test
+      suite provides no protection - it's just ceremony that occasionally blocks
+      deploys.
+    solution: |
+      1. Zero tolerance for flakiness:
+         - Flaky test = quarantined immediately
+         - Fix within 24 hours or delete
+         - Never merge with "it's flaky"
+
+      2. Identify flakiness sources:
+         - Timing dependencies (sleep, setTimeout)
+         - Shared state between tests
+         - External service calls
+         - Random data without seeds
+
+      3. Build robust tests:
+         - Wait for conditions, not time
+         - Isolate test data
+         - Mock unstable externals
+         - Seed random generators
+    symptoms:
+      - "Just rerun it" in team vocabulary
+      - Same test fails for different PRs
+      - CI has retry logic for tests
+      - Tests pass locally, fail in CI
+    detection_pattern: "flaky|retry|intermittent|sleep\\(|setTimeout\\(.*\\d{4}"
+
+  - id: test-pyramid-inversion
+    title: Test Pyramid Inversion - E2E Heavy, Unit Light
+    severity: high
+    situation: |
+      Team has lots of E2E tests, few unit tests. Test suite takes 45 minutes.
+      Developers stop running tests locally. Feedback loop is broken. When tests
+      fail, debugging is hard because so much is involved.
+    why: |
+      E2E tests are slow, flaky, and hard to debug. They're valuable for critical
+      paths but shouldn't be the primary testing strategy. A 45-minute test suite
+      is not a development tool - it's a deployment gate you wait for.
+    solution: |
+      1. Audit test distribution:
+         - Count tests at each level
+         - Measure time at each level
+         - Compare to pyramid shape
+
+      2. Push tests down the pyramid:
+         - E2E test failing? Add unit/integration test for same case
+         - E2E for happy path, unit for edge cases
+         - Delete E2E tests that duplicate lower-level coverage
+
+      3. Separate test suites by speed:
+         - Fast suite: Unit tests (run always)
+         - Medium suite: Integration tests (run on commit)
+         - Slow suite: E2E tests (run on PR/deploy)
+    symptoms:
+      - Test suite takes > 10 minutes
+      - E2E tests outnumber unit tests
+      - Tests not run locally
+      - Debugging test failures is hard
+    detection_pattern: "describe.*E2E|playwright|cypress|selenium|puppeteer"
+
+  - id: mock-contamination
+    title: Mock Contamination - Tests That Test Mocks
+    severity: high
+    situation: |
+      Test mocks the database, the API client, the logger, the cache, and the
+      queue. It passes. Code is deployed. Production breaks because the real
+      services behave differently than the mocks assumed.
+    why: |
+      Mocks encode assumptions about external systems. Those assumptions can be
+      wrong, or become wrong when the external system changes. You tested that
+      your code works with your mocks, not that it works with reality.
+    solution: |
+      1. Use real dependencies when possible:
+         - SQLite for database tests
+         - In-process HTTP server for API tests
+         - Real message queue (containerized)
+
+      2. Contract tests for external services:
+         - Define expected behavior in tests
+         - Run same tests against real service (integration)
+         - Catch drift between mock and reality
+
+      3. Mock boundaries, not internals:
+         - Mock the HTTP layer, not every internal call
+         - Mock at the edge of your system
+         - The fewer mocks, the more confidence
+    symptoms:
+      - Tests pass but production fails
+      - Mock setup longer than test
+      - Mock behavior doesn't match reality
+      - Fear of changing mocks
+    detection_pattern: "mock\\(|jest\\.mock|stub\\(|when\\(.*\\)\\.thenReturn"
+
+  - id: test-data-time-bomb
+    title: Test Data Time Bomb - Hardcoded Dates
+    severity: medium
+    situation: |
+      Tests use hardcoded dates like "2024-01-15." In 2025, tests start failing
+      because dates are now in the past. Or tests use "tomorrow" and fail on
+      New Year's Eve because tomorrow is next year.
+    why: |
+      Date-dependent tests are time bombs. They work now, fail later, for reasons
+      unrelated to the code. Debugging is confusing because nothing changed.
+    solution: |
+      1. Never hardcode future dates:
+         - Use relative dates: "now + 7 days"
+         - Or freeze time in tests
+
+      2. Freeze time for deterministic tests:
+         ```javascript
+         beforeEach(() => {
+           jest.useFakeTimers();
+           jest.setSystemTime(new Date('2024-01-15'));
+         });
+         ```
+
+      3. Test edge cases explicitly:
+         - Month/year boundaries
+         - Leap years
+         - Timezone changes
+    symptoms:
+      - Tests fail on certain dates
+      - Tests fail in certain timezones
+      - "It works on my machine" with dates
+      - CI failures on month boundaries
+    detection_pattern: "new Date\\(['\"]\\d{4}-|Date\\.parse|moment\\(['\"]\\d"
+
+  - id: shared-state-pollution
+    title: Shared State Pollution - Tests That Affect Each Other
+    severity: high
+    situation: |
+      Test A passes alone, fails when run after Test B. Or tests pass in isolation,
+      fail when run together. Order matters, and developers waste hours on ordering
+      issues instead of actual bugs.
+    why: |
+      Tests share state - database rows, global variables, singletons, files.
+      One test's side effects become another test's preconditions. The suite
+      becomes fragile and non-deterministic.
+    solution: |
+      1. Isolate test data:
+         - Unique IDs per test (use test name prefix)
+         - Truncate tables before each test
+         - Don't rely on data from other tests
+
+      2. Reset global state:
+         - Clear caches and singletons
+         - Reset environment variables
+         - Restore mocks/stubs
+
+      3. Run tests in random order:
+         - Catches ordering dependencies
+         - Fail fast on pollution
+         ```bash
+         jest --runInBand --randomize
+         ```
+    symptoms:
+      - Tests fail in CI but pass locally
+      - Different results with different test order
+      - "I'll fix it by running this test first"
+      - Shared database with no cleanup
+    detection_pattern: "beforeAll.*insert|global\\.|singleton|static.*="
+
+  - id: missing-edge-cases
+    title: Missing Edge Cases - Happy Path Tunnel Vision
+    severity: high
+    situation: |
+      Tests cover the happy path beautifully. Function receives valid input,
+      returns expected output. But production breaks on empty arrays, null
+      values, special characters, and concurrent access - none of which are tested.
+    why: |
+      Happy path tests are easy to write. Edge cases require thinking about what
+      can go wrong. Developers often stop when the happy path works, leaving the
+      risky edges untested - exactly where bugs hide.
+    solution: |
+      1. Explicit edge case checklist:
+         - Empty input ([], {}, '', null, undefined)
+         - Boundary values (0, -1, MAX_INT)
+         - Special characters and encoding
+         - Concurrent/parallel execution
+         - Network failures and timeouts
+
+      2. Use property-based testing:
+         - Generate random inputs
+         - Verify properties hold for all inputs
+         - Catches edge cases you didn't think of
+
+      3. Bug-driven test expansion:
+         - Every production bug gets a test
+         - The bug proves you missed an edge case
+         - Prevent regression
+    symptoms:
+      - Bugs in production that tests didn't catch
+      - Tests only with "valid" data
+      - No tests for error paths
+      - Empty array/null crashes
+    detection_pattern: "\\{ name:.*valid|happy.*path|success.*scenario"
+
+  - id: assertion-free-test
+    title: Assertion-Free Test - The Smoke Screen
+    severity: critical
+    situation: |
+      Test calls function but doesn't assert anything meaningful. Maybe it checks
+      "result is not null" or "no exception thrown." The test passes, but it
+      proves nothing about correctness.
+    why: |
+      Tests without meaningful assertions provide coverage without confidence.
+      They show in coverage reports but catch no bugs. Worse, they give false
+      confidence that code is tested.
+    solution: |
+      1. Every test needs specific assertions:
+         - What exactly should the output be?
+         - What state should change?
+         - What side effects should occur?
+
+      2. Avoid weak assertions:
+         ```javascript
+         // BAD: Proves nothing
+         expect(result).toBeDefined();
+         expect(result).toBeTruthy();
+
+         // GOOD: Proves behavior
+         expect(result.total).toBe(100);
+         expect(result.items).toHaveLength(3);
+         expect(user.save).toHaveBeenCalledWith(expectedData);
+         ```
+
+      3. Use mutation testing to find weak assertions:
+         - If test passes with broken code, assertion is too weak
+    symptoms:
+      - expect().toBeTruthy() everywhere
+      - Tests with no expect()
+      - Coverage high but bugs frequent
+      - "I wrote a test for it" but test is useless
+    detection_pattern: "expect\\(.*\\)\\.toBeTruthy|expect\\(.*\\)\\.toBeDefined|expect\\(.*\\)\\.not\\.toBeNull"
+

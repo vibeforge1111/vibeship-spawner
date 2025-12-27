@@ -1,0 +1,355 @@
+# Test Strategist Collaboration Patterns
+# How testing strategy integrates with other foundational skills
+
+collaboration:
+  # Lead role - Test Strategist drives these workflows
+  leads:
+    - workflow: test-strategy-design
+      description: Designing overall testing approach for a project or feature
+      involves:
+        - system-designer: Architecture informs test boundaries
+        - code-quality: Code structure affects testability
+        - performance-thinker: Performance testing requirements
+      handoff_points:
+        - to: system-designer
+          when: Architecture prevents effective testing
+          context_to_share: Testability concerns, component boundary issues
+        - to: code-quality
+          when: Code structure makes testing difficult
+          context_to_share: Hard-to-test patterns, dependency issues
+
+    - workflow: test-coverage-analysis
+      description: Evaluating what needs testing and current coverage gaps
+      involves:
+        - debugging-master: Understanding where bugs historically occur
+        - tech-debt-manager: Prioritizing test debt
+      handoff_points:
+        - to: tech-debt-manager
+          when: Test debt needs tracking and prioritization
+          context_to_share: Coverage gaps, risk assessment
+        - to: debugging-master
+          when: Test failures need investigation
+          context_to_share: Failing test context, expected vs actual
+
+    - workflow: test-quality-review
+      description: Reviewing test code for effectiveness and maintainability
+      involves:
+        - code-quality: Test code readability
+        - refactoring-guide: Test refactoring strategies
+      handoff_points:
+        - to: refactoring-guide
+          when: Tests need significant restructuring
+          context_to_share: Test smells, proposed improvements
+        - to: code-quality
+          when: Test code quality issues
+          context_to_share: Readability problems, naming issues
+
+  # Support role - Test Strategist assists these workflows
+  supports:
+    - workflow: debugging
+      led_by: debugging-master
+      contribution: Test design that catches similar bugs, regression test creation
+      when_called: Bug fixed, need to prevent regression
+
+    - workflow: code-review
+      led_by: code-quality
+      contribution: Assessing test coverage and quality for code changes
+      when_called: PR review, evaluating test completeness
+
+    - workflow: system-design
+      led_by: system-designer
+      contribution: Testability considerations for architectural decisions
+      when_called: Design review, component boundary decisions
+
+    - workflow: refactoring
+      led_by: refactoring-guide
+      contribution: Test strategy during refactoring, ensuring tests survive changes
+      when_called: Planning refactoring, tests breaking during refactor
+
+    - workflow: performance-optimization
+      led_by: performance-thinker
+      contribution: Performance test design, load testing strategy
+      when_called: Performance testing needed, benchmark design
+
+  # Escalation patterns
+  escalations:
+    - situation: Tests are slow and blocking development
+      escalate_to: performance-thinker
+      with_context: Test timing data, slow test identification
+      reason: Performance optimization expertise needed
+
+    - situation: Can't test due to code structure
+      escalate_to: refactoring-guide + code-quality
+      with_context: Testability blockers, suggested refactoring
+      reason: Code needs restructuring for testability
+
+    - situation: Test failures indicate design problem
+      escalate_to: system-designer
+      with_context: Failure patterns, suspected architectural issues
+      reason: Architecture may need adjustment
+
+    - situation: Flaky tests causing CI/CD problems
+      escalate_to: debugging-master
+      with_context: Flakiness patterns, environment differences
+      reason: Root cause investigation needed
+
+    - situation: Test debt overwhelming
+      escalate_to: tech-debt-manager + decision-maker
+      with_context: Coverage gaps, risk assessment, effort estimates
+      reason: Need to prioritize and resource test improvements
+
+  # Integration contracts
+  contracts:
+    with_debugging_master:
+      test_strategist_provides:
+        - Regression test for each bug fix
+        - Test that reproduces the bug before fix
+        - Test coverage around bug-prone areas
+      debugging_master_provides:
+        - Root cause analysis for test failures
+        - Bug patterns to inform test priorities
+        - Environment context for flaky tests
+      interface_example: |
+        # After bug is fixed, test strategist adds:
+        """
+        REGRESSION TEST:
+
+        BUG: Order total wrong for discounts > 50%
+        ROOT CAUSE: Percentage applied to already-discounted price
+
+        TEST:
+        it('calculates discount correctly for high percentages', () => {
+          const order = { subtotal: 100 };
+          const discount = { percent: 60 };
+
+          const total = calculateTotal(order, discount);
+
+          expect(total).toBe(40); // Not 24 (which double-discounts)
+        });
+        """
+
+    with_code_quality:
+      test_strategist_provides:
+        - Test code quality standards
+        - Test naming conventions
+        - Test organization patterns
+      code_quality_provides:
+        - Testability assessment of production code
+        - Code smells that indicate testing difficulty
+        - Suggestions for more testable structure
+      interface_example: |
+        # Code quality identifies testability issues:
+        """
+        TESTABILITY CONCERNS:
+
+        1. Hidden dependencies in PaymentProcessor
+           - Global config accessed directly
+           - Singleton database connection
+           → Needs dependency injection
+
+        2. God function processPayment (300 lines)
+           - Too many responsibilities
+           - Would require extensive mocking
+           → Needs extraction into smaller units
+        """
+
+        # Test strategist responds:
+        """
+        TESTING STRATEGY:
+
+        Current state: Untestable without heavy mocking
+
+        Options:
+        1. Integration test the whole function (low coverage, high confidence)
+        2. Refactor first, then unit test (high coverage, requires investment)
+
+        Recommendation: Integration test now, refactor progressively
+        """
+
+    with_refactoring_guide:
+      test_strategist_provides:
+        - Test safety net before refactoring
+        - Characterization tests for legacy code
+        - Test migration strategy during refactoring
+      refactoring_guide_provides:
+        - Refactoring plan that preserves tests
+        - Test refactoring techniques
+        - Parallel change strategy for test migration
+      interface_example: |
+        # Before refactoring, test strategist establishes:
+        """
+        REFACTORING TEST STRATEGY:
+
+        TARGET: Extract OrderCalculator from OrderService
+
+        BEFORE REFACTORING:
+        1. Characterization tests capturing current behavior
+        2. Integration tests for OrderService public API
+        3. Golden master tests for calculation outputs
+
+        DURING REFACTORING:
+        - Run tests after each step
+        - If tests fail, investigation before continuing
+        - New unit tests for extracted OrderCalculator
+
+        AFTER REFACTORING:
+        - All original tests still pass
+        - New unit tests for OrderCalculator
+        - Integration tests unchanged (behavior preserved)
+        """
+
+    with_system_designer:
+      test_strategist_provides:
+        - Testing requirements for design decisions
+        - Test boundary recommendations
+        - Integration test strategy for components
+      system_designer_provides:
+        - Component boundaries for test isolation
+        - Contract definitions for contract testing
+        - Dependency graph for mock strategy
+      interface_example: |
+        # System designer defines component:
+        """
+        COMPONENT: OrderService
+
+        BOUNDARIES:
+        - Exposes: createOrder, getOrder, cancelOrder
+        - Depends: PaymentService, InventoryService, NotificationService
+        """
+
+        # Test strategist plans testing:
+        """
+        TESTING APPROACH:
+
+        Unit Tests:
+        - OrderService logic with mocked dependencies
+        - Focus: state transitions, validation, error handling
+
+        Integration Tests:
+        - OrderService + real database (in-memory)
+        - Focus: persistence, queries, transactions
+
+        Contract Tests:
+        - OrderService ↔ PaymentService contract
+        - OrderService ↔ InventoryService contract
+        - Focus: API compatibility, data format
+
+        E2E Tests:
+        - Full order creation flow
+        - Focus: critical path only
+        """
+
+    with_performance_thinker:
+      test_strategist_provides:
+        - Performance test structure
+        - Benchmark test design
+        - Load test scenarios
+      performance_thinker_provides:
+        - Performance requirements and SLAs
+        - Bottleneck identification for focused testing
+        - Baseline metrics for assertions
+      interface_example: |
+        # Performance thinker provides requirements:
+        """
+        PERFORMANCE REQUIREMENTS:
+
+        - API response < 200ms p95
+        - Throughput: 1000 req/sec sustained
+        - Memory: < 512MB under load
+        """
+
+        # Test strategist designs tests:
+        """
+        PERFORMANCE TEST SUITE:
+
+        Benchmark Tests (run on every PR):
+        - calculateOrderTotal: < 10ms for 100 items
+        - serializeOrder: < 5ms for typical order
+
+        Load Tests (run nightly):
+        - Sustained load: 1000 req/sec for 10 minutes
+        - Spike test: 0 → 2000 req/sec in 10 seconds
+        - Endurance: 500 req/sec for 1 hour
+
+        Assertions:
+        - p95 latency < 200ms
+        - Error rate < 0.1%
+        - Memory growth < 10MB/hour
+        """
+
+# Prerequisites for using this skill effectively
+prerequisites:
+  skills: []  # Foundational skill, no prerequisites
+  knowledge:
+    - Basic programming in any language
+    - Understanding of functions and assertions
+    - Familiarity with test frameworks (Jest, pytest, etc.)
+  tools:
+    - Test framework for your language
+    - Code coverage tool
+    - CI/CD system for running tests
+
+# When to delegate to this skill
+delegation_triggers:
+  - phrase: "test"
+    confidence: high
+  - phrase: "testing"
+    confidence: high
+  - phrase: "TDD"
+    confidence: high
+  - phrase: "unit test"
+    confidence: high
+  - phrase: "integration test"
+    confidence: high
+  - phrase: "e2e"
+    confidence: high
+  - phrase: "coverage"
+    confidence: medium
+  - phrase: "flaky"
+    confidence: high
+  - phrase: "should I test"
+    confidence: high
+  - phrase: "what to test"
+    confidence: high
+  - phrase: "how to test"
+    confidence: high
+  - phrase: "test pyramid"
+    confidence: high
+  - phrase: "mock"
+    confidence: medium
+  - phrase: "stub"
+    confidence: medium
+  - phrase: "assertion"
+    confidence: high
+
+# Skill maturity indicators
+maturity_levels:
+  beginner:
+    characteristics:
+      - Writes tests for obvious cases
+      - Uses testing framework correctly
+      - Achieves some coverage
+    common_mistakes:
+      - Testing implementation details
+      - Only happy path testing
+      - Weak assertions (toBeTruthy)
+
+  intermediate:
+    characteristics:
+      - Tests edge cases systematically
+      - Applies test pyramid appropriately
+      - Writes readable, maintainable tests
+    common_mistakes:
+      - Over-mocking
+      - Slow test suites
+      - Flaky test tolerance
+
+  advanced:
+    characteristics:
+      - Strategic test coverage decisions
+      - Knows when NOT to test
+      - Balances confidence vs effort
+    common_mistakes:
+      - Assuming team shares same judgment
+      - Under-documenting test decisions
+      - Forgetting to teach others
