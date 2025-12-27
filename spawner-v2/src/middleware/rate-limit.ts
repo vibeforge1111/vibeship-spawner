@@ -88,11 +88,11 @@ const TOOL_MULTIPLIERS: Record<string, number> = {
  * Base rate limits (per IP)
  */
 const BASE_LIMITS: RateLimitConfig = {
-  requestsPerMinute: 15,
-  requestsPerHour: 90,
-  burstAllowance: 5,
-  costPerMinute: 50,   // Can spend 50 cost units per minute
-  costPerHour: 200,    // Can spend 200 cost units per hour
+  requestsPerMinute: 150,
+  requestsPerHour: 900,
+  burstAllowance: 50,
+  costPerMinute: 500,   // Can spend 500 cost units per minute
+  costPerHour: 2000,    // Can spend 2000 cost units per hour
 };
 
 // ============================================================================
