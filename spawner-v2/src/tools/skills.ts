@@ -101,14 +101,15 @@ function findSimilarSkills(
 ): string[] {
   const normalized = normalizeSkillId(query);
   const allNames = [
-    ...(v1Registry?.specialists.map(s => s.name) ?? []),
-    ...v2Skills.map(s => s.name),
-    ...v2Skills.map(s => s.id),
-  ];
+    ...(v1Registry?.specialists.map(s => s.name).filter(Boolean) ?? []),
+    ...v2Skills.map(s => s.name).filter(Boolean),
+    ...v2Skills.map(s => s.id).filter(Boolean),
+  ] as string[];
 
   // Simple similarity: contains or starts with
   return allNames
     .filter(name => {
+      if (!name) return false;
       const n = normalizeSkillId(name);
       return n.includes(normalized) || normalized.includes(n) ||
         n.split('-').some(part => normalized.includes(part));
@@ -516,10 +517,10 @@ async function handleGet(
 ): Promise<SkillsOutput> {
   const normalized = normalizeSkillId(name);
 
-  // Check V2 first (preferred) - with normalized matching
+  // Check V2 first (preferred) - with normalized matching and defensive checks
   const v2SkillMeta = v2Skills.find(s =>
-    normalizeSkillId(s.name) === normalized ||
-    normalizeSkillId(s.id) === normalized
+    (s.name && normalizeSkillId(s.name) === normalized) ||
+    (s.id && normalizeSkillId(s.id) === normalized)
   );
   if (v2SkillMeta) {
     // Load full skill object for rendering
@@ -565,7 +566,7 @@ async function handleGet(
   // Check V1 (legacy markdown skills - no handoff protocol) - with normalized matching
   if (v1Registry) {
     const v1Skill = v1Registry.specialists.find(s =>
-      normalizeSkillId(s.name) === normalized
+      s.name && normalizeSkillId(s.name) === normalized
     );
     if (v1Skill) {
       const content = await env.SKILLS.get(`v1:skill:${v1Skill.name}`);
@@ -626,10 +627,10 @@ function handleExists(
 ): SkillsOutput {
   const normalized = normalizeSkillId(name);
 
-  // Check V2 first (preferred)
+  // Check V2 first (preferred) - defensive check for undefined id/name
   const v2Match = v2Skills.find(s =>
-    normalizeSkillId(s.id) === normalized ||
-    normalizeSkillId(s.name) === normalized
+    (s.id && normalizeSkillId(s.id) === normalized) ||
+    (s.name && normalizeSkillId(s.name) === normalized)
   );
 
   if (v2Match) {
@@ -649,13 +650,13 @@ function handleExists(
   // Check V1
   if (v1Registry) {
     const v1Match = v1Registry.specialists.find(s =>
-      normalizeSkillId(s.name) === normalized
+      s.name && normalizeSkillId(s.name) === normalized
     );
 
     if (v1Match) {
       return {
         exists: true,
-        skill_id: normalizeSkillId(v1Match.name),
+        skill_id: v1Match.name ? normalizeSkillId(v1Match.name) : 'unknown',
         skill_name: v1Match.name,
         skill_path: v1Match.path,
         _instruction: `Skill "${v1Match.name}" exists (V1 markdown). Use action="get" to retrieve it.`,
@@ -688,10 +689,10 @@ async function handleGetFiles(
 ): Promise<SkillsOutput> {
   const normalized = normalizeSkillId(name);
 
-  // Check V2 first (only V2 has structured files)
+  // Check V2 first (only V2 has structured files) - defensive checks
   const v2Match = v2Skills.find(s =>
-    normalizeSkillId(s.id) === normalized ||
-    normalizeSkillId(s.name) === normalized
+    (s.id && normalizeSkillId(s.id) === normalized) ||
+    (s.name && normalizeSkillId(s.name) === normalized)
   );
 
   if (v2Match) {
@@ -748,7 +749,7 @@ async function handleGetFiles(
   // V1 skills don't have structured files
   if (v1Registry) {
     const v1Match = v1Registry.specialists.find(s =>
-      normalizeSkillId(s.name) === normalized
+      s.name && normalizeSkillId(s.name) === normalized
     );
 
     if (v1Match) {
@@ -756,7 +757,7 @@ async function handleGetFiles(
       const content = await env.SKILLS.get(`v1:skill:${v1Match.name}`);
       if (content) {
         return {
-          skill_id: normalizeSkillId(v1Match.name),
+          skill_id: v1Match.name ? normalizeSkillId(v1Match.name) : 'unknown',
           skill_name: v1Match.name,
           files: {
             'skill.md': content,
@@ -1069,7 +1070,7 @@ function matchesFilters(
   if (query) {
     const q = query.toLowerCase();
     return (
-      skill.name.toLowerCase().includes(q) ||
+      (skill.name?.toLowerCase().includes(q) ?? false) ||
       (skill.description?.toLowerCase().includes(q) ?? false) ||
       safeArrayIncludes(skill.tags, q) ||
       safeArrayIncludes(skill.triggers, q)
@@ -1094,8 +1095,8 @@ function matchesFiltersV2(
   if (query) {
     const q = query.toLowerCase();
     return (
-      skill.name.toLowerCase().includes(q) ||
-      skill.id.toLowerCase().includes(q) ||
+      (skill.name?.toLowerCase().includes(q) ?? false) ||
+      (skill.id?.toLowerCase().includes(q) ?? false) ||
       (skill.description?.toLowerCase().includes(q) ?? false) ||
       safeArrayIncludes(skill.tags, q) ||
       safeArrayIncludes(skill.triggers, q)
