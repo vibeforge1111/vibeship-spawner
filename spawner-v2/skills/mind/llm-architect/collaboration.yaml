@@ -1,0 +1,155 @@
+# LLM Architect Collaboration Patterns
+# How this skill integrates with others for complex LLM system builds
+
+collaboration:
+  # Lead role - LLM Architect drives these workflows
+  leads:
+    - workflow: rag-system-implementation
+      description: Building retrieval-augmented generation pipelines
+      involves:
+        - vector-specialist: Embedding model selection, index configuration, similarity search tuning
+        - performance-hunter: Latency optimization, caching strategies, batch processing
+        - api-designer: RAG endpoint design, streaming response APIs
+      handoff_points:
+        - to: vector-specialist
+          when: Need to select embedding models or optimize vector search performance
+          context_to_share: Query patterns, document types, expected QPS, latency requirements
+        - to: performance-hunter
+          when: RAG latency exceeds targets or need caching strategy
+          context_to_share: Current p50/p95 latencies, cache hit rates, token costs
+
+    - workflow: agent-system-design
+      description: Multi-agent architectures with tool use
+      involves:
+        - api-designer: Tool API specifications, input/output schemas
+        - event-architect: Agent event streaming, async tool execution
+        - privacy-guardian: Tool access control, PII handling in agent context
+      handoff_points:
+        - to: api-designer
+          when: Defining tool interfaces for agents
+          context_to_share: Tool purposes, expected inputs/outputs, error modes
+        - to: event-architect
+          when: Need async tool execution or agent event streaming
+          context_to_share: Tool execution patterns, state requirements
+
+    - workflow: production-llm-hardening
+      description: Making LLM applications production-ready
+      involves:
+        - security-engineer: Prompt injection defense, output sanitization
+        - error-handler: Retry strategies, fallback chains, circuit breakers
+        - observability-specialist: LLM tracing, token usage monitoring
+      handoff_points:
+        - to: security-engineer
+          when: Untrusted content enters prompts or outputs go to users
+          context_to_share: Data flow, trust boundaries, attack surfaces
+
+  # Support role - LLM Architect assists these workflows
+  supports:
+    - workflow: chatbot-implementation
+      led_by: frontend-react
+      contribution: Conversation design, context management, streaming patterns
+      when_called: Need chat architecture, message history strategy, or streaming UX
+
+    - workflow: search-enhancement
+      led_by: vector-specialist
+      contribution: Query understanding, result reranking, semantic matching
+      when_called: Vector search alone insufficient, need LLM-powered query expansion
+
+    - workflow: content-moderation
+      led_by: privacy-guardian
+      contribution: Classification prompts, confidence thresholds, escalation logic
+      when_called: Need LLM-based content classification or policy enforcement
+
+    - workflow: document-processing
+      led_by: data-engineer
+      contribution: Chunking strategy, metadata extraction, summarization pipelines
+      when_called: Processing documents for downstream LLM consumption
+
+  # Escalation patterns
+  escalations:
+    - situation: Vector search returns irrelevant results despite good embeddings
+      escalate_to: vector-specialist
+      with_context: Sample queries, expected vs actual results, embedding model used
+      reason: May need index tuning, different similarity metric, or hybrid search config
+
+    - situation: Agent loops infinitely or makes wrong tool choices
+      escalate_to: api-designer
+      with_context: Tool definitions, agent prompts, failure traces
+      reason: Tool schemas or descriptions may be ambiguous or conflicting
+
+    - situation: Token costs exploding unexpectedly
+      escalate_to: performance-hunter
+      with_context: Token usage breakdown, prompt sizes, caching status
+      reason: May need caching, compression, or request batching optimization
+
+    - situation: LLM responses leaking sensitive data
+      escalate_to: privacy-guardian
+      with_context: Data flow, PII types, current sanitization
+      reason: Need input/output filtering, data classification, redaction strategy
+
+  # Integration contracts
+  contracts:
+    with_vector_specialist:
+      llm_architect_provides:
+        - Query text to embed
+        - Minimum relevance threshold requirements
+        - Reranking preferences
+      vector_specialist_provides:
+        - Embedded vectors
+        - Similarity scores
+        - Retrieval metadata (chunk IDs, sources)
+      interface_example: |
+        # LLM Architect calls Vector Specialist
+        results = await vector_search(
+            query=user_query,
+            top_k=20,  # Over-retrieve for reranking
+            threshold=0.7,
+            include_metadata=True
+        )
+        # Vector Specialist returns
+        # [{ chunk_id, content, score, source, metadata }]
+
+    with_api_designer:
+      llm_architect_provides:
+        - Tool purpose and behavior description
+        - Required input parameters
+        - Expected output structure
+        - Error conditions
+      api_designer_provides:
+        - OpenAPI/JSON Schema tool definition
+        - Endpoint implementation
+        - Rate limiting configuration
+      interface_example: |
+        # LLM Architect specifies tool need
+        tool_spec = {
+            "purpose": "Search company knowledge base",
+            "inputs": {"query": "string", "limit": "int"},
+            "outputs": {"results": [{"title", "content", "url"}]},
+            "errors": ["no_results", "invalid_query"]
+        }
+        # API Designer implements
+        tools = [{
+            "name": "search_knowledge_base",
+            "description": "Search internal docs. Returns titles and snippets.",
+            "input_schema": {...}
+        }]
+
+    with_event_architect:
+      llm_architect_provides:
+        - Streaming requirements (token-by-token, tool calls)
+        - State that needs persistence
+        - Event types to emit
+      event_architect_provides:
+        - Event stream infrastructure
+        - State management patterns
+        - Delivery guarantees
+      interface_example: |
+        # LLM Architect specifies streaming need
+        streaming_spec = {
+            "events": ["token", "tool_start", "tool_end", "complete"],
+            "state": {"conversation_id", "tool_results"},
+            "delivery": "at_least_once"
+        }
+        # Event Architect implements
+        async for event in llm_stream:
+            await event_bus.emit(event.type, event.data)

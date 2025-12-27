@@ -1,0 +1,233 @@
+# Auth Specialist Collaboration Patterns
+# How this skill integrates with others for complete auth implementations
+
+collaboration:
+  # Lead role - Auth Specialist drives these workflows
+  leads:
+    - workflow: authentication-system-implementation
+      description: Building complete authentication from scratch
+      involves:
+        - database-specialist: User schema, session storage, token tables
+        - frontend-react: Login forms, protected routes, auth context
+        - api-designer: Auth endpoints, middleware patterns
+      handoff_points:
+        - to: database-specialist
+          when: Need user/session/token schema design
+          context_to_share: Required fields, indexing needs, soft delete for sessions
+        - to: frontend-react
+          when: Need auth UI components
+          context_to_share: OAuth providers, form validation rules, error states
+        - to: api-designer
+          when: Need auth endpoint structure
+          context_to_share: Token formats, header conventions, error response shapes
+
+    - workflow: oauth-integration
+      description: Integrating third-party OAuth providers
+      involves:
+        - api-designer: Callback endpoint design, token exchange
+        - security-engineer: Scope review, token storage security
+      handoff_points:
+        - to: security-engineer
+          when: Reviewing OAuth scopes and permissions
+          context_to_share: Requested scopes, data accessed, storage approach
+
+    - workflow: mfa-implementation
+      description: Adding multi-factor authentication
+      involves:
+        - frontend-react: TOTP setup UI, backup codes display, WebAuthn prompts
+        - database-specialist: MFA secrets storage, backup codes table
+      handoff_points:
+        - to: frontend-react
+          when: Need MFA enrollment and verification UI
+          context_to_share: TOTP QR code generation, WebAuthn browser API usage
+
+    - workflow: session-security-hardening
+      description: Securing session management for production
+      involves:
+        - security-engineer: Threat modeling, penetration testing
+        - performance-hunter: Session store optimization, caching
+        - privacy-guardian: Session data minimization
+      handoff_points:
+        - to: security-engineer
+          when: Need security review of session implementation
+          context_to_share: Session storage, cookie config, token lifecycle
+        - to: performance-hunter
+          when: Session lookups causing latency
+          context_to_share: Session store choice, lookup patterns, cache options
+
+  # Support role - Auth Specialist assists these workflows
+  supports:
+    - workflow: api-endpoint-protection
+      led_by: api-designer
+      contribution: Authentication middleware, token validation, permission checks
+      when_called: Need to protect API routes with auth
+
+    - workflow: user-profile-features
+      led_by: frontend-react
+      contribution: Password change, session management UI, linked accounts
+      when_called: Building user settings related to auth
+
+    - workflow: audit-logging
+      led_by: security-engineer
+      contribution: Auth event definitions, login tracking, suspicious activity patterns
+      when_called: Need to log authentication events for compliance
+
+    - workflow: data-access-control
+      led_by: privacy-guardian
+      contribution: Role-based access, permission checks, data scoping
+      when_called: Need to restrict data access based on user roles
+
+  # Escalation patterns
+  escalations:
+    - situation: Login endpoint under brute force attack
+      escalate_to: performance-hunter
+      with_context: Current rate limiting, attack patterns, legitimate user impact
+      reason: Need distributed rate limiting and IP-based blocking at edge
+
+    - situation: Need to store encryption keys for user data
+      escalate_to: security-engineer
+      with_context: Key usage patterns, rotation requirements, compliance needs
+      reason: Key management requires HSM/KMS expertise beyond auth scope
+
+    - situation: Auth tokens contain PII for legacy reasons
+      escalate_to: privacy-guardian
+      with_context: PII types in tokens, why they're needed, alternatives considered
+      reason: Need privacy impact assessment and minimization strategy
+
+    - situation: Session store performance degrading at scale
+      escalate_to: performance-hunter
+      with_context: Session count, lookup patterns, current store implementation
+      reason: May need Redis clustering, sharding, or caching strategy
+
+    - situation: Need to implement SSO across multiple domains
+      escalate_to: api-designer
+      with_context: Domains involved, user experience requirements, existing auth
+      reason: Cross-domain auth requires careful API and cookie design
+
+  # Integration contracts
+  contracts:
+    with_database_specialist:
+      auth_specialist_provides:
+        - User schema requirements (email, password_hash, mfa_secret)
+        - Session table structure (token, user_id, expires_at, device_info)
+        - Token family structure for refresh rotation
+      database_specialist_provides:
+        - Migration files
+        - Index recommendations for auth queries
+        - Secure storage patterns for sensitive fields
+      interface_example: |
+        -- Auth Specialist specifies
+        CREATE TABLE users (
+          id UUID PRIMARY KEY,
+          email TEXT UNIQUE NOT NULL,
+          password_hash TEXT,  -- Argon2id output
+          mfa_secret TEXT,     -- Encrypted TOTP seed
+          mfa_enabled BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+
+        CREATE TABLE sessions (
+          id UUID PRIMARY KEY,
+          user_id UUID REFERENCES users(id),
+          token_hash TEXT NOT NULL,  -- SHA256 of token
+          expires_at TIMESTAMP NOT NULL,
+          device_info JSONB,
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+        CREATE INDEX idx_sessions_token ON sessions(token_hash);
+        CREATE INDEX idx_sessions_user ON sessions(user_id);
+
+    with_frontend_react:
+      auth_specialist_provides:
+        - Auth state shape (user, isAuthenticated, isLoading)
+        - API response formats for login/logout/refresh
+        - Error codes and messages
+        - OAuth redirect URLs and scopes
+      frontend_react_provides:
+        - Auth context/provider implementation
+        - Protected route wrapper
+        - Login/signup forms with validation
+        - Token storage and refresh logic
+      interface_example: |
+        // Auth Specialist defines interface
+        interface AuthState {
+          user: User | null;
+          isAuthenticated: boolean;
+          isLoading: boolean;
+        }
+
+        interface LoginResponse {
+          user: User;
+          accessToken: string;  // Store in memory
+          // refreshToken in HttpOnly cookie
+        }
+
+        interface AuthError {
+          code: 'INVALID_CREDENTIALS' | 'MFA_REQUIRED' | 'ACCOUNT_LOCKED';
+          message: string;
+          mfaToken?: string;  // For MFA flow
+        }
+
+    with_api_designer:
+      auth_specialist_provides:
+        - Auth header format (Bearer token)
+        - Required middleware behavior
+        - Permission check patterns
+        - Error response shapes
+      api_designer_provides:
+        - Protected route decorators/middleware
+        - Auth endpoint implementations
+        - Token extraction and validation in request pipeline
+      interface_example: |
+        // Auth Specialist specifies auth requirements
+        const authMiddleware = async (req, res, next) => {
+          const token = req.headers.authorization?.replace('Bearer ', '');
+          if (!token) {
+            return res.status(401).json({
+              error: 'UNAUTHORIZED',
+              message: 'Authentication required'
+            });
+          }
+
+          try {
+            req.user = await verifyAccessToken(token);
+            next();
+          } catch (error) {
+            return res.status(401).json({
+              error: 'INVALID_TOKEN',
+              message: 'Token expired or invalid'
+            });
+          }
+        };
+
+        // Permission middleware
+        const requireRole = (...roles: string[]) => (req, res, next) => {
+          if (!roles.includes(req.user.role)) {
+            return res.status(403).json({
+              error: 'FORBIDDEN',
+              message: 'Insufficient permissions'
+            });
+          }
+          next();
+        };
+
+    with_security_engineer:
+      auth_specialist_provides:
+        - Current auth implementation details
+        - Token lifecycle and storage
+        - Known attack surface areas
+      security_engineer_provides:
+        - Threat model for auth flows
+        - Penetration test findings
+        - Security hardening recommendations
+      interface_example: |
+        // Auth Specialist documents for security review
+        AuthSecurityProfile:
+          token_storage: "Access in memory, refresh in HttpOnly cookie"
+          password_hashing: "Argon2id with OWASP parameters"
+          session_duration: "Access 15min, refresh 7 days with rotation"
+          mfa_methods: ["TOTP", "WebAuthn"]
+          rate_limiting: "5 failed attempts = 15 min lockout"
+          known_risks:
+            - "No IP-based blocking yet"
+            - "Session not bound to IP"

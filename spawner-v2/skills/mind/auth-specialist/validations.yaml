@@ -1,0 +1,211 @@
+# Auth Specialist Validations
+# Automated checks for authentication and authorization patterns
+
+validations:
+  - id: jwt-verify-no-algorithm
+    name: JWT Verify Without Explicit Algorithm
+    severity: error
+    type: regex
+    pattern:
+      - 'jwt\.verify\(\s*\w+\s*,\s*\w+\s*\)(?!\s*,|\s*{)'
+      - 'verify\(\s*token\s*,\s*secret\s*\)(?!.*algorithms)'
+      - '\.verify\([^)]+\)(?!.*algorithms.*\[)'
+    message: "JWT verification without explicit algorithm. Vulnerable to algorithm confusion attacks."
+    fix_action: "Add { algorithms: ['HS256'] } or ['RS256'] as third parameter to verify()"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.mjs"
+
+  - id: jwt-decode-for-auth
+    name: Using jwt.decode() for Authentication
+    severity: error
+    type: regex
+    pattern:
+      - 'jwt\.decode\(.*\).*(?:user|auth|session|role|admin)'
+      - '(?:if|when).*decode\(.*token'
+      - 'decode\(.*\)\.(?:userId|sub|role)'
+    message: "Using decode() for authentication. decode() does NOT verify signatures."
+    fix_action: "Use jwt.verify() with secret/public key and explicit algorithm"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: password-direct-comparison
+    name: Direct String Comparison for Secrets
+    severity: error
+    type: regex
+    pattern:
+      - 'password\s*===\s*'
+      - 'token\s*===\s*(?!.*length)'
+      - 'apiKey\s*===\s*'
+      - 'secret\s*===\s*'
+    message: "Direct string comparison for secrets enables timing attacks."
+    fix_action: "Use crypto.timingSafeEqual() for constant-time comparison"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.py"
+
+  - id: md5-sha1-password-hash
+    name: Weak Hash Algorithm for Passwords
+    severity: error
+    type: regex
+    pattern:
+      - "createHash\\(['\"]md5['\"]\\).*password"
+      - "createHash\\(['\"]sha1['\"]\\).*password"
+      - 'hashlib\.(md5|sha1).*password'
+      - 'MD5\.hashStr.*password'
+    message: "MD5/SHA1 for password hashing. These are cryptographically broken for passwords."
+    fix_action: "Use argon2id (preferred) or bcrypt with cost factor 12+"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.py"
+
+  - id: hardcoded-jwt-secret
+    name: Hardcoded JWT Secret
+    severity: error
+    type: regex
+    pattern:
+      - "jwt\\.sign\\([^,]+,\\s*['\"][^'\"]{8,}['\"]"
+      - "jwt\\.verify\\([^,]+,\\s*['\"][^'\"]{8,}['\"]"
+      - "secret\\s*[:=]\\s*['\"][^'\"]{8,}['\"].*jwt"
+    message: "Hardcoded JWT secret in code. Will be exposed in version control."
+    fix_action: "Use environment variable: process.env.JWT_SECRET"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: oauth-no-state
+    name: OAuth Request Without State Parameter
+    severity: error
+    type: regex
+    pattern:
+      - 'authorize\?(?!.*state=)'
+      - '/oauth/authorize(?!.*state)'
+      - 'authorizationUrl(?!.*state)'
+    message: "OAuth authorization without state parameter. Vulnerable to CSRF attacks."
+    fix_action: "Generate random state, store in session, validate on callback"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.tsx"
+      - "*.jsx"
+
+  - id: cookie-missing-security-flags
+    name: Cookie Without Security Flags
+    severity: warning
+    type: regex
+    pattern:
+      - "cookie\\([^)]+\\)(?!.*httpOnly)"
+      - "setCookie\\([^)]+\\)(?!.*httpOnly)"
+      - "cookies\\.set\\([^)]+\\)(?!.*httpOnly)"
+    message: "Cookie set without httpOnly flag. Accessible to JavaScript (XSS vulnerable)."
+    fix_action: "Add httpOnly: true, secure: true, sameSite: 'lax' to cookie options"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: session-no-regeneration
+    name: Session Not Regenerated After Login
+    severity: warning
+    type: regex
+    pattern:
+      - 'session\.user\s*=(?!.*regenerate)'
+      - 'req\.session\.userId\s*=(?!.*regenerate)'
+      - 'setUser\(.*\)(?!.*regenerate)'
+    message: "Session ID not regenerated after login. Vulnerable to session fixation."
+    fix_action: "Call session.regenerate() before setting user data"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: password-in-log
+    name: Password May Be Logged
+    severity: error
+    type: regex
+    pattern:
+      - 'console\.(log|error|info|debug).*password'
+      - 'logger\.\w+.*req\.body(?!.*sanitize|redact)'
+      - 'JSON\.stringify\(.*req\.body'
+    message: "Password or request body may be logged. Sensitive data in logs."
+    fix_action: "Sanitize request body before logging, redact password fields"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: access-token-long-expiry
+    name: Access Token With Long Expiry
+    severity: warning
+    type: regex
+    pattern:
+      - "expiresIn.*['\"]\\d+d['\"]"
+      - "expiresIn.*['\"][3-9]h['\"]"
+      - "expiresIn.*86400|expiresIn.*3600\\d"
+      - "maxAge.*86400000"
+    message: "Access token with long expiry (>1 hour). Should be 15-60 minutes max."
+    fix_action: "Use 15-30 minute access tokens with refresh token rotation"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: bcrypt-low-cost
+    name: Bcrypt With Low Cost Factor
+    severity: warning
+    type: regex
+    pattern:
+      - 'bcrypt\.hash\([^,]+,\s*[1-9]\)'
+      - 'bcrypt\.hash\([^,]+,\s*1[01]\)'
+      - 'genSalt\(\s*[1-9]\s*\)'
+    message: "Bcrypt cost factor below 12. Increases brute force speed significantly."
+    fix_action: "Use cost factor 12 or higher (balance with login latency)"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: nextauth-no-secret
+    name: NextAuth Without Secret Configuration
+    severity: error
+    type: regex
+    pattern:
+      - 'NextAuth\(\s*\{(?![\s\S]*secret)[\s\S]*\}\s*\)'
+      - 'authOptions\s*=\s*\{(?![\s\S]*secret)'
+    message: "NextAuth configuration without explicit secret. Uses predictable encryption."
+    fix_action: "Add secret: process.env.NEXTAUTH_SECRET to NextAuth options"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "**/auth.ts"
+      - "**/[...nextauth].ts"
+
+  - id: localstorage-token
+    name: JWT Stored in localStorage
+    severity: warning
+    type: regex
+    pattern:
+      - 'localStorage\.setItem\([^,]*token'
+      - 'localStorage\.setItem\([^,]*jwt'
+      - 'localStorage\.setItem\([^,]*access'
+      - "localStorage\\[['\"].*token"
+    message: "Storing token in localStorage. Accessible to any JavaScript (XSS vulnerable)."
+    fix_action: "Store tokens in HttpOnly cookies, or keep in memory with refresh via cookie"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.tsx"
+      - "*.jsx"
+
+  - id: pkce-missing
+    name: OAuth Without PKCE
+    severity: warning
+    type: regex
+    pattern:
+      - 'response_type.*code(?!.*code_challenge)'
+      - 'grant_type.*authorization_code(?!.*code_verifier)'
+      - '/authorize\?(?!.*code_challenge)'
+    message: "OAuth authorization code flow without PKCE. Required by OAuth 2.1."
+    fix_action: "Add code_challenge to authorize request, code_verifier to token exchange"
+    applies_to:
+      - "*.ts"
+      - "*.js"
