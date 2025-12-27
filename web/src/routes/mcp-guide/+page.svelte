@@ -565,7 +565,7 @@ New score: 91/100 (+4)`,
         <div class="setup-note">
           <span class="note-icon">💡</span>
           <div class="note-content">
-            <p><strong>Skills setup:</strong> Spawner will automatically prompt you to clone 105 local skills on first use. If it doesn't, run manually:</p>
+            <p><strong>Skills setup:</strong> Spawner will automatically prompt you to clone local skills on first use. If it doesn't, run manually:</p>
             <div class="code-block">
               <code>git clone https://github.com/vibeforge1111/vibeship-spawner-skills ~/.spawner/skills</code>
             </div>
@@ -614,7 +614,7 @@ New score: 91/100 (+4)`,
         <div class="setup-note">
           <span class="note-icon">💡</span>
           <div class="note-content">
-            <p><strong>Skills setup:</strong> Spawner will automatically prompt you to clone 105 local skills on first use. If it doesn't, run manually:</p>
+            <p><strong>Skills setup:</strong> Spawner will automatically prompt you to clone local skills on first use. If it doesn't, run manually:</p>
             <div class="code-block">
               <code>git clone https://github.com/vibeforge1111/vibeship-spawner-skills ~/.spawner/skills</code>
             </div>
