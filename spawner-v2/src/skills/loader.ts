@@ -204,6 +204,18 @@ export async function loadAllValidations(
 }
 
 /**
+ * Safely check if array contains matching item
+ */
+function safeArrayMatch(arr: unknown, normalized: string): boolean {
+  if (!Array.isArray(arr)) return false;
+  return arr.some(item => {
+    if (typeof item !== 'string') return false;
+    const normalizedItem = item.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return normalizedItem.includes(normalized) || normalized.includes(normalizedItem);
+  });
+}
+
+/**
  * Load skills relevant to a given stack
  */
 export async function loadRelevantSkills(
@@ -220,27 +232,18 @@ export async function loadRelevantSkills(
     const normalized = stackItem.toLowerCase().replace(/[^a-z0-9]/g, '');
 
     for (const skill of index.skills) {
-      // Check owns
-      if (skill.owns.some(own =>
-        own.toLowerCase().replace(/[^a-z0-9]/g, '').includes(normalized) ||
-        normalized.includes(own.toLowerCase().replace(/[^a-z0-9]/g, ''))
-      )) {
+      // Check owns (with safe array check)
+      if (safeArrayMatch(skill.owns, normalized)) {
         matchedIds.add(skill.id);
       }
 
-      // Check tags
-      if (skill.tags.some(tag =>
-        tag.toLowerCase().replace(/[^a-z0-9]/g, '').includes(normalized) ||
-        normalized.includes(tag.toLowerCase().replace(/[^a-z0-9]/g, ''))
-      )) {
+      // Check tags (with safe array check)
+      if (safeArrayMatch(skill.tags, normalized)) {
         matchedIds.add(skill.id);
       }
 
-      // Check triggers
-      if (skill.triggers.some(trigger =>
-        trigger.toLowerCase().replace(/[^a-z0-9]/g, '').includes(normalized) ||
-        normalized.includes(trigger.toLowerCase().replace(/[^a-z0-9]/g, ''))
-      )) {
+      // Check triggers (with safe array check)
+      if (safeArrayMatch(skill.triggers, normalized)) {
         matchedIds.add(skill.id);
       }
     }
@@ -262,6 +265,14 @@ export async function loadRelevantSkills(
 }
 
 /**
+ * Safely check if array contains query string
+ */
+function safeArrayIncludes(arr: unknown, query: string): boolean {
+  if (!Array.isArray(arr)) return false;
+  return arr.some(item => typeof item === 'string' && item.toLowerCase().includes(query));
+}
+
+/**
  * Search skills by query
  */
 export async function searchSkills(
@@ -277,10 +288,10 @@ export async function searchSkills(
   for (const skill of index.skills) {
     if (
       skill.name.toLowerCase().includes(q) ||
-      skill.id.includes(q) ||
-      skill.tags.some(t => t.toLowerCase().includes(q)) ||
-      skill.triggers.some(t => t.toLowerCase().includes(q)) ||
-      skill.owns.some(o => o.toLowerCase().includes(q))
+      skill.id.toLowerCase().includes(q) ||
+      safeArrayIncludes(skill.tags, q) ||
+      safeArrayIncludes(skill.triggers, q) ||
+      safeArrayIncludes(skill.owns, q)
     ) {
       matchedIds.push(skill.id);
     }

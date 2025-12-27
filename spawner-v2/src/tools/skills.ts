@@ -70,11 +70,58 @@ interface UnifiedSkill {
 }
 
 /**
+ * Normalize skill ID for consistent lookups
+ * Handles: "Event Architect" -> "event-architect", "EventArchitect" -> "event-architect"
+ */
+function normalizeSkillId(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/([a-z])([A-Z])/g, '$1-$2')  // camelCase to kebab
+    .replace(/\s+/g, '-')                  // spaces to dashes
+    .replace(/[^a-z0-9-]/g, '')            // remove special chars
+    .replace(/-+/g, '-')                   // collapse multiple dashes
+    .replace(/^-|-$/g, '');                // trim dashes
+}
+
+/**
+ * Safely check if array contains query (handles undefined/non-array)
+ */
+function safeArrayIncludes(arr: unknown, query: string): boolean {
+  if (!Array.isArray(arr)) return false;
+  return arr.some(item => typeof item === 'string' && item.toLowerCase().includes(query));
+}
+
+/**
+ * Find similar skills using fuzzy matching
+ */
+function findSimilarSkills(
+  query: string,
+  v1Registry: V1SkillRegistry | null,
+  v2Skills: V2Skill[]
+): string[] {
+  const normalized = normalizeSkillId(query);
+  const allNames = [
+    ...(v1Registry?.specialists.map(s => s.name) ?? []),
+    ...v2Skills.map(s => s.name),
+    ...v2Skills.map(s => s.id),
+  ];
+
+  // Simple similarity: contains or starts with
+  return allNames
+    .filter(name => {
+      const n = normalizeSkillId(name);
+      return n.includes(normalized) || normalized.includes(n) ||
+        n.split('-').some(part => normalized.includes(part));
+    })
+    .slice(0, 5);
+}
+
+/**
  * Input schema for spawner_skills
  */
 export const skillsInputSchema = z.object({
-  action: z.enum(['search', 'list', 'get', 'squad']).optional().describe(
-    'Action: search (default), list (all skills), get (specific skill), squad (get skill squad)'
+  action: z.enum(['search', 'list', 'get', 'squad', 'exists', 'get_files']).optional().describe(
+    'Action: search (default), list (all skills), get (specific skill content), squad (get skill squad), exists (check if skill exists), get_files (get raw skill files)'
   ),
   query: z.string().optional().describe(
     'Search query - matches names, descriptions, tags, triggers'
@@ -107,14 +154,14 @@ export const skillsInputSchema = z.object({
  */
 export const skillsToolDefinition = {
   name: 'spawner_skills',
-  description: 'Search, list, and retrieve specialist skills. Skills include handoff protocols for seamless collaboration between specialists.',
+  description: 'Search, list, and retrieve specialist skills. Use exists to check before creating. Use get_files for raw YAML access.',
   inputSchema: {
     type: 'object' as const,
     properties: {
       action: {
         type: 'string',
-        enum: ['search', 'list', 'get', 'squad'],
-        description: 'Action: search (default), list (all skills), get (specific skill content), squad (get skill squad)',
+        enum: ['search', 'list', 'get', 'squad', 'exists', 'get_files'],
+        description: 'Action: search (default), list, get (skill content), squad, exists (check if exists), get_files (raw YAML files)',
       },
       query: {
         type: 'string',
@@ -174,6 +221,16 @@ export interface SkillsOutput {
     description: string;
     count: number;
   }[];
+  // For exists action
+  exists?: boolean;
+  skill_id?: string;
+  skill_name?: string;
+  skill_path?: string;
+  similar?: string[];
+  suggestion?: string;
+  // For get_files action
+  files?: Record<string, string>;
+  source_path?: string;
   _instruction: string;
 }
 
@@ -239,6 +296,18 @@ export async function executeSkills(
         throw new Error('squad is required for squad action');
       }
       return handleSquad(v1Registry, squad);
+
+    case 'exists':
+      if (!name) {
+        throw new Error('name is required for exists action');
+      }
+      return handleExists(v1Registry, v2Skills, name);
+
+    case 'get_files':
+      if (!name) {
+        throw new Error('name is required for get_files action');
+      }
+      return await handleGetFiles(env, v1Registry, v2Skills, name);
 
     default:
       throw new Error(`Unknown action: ${action}`);
@@ -413,8 +482,13 @@ async function handleGet(
   name: string,
   options?: { context?: string; previousSkill?: string }
 ): Promise<SkillsOutput> {
-  // Check V2 first (preferred)
-  const v2SkillMeta = v2Skills.find(s => s.name === name || s.id === name);
+  const normalized = normalizeSkillId(name);
+
+  // Check V2 first (preferred) - with normalized matching
+  const v2SkillMeta = v2Skills.find(s =>
+    normalizeSkillId(s.name) === normalized ||
+    normalizeSkillId(s.id) === normalized
+  );
   if (v2SkillMeta) {
     // Load full skill object for rendering
     const skill = await loadSkill(env, v2SkillMeta.id);
@@ -456,11 +530,13 @@ async function handleGet(
     }
   }
 
-  // Check V1 (legacy markdown skills - no handoff protocol)
+  // Check V1 (legacy markdown skills - no handoff protocol) - with normalized matching
   if (v1Registry) {
-    const v1Skill = v1Registry.specialists.find(s => s.name === name);
+    const v1Skill = v1Registry.specialists.find(s =>
+      normalizeSkillId(s.name) === normalized
+    );
     if (v1Skill) {
-      const content = await env.SKILLS.get(`v1:skill:${name}`);
+      const content = await env.SKILLS.get(`v1:skill:${v1Skill.name}`);
       if (content) {
         return {
           skill_content: content,
@@ -509,6 +585,163 @@ function handleSquad(
 }
 
 /**
+ * Handle exists action - check if a skill exists
+ */
+function handleExists(
+  v1Registry: V1SkillRegistry | null,
+  v2Skills: V2Skill[],
+  name: string
+): SkillsOutput {
+  const normalized = normalizeSkillId(name);
+
+  // Check V2 first (preferred)
+  const v2Match = v2Skills.find(s =>
+    normalizeSkillId(s.id) === normalized ||
+    normalizeSkillId(s.name) === normalized
+  );
+
+  if (v2Match) {
+    // Determine path based on layer
+    const layerFolder = v2Match.layer === 1 ? 'development' :
+      v2Match.layer === 2 ? 'frameworks' : 'marketing';
+
+    return {
+      exists: true,
+      skill_id: v2Match.id,
+      skill_name: v2Match.name,
+      skill_path: `skills/${layerFolder}/${v2Match.id}/`,
+      _instruction: `Skill "${v2Match.name}" exists (V2). Use action="get" or action="get_files" to retrieve it.`,
+    };
+  }
+
+  // Check V1
+  if (v1Registry) {
+    const v1Match = v1Registry.specialists.find(s =>
+      normalizeSkillId(s.name) === normalized
+    );
+
+    if (v1Match) {
+      return {
+        exists: true,
+        skill_id: normalizeSkillId(v1Match.name),
+        skill_name: v1Match.name,
+        skill_path: v1Match.path,
+        _instruction: `Skill "${v1Match.name}" exists (V1 markdown). Use action="get" to retrieve it.`,
+      };
+    }
+  }
+
+  // Not found - provide similar suggestions
+  const similar = findSimilarSkills(name, v1Registry, v2Skills);
+  const suggestion = similar.length > 0
+    ? `Did you mean: ${similar.join(', ')}?`
+    : 'No similar skills found.';
+
+  return {
+    exists: false,
+    similar,
+    suggestion,
+    _instruction: `Skill "${name}" not found. ${suggestion}\n\nUse spawner_skill_new to create a new skill.`,
+  };
+}
+
+/**
+ * Handle get_files action - return raw YAML files for a skill
+ */
+async function handleGetFiles(
+  env: Env,
+  v1Registry: V1SkillRegistry | null,
+  v2Skills: V2Skill[],
+  name: string
+): Promise<SkillsOutput> {
+  const normalized = normalizeSkillId(name);
+
+  // Check V2 first (only V2 has structured files)
+  const v2Match = v2Skills.find(s =>
+    normalizeSkillId(s.id) === normalized ||
+    normalizeSkillId(s.name) === normalized
+  );
+
+  if (v2Match) {
+    const skillId = v2Match.id;
+    const files: Record<string, string> = {};
+
+    // Load all possible files from KV
+    // skill:{id} contains the main skill data
+    const skillData = await env.SKILLS.get(`skill:${skillId}`, 'text');
+    if (skillData) {
+      files['skill.yaml'] = skillData;
+    }
+
+    // Load sharp edges
+    const edgesData = await env.SHARP_EDGES.get(`edges:${skillId}`, 'text');
+    if (edgesData) {
+      files['sharp-edges.yaml'] = edgesData;
+    }
+
+    // Load validations
+    const validationsData = await env.SKILLS.get(`validations:${skillId}`, 'text');
+    if (validationsData) {
+      files['validations.yaml'] = validationsData;
+    }
+
+    // Load collaboration
+    const collabData = await env.SKILLS.get(`collaboration:${skillId}`, 'text');
+    if (collabData) {
+      files['collaboration.yaml'] = collabData;
+    }
+
+    // Determine path based on layer
+    const layerFolder = v2Match.layer === 1 ? 'development' :
+      v2Match.layer === 2 ? 'frameworks' : 'marketing';
+
+    const fileList = Object.keys(files);
+    const expectedFiles = ['skill.yaml', 'sharp-edges.yaml', 'validations.yaml', 'collaboration.yaml'];
+    const missingFiles = expectedFiles.filter(f => !fileList.includes(f));
+
+    return {
+      skill_id: skillId,
+      skill_name: v2Match.name,
+      files,
+      source_path: `skills/${layerFolder}/${skillId}/`,
+      _instruction: [
+        `Retrieved ${fileList.length} files for skill "${v2Match.name}":`,
+        ...fileList.map(f => `  - ${f}`),
+        missingFiles.length > 0 ? `\nMissing files: ${missingFiles.join(', ')}` : '',
+        '\nUse these files to copy the skill structure to another project.',
+      ].filter(Boolean).join('\n'),
+    };
+  }
+
+  // V1 skills don't have structured files
+  if (v1Registry) {
+    const v1Match = v1Registry.specialists.find(s =>
+      normalizeSkillId(s.name) === normalized
+    );
+
+    if (v1Match) {
+      // V1 skills are single markdown files
+      const content = await env.SKILLS.get(`v1:skill:${v1Match.name}`);
+      if (content) {
+        return {
+          skill_id: normalizeSkillId(v1Match.name),
+          skill_name: v1Match.name,
+          files: {
+            'skill.md': content,
+          },
+          source_path: v1Match.path,
+          _instruction: `V1 skill "${v1Match.name}" is a single markdown file. Consider upgrading to V2 format with spawner_skill_upgrade.`,
+        };
+      }
+    }
+  }
+
+  // Not found
+  const similar = findSimilarSkills(name, v1Registry, v2Skills);
+  throw new Error(`Skill "${name}" not found. Similar: ${similar.join(', ') || 'none'}`);
+}
+
+/**
  * Check if V1 skill matches filters
  */
 function matchesFilters(
@@ -518,15 +751,15 @@ function matchesFilters(
   layer?: number
 ): boolean {
   if (layer && skill.layer !== layer) return false;
-  if (tag && !skill.tags.includes(tag.toLowerCase())) return false;
+  if (tag && !safeArrayIncludes(skill.tags, tag.toLowerCase())) return false;
 
   if (query) {
     const q = query.toLowerCase();
     return (
-      skill.name.includes(q) ||
+      skill.name.toLowerCase().includes(q) ||
       (skill.description?.toLowerCase().includes(q) ?? false) ||
-      skill.tags.some(t => t.includes(q)) ||
-      skill.triggers.some(t => t.toLowerCase().includes(q))
+      safeArrayIncludes(skill.tags, q) ||
+      safeArrayIncludes(skill.triggers, q)
     );
   }
 
@@ -543,16 +776,16 @@ function matchesFiltersV2(
   layer?: number
 ): boolean {
   if (layer && skill.layer !== layer) return false;
-  if (tag && !skill.tags.includes(tag.toLowerCase())) return false;
+  if (tag && !safeArrayIncludes(skill.tags, tag.toLowerCase())) return false;
 
   if (query) {
     const q = query.toLowerCase();
     return (
-      skill.name.includes(q) ||
-      skill.id.includes(q) ||
+      skill.name.toLowerCase().includes(q) ||
+      skill.id.toLowerCase().includes(q) ||
       (skill.description?.toLowerCase().includes(q) ?? false) ||
-      skill.tags.some(t => t.includes(q)) ||
-      skill.triggers.some(t => t.toLowerCase().includes(q))
+      safeArrayIncludes(skill.tags, q) ||
+      safeArrayIncludes(skill.triggers, q)
     );
   }
 
