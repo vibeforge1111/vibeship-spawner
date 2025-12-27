@@ -1,0 +1,322 @@
+# Decision Maker Collaboration Patterns
+# How decision-making integrates with other foundational skills
+
+collaboration:
+  # Lead role - Decision Maker drives these workflows
+  leads:
+    - workflow: technology-selection
+      description: Choosing technologies, frameworks, or tools for a project
+      involves:
+        - system-designer: Ensuring choice fits overall architecture
+        - performance-thinker: Validating performance requirements
+        - tech-debt-manager: Assessing future maintenance burden
+      handoff_points:
+        - to: system-designer
+          when: Technology chosen, need to integrate into architecture
+          context_to_share: Decision rationale, constraints considered, alternatives rejected
+        - to: tech-debt-manager
+          when: Choice involves known trade-offs or debt
+          context_to_share: Accepted trade-offs, timeline for revisiting
+
+    - workflow: architectural-decision
+      description: Making significant architectural choices that affect system structure
+      involves:
+        - system-designer: Detailed design after decision
+        - code-quality: Ensuring patterns support maintainability
+        - test-strategist: Validating testability of approach
+      handoff_points:
+        - to: system-designer
+          when: High-level decision made, need detailed design
+          context_to_share: ADR with context, constraints, and rationale
+        - to: test-strategist
+          when: Decision affects testing approach
+          context_to_share: What needs to be testable, new risks introduced
+
+    - workflow: trade-off-evaluation
+      description: Structured comparison of options with competing priorities
+      involves:
+        - performance-thinker: Performance implications
+        - tech-debt-manager: Maintenance implications
+        - system-designer: Architectural implications
+      handoff_points:
+        - to: system-designer
+          when: Trade-off involves architectural patterns
+          context_to_share: Weighted criteria, scores, key differentiators
+        - to: performance-thinker
+          when: Trade-off has performance dimension
+          context_to_share: Performance requirements, acceptable thresholds
+
+  # Support role - Decision Maker assists these workflows
+  supports:
+    - workflow: system-design
+      led_by: system-designer
+      contribution: Framing design choices as decisions with clear criteria
+      when_called: Multiple valid approaches exist, need structured comparison
+
+    - workflow: tech-debt-evaluation
+      led_by: tech-debt-manager
+      contribution: Deciding when to pay down debt vs accept it
+      when_called: Need to prioritize debt items or justify new debt
+
+    - workflow: incident-response
+      led_by: incident-responder
+      contribution: Rapid triage decisions under pressure
+      when_called: Need to decide between mitigation options quickly
+
+    - workflow: refactoring-planning
+      led_by: refactoring-guide
+      contribution: Deciding scope and approach for refactoring efforts
+      when_called: Multiple refactoring strategies possible
+
+  # Escalation patterns
+  escalations:
+    - situation: Decision has organizational or people implications
+      escalate_to: external (human stakeholder)
+      with_context: Options analysis, technical recommendation, risks
+      reason: Technical decisions with org impact need human judgment
+
+    - situation: Decision requires domain expertise I don't have
+      escalate_to: appropriate domain skill (e.g., performance-thinker)
+      with_context: Decision framework, criteria, what expertise is needed
+      reason: Domain expert should evaluate options within their area
+
+    - situation: Decision blocked by missing information
+      escalate_to: debugging-master or relevant exploration
+      with_context: What information is needed, what we've tried
+      reason: Can't decide without necessary data
+
+    - situation: Team deadlock on decision
+      escalate_to: external (human facilitator)
+      with_context: Positions, trade-offs, recommended path forward
+      reason: Human needs to break organizational deadlock
+
+  # Integration contracts
+  contracts:
+    with_system_designer:
+      decision_maker_provides:
+        - Clear decision with documented rationale
+        - Constraints and requirements driving the choice
+        - Alternatives considered and why rejected
+      system_designer_provides:
+        - Feasibility assessment of options
+        - Architectural implications of each choice
+        - Implementation complexity estimates
+      interface_example: |
+        # Decision maker hands off to system designer:
+        """
+        DECISION: Adopt event-driven architecture for order processing
+
+        RATIONALE:
+        - Decouples services (enables independent deployment)
+        - Handles traffic spikes (queue absorbs load)
+        - Trade-off: eventual consistency (acceptable for our use case)
+
+        CONSTRAINTS:
+        - Must integrate with existing sync APIs
+        - Team has no Kafka experience (prefer simpler solution)
+        - Budget for managed service OK
+
+        ALTERNATIVES REJECTED:
+        - Direct API calls: Coupling too tight
+        - Cron jobs: Latency too high
+        """
+
+        # System designer takes it from here:
+        # - Event broker selection (SQS vs SNS vs EventBridge)
+        # - Event schema design
+        # - Integration patterns
+
+    with_tech_debt_manager:
+      decision_maker_provides:
+        - Explicit trade-offs being accepted
+        - Deadline for revisiting decision
+        - Triggers that should prompt review
+      tech_debt_manager_provides:
+        - Debt impact assessment
+        - Paydown timeline recommendation
+        - Risk if debt not addressed
+      interface_example: |
+        # Decision maker acknowledges debt:
+        """
+        DECISION: Ship with in-memory cache (not Redis)
+
+        ACCEPTED TRADE-OFF:
+        - No cache sharing between instances
+        - Cache lost on deploy
+
+        DEADLINE: Revisit before scaling to 3+ instances
+        TRIGGERS:
+        - More than 2 instances needed
+        - Cache hit rate below 80%
+        - Deploy frequency exceeds 1/day
+        """
+
+        # Tech debt manager tracks:
+        # - Add to debt registry
+        # - Monitor triggers
+        # - Alert when thresholds approached
+
+    with_incident_responder:
+      decision_maker_provides:
+        - Rapid triage framework for incidents
+        - Pre-made decision trees for common scenarios
+        - Criteria for escalation vs resolution
+      incident_responder_provides:
+        - Time pressure constraints
+        - Blast radius information
+        - Stakeholder communication needs
+      interface_example: |
+        # During incident, decision maker provides framework:
+        """
+        TRIAGE DECISION TREE:
+
+        1. Is data at risk?
+           YES → Immediate: disable affected feature
+           NO → Continue assessment
+
+        2. Is it affecting > 10% of users?
+           YES → All hands, rollback if possible
+           NO → On-call engineer investigates
+
+        3. Is there a known rollback path?
+           YES → Rollback if issue persists > 15 min
+           NO → Hotfix forward, escalate for eyes
+        """
+
+        # Incident responder uses framework
+        # and provides feedback for refinement
+
+    with_performance_thinker:
+      decision_maker_provides:
+        - Performance requirements and acceptable thresholds
+        - Trade-off priorities (latency vs throughput vs cost)
+        - Decision criteria for optimization investments
+      performance_thinker_provides:
+        - Performance implications of each option
+        - Benchmark data if available
+        - Optimization cost estimates
+      interface_example: |
+        # Decision about caching strategy:
+        """
+        REQUIREMENTS:
+        - P99 latency < 100ms
+        - 10k requests/minute peak
+        - Cost < $500/month
+
+        TRADE-OFF PRIORITY:
+        1. Latency (user experience critical)
+        2. Cost (budget constrained)
+        3. Throughput (current load manageable)
+        """
+
+        # Performance thinker evaluates options:
+        # - Redis: P99 ~5ms, $100/mo, handles 100k/min
+        # - In-memory: P99 ~1ms, $0, per-instance only
+        # - CDN: P99 ~20ms, $50/mo, handles 1M/min
+
+# Prerequisites for using this skill effectively
+prerequisites:
+  skills: []  # Foundational skill, no prerequisites
+  knowledge:
+    - Basic understanding of software development process
+    - Awareness that decisions have trade-offs
+    - Willingness to document and revisit decisions
+  tools:
+    - Text editor for ADRs
+    - Version control for decision history
+    - Optional: Decision log or wiki
+
+# When to delegate to this skill
+delegation_triggers:
+  - phrase: "should we"
+    confidence: high
+  - phrase: "which is better"
+    confidence: high
+  - phrase: "choose between"
+    confidence: high
+  - phrase: "trade-off"
+    confidence: high
+  - phrase: "versus"
+    confidence: high
+  - phrase: "decision"
+    confidence: high
+  - phrase: "pros and cons"
+    confidence: high
+  - phrase: "evaluate"
+    confidence: medium
+  - phrase: "compare"
+    confidence: medium
+  - phrase: "is it worth"
+    confidence: high
+  - phrase: "what if we"
+    confidence: medium
+  - phrase: "alternatively"
+    confidence: medium
+
+# Skill maturity indicators
+maturity_levels:
+  beginner:
+    characteristics:
+      - Can identify when a decision is needed
+      - Uses basic pro/con lists
+      - Documents decisions informally
+    common_mistakes:
+      - Not distinguishing one-way from two-way doors
+      - Analysis paralysis on reversible decisions
+      - Skipping documentation "because it's obvious"
+
+  intermediate:
+    characteristics:
+      - Applies one-way/two-way door framework
+      - Uses weighted criteria for comparisons
+      - Writes structured ADRs
+    common_mistakes:
+      - Overcomplicating two-way door decisions
+      - Not considering second-order effects
+      - Failing to set review triggers
+
+  advanced:
+    characteristics:
+      - Naturally thinks in second-order effects
+      - Facilitates team decisions efficiently
+      - Builds decision frameworks for recurring choices
+    common_mistakes:
+      - Assuming others see trade-offs as clearly
+      - Not adapting frameworks to team culture
+      - Optimizing for decision quality over velocity
+
+# Decision templates
+templates:
+  quick_decision:
+    use_when: Two-way door, low stakes
+    format: |
+      DECISION: [What]
+      BECAUSE: [One-line rationale]
+      REVISIT IF: [Trigger condition]
+
+  standard_adr:
+    use_when: One-way door, significant impact
+    format: |
+      # ADR-NNN: [Title]
+
+      ## Status
+      [Proposed | Accepted | Deprecated | Superseded]
+
+      ## Context
+      [What is the issue we're seeing that motivates this decision?]
+
+      ## Decision
+      [What is the change we're proposing?]
+
+      ## Consequences
+      [What becomes easier or harder as a result?]
+
+  trade_off_matrix:
+    use_when: Multiple options with different strengths
+    format: |
+      | Criterion (weight) | Option A | Option B | Option C |
+      |-------------------|----------|----------|----------|
+      | [Criterion 1] (X%) | [1-5]    | [1-5]    | [1-5]    |
+      | [Criterion 2] (Y%) | [1-5]    | [1-5]    | [1-5]    |
+      | **Weighted Score** | **X.X**  | **X.X**  | **X.X**  |
+
