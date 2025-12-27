@@ -1,0 +1,264 @@
+# Performance Thinker Validations
+# Checks for patterns that indicate potential performance issues
+
+validations:
+  - id: n-plus-one-loop
+    name: Potential N+1 Query Pattern
+    severity: warning
+    type: regex
+    pattern:
+      - "for.*await.*find"
+      - "for.*await.*query"
+      - "\\.forEach.*await.*get"
+      - "map.*async.*fetch"
+    message: "Database query inside loop suggests N+1 problem. Consider eager loading."
+    fix_action: "Use batch query or eager loading: findAll with IDs instead of find in loop"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: unbounded-query
+    name: Query Without Limit
+    severity: warning
+    type: regex
+    pattern:
+      - "\\.find\\(\\{\\}\\)"
+      - "\\.all\\(\\)"
+      - "SELECT\\s+\\*\\s+FROM(?!.*LIMIT)"
+      - "findMany\\(\\{\\s*\\}\\)"
+    message: "Query without limit can return unbounded results. Add pagination."
+    fix_action: "Add .limit() or LIMIT clause to prevent loading entire table"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+    exceptions:
+      - "\\.limit\\("
+      - "LIMIT\\s+\\d"
+      - "\\.take\\("
+
+  - id: sync-io-in-loop
+    name: Synchronous I/O in Loop
+    severity: warning
+    type: regex
+    pattern:
+      - "for.*readFileSync"
+      - "for.*writeFileSync"
+      - "while.*readFileSync"
+    message: "Sync I/O in loop blocks event loop. Consider async or batching."
+    fix_action: "Use async methods: readFile with Promise.all for parallel reads"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: sequential-awaits
+    name: Sequential Awaits That Could Be Parallel
+    severity: info
+    type: regex
+    pattern:
+      - "await\\s+\\w+\\([^)]*\\);\\s*await\\s+\\w+\\([^)]*\\);\\s*await\\s+\\w+\\([^)]*\\)"
+    message: "Multiple sequential awaits may be parallelizable. Consider Promise.all."
+    fix_action: "If independent: const [a,b,c] = await Promise.all([fetchA(), fetchB(), fetchC()])"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: unbounded-cache
+    name: In-Memory Cache Without Size Limit
+    severity: warning
+    type: regex
+    pattern:
+      - "const\\s+cache\\s*=\\s*new\\s+Map\\(\\)"
+      - "const\\s+cache\\s*=\\s*\\{\\}"
+      - "let\\s+cache\\s*=\\s*\\{\\}"
+    message: "In-memory cache without size limit can cause memory leak."
+    fix_action: "Use LRU cache with size limit or add periodic cleanup"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+    exceptions:
+      - "LRU"
+      - "maxSize"
+      - "max:"
+
+  - id: string-concat-loop
+    name: String Concatenation in Loop
+    severity: info
+    type: regex
+    pattern:
+      - "for.*\\+=.*['\"`]"
+      - "while.*\\+=.*['\"`]"
+    message: "String concatenation in loop is O(n²). Use array join or StringBuilder."
+    fix_action: "Collect in array, then join: parts.push(x); return parts.join('')"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: json-parse-in-loop
+    name: JSON Parse in Hot Loop
+    severity: info
+    type: regex
+    pattern:
+      - "for.*JSON\\.parse"
+      - "\\.forEach.*JSON\\.parse"
+      - "\\.map.*JSON\\.parse"
+    message: "JSON.parse in loop is expensive. Consider parsing once outside loop."
+    fix_action: "Parse the collection once before iterating if possible"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: large-payload-return
+    name: Returning Entire Objects
+    severity: info
+    type: regex
+    pattern:
+      - "return\\s+.*\\.toJSON\\(\\)"
+      - "return\\s+.*\\.toObject\\(\\)"
+      - "res\\.json\\(\\s*await.*\\.find"
+    message: "Returning entire object may include unnecessary fields. Consider selecting fields."
+    fix_action: "Select only needed fields or use DTOs to limit response size"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: missing-index-hint
+    name: Query on Likely Unindexed Column
+    severity: info
+    type: regex
+    pattern:
+      - "WHERE.*created_at\\s*[<>]"
+      - "WHERE.*status\\s*="
+      - "ORDER BY.*created_at"
+      - "WHERE.*email\\s*="
+    message: "Query pattern suggests index might help. Verify index exists for this column."
+    fix_action: "Check EXPLAIN plan; add index if sequential scan on large table"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.sql"
+
+  - id: inefficient-regex
+    name: Potentially Inefficient Regex
+    severity: info
+    type: regex
+    pattern:
+      - "new RegExp\\([^)]*\\+[^)]*\\)"
+      - "\\.match\\(/.*\\*.*\\*/\\)"
+      - "\\.test\\(/.*\\+.*\\+.*\\+.*/"
+    message: "Complex regex can be slow. Consider if simpler string operations work."
+    fix_action: "For simple patterns, use indexOf/includes instead of regex"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: array-includes-large
+    name: Array.includes on Large Arrays
+    severity: info
+    type: regex
+    pattern:
+      - "\\.includes\\(.*\\)\\s*//.*large"
+      - "for.*\\.includes\\("
+    message: "Array.includes is O(n). For large arrays or frequent lookups, use Set."
+    fix_action: "const lookup = new Set(array); lookup.has(x) is O(1)"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: sync-crypto
+    name: Synchronous Crypto Operations
+    severity: warning
+    type: regex
+    pattern:
+      - "crypto\\.pbkdf2Sync"
+      - "crypto\\.scryptSync"
+      - "bcrypt\\.hashSync"
+      - "bcrypt\\.compareSync"
+    message: "Sync crypto blocks event loop. Use async versions in web servers."
+    fix_action: "Use async: crypto.pbkdf2, bcrypt.hash (without Sync)"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+    exceptions:
+      - "cli"
+      - "script"
+      - "build"
+
+  - id: timeout-in-hot-path
+    name: setTimeout/setInterval in Request Handler
+    severity: warning
+    type: regex
+    pattern:
+      - "app\\.get.*setTimeout"
+      - "app\\.post.*setTimeout"
+      - "router\\.get.*setTimeout"
+    message: "Timeout in request handler suggests async work. Use queue instead."
+    fix_action: "Queue background work instead of setTimeout: queue.enqueue(job)"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: loading-entire-file
+    name: Reading Entire File Into Memory
+    severity: info
+    type: regex
+    pattern:
+      - "readFileSync\\([^)]+\\)"
+      - "readFile\\([^)]+\\)"
+      - "fs\\.promises\\.readFile"
+    message: "Reading entire file may be problematic for large files. Consider streaming."
+    fix_action: "For large files, use createReadStream with pipeline"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: no-connection-pooling
+    name: Database Connection Without Pooling
+    severity: warning
+    type: regex
+    pattern:
+      - "new Client\\(\\)"
+      - "createConnection\\("
+      - "mysql\\.createConnection"
+    message: "Creating connection per request is expensive. Use connection pool."
+    fix_action: "Use pool: createPool() instead of createConnection()"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: logging-in-hot-path
+    name: Excessive Logging in Hot Path
+    severity: info
+    type: regex
+    pattern:
+      - "console\\.log.*req\\."
+      - "logger\\.debug.*for\\s*\\("
+    message: "Logging in hot path adds latency. Consider sampling or log level guards."
+    fix_action: "Use log level guards: if (logger.isDebugEnabled()) logger.debug(...)"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
