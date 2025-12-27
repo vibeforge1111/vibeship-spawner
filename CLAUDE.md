@@ -23,11 +23,59 @@ Spawner is an MCP server that transforms Claude into a specialized product-build
 5. **Skill System** - 35+ specialist skills in YAML format
 6. **Skill Level Detection** - Adapts guidance to user experience level
 
+## Local Skills (Zero-Cost)
+
+**Skills are now loaded locally, not from MCP.** This is free, fast, and works offline.
+
+### First-Time Setup
+
+If `~/.spawner/skills` doesn't exist, clone the skills repo:
+
+```bash
+# Windows
+git clone https://github.com/vibeforge1111/vibeship-spawner-skills %USERPROFILE%\.spawner\skills
+
+# macOS/Linux
+git clone https://github.com/vibeforge1111/vibeship-spawner-skills ~/.spawner/skills
+```
+
+### Loading Skills
+
+Read skill YAML files directly from local disk:
+
+```
+# Example: Load backend skill
+Read: ~/.spawner/skills/development/backend/skill.yaml
+Read: ~/.spawner/skills/development/backend/sharp-edges.yaml
+```
+
+### Skill Categories
+
+| Need | Path |
+|------|------|
+| Backend/API | `development/backend`, `development/api-designer` |
+| Frontend/UI | `development/frontend`, `design/ui-design` |
+| Database | `data/postgres-wizard`, `data/redis-specialist` |
+| AI/LLM | `ai/llm-architect`, `ai/ml-memory` |
+| Auth | `development/auth-specialist` |
+| Testing | `development/test-architect` |
+| DevOps | `development/devops`, `development/infra-architect` |
+
+### Updating Skills
+
+```bash
+cd ~/.spawner/skills && git pull
+```
+
+See full instructions: https://github.com/vibeforge1111/vibeship-spawner-skills
+
+---
+
 ## Tech Stack
 
 - **Runtime:** Cloudflare Workers
 - **Database:** Cloudflare D1 (SQLite)
-- **Cache/Skills:** Cloudflare KV
+- **Cache:** Cloudflare KV (project memory, validations)
 - **Protocol:** MCP (Model Context Protocol)
 - **Language:** TypeScript
 - **Validation:** Zod
@@ -64,19 +112,20 @@ vibeship-spawner/
 
 ### Skill System
 
-**V2 Skills (YAML)** - The primary skill format:
-- Stored in `spawner-v2/skills/` by category (development/, frameworks/, marketing/, etc.)
-- Each skill has 4 required files:
-  - `skill.yaml` - Identity (world-class template), patterns, anti-patterns, handoffs
-  - `sharp-edges.yaml` - Gotchas with detection patterns (8-12)
-  - `validations.yaml` - Automated code checks (8-12)
-  - `collaboration.yaml` - Prerequisites, delegation triggers, cross-domain insights
-- Optional markdown files for deep-dive content
-- Loaded to KV as `v2:index` and `skill:{id}`
-- Include: structured validations, sharp edges with detection patterns
-- Quality scored against 100-point rubric (80 minimum to ship)
+**Primary: Local Skills** - Loaded from `~/.spawner/skills/` (see Local Skills section above)
+- 105+ skills across 11 categories
+- Free, fast, works offline
+- Clone once, read locally forever
 
-**35+ skills** across categories: frameworks, development, design, marketing, strategy, product, communications
+**V2 Skills (YAML format):**
+- Each skill has 4 required files:
+  - `skill.yaml` - Identity, patterns, anti-patterns, handoffs
+  - `sharp-edges.yaml` - Gotchas with detection patterns
+  - `validations.yaml` - Automated code checks
+  - `collaboration.yaml` - Prerequisites, delegation triggers
+- Categories: development, data, ai, design, frameworks, marketing, startup, strategy, communications, integration, product
+
+**Internal (KV)** - Used by MCP server for validations and sharp edge queries only
 
 ### Squads
 
@@ -216,14 +265,15 @@ node scripts/upload-skills.js
 
 ### Adding a New Skill
 
-1. Choose category folder in `spawner-v2/skills/` (development/, frameworks/, marketing/, etc.)
+**For local skills repo** (https://github.com/vibeforge1111/vibeship-spawner-skills):
+1. Choose category folder (development/, data/, ai/, design/, etc.)
 2. Create skill folder with kebab-case name
-3. Add required files:
-   - `skill.yaml` - identity, patterns, anti-patterns, handoffs
-   - `sharp-edges.yaml` - gotchas with detection patterns (8-12)
-   - `validations.yaml` - automated code checks (8-12)
-4. Optional: Add `.md` files for deeper prose content
-5. Run upload script: `node scripts/upload-skills.js`
+3. Add required files: `skill.yaml`, `sharp-edges.yaml`, `validations.yaml`, `collaboration.yaml`
+4. Push to GitHub
+
+**For internal MCP** (spawner-v2/skills/):
+1. Same structure as above
+2. Run upload script: `node scripts/upload-skills.js`
 
 See `docs/V2/SKILL_CREATION_GUIDE.md` for full guide.
 
@@ -263,9 +313,12 @@ See `docs/V2/SKILL_CREATION_GUIDE.md` for full guide.
 Relational data (projects → sessions → decisions) fits SQL.
 D1 is cheap, fast, and co-located with Workers.
 
-### Why KV for Skills?
-Skills are read-heavy, rarely updated.
-KV is optimized for this access pattern.
+### Why Local Skills?
+Skills are now loaded locally from `~/.spawner/skills/` via git clone.
+- Zero API cost (no MCP calls for skill content)
+- Works offline after initial clone
+- Fast reads from local filesystem
+- KV is still used internally for validations and sharp edge queries
 
 ### Why Not Full AST for All Checks?
 ts-morph is powerful but slow.
