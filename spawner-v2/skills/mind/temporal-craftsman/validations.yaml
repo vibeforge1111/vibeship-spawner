@@ -1,0 +1,146 @@
+# Temporal Craftsman Validations
+# Automated checks for Temporal workflow patterns
+
+validations:
+  - id: workflow-non-deterministic-import
+    name: Non-Deterministic Import in Workflow
+    severity: error
+    type: regex
+    pattern:
+      - 'from.*random import|import random'
+      - 'from.*uuid import.*uuid4'
+      - 'from.*datetime import.*datetime(?!.*workflow)'
+    message: "Non-deterministic import in workflow file. Use workflow.uuid4(), workflow.now()."
+    fix_action: "Replace with Temporal's deterministic helpers"
+    applies_to:
+      - "**/workflows/*.py"
+      - "**/*_workflow.py"
+
+  - id: workflow-io-operation
+    name: I/O Operation in Workflow Code
+    severity: error
+    type: regex
+    pattern:
+      - '@workflow\\.defn[\\s\\S]*?requests\\.'
+      - '@workflow\\.defn[\\s\\S]*?httpx\\.'
+      - '@workflow\\.defn[\\s\\S]*?await.*db\\.'
+      - '@workflow\\.defn[\\s\\S]*?open\\('
+    message: "I/O operation in workflow code. Move to activity."
+    fix_action: "Extract I/O to an activity function"
+    applies_to:
+      - "**/workflows/*.py"
+
+  - id: activity-no-timeout
+    name: Activity Called Without Timeout
+    severity: error
+    type: regex
+    pattern:
+      - 'execute_activity\\([^)]*\\)(?!.*timeout)'
+      - 'execute_activity\\((?!.*start_to_close|.*schedule_to_close)'
+    message: "Activity called without explicit timeout. Always set timeouts."
+    fix_action: "Add start_to_close_timeout parameter"
+    applies_to:
+      - "**/workflows/*.py"
+
+  - id: activity-missing-heartbeat
+    name: Long Activity Without Heartbeat
+    severity: warning
+    type: regex
+    pattern:
+      - '@activity\\.defn[\\s\\S]*?for.*in.*:[\\s\\S]*?(?!heartbeat)'
+      - '@activity\\.defn[\\s\\S]*?while.*:[\\s\\S]*?(?!heartbeat)'
+    message: "Activity with loop but no heartbeat. Add heartbeat for long operations."
+    fix_action: "Add activity.heartbeat() in loop body"
+    applies_to:
+      - "**/activities/*.py"
+
+  - id: workflow-while-true-no-continue
+    name: Infinite Workflow Loop Without Continue-As-New
+    severity: warning
+    type: regex
+    pattern:
+      - 'while True:[\\s\\S]*?(?!continue_as_new)'
+      - 'while.*running:[\\s\\S]*?(?!continue_as_new)'
+    message: "Infinite loop without continue_as_new. History will overflow."
+    fix_action: "Add continue_as_new after N iterations to reset history"
+    applies_to:
+      - "**/workflows/*.py"
+
+  - id: workflow-logic-change-no-patch
+    name: Workflow Logic Change Without Versioning
+    severity: warning
+    type: regex
+    pattern:
+      - '@workflow\\.defn[\\s\\S]*?# TODO|# FIXME(?!.*patched)'
+    message: "Workflow has TODO/FIXME but no patching. Use workflow.patched() for changes."
+    fix_action: "Wrap logic changes in workflow.patched() for versioning"
+    applies_to:
+      - "**/workflows/*.py"
+
+  - id: child-workflow-no-policy
+    name: Child Workflow Without Parent Close Policy
+    severity: warning
+    type: regex
+    pattern:
+      - 'start_child_workflow\\([^)]*\\)(?!.*parent_close_policy)'
+    message: "Child workflow without parent_close_policy. May become orphan."
+    fix_action: "Add parent_close_policy=ParentClosePolicy.REQUEST_CANCEL"
+    applies_to:
+      - "**/workflows/*.py"
+
+  - id: signal-handler-activity
+    name: Activity Call in Signal Handler
+    severity: error
+    type: regex
+    pattern:
+      - '@workflow\\.signal[\\s\\S]*?execute_activity'
+    message: "Activity in signal handler. Signals should only update state."
+    fix_action: "Update state in signal, do work in main workflow loop"
+    applies_to:
+      - "**/workflows/*.py"
+
+  - id: activity-no-retry-policy
+    name: Activity Without Retry Policy
+    severity: info
+    type: regex
+    pattern:
+      - 'execute_activity\\([^)]*\\)(?!.*retry_policy)'
+    message: "Activity without explicit retry policy. Consider setting non_retryable_error_types."
+    fix_action: "Add retry_policy with appropriate settings"
+    applies_to:
+      - "**/workflows/*.py"
+
+  - id: workflow-single-task-queue
+    name: All Workflows on Default Queue
+    severity: info
+    type: regex
+    pattern:
+      - 'task_queue.*=.*["\']default["\']'
+      - 'task_queue.*=.*["\']main["\']'
+    message: "Using generic task queue. Consider dedicated queues for isolation."
+    fix_action: "Create dedicated task queues for different workflow types"
+    applies_to:
+      - "*.py"
+
+  - id: workflow-no-cancellation-handling
+    name: Activity Without Cancellation Check
+    severity: info
+    type: regex
+    pattern:
+      - '@activity\\.defn[\\s\\S]*?for.*in.*:[\\s\\S]*?(?!is_cancelled)'
+    message: "Activity loop without cancellation check. Add is_cancelled() handling."
+    fix_action: "Check activity.is_cancelled() and handle gracefully"
+    applies_to:
+      - "**/activities/*.py"
+
+  - id: workflow-hardcoded-timeout
+    name: Hardcoded Timeout Values
+    severity: info
+    type: regex
+    pattern:
+      - 'timedelta\\(seconds=30\\)'
+      - 'timedelta\\(minutes=5\\)'
+    message: "Hardcoded timeout. Consider configuration or constants."
+    fix_action: "Use named constants or configuration for timeouts"
+    applies_to:
+      - "**/workflows/*.py"

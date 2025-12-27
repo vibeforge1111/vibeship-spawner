@@ -1,0 +1,517 @@
+# Privacy Guardian Sharp Edges
+# Battle scars from building privacy-preserving systems
+
+sharp_edges:
+  - id: dp-composition-budget
+    summary: Differential privacy budget exhausted, no more queries allowed
+    severity: critical
+    situation: |
+      You set ε=0.1 per query for privacy. After 100 queries per user per day,
+      you've used ε=10 total. Privacy guarantees are meaningless. Or worse,
+      you didn't track composition and have no idea what privacy you provide.
+    why: |
+      Differential privacy composes: multiple queries on same data accumulate
+      privacy loss. Without tracking the privacy budget, you either run out
+      (blocking queries) or exceed it (no real privacy). Most teams discover
+      this after deployment.
+    solution: |
+      # Track privacy budget per user
+      from dataclasses import dataclass
+      from datetime import datetime, timedelta
+
+      @dataclass
+      class PrivacyBudget:
+          user_id: UUID
+          epsilon_used: float
+          epsilon_limit: float
+          reset_at: datetime
+
+      class PrivacyBudgetTracker:
+          DAILY_EPSILON_LIMIT = 1.0  # Total budget per user per day
+          QUERY_EPSILON = 0.01       # Cost per query
+
+          async def can_query(self, user_id: UUID) -> bool:
+              budget = await self.get_or_create_budget(user_id)
+
+              # Reset if past reset time
+              if datetime.utcnow() > budget.reset_at:
+                  await self.reset_budget(user_id)
+                  budget = await self.get_or_create_budget(user_id)
+
+              return budget.epsilon_used + self.QUERY_EPSILON <= budget.epsilon_limit
+
+          async def consume_budget(
+              self,
+              user_id: UUID,
+              epsilon: float,
+          ) -> bool:
+              """Consume privacy budget. Returns False if insufficient."""
+              budget = await self.get_or_create_budget(user_id)
+
+              if budget.epsilon_used + epsilon > budget.epsilon_limit:
+                  logger.warning(f"Privacy budget exhausted for user {user_id}")
+                  return False
+
+              await self.db.execute(
+                  """
+                  UPDATE privacy_budgets
+                  SET epsilon_used = epsilon_used + $1
+                  WHERE user_id = $2
+                  """,
+                  epsilon, user_id
+              )
+              return True
+
+          async def get_remaining(self, user_id: UUID) -> float:
+              budget = await self.get_or_create_budget(user_id)
+              return max(0, budget.epsilon_limit - budget.epsilon_used)
+
+      # Use budget in all DP operations
+      async def dp_query(user_id: UUID, query_fn, epsilon: float):
+          tracker = PrivacyBudgetTracker()
+
+          if not await tracker.consume_budget(user_id, epsilon):
+              raise PrivacyBudgetExhaustedError(
+                  f"Daily privacy budget exhausted. Resets at midnight."
+              )
+
+          return await query_fn(epsilon=epsilon)
+    symptoms:
+      - "Privacy budget exhausted errors"
+      - "Can't answer how much privacy is provided"
+      - "No tracking of epsilon composition"
+      - "Different ε values for same query type"
+    detection_pattern: 'laplace|differential.*privacy(?!.*budget|.*track)'
+    version_range: ">=1.0.0"
+
+  - id: encryption-key-in-code
+    summary: Encryption key hardcoded or in environment variable without rotation
+    severity: critical
+    situation: |
+      You hardcode an encryption key or load from environment. The key never
+      changes. It ends up in logs, backups, developer machines. Years later,
+      a breach exposes data encrypted years ago.
+    why: |
+      Static keys are a single point of failure. If compromised (and assume
+      they will be), all historical data is exposed. Key rotation limits
+      blast radius. Envelope encryption allows rotation without re-encrypting data.
+    solution: |
+      # Envelope encryption with key rotation
+      from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+      from datetime import datetime
+      import os
+
+      class EnvelopeEncryption:
+          """Envelope encryption with rotating KEKs."""
+
+          def __init__(self, kms_client):
+              self.kms = kms_client  # AWS KMS, GCP KMS, Vault
+
+          async def encrypt(
+              self,
+              plaintext: bytes,
+          ) -> EncryptedPayload:
+              # 1. Generate data encryption key (DEK)
+              dek = os.urandom(32)  # 256-bit key
+
+              # 2. Encrypt DEK with current Key Encryption Key (KEK)
+              current_kek_id = await self.get_current_kek_id()
+              encrypted_dek = await self.kms.encrypt(
+                  key_id=current_kek_id,
+                  plaintext=dek,
+              )
+
+              # 3. Encrypt data with DEK
+              aesgcm = AESGCM(dek)
+              nonce = os.urandom(12)
+              ciphertext = aesgcm.encrypt(nonce, plaintext, None)
+
+              # 4. Return envelope
+              return EncryptedPayload(
+                  ciphertext=ciphertext,
+                  nonce=nonce,
+                  encrypted_dek=encrypted_dek,
+                  kek_id=current_kek_id,
+                  encrypted_at=datetime.utcnow(),
+              )
+
+          async def decrypt(
+              self,
+              payload: EncryptedPayload,
+          ) -> bytes:
+              # 1. Decrypt DEK with appropriate KEK
+              dek = await self.kms.decrypt(
+                  key_id=payload.kek_id,
+                  ciphertext=payload.encrypted_dek,
+              )
+
+              # 2. Decrypt data with DEK
+              aesgcm = AESGCM(dek)
+              return aesgcm.decrypt(payload.nonce, payload.ciphertext, None)
+
+          async def rotate_kek(self) -> str:
+              """Rotate to new KEK. Old KEK kept for decryption."""
+              new_kek_id = await self.kms.create_key()
+              await self.set_current_kek_id(new_kek_id)
+
+              # Don't delete old KEK - needed for old data
+              # Schedule old KEK deletion after all data re-encrypted
+              return new_kek_id
+    symptoms:
+      - "Encryption key in source control"
+      - "Same key for years"
+      - "Key appears in logs or error messages"
+      - "No key rotation plan"
+    detection_pattern: 'ENCRYPTION_KEY.*=|Fernet\\(b["\']|aes.*key.*='
+    version_range: ">=1.0.0"
+
+  - id: pii-in-embeddings
+    summary: PII reconstructable from embedding vectors
+    severity: high
+    situation: |
+      You embed user content and store vectors. You assume embeddings are
+      "one-way" like hashes. Researchers show they can reconstruct PII
+      from embeddings using inversion attacks.
+    why: |
+      Embeddings preserve semantic information - that's their point. With
+      enough context or the right model, original content can be partially
+      reconstructed. Names, numbers, patterns leak through embeddings.
+    solution: |
+      # Sanitize before embedding, not after
+      class PrivacyAwareEmbedder:
+          def __init__(self, pii_detector: PIIDetector, embedder):
+              self.pii_detector = pii_detector
+              self.embedder = embedder
+
+          async def embed(self, text: str) -> EmbeddingResult:
+              # 1. Detect and remove PII before embedding
+              sanitized, pii_found = await self.pii_detector.sanitize(text)
+
+              if pii_found:
+                  logger.info(f"Removed {len(pii_found)} PII items before embedding")
+
+              # 2. Embed sanitized text
+              embedding = await self.embedder.embed(sanitized)
+
+              # 3. Store mapping separately if needed (encrypted)
+              # Never store PII alongside or reconstructable from embedding
+
+              return EmbeddingResult(
+                  embedding=embedding,
+                  sanitized_text=sanitized,  # Store this, not original
+                  pii_removed=len(pii_found) > 0,
+              )
+
+      # For existing embeddings, consider:
+      # 1. Differential privacy during training
+      # 2. Dimensionality reduction to remove fine details
+      # 3. Quantization to reduce precision
+
+      class PrivacyReducedEmbedding:
+          """Reduce embedding precision to limit PII reconstruction."""
+
+          REDUCED_DIMS = 256  # From 1536
+
+          async def reduce(
+              self,
+              embedding: List[float],
+          ) -> List[float]:
+              # PCA or random projection to reduce dimensions
+              reduced = self.pca.transform([embedding])[0]
+
+              # Quantize to reduce precision
+              quantized = np.round(reduced, decimals=2)
+
+              return quantized.tolist()
+    symptoms:
+      - "User names appear when decoding embeddings"
+      - "Semantic search returns exact content matches"
+      - "Embedding inversion attacks succeed"
+      - "No PII check before embedding"
+    detection_pattern: 'embed\\(.*content|embed.*memory\\.content'
+    version_range: ">=1.0.0"
+
+  - id: audit-log-forgery
+    summary: Audit logs can be modified or deleted
+    severity: high
+    situation: |
+      You log access for compliance. A bad actor (internal or external) deletes
+      or modifies logs to cover their tracks. During audit, you can't prove
+      what happened.
+    why: |
+      Mutable audit logs are worthless. If logs can be changed, they can't be
+      trusted. Regulatory audits require proof of immutability. Insurance
+      claims require tamper-evident records.
+    solution: |
+      # Append-only audit with external verification
+      import hashlib
+      from datetime import datetime
+
+      class TamperEvidentAuditLog:
+          """Audit log with hash chain and external anchoring."""
+
+          ANCHOR_FREQUENCY = 100  # Anchor to external system every N entries
+
+          async def log(self, entry: AuditEntry) -> str:
+              # 1. Get previous hash for chain
+              previous = await self.db.fetchone(
+                  """
+                  SELECT entry_hash, entry_number
+                  FROM audit_log
+                  ORDER BY entry_number DESC
+                  LIMIT 1
+                  """
+              )
+
+              previous_hash = previous['entry_hash'] if previous else "genesis"
+              entry_number = (previous['entry_number'] + 1) if previous else 1
+
+              # 2. Compute entry hash
+              entry_hash = self._compute_hash(entry, previous_hash)
+
+              # 3. Append-only insert (use database constraints)
+              await self.db.execute(
+                  """
+                  INSERT INTO audit_log (
+                      entry_number, entry_hash, previous_hash,
+                      timestamp, user_id, action, resource_id, details
+                  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                  """,
+                  entry_number, entry_hash, previous_hash,
+                  entry.timestamp, entry.user_id, entry.action,
+                  entry.resource_id, entry.details,
+              )
+
+              # 4. Periodically anchor to external system
+              if entry_number % self.ANCHOR_FREQUENCY == 0:
+                  await self._anchor_externally(entry_number, entry_hash)
+
+              return entry_hash
+
+          async def _anchor_externally(
+              self,
+              entry_number: int,
+              entry_hash: str,
+          ) -> None:
+              """Anchor hash to external timestamping service."""
+              # Options: AWS QLDB, blockchain, third-party TSA
+              await self.external_anchor.record(
+                  timestamp=datetime.utcnow(),
+                  entry_number=entry_number,
+                  hash=entry_hash,
+              )
+
+          async def verify_integrity(self) -> VerificationResult:
+              """Verify entire log chain."""
+              entries = await self.db.fetch(
+                  "SELECT * FROM audit_log ORDER BY entry_number ASC"
+              )
+
+              errors = []
+              for i, entry in enumerate(entries):
+                  # Verify hash
+                  expected_prev = entries[i-1]['entry_hash'] if i > 0 else "genesis"
+                  if entry['previous_hash'] != expected_prev:
+                      errors.append(f"Chain break at entry {entry['entry_number']}")
+
+                  computed = self._compute_hash(entry, entry['previous_hash'])
+                  if computed != entry['entry_hash']:
+                      errors.append(f"Hash mismatch at entry {entry['entry_number']}")
+
+              return VerificationResult(
+                  valid=len(errors) == 0,
+                  entries_checked=len(entries),
+                  errors=errors,
+              )
+
+      # Database constraints for append-only
+      # CREATE TABLE audit_log (
+      #     entry_number BIGSERIAL PRIMARY KEY,
+      #     -- No UPDATE or DELETE permissions for this table
+      # );
+      # REVOKE UPDATE, DELETE ON audit_log FROM application_role;
+    symptoms:
+      - "Gaps in audit log sequence"
+      - "Audit entries without hash chain"
+      - "Application role can DELETE from audit table"
+      - "No external anchoring or verification"
+    detection_pattern: 'audit.*log(?!.*hash|.*immutable|.*append)'
+    version_range: ">=1.0.0"
+
+  - id: retention-without-deletion
+    summary: Data retention policy without ability to actually delete
+    severity: medium
+    situation: |
+      GDPR requires deletion after retention period. You have a policy saying
+      "delete after 2 years." But data is in backups, logs, caches, and
+      analytics systems. You can't actually delete it.
+    why: |
+      Retention policies are legal commitments. If you can't delete, you're
+      non-compliant. Backups, replicas, and derived data all need deletion
+      paths. "We can't delete from backups" is not an acceptable answer.
+    solution: |
+      # Comprehensive deletion with verification
+      from dataclasses import dataclass
+      from typing import List
+
+      @dataclass
+      class DeletionTarget:
+          system: str
+          location: str
+          deletion_method: str
+          verified: bool
+
+      class ComprehensiveDeletion:
+          """Delete data across all systems."""
+
+          TARGETS = [
+              DeletionTarget("primary_db", "memories", "DELETE", False),
+              DeletionTarget("vector_db", "qdrant", "delete_points", False),
+              DeletionTarget("graph_db", "falkordb", "DELETE nodes", False),
+              DeletionTarget("cache", "redis", "DEL", False),
+              DeletionTarget("search", "elasticsearch", "delete_by_query", False),
+              DeletionTarget("logs", "cloudwatch", "create_log_group_retention", False),
+              DeletionTarget("backups", "s3", "lifecycle_policy", False),
+              DeletionTarget("analytics", "bigquery", "DELETE", False),
+          ]
+
+          async def delete_user_data(
+              self,
+              user_id: UUID,
+          ) -> DeletionReport:
+              results = []
+
+              for target in self.TARGETS:
+                  try:
+                      await self._delete_from_target(target, user_id)
+                      target.verified = await self._verify_deletion(target, user_id)
+                      results.append(target)
+                  except Exception as e:
+                      logger.error(f"Deletion failed for {target.system}: {e}")
+                      results.append(DeletionTarget(
+                          system=target.system,
+                          location=target.location,
+                          deletion_method="FAILED",
+                          verified=False,
+                      ))
+
+              # Schedule backup expiration
+              await self.schedule_backup_expiration(user_id)
+
+              # Record deletion for compliance
+              await self.audit.log(
+                  action="data_deletion",
+                  user_id=user_id,
+                  details={"targets": [t.system for t in results if t.verified]},
+              )
+
+              return DeletionReport(
+                  user_id=user_id,
+                  targets=results,
+                  complete=all(t.verified for t in results),
+              )
+
+          async def _verify_deletion(
+              self,
+              target: DeletionTarget,
+              user_id: UUID,
+          ) -> bool:
+              """Verify data is actually deleted."""
+              # Query each system to confirm no data remains
+              if target.system == "primary_db":
+                  count = await self.db.fetchone(
+                      "SELECT COUNT(*) FROM memories WHERE user_id = $1",
+                      user_id
+                  )
+                  return count['count'] == 0
+
+              # Similar verification for each target
+              return True
+    symptoms:
+      - "Can't find all places user data exists"
+      - "Backups contain deleted data"
+      - "No verification after deletion"
+      - "GDPR deletion request takes weeks"
+    detection_pattern: 'delete.*user.*data(?!.*backup|.*verify|.*all)'
+    version_range: ">=1.0.0"
+
+  - id: access-without-audit
+    summary: Data access not logged, can't answer "who accessed what"
+    severity: medium
+    situation: |
+      User asks "who has seen my data?" You can't answer. There's no record
+      of who accessed what. Compliance audit asks for access logs. You have
+      application logs but not structured access audit.
+    why: |
+      Access audit is required for GDPR (right to know), SOC2, HIPAA, and
+      most compliance frameworks. Application logs are not audit trails -
+      they're debugging aids. Structured, queryable access logs are different.
+    solution: |
+      # Structured access audit middleware
+      from functools import wraps
+
+      class AccessAuditor:
+          """Audit all data access with structured logging."""
+
+          async def log_access(
+              self,
+              user_id: UUID,
+              accessor_id: UUID,
+              resource_type: str,
+              resource_id: UUID,
+              access_type: str,  # "read", "write", "delete"
+              context: dict,
+          ) -> None:
+              await self.db.execute(
+                  """
+                  INSERT INTO access_audit (
+                      access_id, timestamp, user_id, accessor_id,
+                      resource_type, resource_id, access_type,
+                      ip_address, user_agent, session_id
+                  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                  """,
+                  uuid4(), datetime.utcnow(), user_id, accessor_id,
+                  resource_type, resource_id, access_type,
+                  context.get('ip'), context.get('user_agent'),
+                  context.get('session_id'),
+              )
+
+      def audit_access(resource_type: str, access_type: str):
+          """Decorator to audit data access."""
+          def decorator(func):
+              @wraps(func)
+              async def wrapper(self, *args, **kwargs):
+                  # Extract user_id and resource_id from args/kwargs
+                  user_id = kwargs.get('user_id') or args[0]
+                  resource_id = kwargs.get('resource_id') or args[1] if len(args) > 1 else None
+
+                  # Log before access
+                  await self.auditor.log_access(
+                      user_id=user_id,
+                      accessor_id=self.current_user_id,
+                      resource_type=resource_type,
+                      resource_id=resource_id,
+                      access_type=access_type,
+                      context=self.request_context,
+                  )
+
+                  return await func(self, *args, **kwargs)
+              return wrapper
+          return decorator
+
+      # Usage
+      class MemoryService:
+          @audit_access("memory", "read")
+          async def get_memory(self, user_id: UUID, memory_id: UUID) -> Memory:
+              return await self.db.get_memory(memory_id)
+
+          @audit_access("memory", "write")
+          async def update_memory(self, user_id: UUID, memory_id: UUID, content: str):
+              await self.db.update_memory(memory_id, content)
+    symptoms:
+      - "Can't answer 'who accessed my data'"
+      - "No access logs for compliance audit"
+      - "Only application debug logs exist"
+      - "Access patterns not queryable"
+    detection_pattern: 'get.*memory|read.*memory|fetch.*memory(?!.*audit|.*log)'
+    version_range: ">=1.0.0"

@@ -1,0 +1,532 @@
+# Performance Hunter Sharp Edges
+# Battle scars from making systems fast
+
+sharp_edges:
+  - id: async-not-parallel
+    summary: Treating asyncio as parallelism when it's just concurrency
+    severity: critical
+    situation: |
+      You convert sync code to async expecting 10x speedup for CPU-bound work.
+      Performance is the same or worse. async/await isn't making it faster.
+    why: |
+      asyncio is cooperative concurrency for I/O-bound work. It runs on a
+      single thread. CPU-bound work blocks the event loop. For parallelism,
+      you need threads (for I/O) or processes (for CPU).
+    solution: |
+      import asyncio
+      from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+
+      # For I/O-bound: asyncio is correct
+      async def fetch_all(urls: List[str]) -> List[Response]:
+          # This works because HTTP is I/O-bound
+          return await asyncio.gather(*[fetch(url) for url in urls])
+
+      # For CPU-bound: use ProcessPoolExecutor
+      class CPUBoundProcessor:
+          def __init__(self):
+              # Process pool for CPU work
+              self.process_pool = ProcessPoolExecutor(max_workers=4)
+              # Thread pool for blocking I/O
+              self.thread_pool = ThreadPoolExecutor(max_workers=10)
+
+          async def process_cpu_intensive(self, data: bytes) -> Result:
+              """Run CPU-bound work in process pool."""
+              loop = asyncio.get_event_loop()
+
+              # Run in separate process (true parallelism)
+              result = await loop.run_in_executor(
+                  self.process_pool,
+                  cpu_intensive_function,
+                  data,
+              )
+              return result
+
+          async def call_blocking_library(self, params) -> Result:
+              """Run blocking sync code in thread pool."""
+              loop = asyncio.get_event_loop()
+
+              # Run in thread (doesn't block event loop)
+              result = await loop.run_in_executor(
+                  self.thread_pool,
+                  blocking_library_function,
+                  params,
+              )
+              return result
+
+      # Identify what type of work you have:
+      # - I/O-bound (network, disk): asyncio
+      # - CPU-bound (parsing, ML inference): ProcessPoolExecutor
+      # - Blocking library: ThreadPoolExecutor
+    symptoms:
+      - "async code no faster than sync"
+      - "Event loop blocked by CPU work"
+      - "One slow operation blocks all others"
+      - "GIL contention in profiler"
+    detection_pattern: 'async def.*(?!await).*for.*in|asyncio.*cpu_bound'
+    version_range: ">=1.0.0"
+
+  - id: n-plus-1-hidden
+    summary: N+1 queries hidden in ORM or helper functions
+    severity: high
+    situation: |
+      Your list view is slow. You check the main query - it's fast.
+      You enable query logging and see 100+ queries. Each item loads
+      relations one by one.
+    why: |
+      ORMs make it easy to access relations as properties. Each access
+      triggers a query. Loops over items with relation access create N+1.
+      It's hidden because the code looks like simple property access.
+    solution: |
+      # Detect N+1 with query counting
+      class QueryCounter:
+          """Detect N+1 by counting queries in a request."""
+
+          def __init__(self):
+              self.count = 0
+              self.queries = []
+
+          async def __aenter__(self):
+              self.count = 0
+              self.queries = []
+              # Hook into database connection
+              self.original_execute = db.execute
+              db.execute = self.counting_execute
+              return self
+
+          async def __aexit__(self, *args):
+              db.execute = self.original_execute
+
+              if self.count > 10:
+                  logger.warning(
+                      f"Potential N+1: {self.count} queries\n"
+                      f"Queries: {self.queries[:10]}"
+                  )
+
+          async def counting_execute(self, query, *args):
+              self.count += 1
+              self.queries.append(str(query)[:100])
+              return await self.original_execute(query, *args)
+
+      # Usage
+      async def list_memories(user_id: UUID):
+          async with QueryCounter():
+              memories = await get_memories(user_id)
+              # This should be 1 query, not N+1
+              return [m.to_dict() for m in memories]
+
+      # Fix: Eager loading or batching
+      class MemoryRepository:
+          async def get_with_relations(
+              self,
+              user_id: UUID,
+          ) -> List[MemoryWithRelations]:
+              # Single query with JOIN
+              rows = await self.db.fetch(
+                  """
+                  SELECT m.*, e.*, r.*
+                  FROM memories m
+                  LEFT JOIN entities e ON m.memory_id = e.memory_id
+                  LEFT JOIN relations r ON m.memory_id = r.source_id
+                  WHERE m.user_id = $1
+                  """,
+                  user_id
+              )
+              return self._assemble(rows)
+
+          # Or: DataLoader pattern for GraphQL
+          async def batch_load_entities(
+              self,
+              memory_ids: List[UUID],
+          ) -> Dict[UUID, List[Entity]]:
+              rows = await self.db.fetch(
+                  """
+                  SELECT * FROM entities
+                  WHERE memory_id = ANY($1)
+                  """,
+                  memory_ids
+              )
+              # Group by memory_id
+              return self._group_by_memory(rows)
+    symptoms:
+      - "Query count scales with result size"
+      - "Slow list views, fast detail views"
+      - "Many similar queries in logs"
+      - "DB connection exhaustion"
+    detection_pattern: 'for.*in.*:.*await.*db|\\[.*await.*for.*in'
+    version_range: ">=1.0.0"
+
+  - id: cache-thundering-herd
+    summary: All requests hit database when cache expires
+    severity: high
+    situation: |
+      Your cache TTL is 5 minutes. At minute 5, the cache expires. Suddenly
+      100 concurrent requests all miss cache and hit the database. Database
+      overloads. Requests timeout. Users see errors.
+    why: |
+      When cached value expires, all waiting requests see cache miss
+      simultaneously. Each request independently tries to fill the cache.
+      You get N database hits instead of 1.
+    solution: |
+      import asyncio
+      from dataclasses import dataclass
+      from typing import Optional, Dict
+      import random
+
+      @dataclass
+      class CacheEntry:
+          value: any
+          expires_at: float
+          soft_expires_at: float  # Refresh before hard expiry
+
+      class ThunderingHerdCache:
+          """Cache with thundering herd protection."""
+
+          def __init__(self):
+              self.cache: Dict[str, CacheEntry] = {}
+              self.locks: Dict[str, asyncio.Lock] = {}
+              self.pending: Dict[str, asyncio.Future] = {}
+
+          async def get_or_compute(
+              self,
+              key: str,
+              compute_fn,
+              ttl: int = 300,
+              stale_ttl: int = 60,  # Serve stale while refreshing
+          ):
+              now = time.time()
+              entry = self.cache.get(key)
+
+              # 1. Fresh hit
+              if entry and now < entry.soft_expires_at:
+                  return entry.value
+
+              # 2. Stale hit - serve stale, refresh in background
+              if entry and now < entry.expires_at:
+                  asyncio.create_task(
+                      self._refresh_background(key, compute_fn, ttl, stale_ttl)
+                  )
+                  return entry.value
+
+              # 3. Miss - need to compute (with lock)
+              return await self._compute_with_lock(
+                  key, compute_fn, ttl, stale_ttl
+              )
+
+          async def _compute_with_lock(
+              self,
+              key: str,
+              compute_fn,
+              ttl: int,
+              stale_ttl: int,
+          ):
+              # Check if another request is already computing
+              if key in self.pending:
+                  return await self.pending[key]
+
+              # Take lock and compute
+              if key not in self.locks:
+                  self.locks[key] = asyncio.Lock()
+
+              async with self.locks[key]:
+                  # Double-check after acquiring lock
+                  entry = self.cache.get(key)
+                  if entry and time.time() < entry.soft_expires_at:
+                      return entry.value
+
+                  # Create future for other waiters
+                  future = asyncio.Future()
+                  self.pending[key] = future
+
+                  try:
+                      value = await compute_fn()
+                      now = time.time()
+
+                      # Add jitter to prevent synchronized expiry
+                      jitter = random.uniform(0.8, 1.2)
+
+                      self.cache[key] = CacheEntry(
+                          value=value,
+                          expires_at=now + (ttl + stale_ttl) * jitter,
+                          soft_expires_at=now + ttl * jitter,
+                      )
+
+                      future.set_result(value)
+                      return value
+
+                  except Exception as e:
+                      future.set_exception(e)
+                      raise
+                  finally:
+                      del self.pending[key]
+    symptoms:
+      - "Periodic latency spikes at cache expiry"
+      - "Database connection spikes every N minutes"
+      - "All users see slow response at same time"
+      - "Cache hit rate drops to 0 periodically"
+    detection_pattern: 'cache\\.get|@cached(?!.*lock|.*herd)'
+    version_range: ">=1.0.0"
+
+  - id: connection-pool-exhaustion
+    summary: Database connections exhausted under load
+    severity: high
+    situation: |
+      Traffic spikes. Requests start timing out. Database shows "too many
+      connections." Your pool size is 10, but you have 100 concurrent requests.
+    why: |
+      Connection pool limits how many concurrent DB operations are possible.
+      When pool exhausted, requests wait for connection. Timeouts cascade.
+      Pool too small = queueing. Pool too large = DB overload.
+    solution: |
+      # Right-size connection pool
+      import asyncpg
+
+      class DatabasePool:
+          """Database pool with monitoring."""
+
+          def __init__(self, config: Config):
+              self.config = config
+              self.pool = None
+
+          async def initialize(self):
+              self.pool = await asyncpg.create_pool(
+                  dsn=self.config.database_url,
+                  min_size=5,      # Baseline connections
+                  max_size=20,     # Max concurrent queries
+                  # Don't wait forever for connection
+                  max_inactive_connection_lifetime=300,
+                  # Query timeout prevents runaway queries
+                  command_timeout=30,
+              )
+
+          async def get_pool_stats(self) -> PoolStats:
+              return PoolStats(
+                  size=self.pool.get_size(),
+                  min_size=self.pool.get_min_size(),
+                  max_size=self.pool.get_max_size(),
+                  free_size=self.pool.get_idle_size(),
+              )
+
+          async def health_check(self) -> bool:
+              stats = await self.get_pool_stats()
+
+              # Alert if pool is near exhaustion
+              utilization = (stats.size - stats.free_size) / stats.max_size
+              if utilization > 0.8:
+                  logger.warning(
+                      f"Connection pool {utilization*100:.0f}% utilized"
+                  )
+
+              return stats.free_size > 0
+
+      # Rule of thumb for pool sizing:
+      # max_connections = (cores * 2) + spinning_disks
+      # For SSD: max_connections = cores * 2
+      # For cloud DB: check provider limits
+
+      # Connection pool per external service
+      class ConnectionManager:
+          pools = {
+              "postgres": None,
+              "redis": None,
+              "qdrant": None,
+          }
+
+          async def initialize_all(self):
+              # Each service gets its own pool
+              self.pools["postgres"] = await asyncpg.create_pool(...)
+              self.pools["redis"] = redis.ConnectionPool(max_connections=50)
+              self.pools["qdrant"] = QdrantClient(
+                  grpc_options={"grpc.max_concurrent_streams": 100}
+              )
+    symptoms:
+      - "Connection timeout errors"
+      - "'Too many connections' from database"
+      - "Latency spikes under load"
+      - "Pool stats show 0 free connections"
+    detection_pattern: 'create_pool|Pool\\((?!.*max_size)'
+    version_range: ">=1.0.0"
+
+  - id: p99-ignored
+    summary: Optimizing for average while p99 kills users
+    severity: medium
+    situation: |
+      Average latency is 50ms. Looks great! But 1% of users wait 5 seconds.
+      They complain, leave, blame your product. You didn't notice because
+      you only tracked average.
+    why: |
+      Average hides tail latency. One slow database query, one cold cache,
+      one garbage collection - these affect the unlucky 1%. They experience
+      your product as slow.
+    solution: |
+      from prometheus_client import Histogram, Summary
+      import statistics
+
+      # Track percentiles, not just averages
+      LATENCY_HISTOGRAM = Histogram(
+          'request_latency_seconds',
+          'Request latency in seconds',
+          ['endpoint'],
+          buckets=[0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+      )
+
+      class LatencyTracker:
+          """Track and analyze latency distributions."""
+
+          def __init__(self, window_size: int = 1000):
+              self.samples = []
+              self.window_size = window_size
+
+          def record(self, latency_ms: float):
+              self.samples.append(latency_ms)
+              if len(self.samples) > self.window_size:
+                  self.samples.pop(0)
+
+          def get_percentiles(self) -> dict:
+              if not self.samples:
+                  return {}
+
+              sorted_samples = sorted(self.samples)
+              n = len(sorted_samples)
+
+              return {
+                  "p50": sorted_samples[int(n * 0.50)],
+                  "p90": sorted_samples[int(n * 0.90)],
+                  "p95": sorted_samples[int(n * 0.95)],
+                  "p99": sorted_samples[int(n * 0.99)],
+                  "max": sorted_samples[-1],
+                  "avg": statistics.mean(sorted_samples),
+              }
+
+          def alert_on_p99(self, threshold_ms: float) -> bool:
+              percentiles = self.get_percentiles()
+              if percentiles.get("p99", 0) > threshold_ms:
+                  logger.warning(
+                      f"p99 latency {percentiles['p99']}ms exceeds "
+                      f"threshold {threshold_ms}ms"
+                  )
+                  return True
+              return False
+
+      # SLO based on percentiles
+      class LatencySLO:
+          """Service Level Objective for latency."""
+
+          TARGETS = {
+              "retrieval": {"p50": 50, "p99": 500},
+              "embedding": {"p50": 100, "p99": 1000},
+              "graph_query": {"p50": 20, "p99": 200},
+          }
+
+          async def check_slo(self, operation: str) -> SLOResult:
+              tracker = self.trackers[operation]
+              percentiles = tracker.get_percentiles()
+              targets = self.TARGETS[operation]
+
+              violations = []
+              for metric, target in targets.items():
+                  actual = percentiles.get(metric, 0)
+                  if actual > target:
+                      violations.append(f"{metric}: {actual}ms > {target}ms")
+
+              return SLOResult(
+                  operation=operation,
+                  meeting_slo=len(violations) == 0,
+                  violations=violations,
+              )
+    symptoms:
+      - "Users complain about slowness but dashboards look fine"
+      - "Occasional timeout errors"
+      - "Large variance in response times"
+      - "Only tracking average latency"
+    detection_pattern: 'latency.*mean|average.*latency(?!.*p99|.*percentile)'
+    version_range: ">=1.0.0"
+
+  - id: embedding-not-cached
+    summary: Re-embedding same text repeatedly
+    severity: medium
+    situation: |
+      Same query gets embedded every time it's searched. Same content
+      re-embedded on every startup. Embedding API costs are huge.
+    why: |
+      Embeddings are deterministic: same input → same output. Re-computing
+      wastes API calls, adds latency. Embedding models are expensive.
+    solution: |
+      import hashlib
+      from functools import lru_cache
+
+      class EmbeddingCache:
+          """Cache embeddings by content hash."""
+
+          def __init__(self, redis_client, embedder):
+              self.redis = redis_client
+              self.embedder = embedder
+              self.local_cache = {}  # LRU for hot embeddings
+              self.local_cache_size = 10000
+
+          def _content_hash(self, text: str) -> str:
+              return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+          async def embed(self, text: str) -> List[float]:
+              cache_key = f"emb:{self._content_hash(text)}"
+
+              # L1: Local memory
+              if cache_key in self.local_cache:
+                  return self.local_cache[cache_key]
+
+              # L2: Redis
+              cached = await self.redis.get(cache_key)
+              if cached:
+                  embedding = self._deserialize(cached)
+                  self._add_to_local(cache_key, embedding)
+                  return embedding
+
+              # Miss: Compute and cache
+              embedding = await self.embedder.embed(text)
+
+              # Cache in both levels
+              await self.redis.set(
+                  cache_key,
+                  self._serialize(embedding),
+                  ex=86400 * 30,  # 30 day TTL
+              )
+              self._add_to_local(cache_key, embedding)
+
+              return embedding
+
+          async def embed_batch(
+              self,
+              texts: List[str],
+          ) -> List[List[float]]:
+              """Batch embed with cache lookup."""
+              results = [None] * len(texts)
+              to_embed = []
+              to_embed_indices = []
+
+              # Check cache for each
+              for i, text in enumerate(texts):
+                  cache_key = f"emb:{self._content_hash(text)}"
+                  cached = await self.redis.get(cache_key)
+
+                  if cached:
+                      results[i] = self._deserialize(cached)
+                  else:
+                      to_embed.append(text)
+                      to_embed_indices.append(i)
+
+              # Batch embed misses
+              if to_embed:
+                  new_embeddings = await self.embedder.embed_batch(to_embed)
+
+                  for idx, embedding in zip(to_embed_indices, new_embeddings):
+                      results[idx] = embedding
+                      cache_key = f"emb:{self._content_hash(texts[idx])}"
+                      await self.redis.set(cache_key, self._serialize(embedding))
+
+              return results
+    symptoms:
+      - "High embedding API costs"
+      - "Same texts embedded repeatedly"
+      - "Search latency includes embedding time"
+      - "No embedding cache hit metrics"
+    detection_pattern: 'embed\\(|embed_batch\\((?!.*cache)'
+    version_range: ">=1.0.0"

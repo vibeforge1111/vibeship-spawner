@@ -1,0 +1,152 @@
+# Vector Specialist Validations
+# Automated checks for embedding and retrieval patterns
+
+validations:
+  - id: vector-search-no-rerank
+    name: Vector Search Without Reranking
+    severity: warning
+    type: regex
+    pattern:
+      - 'return.*search\\(.*\\)(?!.*rerank)'
+      - '\\.search\\([^)]+\\)\\s*$'
+    message: "Vector search without reranking. Consider adding cross-encoder reranking for quality."
+    fix_action: "Add reranking step before returning results"
+    applies_to:
+      - "*.py"
+      - "**/retrieval/*.py"
+
+  - id: embedding-no-cache
+    name: Embedding Call Without Caching
+    severity: warning
+    type: regex
+    pattern:
+      - 'await.*embed\\((?!.*cache)'
+      - 'openai.*embed(?!.*cache)'
+    message: "Embedding without caching. Same content may be re-embedded, wasting API costs."
+    fix_action: "Add caching layer with content hash as key"
+    applies_to:
+      - "*.py"
+      - "**/embeddings/*.py"
+
+  - id: embedding-no-batch
+    name: Single Embedding Calls in Loop
+    severity: warning
+    type: regex
+    pattern:
+      - 'for.*in.*:\\s*\\n.*await.*embed\\('
+      - 'for.*:\\s*embed\\('
+    message: "Embedding one at a time in loop. Batch for efficiency and cost savings."
+    fix_action: "Collect texts and use batch embedding API"
+    applies_to:
+      - "*.py"
+
+  - id: vector-only-retrieval
+    name: Vector-Only Retrieval Without Hybrid
+    severity: info
+    type: regex
+    pattern:
+      - 'async def search[^:]*:[\\s\\S]*?vector.*search(?!.*bm25|.*keyword|.*hybrid)'
+    message: "Vector-only retrieval. Consider hybrid (vector + BM25) for better recall."
+    fix_action: "Combine vector search with keyword/BM25 search using RRF"
+    applies_to:
+      - "*.py"
+      - "**/retrieval/*.py"
+
+  - id: large-chunk-size
+    name: Large Document Chunk Size
+    severity: warning
+    type: regex
+    pattern:
+      - 'chunk_size.*(?:1000|1500|2000)'
+      - 'max_tokens.*(?:1000|1500|2000)'
+    message: "Large chunk size (>1000) dilutes specific information. Use 256-512 tokens."
+    fix_action: "Reduce chunk size to 256-512 tokens with 10-20% overlap"
+    applies_to:
+      - "*.py"
+      - "**/chunking/*.py"
+
+  - id: hardcoded-embedding-model
+    name: Hardcoded Embedding Model Name
+    severity: info
+    type: regex
+    pattern:
+      - "model.*=.*['\"]text-embedding"
+      - "model.*=.*['\"]ada"
+    message: "Hardcoded embedding model. Use config/env variable for easier upgrades."
+    fix_action: "Move model name to configuration: EMBEDDING_MODEL = os.getenv(...)"
+    applies_to:
+      - "*.py"
+
+  - id: no-embedding-dimension-check
+    name: Missing Embedding Dimension Validation
+    severity: warning
+    type: regex
+    pattern:
+      - 'def.*embed[^:]*:[\\s\\S]*?return(?!.*len|.*dimension|.*shape)'
+    message: "No dimension validation on embeddings. Model mismatch could cause silent failures."
+    fix_action: "Validate embedding dimension matches expected value"
+    applies_to:
+      - "*.py"
+      - "**/embeddings/*.py"
+
+  - id: quantization-no-recall-test
+    name: Quantization Enabled Without Recall Testing
+    severity: warning
+    type: regex
+    pattern:
+      - 'ScalarQuantization|BinaryQuantization(?!.*recall|.*measure|.*test)'
+    message: "Quantization enabled without recall measurement. Measure recall before/after."
+    fix_action: "Measure recall@k before and after enabling quantization"
+    applies_to:
+      - "*.py"
+      - "**/vector_db/*.py"
+
+  - id: qdrant-no-payload-index
+    name: Qdrant Search With Payload Filter But No Index
+    severity: info
+    type: regex
+    pattern:
+      - 'Filter.*FieldCondition(?!.*create_payload_index)'
+    message: "Filtering on payload field. Consider creating payload index for performance."
+    fix_action: "Create payload index for frequently filtered fields"
+    applies_to:
+      - "*.py"
+      - "**/qdrant/*.py"
+
+  - id: pgvector-no-index
+    name: pgvector Table Without Vector Index
+    severity: warning
+    type: regex
+    pattern:
+      - 'CREATE TABLE.*vector\\([\\s\\S]*?(?!CREATE INDEX.*USING)'
+    message: "pgvector table without index. Queries will be slow O(n) scans."
+    fix_action: "CREATE INDEX USING ivfflat or hnsw on vector column"
+    applies_to:
+      - "*.sql"
+      - "**/migrations/*.py"
+
+  - id: uniform-cache-ttl
+    name: Uniform Cache TTL for Embeddings
+    severity: info
+    type: regex
+    pattern:
+      - 'setex.*(?:3600|86400)\\)'
+      - 'expire.*(?:3600|86400)\\)'
+    message: "Uniform cache TTL can cause thundering herd. Add jitter."
+    fix_action: "Add random jitter (±10%) to TTL to spread cache expiry"
+    applies_to:
+      - "*.py"
+      - "**/cache/*.py"
+
+  - id: embedding-in-request-handler
+    name: Embedding Call in Request Handler
+    severity: warning
+    type: regex
+    pattern:
+      - '@app\\.(?:get|post)[\\s\\S]*?await.*embed\\('
+      - 'async def.*handler[\\s\\S]*?embed\\('
+    message: "Embedding in request handler adds latency. Consider pre-computing or async."
+    fix_action: "Pre-compute embeddings or move to background task"
+    applies_to:
+      - "*.py"
+      - "**/api/*.py"
