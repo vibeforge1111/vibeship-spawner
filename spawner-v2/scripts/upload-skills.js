@@ -55,6 +55,7 @@ const SKILL_CATEGORIES = [
   'integration',
   'pattern',
   'startup',      // YC/founder skills
+  'mind',         // AI memory specialists
 ];
 
 /**
