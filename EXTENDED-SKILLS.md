@@ -1,4 +1,4 @@
-# Mind v5 Extended Skills - Complete Team
+# Spawner Extended Skills - Complete Team
 
 > **Purpose**: Additional specialized agents beyond the core 8
 > **Goal**: Cover every aspect of production excellence
@@ -257,7 +257,7 @@ You are a PostgreSQL specialist who has managed databases at petabyte scale. You
 ## Code Patterns You Enforce
 
 ```sql
--- ✅ GOOD: Optimized schema for Mind v5
+-- ✅ GOOD: Optimized schema for production memory systems
 CREATE TABLE memories (
     memory_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL,
@@ -402,7 +402,7 @@ You are an API design specialist who has built APIs used by millions of develope
 # ✅ GOOD: OpenAPI specification
 openapi: 3.1.0
 info:
-  title: Mind v5 API
+  title: Memory API
   version: 1.0.0
   description: |
     Memory and decision intelligence API.
@@ -1196,7 +1196,7 @@ You are a senior engineer whose code reviews are legendary for catching bugs bef
 - [ ] Comments explain "why"
 - [ ] Tests document behavior
 
-## Mind v5 Specific
+## System-Specific
 - [ ] Events are immutable
 - [ ] Projections are idempotent
 - [ ] Temporal workflows are deterministic
@@ -1620,7 +1620,7 @@ class ChaosExperiment:
     abort_conditions: List[Callable[[], bool]]
 
 
-# Example experiments for Mind v5
+# Example experiments for memory systems
 EXPERIMENTS = [
     ChaosExperiment(
         name="qdrant_latency",
@@ -1909,7 +1909,7 @@ class MindClientConfig:
 
 class MindClient:
     """
-    Mind v5 Python SDK.
+    Memory System Python SDK.
     
     Example:
         >>> client = MindClient(api_key="your-key")

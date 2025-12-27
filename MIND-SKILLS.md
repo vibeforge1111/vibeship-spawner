@@ -1,6 +1,6 @@
-# Mind v5 Skill Definitions for Spawner Agents
+# Spawner Skill Definitions for AI Agents
 
-> **Purpose**: Define the specialized agents needed to build Mind v5
+> **Purpose**: Define the specialized agents for production-grade development
 > **Created with**: Opus via Spawner
 > **Standard**: Each skill represents a senior+ engineer's expertise
 
@@ -8,7 +8,7 @@
 
 ## Overview: The Dream Team
 
-Building Mind v5 requires specialists who don't just know their domain—they've been burned by the sharp edges and know exactly where the dragons live.
+Building production systems requires specialists who don't just know their domain—they've been burned by the sharp edges and know exactly where the dragons live.
 
 | Skill | Role | Core Expertise |
 |-------|------|----------------|
@@ -1162,7 +1162,7 @@ The skill should represent a senior engineer who has:
 - Seen what breaks and why
 - Learned from painful experience
 
-Make it specific to Mind v5 technology choices.
+Make it specific to your project's technology choices.
 ```
 
 ---

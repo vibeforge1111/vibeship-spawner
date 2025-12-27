@@ -196,5 +196,5 @@
   - spawner_skills({ action: "search", query: "graph" }) works without error   
   - spawner_skills({ action: "exists", name: "graph-engineer" }) returns correct result
   - spawner_skills({ action: "get_files", name: "Event Architect" }) returns all 8 files
-  - spawner_skills({ action: "list", tag: "ai-memory" }) shows all 20 Mind v5 skills
+  - spawner_skills({ action: "list", tag: "ai-memory" }) shows all relevant skills
   - Creating a skill that exists shows warning/error instead of duplicating 
