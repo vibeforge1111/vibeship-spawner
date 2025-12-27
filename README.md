@@ -14,7 +14,7 @@ Spawner adds capabilities Claude doesn't have by default:
 2. **Guardrails** - Actually catches code issues (not just suggests)
 3. **Sharp Edges** - Knows gotchas Claude doesn't know
 4. **Escape Hatches** - Detects when you're stuck and offers alternatives
-5. **Skill System** - 35+ specialist skills in YAML format
+5. **Skill System** - 105 specialist skills loaded locally (zero cost)
 6. **Skill Level Detection** - Adapts guidance to your experience level
 
 ---
@@ -38,7 +38,21 @@ Add to your Claude Desktop MCP configuration:
 
 Restart Claude Desktop.
 
-### 2. Start Building
+### 2. Install Local Skills (One-Time)
+
+Skills are loaded locally for zero API cost. Clone once, use forever:
+
+**Windows:**
+```bash
+git clone https://github.com/vibeforge1111/vibeship-spawner-skills %USERPROFILE%\.spawner\skills
+```
+
+**macOS/Linux:**
+```bash
+git clone https://github.com/vibeforge1111/vibeship-spawner-skills ~/.spawner/skills
+```
+
+### 3. Start Building
 
 Open Claude and describe your idea:
 
@@ -58,6 +72,7 @@ Spawner automatically:
 
 | Tool | Purpose |
 |------|---------|
+| `spawner_orchestrate` | **Call first.** Detects context, sets up skills, routes to resume/analyze/brainstorm |
 | `spawner_plan` | Plan and create projects (discover → recommend → create) |
 | `spawner_analyze` | Analyze existing codebase for stack/skill recommendations |
 | `spawner_load` | Load project context and skills for session |
@@ -91,19 +106,26 @@ Spawner automatically:
 
 ## Skill System
 
-### 35+ Skills
+### 105 Skills (Zero Cost)
 
-Spawner includes 35+ skills across categories:
-- **Frameworks:** nextjs-app-router, supabase-backend, react-patterns, tailwind-ui, typescript-strict
-- **Development:** frontend, backend, devops, cybersecurity, qa-engineering, game-development
-- **Design:** ui-design, ux-design, branding, landing-page-design
-- **Marketing:** copywriting, content-strategy, viral-marketing
-- **Strategy:** product-strategy, growth-strategy, brand-positioning
-- **Product:** product-management, analytics, a-b-testing
+Skills are loaded locally from `~/.spawner/skills/`. No API calls, works offline.
+
+**Categories:**
+- **Development (31):** backend, frontend, api-designer, auth-specialist, devops, security, test-architect...
+- **Data (6):** postgres-wizard, redis-specialist, vector-specialist, graph-engineer...
+- **AI (3):** llm-architect, ml-memory, causal-scientist
+- **Design (4):** ui-design, ux-design, branding, landing-page-design
+- **Frameworks (6):** nextjs-app-router, react-patterns, svelte-kit, vue-composition...
+- **Marketing (33):** copywriting, content-strategy, seo, growth, social-media...
+- **Startup (3):** yc-partner, fundraising, pitch-deck
+- **Strategy (2):** product-strategy, competitive-analysis
+- **Product (4):** product-management, analytics, roadmapping...
+- **Communications:** investor-updates, pitching, writing
+- **Integration:** webhooks, api-integration, third-party-services
 
 ```
 You: What skills are available for authentication?
-Claude: [Uses spawner_skills({ query: "auth" })]
+Claude: [Reads ~/.spawner/skills/development/auth-specialist/skill.yaml]
 ```
 
 ### Squads
@@ -268,7 +290,8 @@ Claude: Loading payments squad: payments-flow (lead), stripe-webhooks, error-han
 
 - **Runtime:** Cloudflare Workers
 - **Database:** Cloudflare D1 (SQLite)
-- **Cache/Skills:** Cloudflare KV
+- **Cache:** Cloudflare KV (validations, sharp edges)
+- **Skills:** Local filesystem (`~/.spawner/skills/`) - zero API cost
 - **Protocol:** MCP (Model Context Protocol)
 - **Language:** TypeScript
 
@@ -283,24 +306,24 @@ vibeship-spawner/
 │   │   ├── index.ts      # Main worker, MCP routing
 │   │   ├── tools/        # MCP tool implementations
 │   │   ├── validation/   # Code checking
-│   │   ├── skills/       # Skill loading
+│   │   ├── skills/       # Skill loading (internal)
 │   │   └── db/           # D1 database operations
-│   ├── skills/           # 35+ Skills (YAML format)
 │   └── migrations/       # D1 schema
-├── archive/              # Archived code (workers-v1, v1-skills, v1-scripts)
-├── benchmarks/           # Skill benchmark system
-├── catalogs/             # Agent and MCP catalogs
-├── mcp-registry.json     # MCP tool/template registry
-├── docs/
-│   ├── TUTORIAL.md       # Getting started guide
-│   ├── archive/          # Historical documentation
-│   └── V2/               # V2 documentation
-│       ├── PRD.md        # Product requirements
-│       ├── ARCHITECTURE.md
-│       ├── SKILL_CREATION_GUIDE.md
-│       └── ROADMAP.md
-└── web/                  # Web UI (SvelteKit)
+├── docs/V2/              # Documentation (PRD, Architecture, etc.)
+├── web/                  # Web UI (SvelteKit)
+└── archive/              # Historical code
+
+~/.spawner/skills/        # LOCAL SKILLS (separate repo)
+├── development/          # 31 skills
+├── data/                 # 6 skills
+├── ai/                   # 3 skills
+├── design/               # 4 skills
+├── frameworks/           # 6 skills
+├── marketing/            # 33 skills
+└── ...                   # 105 total
 ```
+
+**Skills repo:** [vibeforge1111/vibeship-spawner-skills](https://github.com/vibeforge1111/vibeship-spawner-skills)
 
 ---
 
