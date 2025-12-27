@@ -1,0 +1,401 @@
+# Debugging Master Sharp Edges
+# Real gotchas from production debugging - the traps that waste hours
+
+sharp_edges:
+  - id: temporal-chasm
+    title: The Temporal Chasm - Symptom Far From Cause in Time
+    severity: critical
+    situation: |
+      Bug manifests hours, days, or weeks after the code that caused it ran.
+      Memory leak shows up after days. Cache corruption surfaces on next deploy.
+      Data written wrong shows up when read months later.
+    why: |
+      Developers look at recent code changes. The actual cause was deployed
+      weeks ago but only triggered now. Or the bug was always there but
+      conditions finally aligned. The timeline misdirects the investigation.
+    solution: |
+      1. Don't assume the bug is in recent code
+      2. Ask: "When could this bad state have been created?"
+      3. Check for delayed effects:
+         - Cron jobs that ran overnight
+         - Cache expiration timing
+         - Data that was written long ago
+         - Migrations that ran last week
+      4. Use data forensics:
+         - created_at / updated_at timestamps
+         - Audit logs showing when data changed
+         - Deploy logs showing when code changed
+
+      Example: User can't log in today. Bug is in password hashing.
+      But password was SET 6 months ago. The bug was in the signup
+      flow that ran 6 months ago, not in today's login flow.
+    symptoms:
+      - Bug appears on data that existed before the symptom
+      - Works for new users, breaks for old users (or vice versa)
+      - Appears after cache/restart clears state
+      - Correlated with scheduled jobs, not user actions
+    detection_pattern: "created_at|updated_at|migration|cron|scheduled"
+
+  - id: spatial-chasm
+    title: The Spatial Chasm - Symptom Far From Cause in Code
+    severity: critical
+    situation: |
+      Error surfaces in module A, but root cause is in module B. Frontend
+      shows wrong data, but bug is in backend validation. API returns 500,
+      but cause is in the ORM layer three abstractions away.
+    why: |
+      Developers start where the error appears. But abstractions, event
+      systems, and data flow mean the cause can be anywhere. Stack traces
+      show where it crashed, not where it went wrong.
+    solution: |
+      1. Trace the data, not the error
+         - Where did this value come from?
+         - What function produced it?
+         - What was its input?
+
+      2. Work backward from symptom:
+         Bad output → function that produced it → input to that function →
+         function that produced the input → repeat until you find bad logic
+
+      3. Don't trust the stack trace location:
+         - Error at line 50 doesn't mean bug at line 50
+         - Bug could be the function that returned bad data
+
+      Example: "Cannot read property 'name' of null" at line 50.
+      Line 50 is correct code. The bug is in line 12, which forgot
+      to return early when lookup failed, returning null instead.
+    symptoms:
+      - Stack trace location is in correct code
+      - Bug in library/framework you trust
+      - Error in generic code (serialization, validation)
+      - Multiple symptoms in different places from one root cause
+    detection_pattern: "at.*\\.js:\\d+|TypeError|ReferenceError|null|undefined"
+
+  - id: heisenbug
+    title: The Heisenbug - Bug Disappears Under Observation
+    severity: high
+    situation: |
+      Bug happens in production. Add logging, can't reproduce. Remove logging,
+      bug returns. Works in debugger, breaks when running normally. Only
+      fails under load, never in testing.
+    why: |
+      Observation changes the system. Logging adds delays that hide race
+      conditions. Debugger pauses threads, changing timing. Memory layout
+      differs between debug and release builds. The act of looking changes
+      what you're looking at.
+    solution: |
+      1. Accept that observation IS the clue
+         - What does logging change? Timing.
+         - What does debugger change? Thread interleaving.
+         - What does testing change? Load, memory pressure.
+
+      2. Reproduce conditions without observation:
+         - Add artificial delays instead of debugger pauses
+         - Use non-blocking logging (async log shipping)
+         - Test at production-like scale
+
+      3. Look for timing-related bugs:
+         - Race conditions (two threads, shared state)
+         - Timeout edge cases
+         - Event ordering assumptions
+         - Cache expiration during operation
+
+      4. Use post-mortem techniques:
+         - Core dumps
+         - Tracing (not logging)
+         - Record-and-replay debugging
+    symptoms:
+      - Works in debug mode, fails in release
+      - Works locally, fails in production
+      - Works with logging, fails without
+      - Only happens under load
+    detection_pattern: "race|concurrent|async|thread|parallel|load"
+
+  - id: coincidental-fix
+    title: The Coincidental Fix - Unrelated Change "Fixed" It
+    severity: high
+    situation: |
+      Bug exists. You make changes. Bug disappears. Ship it. But your
+      change didn't actually fix the root cause - something else happened.
+      Deploy, revert something else, bug returns. Now you're lost.
+    why: |
+      Software is complex. Changes have side effects. Your "fix" might have
+      changed timing, memory layout, or code paths in a way that hides
+      the bug without fixing it. You have no idea why it works.
+    solution: |
+      1. ALWAYS understand why your fix works
+         - What was the root cause?
+         - How does your change address it?
+         - Can you explain it to someone else?
+
+      2. Verify fix addresses root cause:
+         - Can you reproduce the bug reliably first?
+         - Does your fix break if you undo half of it?
+         - Can you write a test that fails before, passes after?
+
+      3. If you can't explain it:
+         - The bug isn't fixed
+         - Revert your change and keep investigating
+         - You got lucky; don't ship luck
+    symptoms:
+      - Cannot explain why the fix works
+      - Fix is in unrelated code
+      - Bug returns after unrelated changes
+      - '"It just started working"'
+    detection_pattern: "somehow|not sure why|seems to work|mysteriously"
+
+  - id: log-level-blindness
+    title: Log Level Blindness - Critical Info Lost to Wrong Level
+    severity: medium
+    situation: |
+      The information you need to debug was logged - at DEBUG level. But
+      production runs at INFO or WARN. The clue existed, but you couldn't
+      see it. Or the opposite: so much logging that the signal is buried.
+    why: |
+      Log levels are set at deploy time, not debug time. When the bug
+      happens, you can't change what was logged. Either everything was
+      logged (noise) or critical context wasn't logged (blind).
+    solution: |
+      1. Design logging for debugging upfront:
+         - ERROR: Operation failed, action needed
+         - WARN: Unexpected but handled, might be bug
+         - INFO: Significant events (request start/end, state changes)
+         - DEBUG: Detailed trace for debugging
+
+      2. Key events must be at INFO or higher:
+         - Request received (with ID for correlation)
+         - External calls (API, database, cache)
+         - State transitions
+         - Error recovery attempts
+
+      3. Implement correlation IDs:
+         - Every request gets unique ID
+         - All logs include that ID
+         - Can trace full request flow
+
+      4. Consider structured logging:
+         - JSON logs with fields
+         - Queryable in log aggregator
+         - Find all logs for user_id=X, request_id=Y
+    symptoms:
+      - Logs exist but don't help
+      - Need to reproduce with debug logging enabled
+      - Can't correlate related log entries
+      - Important events not logged
+    detection_pattern: "log\\.debug|console\\.log|print\\(|logger\\."
+
+  - id: fix-vs-workaround
+    title: The Fix That Wasn't - Symptom Gone, Root Cause Remains
+    severity: high
+    situation: |
+      Add null check to prevent crash. Add retry to handle timeout.
+      Add cache to work around slow query. Symptom is gone, but root
+      cause remains. Bug will resurface in new form.
+    why: |
+      Under pressure, fixing the symptom is faster than fixing the cause.
+      But symptoms are infinite; causes are finite. Treat the cause,
+      not the symptom, or you'll play whack-a-mole forever.
+    solution: |
+      1. Distinguish fix from workaround:
+         - Fix: Addresses root cause, bug cannot recur
+         - Workaround: Hides symptom, root cause remains
+
+      2. Both have their place:
+         - Workaround: Stops the bleeding NOW (production is down)
+         - Fix: Prevents recurrence (do after workaround)
+
+      3. Track workarounds as tech debt:
+         - Mark in code: // WORKAROUND: issue #123
+         - Create ticket for real fix
+         - Set deadline to address root cause
+
+      4. Example:
+         Workaround: Add null check before .name access
+         Fix: Ensure object is never null (fix initialization)
+    symptoms:
+      - Code has defensive checks everywhere
+      - Same type of bug in multiple places
+      - Comments like "not sure why this is needed"
+      - Retries / fallbacks as first resort
+    detection_pattern: "// hack|// workaround|// TODO.*fix|if.*!= null|\\|\\| \\[\\]|\\|\\| \\{\\}"
+
+  - id: environment-mismatch
+    title: '"It Works On My Machine" - Environment Differences'
+    severity: medium
+    situation: |
+      Works locally, breaks in staging. Works in staging, breaks in
+      production. Works for you, breaks for teammate. The code is the
+      same, but the behavior differs.
+    why: |
+      Environments differ in ways you don't see: dependencies, config,
+      permissions, data, load, network, OS. Your local environment lies
+      to you - it's too clean, too controlled, too empty.
+    solution: |
+      1. Identify what differs:
+         - Dependency versions (package.lock, requirements.txt)
+         - Environment variables
+         - Database contents (fresh vs years of data)
+         - Permissions (root vs non-root, file access)
+         - Network (localhost vs DNS, latency, firewalls)
+
+      2. Reproduce production conditions locally:
+         - Use Docker with production-like image
+         - Load production data sample (anonymized)
+         - Set same environment variables
+         - Run as non-privileged user
+
+      3. When can't reproduce locally:
+         - Debug in the failing environment
+         - Add logging, deploy, observe
+         - Use remote debugging if available
+         - Accept that local ≠ production
+    symptoms:
+      - Works on one machine, not another
+      - Works in tests, fails in production
+      - Works first deploy, fails subsequent
+      - Bug correlated with environment (time zone, locale, OS)
+    detection_pattern: "env|config|NODE_ENV|RAILS_ENV|production|staging"
+
+  - id: insufficient-reproduction
+    title: Cannot Reproduce - Not Trying Hard Enough
+    severity: medium
+    situation: |
+      Bug reported. You try to reproduce. Can't. Close as "cannot reproduce."
+      Bug reopens. User is frustrated. You're frustrated. No progress.
+    why: |
+      Reproduction requires matching conditions: inputs, state, timing,
+      environment. If you can't reproduce, you haven't matched conditions.
+      "Cannot reproduce" often means "didn't try hard enough."
+    solution: |
+      1. Get exact reproduction steps from reporter:
+         - Exact inputs (not "I entered my email")
+         - Exact sequence (not "I clicked around")
+         - Screenshots / video if possible
+         - Environment details (browser, OS, account)
+
+      2. Match their environment:
+         - Same browser/app version
+         - Same account type (permissions)
+         - Same data state
+         - Same time of day (if timing matters)
+
+      3. Check for intermittent conditions:
+         - Load (only under high traffic?)
+         - Timing (only first request after idle?)
+         - Data (only with specific values?)
+         - History (only after certain prior actions?)
+
+      4. If still can't reproduce:
+         - Add logging for the specific scenario
+         - Wait for next occurrence with logs
+         - Use feature flags to enable tracing for affected users
+    symptoms:
+      - Bug reports closed as "cannot reproduce"
+      - Same bug repeatedly reported
+      - Works for developer, fails for user
+      - Intermittent failures
+    detection_pattern: "cannot reproduce|works for me|unable to replicate"
+
+  - id: assumption-validation
+    title: Trusting Instead of Verifying
+    severity: medium
+    situation: |
+      You trust that the library works. You trust the documentation.
+      You trust the API response. You trust the database value. But
+      something in that chain is lying to you.
+    why: |
+      Debugging requires skepticism. Every assumption is a potential
+      blind spot. The bug hides in what you don't question. The more
+      you trust something, the less you look at it.
+    solution: |
+      1. Verify every link in the chain:
+         - Actual request sent (not what you think you sent)
+         - Actual response received (not what you expect)
+         - Actual value in database (not what you wrote)
+         - Actual config loaded (not what's in file)
+
+      2. Tools for verification:
+         - Network tab for HTTP requests/responses
+         - Database query to check actual values
+         - Environment dump to check loaded config
+         - Print statement at the exact moment
+
+      3. Trust, but verify:
+         - "I'm sending X" → print/log request body
+         - "Database has Y" → query database directly
+         - "Config is Z" → print loaded config at startup
+    symptoms:
+      - Bug in "known good" code
+      - Documentation doesn't match behavior
+      - Expected value differs from actual value
+      - Third-party integration behaves unexpectedly
+    detection_pattern: "should be|supposed to|according to|documentation says"
+
+  - id: multiple-bugs
+    title: More Than One Bug - Tangled Symptoms
+    severity: medium
+    situation: |
+      Fix a bug. Some symptoms disappear, others remain. You think your
+      fix is incomplete, but actually there were two bugs with overlapping
+      symptoms. You're chasing a ghost.
+    why: |
+      When multiple bugs affect the same area, their symptoms interleave.
+      Fixing one clears part of the picture but confuses the rest. You
+      attribute remaining symptoms to the bug you "partially fixed."
+    solution: |
+      1. Suspect multiple bugs when:
+         - Fix solves some symptoms but not others
+         - Symptoms seem inconsistent or contradictory
+         - Different users report different variations
+
+      2. Isolate each bug separately:
+         - Create separate reproduction cases
+         - Fix one, verify complete fix
+         - Then investigate remaining symptoms as new bug
+
+      3. Track bugs independently:
+         - Separate tickets for each
+         - Don't assume they're related
+         - Each needs its own root cause analysis
+    symptoms:
+      - Partial fixes
+      - Contradictory bug reports
+      - Fix helps some users, not others
+      - Symptoms change after fix
+    detection_pattern: "still broken|partially fixed|sometimes works|inconsistent"
+
+  - id: data-corruption-legacy
+    title: The Corrupted Data From Long Ago
+    severity: high
+    situation: |
+      Bug in current code can't explain the bad data. The data is wrong,
+      but the current code couldn't have produced it. You're debugging
+      the wrong version of the code.
+    why: |
+      Data persists across code versions. A bug fixed months ago could
+      have written bad data that still exists. You're looking at current
+      code, but the bug was in code that no longer exists.
+    solution: |
+      1. Check when data was created/modified:
+         - Audit logs
+         - created_at / updated_at columns
+         - Version columns if you have them
+
+      2. Correlate with code versions:
+         - When was this user created?
+         - What code was deployed then?
+         - Check that version's git history
+
+      3. Consider:
+         - Old migrations that had bugs
+         - Manual database edits
+         - Data imports from external systems
+         - API clients sending bad data
+
+      4. May need data migration to fix, not code change
+    symptoms:
+      - Bad data that current code can't produce
+      - Old users affected, new users fine
+      - Data inconsistent with database constraints
+      - Fix doesn't help existing data
+    detection_pattern: "old|legacy|historical|created.*ago|migrate"
