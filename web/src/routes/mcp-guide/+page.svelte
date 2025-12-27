@@ -561,6 +561,16 @@ New score: 91/100 (+4)`,
             <p>Run <code>claude</code> in your project. Type <code>/mcp</code> to verify Spawner is connected.</p>
           </div>
         </div>
+
+        <div class="setup-note">
+          <span class="note-icon">💡</span>
+          <div class="note-content">
+            <p><strong>Skills setup:</strong> Spawner will automatically prompt you to clone 105 local skills on first use. If it doesn't, run manually:</p>
+            <div class="code-block">
+              <code>git clone https://github.com/vibeforge1111/vibeship-spawner-skills ~/.spawner/skills</code>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="setup-tabs">
@@ -598,6 +608,16 @@ New score: 91/100 (+4)`,
           <div class="step-content">
             <h4>Restart Claude Desktop</h4>
             <p>Fully quit and reopen. Look for the <strong>hammer icon</strong> in the chat input - that means Spawner is connected!</p>
+          </div>
+        </div>
+
+        <div class="setup-note">
+          <span class="note-icon">💡</span>
+          <div class="note-content">
+            <p><strong>Skills setup:</strong> Spawner will automatically prompt you to clone 105 local skills on first use. If it doesn't, run manually:</p>
+            <div class="code-block">
+              <code>git clone https://github.com/vibeforge1111/vibeship-spawner-skills ~/.spawner/skills</code>
+            </div>
           </div>
         </div>
       </div>
@@ -663,8 +683,8 @@ New score: 91/100 (+4)`,
 
   <!-- CTA -->
   <section class="cta-section">
-    <h2>Explore 40+ Skills</h2>
-    <p class="cta-desc">Spawner's real power comes from specialist skills. Browse the library or create your own.</p>
+    <h2>Explore 105 Skills</h2>
+    <p class="cta-desc">Spawner's real power comes from 105 specialist skills loaded locally. Browse the library or create your own.</p>
     <div class="cta-buttons">
       <a href="/skills" class="btn btn-primary">Browse Skills</a>
       <a href="/skill-creation" class="btn btn-secondary">Create a Skill</a>
@@ -819,6 +839,36 @@ New score: 91/100 (+4)`,
     font-size: var(--text-sm);
     color: var(--terminal-text);
     margin: 0;
+  }
+
+  .setup-note {
+    display: flex;
+    gap: var(--space-3);
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--green-dim);
+    padding: var(--space-4);
+    margin-top: var(--space-4);
+  }
+
+  .note-icon {
+    font-size: var(--text-base);
+    flex-shrink: 0;
+  }
+
+  .note-content {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .note-content p {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    margin: 0 0 var(--space-3) 0;
+  }
+
+  .note-content .code-block {
+    margin-top: var(--space-2);
   }
 
   /* Workflows */

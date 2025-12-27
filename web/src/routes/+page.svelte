@@ -293,6 +293,8 @@
     }
   }
 }`,
+    'skills-clone-unix': 'git clone https://github.com/vibeforge1111/vibeship-spawner-skills ~/.spawner/skills',
+    'skills-clone-windows': 'git clone https://github.com/vibeforge1111/vibeship-spawner-skills %USERPROFILE%\\.spawner\\skills',
     'new-project': 'I want to build [your idea]. Use spawner_plan to help me get started.',
     'existing-project': 'Analyze this codebase with spawner_analyze and load the right skills.',
     'gotchas': 'Use spawner_watch_out to check for sharp edges before I implement [feature].',
@@ -1081,6 +1083,17 @@ export async function GET(req: Request) {
               <p class="qs-instruction">Run <code>claude</code> in your project. Type <code>/mcp</code> to verify Spawner is connected.</p>
             </div>
           </div>
+
+          <div class="qs-note">
+            <span class="qs-note-icon">💡</span>
+            <div class="qs-note-content">
+              <p><strong>Skills setup:</strong> Spawner will automatically prompt you to clone 105 local skills on first use. If it doesn't, you can run manually:</p>
+              <div class="qs-code-block small">
+                <pre>git clone https://github.com/vibeforge1111/vibeship-spawner-skills ~/.spawner/skills</pre>
+                <button class="copy-btn small" onclick={() => copyToClipboard('skills-clone-unix')}>Copy</button>
+              </div>
+            </div>
+          </div>
         {:else}
           <div class="qs-step">
             <span class="qs-step-number">1</span>
@@ -1114,6 +1127,17 @@ export async function GET(req: Request) {
             <div class="qs-step-content">
               <span class="qs-step-label">Restart Claude Desktop</span>
               <p class="qs-instruction">Fully quit and reopen. Look for the hammer icon in the chat input - that means Spawner is connected!</p>
+            </div>
+          </div>
+
+          <div class="qs-note">
+            <span class="qs-note-icon">💡</span>
+            <div class="qs-note-content">
+              <p><strong>Skills setup:</strong> Spawner will automatically prompt you to clone 105 local skills on first use. If it doesn't, you can run manually:</p>
+              <div class="qs-code-block small">
+                <pre>git clone https://github.com/vibeforge1111/vibeship-spawner-skills ~/.spawner/skills</pre>
+                <button class="copy-btn small" onclick={() => copyToClipboard('skills-clone-unix')}>Copy</button>
+              </div>
             </div>
           </div>
         {/if}
@@ -3155,6 +3179,38 @@ export async function GET(req: Request) {
     height: 1px;
     background: var(--border);
     margin: var(--space-6) 0;
+  }
+
+  .qs-note {
+    display: flex;
+    gap: var(--space-3);
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    padding: var(--space-4);
+    margin-top: var(--space-4);
+    border-radius: 4px;
+  }
+
+  .qs-note-icon {
+    font-size: var(--text-base);
+    flex-shrink: 0;
+  }
+
+  .qs-note-content {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .qs-note-content p {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--terminal-text);
+    margin: 0 0 var(--space-3) 0;
+  }
+
+  .qs-note-content .qs-code-block {
+    margin-top: var(--space-2);
   }
 
   .qs-step-label {
