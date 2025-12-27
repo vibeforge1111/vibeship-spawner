@@ -45,6 +45,51 @@
 │   └───────────┘      └───────────┘      └───────────┘             │
 │                                                                    │
 └────────────────────────────────────────────────────────────────────┘
+
+                        +
+                        │
+                        ▼
+┌────────────────────────────────────────────────────────────────────┐
+│                     LOCAL FILESYSTEM                               │
+│                                                                    │
+│   ~/.spawner/skills/              ← 105 skills (YAML)              │
+│   ├── development/                   Cloned from GitHub            │
+│   ├── data/                          Zero API cost                 │
+│   ├── ai/                            Works offline                 │
+│   └── ...                                                          │
+│                                                                    │
+│   GitHub: vibeforge1111/vibeship-spawner-skills                    │
+│                                                                    │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Skill Loading Model
+
+**Hybrid Architecture:**
+
+| Component | Where | Purpose |
+|-----------|-------|---------|
+| Skill Content | Local filesystem (`~/.spawner/skills/`) | Claude reads YAML files directly. Zero API cost, works offline. |
+| Validations | Cloudflare KV | MCP runs code checks server-side |
+| Sharp Edges | Cloudflare KV | Quick lookup for situation-specific gotchas |
+| Project Memory | Cloudflare D1 | Persistent storage for decisions, sessions, issues |
+
+**Why Local Skills?**
+- Free forever (no API calls for skill content)
+- Fast (local file reads)
+- Works offline after initial clone
+- Easy to customize (edit YAML files)
+- Easy to update (`git pull`)
+
+**Setup:**
+```bash
+# One-time clone
+git clone https://github.com/vibeforge1111/vibeship-spawner-skills ~/.spawner/skills
+
+# Update skills
+cd ~/.spawner/skills && git pull
 ```
 
 ---

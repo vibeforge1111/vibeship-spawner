@@ -4,16 +4,17 @@ import skillsData from '$lib/data/skills.json';
 
 // Category metadata
 const CATEGORY_META: Record<string, { icon: string; description: string }> = {
-  frameworks: { icon: 'code', description: 'Deep expertise in specific technology frameworks' },
-  development: { icon: 'terminal', description: 'Core software engineering skills' },
+  ai: { icon: 'brain', description: 'AI/ML architecture, LLMs, and intelligent systems' },
+  communications: { icon: 'message-circle', description: 'Developer and stakeholder communication' },
+  data: { icon: 'database', description: 'Databases, vectors, graphs, and data engineering' },
   design: { icon: 'palette', description: 'User experience and visual design' },
-  strategy: { icon: 'target', description: 'Business and product strategy' },
+  development: { icon: 'terminal', description: 'Core software engineering skills' },
+  frameworks: { icon: 'code', description: 'Deep expertise in specific technology frameworks' },
+  integration: { icon: 'link', description: 'Connecting services and systems' },
   marketing: { icon: 'megaphone', description: 'Growth and customer acquisition' },
   product: { icon: 'box', description: 'Product management and analytics' },
-  integration: { icon: 'link', description: 'Connecting services and systems' },
   startup: { icon: 'rocket', description: 'Startup-specific expertise' },
-  pattern: { icon: 'grid', description: 'Cross-cutting patterns and practices' },
-  communications: { icon: 'message-circle', description: 'Developer and stakeholder communication' }
+  strategy: { icon: 'target', description: 'Business and product strategy' }
 };
 
 // Load and enrich categories
