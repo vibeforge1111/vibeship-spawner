@@ -1,0 +1,158 @@
+# Data Engineer Validations
+# Automated checks for data pipeline patterns
+
+validations:
+  - id: non-idempotent-insert
+    name: Non-Idempotent Insert
+    severity: error
+    type: regex
+    pattern:
+      - 'INSERT INTO(?!.*ON CONFLICT|.*UPSERT|.*MERGE)'
+      - '\.insert\((?!.*upsert|.*on_conflict)'
+    message: "Insert without upsert/conflict handling. Re-runs will create duplicates."
+    fix_action: "Use INSERT ON CONFLICT or MERGE for idempotent inserts"
+    applies_to:
+      - "**/*.py"
+      - "**/*.sql"
+
+  - id: no-transaction
+    name: Multi-Statement Without Transaction
+    severity: warning
+    type: regex
+    pattern:
+      - 'execute.*execute(?!.*transaction|.*BEGIN)'
+      - '\.run\(\).*\.run\(\)(?!.*atomic)'
+    message: "Multiple statements without transaction. Partial failure leaves inconsistent state."
+    fix_action: "Wrap in transaction: async with db.transaction()"
+    applies_to:
+      - "**/*.py"
+
+  - id: except-pass
+    name: Silent Exception Swallowing
+    severity: error
+    type: regex
+    pattern:
+      - 'except.*:\s*pass'
+      - 'except.*:\s*continue'
+      - 'catch.*\{\s*\}'
+    message: "Exception silently swallowed. Data may be lost without trace."
+    fix_action: "Log error and send to dead letter queue"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+
+  - id: naive-datetime
+    name: Timezone-Naive Datetime
+    severity: warning
+    type: regex
+    pattern:
+      - 'datetime\.now\(\)(?!.*tz)'
+      - 'datetime\.utcnow\(\)'
+      - 'TIMESTAMP(?!.*WITH TIME ZONE)'
+    message: "Timezone-naive datetime can cause aggregation errors."
+    fix_action: "Use datetime.now(timezone.utc) or TIMESTAMP WITH TIME ZONE"
+    applies_to:
+      - "**/*.py"
+      - "**/*.sql"
+
+  - id: no-checkpoint
+    name: Long Pipeline Without Checkpoint
+    severity: warning
+    type: regex
+    pattern:
+      - 'for.*in.*:.*process(?!.*checkpoint|.*commit)'
+      - 'while.*:.*batch(?!.*save.*state)'
+    message: "Long-running loop without checkpointing. Failure loses all progress."
+    fix_action: "Add checkpoint/commit after each batch"
+    applies_to:
+      - "**/*.py"
+
+  - id: hardcoded-batch-size
+    name: Hardcoded Batch Size
+    severity: info
+    type: regex
+    pattern:
+      - 'batch_size\s*=\s*\d{4,}'
+      - 'LIMIT\s+\d{4,}'
+      - 'chunk.*size.*=.*\d{4,}'
+    message: "Large hardcoded batch size may cause memory issues."
+    fix_action: "Make batch size configurable and test with production data volumes"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-data-validation
+    name: Loading Without Validation
+    severity: warning
+    type: regex
+    pattern:
+      - 'insert.*\(data\)(?!.*validate|.*schema)'
+      - 'load.*(?!.*check|.*valid)'
+    message: "Loading data without validation. Bad data propagates."
+    fix_action: "Validate schema and business rules before loading"
+    applies_to:
+      - "**/*.py"
+
+  - id: processing-time-window
+    name: Using Processing Time for Windowing
+    severity: warning
+    type: regex
+    pattern:
+      - 'now\(\).*GROUP BY'
+      - 'processing_time.*window'
+      - 'arrival_time.*aggregate'
+    message: "Using processing time for windows. Late data will be in wrong window."
+    fix_action: "Use event_time with watermarks for accurate windowing"
+    applies_to:
+      - "**/*.py"
+      - "**/*.sql"
+
+  - id: unbounded-query
+    name: Query Without Bounds
+    severity: warning
+    type: regex
+    pattern:
+      - 'SELECT.*FROM(?!.*WHERE|.*LIMIT)'
+      - '\.find\(\{\}\)(?!.*limit)'
+    message: "Query without bounds may return unbounded data."
+    fix_action: "Add WHERE clause with date range or LIMIT"
+    applies_to:
+      - "**/*.py"
+      - "**/*.sql"
+
+  - id: no-reconciliation
+    name: No Record Count Reconciliation
+    severity: info
+    type: regex
+    pattern:
+      - 'load.*complete(?!.*count|.*verify)'
+      - 'pipeline.*done(?!.*reconcil)'
+    message: "Pipeline completes without record count verification."
+    fix_action: "Compare source and sink counts after pipeline run"
+    applies_to:
+      - "**/*.py"
+
+  - id: polling-instead-cdc
+    name: Polling for Changes
+    severity: info
+    type: regex
+    pattern:
+      - 'while.*sleep.*SELECT.*WHERE.*updated'
+      - 'poll.*interval.*query'
+      - 'WHERE updated_at > last_sync'
+    message: "Polling for changes is inefficient. Consider CDC."
+    fix_action: "Use Change Data Capture (Debezium, pg_notify) instead"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-dead-letter
+    name: No Dead Letter Queue
+    severity: warning
+    type: regex
+    pattern:
+      - 'except.*log.*error(?!.*dead.*letter|.*dlq)'
+      - 'catch.*console\.error(?!.*retry|.*queue)'
+    message: "Errors logged but not sent to dead letter queue for retry."
+    fix_action: "Send failed records to DLQ for investigation and reprocessing"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"

@@ -1,0 +1,277 @@
+# Test Architect Sharp Edges
+# Production gotchas for testing strategy
+
+sharp_edges:
+  - id: test-database-not-isolated
+    summary: Tests share database, pass alone but fail together
+    severity: high
+    situation: Integration tests with real database
+    why: |
+      Test A creates user with email "test@example.com".
+      Test B also tries to create user with same email.
+      Run separately: both pass. Run together: unique constraint violation.
+      Order-dependent failures are maddening to debug.
+    solution: |
+      1. Use unique identifiers per test:
+         user_email = f"test_{uuid4().hex[:8]}@example.com"
+
+      2. Truncate tables between tests:
+         @pytest.fixture(autouse=True)
+         async def clean_db(database):
+             yield
+             await database.execute("TRUNCATE users CASCADE")
+
+      3. Use transactions that rollback:
+         @pytest.fixture
+         async def db_session(database):
+             async with database.transaction() as tx:
+                 yield tx
+                 await tx.rollback()
+
+      4. Separate database per test file (for parallelization):
+         database_url = f"test_db_{os.getpid()}"
+    symptoms:
+      - Tests pass in isolation, fail in suite
+      - Random test failures in CI
+      - "Unique constraint violation" in test logs
+    detection_pattern: 'fixture.*scope.*session|shared.*database|@pytest.fixture.*scope'
+
+  - id: async-test-not-awaited
+    summary: Async assertions not awaited, test passes falsely
+    severity: critical
+    situation: Testing async Python code
+    why: |
+      async def test_create(): assert create_memory() creates a coroutine, not a result.
+      The assertion checks truthiness of coroutine object (always truthy).
+      Test passes but nothing was actually tested.
+    solution: |
+      1. Always await async calls:
+         async def test_create():
+             result = await create_memory()
+             assert result.id is not None
+
+      2. Use pytest-asyncio correctly:
+         @pytest.mark.asyncio
+         async def test_create():
+             ...
+
+      3. Enable warnings in pytest.ini:
+         filterwarnings = error::RuntimeWarning
+
+      4. Use linter rule to catch:
+         # ruff: enable RUF006 (asyncio-dangling-task)
+    symptoms:
+      - Tests pass but functionality is broken
+      - "coroutine was never awaited" warnings
+      - Async tests complete instantly
+    detection_pattern: 'assert.*\(\)(?!.*await)|async def test.*(?!.*await)'
+
+  - id: mock-hides-real-bug
+    summary: Over-mocking hides integration bugs
+    severity: medium
+    situation: Unit tests with many mocks
+    why: |
+      You mock the database, mock the cache, mock the API.
+      Test passes! But in production, the database returns different
+      types, the cache has serialization issues, the API has pagination.
+      Mocks encoded your assumptions, not reality.
+    solution: |
+      1. Prefer fakes over mocks for complex dependencies:
+         # Fake: in-memory implementation with real behavior
+         class FakeMemoryStore:
+             def __init__(self):
+                 self._data = {}
+             async def get(self, id): return self._data.get(id)
+             async def set(self, id, value): self._data[id] = value
+
+      2. Mock at system boundaries, not internally:
+         # Mock external API, not your own repository
+
+      3. Use integration tests for component interactions:
+         # Real database, real cache, mock only external services
+
+      4. Contract tests verify mock accuracy:
+         # Verify mocks match real service behavior
+    symptoms:
+      - Unit tests pass, integration tests fail
+      - Works in test, fails in production
+      - Tests don't catch obvious bugs
+    detection_pattern: 'mock.*mock.*mock|patch.*patch.*patch|@mock.patch'
+
+  - id: flaky-async-timing
+    summary: Tests flaky due to timing assumptions
+    severity: high
+    situation: Testing async operations with sleeps
+    why: |
+      await asyncio.sleep(0.1) # Wait for background task
+      Works on your machine. CI is slower, task not done in 100ms.
+      Test fails randomly. You increase to 500ms. Now tests are slow AND flaky.
+    solution: |
+      1. Use condition waiting, not fixed sleeps:
+         async def wait_for(condition, timeout=5.0):
+             start = time.monotonic()
+             while not condition():
+                 if time.monotonic() - start > timeout:
+                     raise TimeoutError("Condition not met")
+                 await asyncio.sleep(0.01)
+
+         await wait_for(lambda: task.is_complete)
+
+      2. Return completable futures:
+         task = await start_background_task()
+         await task.wait()  # Explicit completion signal
+
+      3. Use asyncio.wait_for with reasonable timeout:
+         await asyncio.wait_for(operation(), timeout=5.0)
+
+      4. For event-driven, use asyncio.Event:
+         event = asyncio.Event()
+         # Task sets event when done
+         await asyncio.wait_for(event.wait(), timeout=5.0)
+    symptoms:
+      - Tests pass locally, fail in CI
+      - Tests fail under high system load
+      - Random timeouts in async tests
+    detection_pattern: 'sleep\(|time\.sleep|asyncio\.sleep.*0\.'
+
+  - id: test-data-not-representative
+    summary: Test data too simple, misses real-world edge cases
+    severity: medium
+    situation: Testing with hardcoded sample data
+    why: |
+      Test uses {"name": "John"}. Works great.
+      Production gets {"name": "José María García-López"}.
+      Encoding issues, length limits, regex failures.
+      Your tests only tested the happy path.
+    solution: |
+      1. Use property-based testing for data variety:
+         @given(st.text())
+         def test_handles_any_name(name):
+             result = process_name(name)
+             assert result is not None
+
+      2. Include edge cases explicitly:
+         @pytest.mark.parametrize("name", [
+             "John",
+             "José María García-López",
+             "李明",
+             "",
+             "A" * 1000,
+             "John\x00Doe",  # Null byte
+             "<script>alert(1)</script>",
+         ])
+
+      3. Use faker for realistic variety:
+         from faker import Faker
+         fake = Faker(['en_US', 'zh_CN', 'es_ES'])
+         name = fake.name()
+
+      4. Snapshot production data (anonymized) for tests
+    symptoms:
+      - Tests pass, production fails on real data
+      - Edge cases discovered by users
+      - Encoding/length errors in production
+    detection_pattern: 'test.*John|test.*example\.com|hardcoded.*test'
+
+  - id: missing-cleanup-leaks-resources
+    summary: Test creates resources but doesn't clean up
+    severity: medium
+    situation: Tests that create files, connections, or external resources
+    why: |
+      Each test creates temp file. 1000 tests = 1000 files.
+      Disk fills up. Or tests create database connections without closing.
+      Connection pool exhausted. CI hangs.
+    solution: |
+      1. Use context managers and fixtures:
+         @pytest.fixture
+         def temp_file():
+             path = tempfile.mktemp()
+             yield path
+             os.unlink(path)  # Always runs
+
+      2. Use try/finally in tests:
+         async def test_connection():
+             conn = await create_connection()
+             try:
+                 # test logic
+             finally:
+                 await conn.close()
+
+      3. Use pytest-asyncio's event loop cleanup:
+         @pytest.fixture(scope="function")
+         async def client():
+             client = AsyncClient()
+             yield client
+             await client.aclose()
+
+      4. Monitor resource usage in CI:
+         pytest --resource-monitor
+    symptoms:
+      - CI runs slower over time
+      - "Too many open files" errors
+      - Tests hang waiting for resources
+    detection_pattern: 'tempfile|open\(|create.*connection'
+
+  - id: snapshot-test-brittleness
+    summary: Snapshot tests break on irrelevant changes
+    severity: medium
+    situation: Using snapshot testing for complex outputs
+    why: |
+      Snapshot test captures entire JSON response.
+      Someone adds new optional field. 50 snapshots break.
+      Reviewer auto-approves updates. Actual bugs slip through.
+    solution: |
+      1. Snapshot only stable parts:
+         snapshot.assert_match(
+             result.to_dict(exclude=['created_at', 'request_id'])
+         )
+
+      2. Use targeted assertions instead:
+         assert result.status == "success"
+         assert len(result.items) == 3
+
+      3. Normalize variable data:
+         snapshot.assert_match(
+             normalize_timestamps(result)
+         )
+
+      4. Review snapshot diffs carefully:
+         # Don't auto-approve, understand what changed
+    symptoms:
+      - Snapshot tests break on unrelated changes
+      - Developers auto-update without reviewing
+      - Real bugs hidden in noise of snapshot updates
+    detection_pattern: 'snapshot|assert_match|toMatchSnapshot'
+
+  - id: ci-only-failures-hard-to-debug
+    summary: Tests fail only in CI, impossible to reproduce locally
+    severity: high
+    situation: Tests passing locally but failing in CI
+    why: |
+      Your machine: 16 cores, 32GB RAM, SSD, single test run.
+      CI: 2 cores, 4GB RAM, shared disk, parallel tests.
+      Timing, resource limits, parallelism all different.
+    solution: |
+      1. Run tests in Docker locally:
+         docker run --cpus=2 --memory=4g pytest
+
+      2. Run tests in parallel locally:
+         pytest -n auto  # Same as CI
+
+      3. Add CI-like constraints:
+         pytest --timeout=30  # Fail slow tests
+
+      4. Log extensively on failure:
+         @pytest.hookimpl(hookwrapper=True)
+         def pytest_runtest_makereport(item, call):
+             outcome = yield
+             if call.excinfo:
+                 log_debug_info(item)
+
+      5. Use CI debug mode:
+         # GitHub Actions: re-run with debug logging
+    symptoms:
+      - "Works on my machine"
+      - CI failures not reproducible
+      - Tests timeout only in CI
+    detection_pattern: 'CI|github.*actions|gitlab.*ci'

@@ -1,0 +1,320 @@
+# SDK Builder Sharp Edges
+# Production gotchas for SDK development
+
+sharp_edges:
+  - id: breaking-change-minor
+    summary: Breaking change in minor version breaks user builds
+    severity: critical
+    situation: Changing API without major version bump
+    why: |
+      Changed function signature in 1.3.0. Users with ^1.0.0 dependency
+      auto-updated. Their builds broke. Their CI went red. Trust gone.
+      They pin to 1.2.0 and never update again. You lose ability to ship fixes.
+    solution: |
+      1. Semantic versioning is a contract:
+         # Major: Breaking changes
+         # Minor: New features, backwards compatible
+         # Patch: Bug fixes, backwards compatible
+
+      2. Deprecate before removing:
+         def old_method(self, x: int) -> str:
+             """Deprecated: Use new_method() instead."""
+             warnings.warn(
+                 "old_method is deprecated, use new_method",
+                 DeprecationWarning,
+                 stacklevel=2,
+             )
+             return self.new_method(x)
+
+      3. Keep deprecated methods for at least one major version:
+         # v1.x: old_method works, warns
+         # v2.0: old_method removed
+
+      4. Additive changes are always safe:
+         # Adding optional parameter: safe
+         # Adding new method: safe
+         # Adding new exception type: safe (if subclass)
+
+      5. Document in CHANGELOG:
+         ## [2.0.0] - Breaking Changes
+         - Removed: `old_method()` (deprecated since 1.3.0)
+         - Changed: `Config` now requires `api_key` parameter
+    symptoms:
+      - Users pinned to old version
+      - Angry GitHub issues
+      - Stack Overflow questions about version conflicts
+    detection_pattern: 'version.*[0-9]+\.[0-9]+\.0|BREAKING'
+
+  - id: retry-without-backoff
+    summary: Retry without backoff creates thundering herd
+    severity: high
+    situation: Immediate retries on failure
+    why: |
+      Server returns 503. All SDK instances retry immediately.
+      Server gets 10x traffic. 503 continues. Retry again.
+      Server never recovers. Your SDK DDoS'd your own API.
+    solution: |
+      1. Exponential backoff is mandatory:
+         delay = initial_delay * (2 ** attempt)
+         delay = min(delay, max_delay)
+
+      2. Add jitter to prevent synchronized retries:
+         delay = delay * (0.5 + random.random())
+
+      3. Respect Retry-After header:
+         if "Retry-After" in headers:
+             delay = int(headers["Retry-After"])
+
+      4. Limit total retry attempts:
+         max_retries = 3  # Not infinite!
+
+      5. Log retries for debugging:
+         logger.warning(f"Retry {attempt}/{max_retries} after {delay}s")
+
+      6. Make retry behavior configurable:
+         client = Client(
+             retry_config=RetryConfig(
+                 max_retries=5,
+                 initial_delay=2.0,
+             )
+         )
+    symptoms:
+      - API overloaded during outages
+      - Recovery takes longer than expected
+      - Logs show rapid retry sequences
+    detection_pattern: 'retry|sleep\(0\)|sleep\(1\)'
+
+  - id: missing-timeout
+    summary: No timeout causes request to hang indefinitely
+    severity: critical
+    situation: HTTP request without timeout
+    why: |
+      Network issue. Connection hangs. No timeout set.
+      SDK call never returns. Application thread blocked.
+      User's app becomes unresponsive. They blame your SDK.
+    solution: |
+      1. Always set timeout on HTTP clients:
+         async with httpx.AsyncClient(timeout=30.0) as client:
+             response = await client.get(url)
+
+      2. Use granular timeouts for clarity:
+         timeout = httpx.Timeout(
+             connect=5.0,    # Time to connect
+             read=30.0,      # Time to read response
+             write=10.0,     # Time to write request
+             pool=5.0,       # Time to get connection from pool
+         )
+
+      3. Make timeouts configurable:
+         client = MindClient(
+             api_key="...",
+             timeout=60.0,  # For slow operations
+         )
+
+      4. Document timeout behavior:
+         """
+         Raises:
+             TimeoutError: If request takes longer than timeout.
+                 Default timeout is 30 seconds.
+         """
+
+      5. Consider operation-specific timeouts:
+         # Quick operations: 10s
+         await client.memories.get(id, timeout=10.0)
+         # Slow operations: 120s
+         await client.memories.bulk_import(data, timeout=120.0)
+    symptoms:
+      - Hung requests in production
+      - Connection pool exhaustion
+      - "SDK is slow" complaints
+    detection_pattern: 'timeout|httpx|aiohttp|requests\.'
+
+  - id: leaking-credentials
+    summary: API keys logged or included in error messages
+    severity: critical
+    situation: Credentials in logs, errors, or debug output
+    why: |
+      Exception thrown. Stack trace includes API key from headers dict.
+      User pastes stack trace in GitHub issue. API key now public.
+      Their account compromised. Your reputation damaged.
+    solution: |
+      1. Never include credentials in error messages:
+         # Bad
+         raise AuthError(f"Invalid key: {api_key}")
+         # Good
+         raise AuthError("Invalid API key. Check your credentials.")
+
+      2. Mask credentials in debug output:
+         def __repr__(self) -> str:
+             return f"Client(api_key='***', base_url={self.base_url!r})"
+
+      3. Don't log request headers:
+         # Bad
+         logger.debug(f"Request headers: {headers}")
+         # Good
+         logger.debug(f"Request to {url}")
+
+      4. Use secrets module for sensitive data:
+         from secrets import compare_digest
+
+      5. Clear credentials from exceptions:
+         try:
+             await self._http.request(...)
+         except httpx.HTTPError as e:
+             # Don't re-raise with request details
+             raise ConnectionError("Request failed") from None
+    symptoms:
+      - API keys in logs
+      - Credentials in GitHub issues
+      - Security audit failures
+    detection_pattern: 'api_key|secret|password|token|credential'
+
+  - id: blocking-async-event-loop
+    summary: Sync SDK blocks async applications
+    severity: high
+    situation: SDK uses sync HTTP in async application
+    why: |
+      User's app is async (FastAPI). Your SDK uses requests (sync).
+      Every SDK call blocks the event loop. Their async app loses
+      all concurrency benefits. Performance tanks.
+    solution: |
+      1. Provide async-first SDK:
+         class AsyncMindClient:
+             async def get_memory(self, id: str) -> Memory:
+                 ...
+
+      2. Or provide both sync and async:
+         from mind.sync import MindClient
+         from mind.async_ import AsyncMindClient
+
+      3. Document clearly which is which:
+         # Sync client - use in synchronous applications
+         client = MindClient(api_key)
+
+         # Async client - use in async applications
+         client = AsyncMindClient(api_key)
+
+      4. Detect event loop and warn:
+         import asyncio
+         try:
+             loop = asyncio.get_running_loop()
+             warnings.warn(
+                 "Using sync client in async context. "
+                 "Consider using AsyncMindClient.",
+                 RuntimeWarning,
+             )
+         except RuntimeError:
+             pass  # No loop running, sync is fine
+
+      5. Don't use run_in_executor as default:
+         # It works but hides the problem
+         # Users should choose async SDK
+    symptoms:
+      - Slow async applications using your SDK
+      - Event loop warnings
+      - Concurrency not scaling
+    detection_pattern: 'requests\.|urllib|sync.*async|asyncio.*run'
+
+  - id: no-connection-pooling
+    summary: New connection per request slows everything
+    severity: medium
+    situation: Creating HTTP client for each request
+    why: |
+      Every request: DNS lookup, TCP handshake, TLS handshake.
+      Adds 50-200ms per request. With connection pooling: 5ms.
+      SDK feels sluggish. Users switch to faster alternative.
+    solution: |
+      1. Reuse HTTP client instance:
+         # Bad
+         async def get_memory(self, id: str) -> Memory:
+             async with httpx.AsyncClient() as client:  # New client each call!
+                 response = await client.get(f"/memories/{id}")
+
+         # Good
+         class MindClient:
+             def __init__(self):
+                 self._http = httpx.AsyncClient(...)  # Reused
+
+             async def get_memory(self, id: str) -> Memory:
+                 response = await self._http.get(f"/memories/{id}")
+
+      2. Configure connection pool:
+         self._http = httpx.AsyncClient(
+             limits=httpx.Limits(
+                 max_connections=100,
+                 max_keepalive_connections=20,
+             )
+         )
+
+      3. Require explicit lifecycle:
+         async with MindClient(api_key) as client:
+             # Client closed automatically
+
+         # Or explicit close
+         client = MindClient(api_key)
+         try:
+             ...
+         finally:
+             await client.close()
+
+      4. Document lifecycle requirements:
+         """
+         MindClient must be used as context manager or explicitly closed:
+
+         async with MindClient(api_key) as client:
+             ...
+         """
+    symptoms:
+      - High latency for every request
+      - Many TIME_WAIT connections
+      - "Too many open files" errors
+    detection_pattern: 'async with httpx|with requests\.Session'
+
+  - id: generic-error-messages
+    summary: Unhelpful errors frustrate developers
+    severity: medium
+    situation: "Error occurred" with no details
+    why: |
+      "Request failed". What request? What failed? How to fix?
+      Developer searches, finds nothing. Opens support ticket.
+      You spend time debugging what should be self-service.
+    solution: |
+      1. Include context in every error:
+         raise APIError(
+             message="Failed to create memory",
+             status_code=400,
+             error_code="INVALID_CONTENT",
+             request_id="req_abc123",
+         )
+
+      2. Suggest fixes when possible:
+         if status_code == 401:
+             raise AuthError(
+                 "Invalid API key. "
+                 "Check that your key starts with 'mk_' and hasn't expired. "
+                 "Get a new key at https://mind.v5/keys"
+             )
+
+      3. Include request ID for support:
+         # Users can reference in support tickets
+         print(f"Request ID: {error.request_id}")
+
+      4. Different detail levels:
+         # Brief for logs
+         logger.error(f"API error: {error.error_code}")
+         # Detailed for humans
+         print(error)  # Full message with suggestions
+
+      5. Validation errors should be specific:
+         raise ValidationError(
+             message="Invalid request",
+             field_errors={
+                 "content": ["Content cannot be empty"],
+                 "metadata.date": ["Invalid date format. Use ISO 8601."],
+             }
+         )
+    symptoms:
+      - Support tickets asking "what does this mean?"
+      - Developers can't self-diagnose
+      - Long debugging sessions for simple issues
+    detection_pattern: 'raise.*Error\(|except.*raise'

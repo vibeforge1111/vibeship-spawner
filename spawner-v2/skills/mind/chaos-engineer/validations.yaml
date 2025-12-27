@@ -1,0 +1,140 @@
+# Chaos Engineer Validations
+# Automated checks for chaos engineering patterns
+
+validations:
+  - id: no-hypothesis
+    name: Chaos Experiment Without Hypothesis
+    severity: warning
+    type: regex
+    pattern:
+      - 'ChaosEngine(?!.*hypothesis)'
+      - 'experiment(?!.*expect|.*hypothesis)'
+    message: "Chaos experiment without hypothesis. No learning possible."
+    fix_action: "Define expected behavior: 'We expect system to maintain 99% availability when X fails'"
+    applies_to:
+      - "**/chaos/**/*.yaml"
+      - "**/litmus/**/*.yaml"
+
+  - id: no-abort-condition
+    name: Chaos Without Abort Condition
+    severity: error
+    type: regex
+    pattern:
+      - 'ChaosEngine(?!.*abort|.*probe)'
+      - 'experiments:(?!.*runProperties.*abort)'
+    message: "Chaos experiment without abort condition. Can't stop if things go wrong."
+    fix_action: "Add abort probe that triggers on error rate exceeding threshold"
+    applies_to:
+      - "**/chaos/**/*.yaml"
+      - "**/litmus/**/*.yaml"
+
+  - id: no-duration-limit
+    name: Chaos Without Time Limit
+    severity: error
+    type: regex
+    pattern:
+      - 'TOTAL_CHAOS_DURATION(?!.*[0-9])'
+      - 'duration:(?!.*[0-9])'
+    message: "Chaos experiment without duration limit. May run indefinitely."
+    fix_action: "Set TOTAL_CHAOS_DURATION to a reasonable limit (e.g., 60 seconds)"
+    applies_to:
+      - "**/chaos/**/*.yaml"
+      - "**/litmus/**/*.yaml"
+
+  - id: high-blast-radius
+    name: Chaos Affecting Too Many Resources
+    severity: warning
+    type: regex
+    pattern:
+      - 'PODS_AFFECTED_PERC.*[5-9][0-9]'
+      - 'PODS_AFFECTED_PERC.*100'
+    message: "Chaos affecting high percentage of resources. Consider smaller blast radius."
+    fix_action: "Start with 10-20% of pods affected, increase gradually"
+    applies_to:
+      - "**/chaos/**/*.yaml"
+      - "**/litmus/**/*.yaml"
+
+  - id: no-cleanup
+    name: Chaos Without Cleanup Strategy
+    severity: warning
+    type: regex
+    pattern:
+      - 'ChaosEngine(?!.*cleanup)'
+      - 'spec:(?!.*cleanup.*strategy)'
+    message: "Chaos experiment without cleanup strategy. May leave resources in bad state."
+    fix_action: "Add cleanup strategy: 'always' or 'onSuccess'"
+    applies_to:
+      - "**/chaos/**/*.yaml"
+      - "**/litmus/**/*.yaml"
+
+  - id: production-without-canary
+    name: Production Chaos Without Canary Label
+    severity: warning
+    type: regex
+    pattern:
+      - 'namespace.*prod(?!.*canary)'
+      - 'environment.*production(?!.*percentage|.*subset)'
+    message: "Production chaos without canary scope. Start with subset of traffic."
+    fix_action: "Add canary label or traffic percentage to limit blast radius"
+    applies_to:
+      - "**/chaos/**/*.yaml"
+
+  - id: no-notification
+    name: Chaos Without Team Notification
+    severity: info
+    type: regex
+    pattern:
+      - 'ChaosEngine(?!.*annotation|.*notification)'
+      - 'spec:(?!.*notify|.*slack|.*pagerduty)'
+    message: "Chaos experiment without notification. Team may not know it's running."
+    fix_action: "Add notification to Slack or PagerDuty before experiment starts"
+    applies_to:
+      - "**/chaos/**/*.yaml"
+
+  - id: network-chaos-all-ports
+    name: Network Chaos Affecting All Ports
+    severity: warning
+    type: regex
+    pattern:
+      - 'pod-network.*(?!.*PORT)'
+      - 'network.*chaos(?!.*port)'
+    message: "Network chaos affecting all ports. May block monitoring and control plane."
+    fix_action: "Specify target ports to avoid affecting health checks and metrics"
+    applies_to:
+      - "**/chaos/**/*.yaml"
+
+  - id: no-steady-state-check
+    name: No Pre-Experiment Steady State Check
+    severity: warning
+    type: regex
+    pattern:
+      - 'experiments:(?!.*steady.*state|.*baseline)'
+      - 'ChaosEngine(?!.*probe.*type.*httpProbe)'
+    message: "No steady state verification before chaos. Can't compare impact."
+    fix_action: "Add pre-chaos probe to verify system is healthy before injection"
+    applies_to:
+      - "**/chaos/**/*.yaml"
+
+  - id: no-recovery-verification
+    name: No Post-Chaos Recovery Check
+    severity: info
+    type: regex
+    pattern:
+      - 'experiments:(?!.*post.*action|.*recovery)'
+      - 'ChaosEngine(?!.*post.*chaos.*check)'
+    message: "No verification that system recovered after chaos."
+    fix_action: "Add post-chaos probe to verify system returns to steady state"
+    applies_to:
+      - "**/chaos/**/*.yaml"
+
+  - id: hardcoded-target
+    name: Hardcoded Pod/Service Target
+    severity: info
+    type: regex
+    pattern:
+      - 'podName:.*"[^"]+pod[^"]*"'
+      - 'serviceName:.*"[^"]+-[0-9]+"'
+    message: "Hardcoded target in chaos experiment. May break when pods change."
+    fix_action: "Use label selectors instead of hardcoded names"
+    applies_to:
+      - "**/chaos/**/*.yaml"

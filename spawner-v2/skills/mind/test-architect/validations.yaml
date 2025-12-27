@@ -1,0 +1,168 @@
+# Test Architect Validations
+# Automated checks for testing patterns
+
+validations:
+  - id: missing-assertion
+    name: Test Without Assertion
+    severity: error
+    type: regex
+    pattern:
+      - 'def test_[^(]+\([^)]*\):[^}]+(?<!assert)$'
+      - 'it\(["\'][^"\']+["\'],\s*\(\)\s*=>\s*\{[^}]+\}\)(?!.*expect)'
+    message: "Test function without assertion. Test always passes."
+    fix_action: "Add assert or expect statement to verify behavior"
+    applies_to:
+      - "**/test_*.py"
+      - "**/*.test.ts"
+      - "**/*.spec.ts"
+
+  - id: hardcoded-test-data
+    name: Hardcoded Email/ID in Tests
+    severity: info
+    type: regex
+    pattern:
+      - 'test@example\.com'
+      - 'user_123'
+      - 'agent_test'
+    message: "Hardcoded test data may cause isolation issues."
+    fix_action: "Use unique generated data: f'test_{uuid4().hex}@example.com'"
+    applies_to:
+      - "**/test_*.py"
+      - "**/*.test.ts"
+      - "**/*.spec.ts"
+
+  - id: sleep-in-test
+    name: Fixed Sleep in Async Test
+    severity: warning
+    type: regex
+    pattern:
+      - 'asyncio\.sleep\([0-9]'
+      - 'time\.sleep\([0-9]'
+      - 'await.*delay\([0-9]'
+      - 'setTimeout.*[0-9]+\)'
+    message: "Fixed sleep causes flaky tests. Use condition-based waiting."
+    fix_action: "Use await wait_for(condition) or polling with timeout"
+    applies_to:
+      - "**/test_*.py"
+      - "**/*.test.ts"
+      - "**/*.spec.ts"
+
+  - id: async-not-awaited
+    name: Async Call Not Awaited in Test
+    severity: error
+    type: regex
+    pattern:
+      - 'assert\s+\w+\(\)(?!.*await)'
+      - 'expect\(\w+\(\)\)\.to'
+    message: "Async call may not be awaited. Test may pass falsely."
+    fix_action: "Add await: assert await function() or await expect()"
+    applies_to:
+      - "**/test_*.py"
+      - "**/*.test.ts"
+
+  - id: mock-overuse
+    name: Excessive Mocking
+    severity: info
+    type: regex
+    pattern:
+      - '@mock\.patch.*@mock\.patch.*@mock\.patch'
+      - 'jest\.mock.*jest\.mock.*jest\.mock'
+      - 'Mock\(\).*Mock\(\).*Mock\(\)'
+    message: "Multiple mocks may hide integration issues."
+    fix_action: "Consider using fakes or integration tests for complex interactions"
+    applies_to:
+      - "**/test_*.py"
+      - "**/*.test.ts"
+
+  - id: test-not-async
+    name: Async Function Test Missing Async
+    severity: error
+    type: regex
+    pattern:
+      - 'def test_.*await'
+      - 'function test.*await(?!.*async)'
+    message: "Test uses await but function is not async."
+    fix_action: "Add async to function definition: async def test_..."
+    applies_to:
+      - "**/test_*.py"
+      - "**/*.test.ts"
+
+  - id: no-fixture-cleanup
+    name: Fixture Without Cleanup
+    severity: warning
+    type: regex
+    pattern:
+      - '@pytest\.fixture(?!.*yield|.*return)'
+      - 'beforeEach(?!.*afterEach)'
+    message: "Fixture creates resources but may not clean up."
+    fix_action: "Use yield and cleanup after: yield resource; cleanup()"
+    applies_to:
+      - "**/test_*.py"
+      - "**/conftest.py"
+      - "**/*.test.ts"
+
+  - id: snapshot-without-filter
+    name: Snapshot Test Without Filtering
+    severity: info
+    type: regex
+    pattern:
+      - 'assert_match\([^)]+\)(?!.*exclude)'
+      - 'toMatchSnapshot\(\)(?!.*omit)'
+    message: "Snapshot includes all fields. May break on irrelevant changes."
+    fix_action: "Filter out timestamps, IDs: assert_match(data, exclude=['created_at'])"
+    applies_to:
+      - "**/test_*.py"
+      - "**/*.test.ts"
+
+  - id: test-order-dependency
+    name: Test Depends on Other Test
+    severity: error
+    type: regex
+    pattern:
+      - 'test_[a-z]+.*test_[a-z]+'
+      - '@pytest\.mark\.order'
+      - 'jest\..*runInBand'
+    message: "Tests may depend on execution order. Should be independent."
+    fix_action: "Use fixtures for setup, each test should be self-contained"
+    applies_to:
+      - "**/test_*.py"
+      - "**/*.test.ts"
+
+  - id: missing-error-test
+    name: No Error Case Test
+    severity: info
+    type: regex
+    pattern:
+      - 'class Test\w+:(?!.*error|.*exception|.*fail|.*invalid)'
+      - 'describe\([^)]+\)(?!.*error|.*throw|.*reject)'
+    message: "Test class has no error/exception tests."
+    fix_action: "Add tests for error cases: test_raises_on_invalid_input"
+    applies_to:
+      - "**/test_*.py"
+      - "**/*.test.ts"
+
+  - id: flaky-test-retry
+    name: Test Marked as Flaky/Retry
+    severity: warning
+    type: regex
+    pattern:
+      - '@pytest\.mark\.flaky'
+      - '@retry'
+      - 'jest\.retryTimes'
+    message: "Test marked as flaky. Should be fixed or removed."
+    fix_action: "Fix underlying timing/isolation issue instead of retrying"
+    applies_to:
+      - "**/test_*.py"
+      - "**/*.test.ts"
+
+  - id: large-test-file
+    name: Test File Too Large
+    severity: info
+    type: regex
+    pattern:
+      - 'def test_.*def test_.*def test_.*def test_.*def test_.*def test_.*def test_.*def test_.*def test_.*def test_'
+    message: "Test file has many tests. Consider splitting by feature."
+    fix_action: "Split into focused test files: test_create.py, test_update.py"
+    applies_to:
+      - "**/test_*.py"
+      - "**/*.test.ts"

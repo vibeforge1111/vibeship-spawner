@@ -1,0 +1,178 @@
+# PostgreSQL Wizard Validations
+# Automated checks for PostgreSQL patterns
+
+validations:
+  - id: select-star
+    name: SELECT * in Production Code
+    severity: warning
+    type: regex
+    pattern:
+      - 'SELECT\s+\*\s+FROM'
+      - '\.select\(\s*\*\s*\)'
+    message: "SELECT * fetches all columns. Wastes I/O, prevents covering indexes."
+    fix_action: "List specific columns needed: SELECT id, name, created_at FROM"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.sql"
+
+  - id: missing-index-on-foreign-key
+    name: Foreign Key Without Index
+    severity: warning
+    type: regex
+    pattern:
+      - 'REFERENCES\s+\w+\s*\([^)]+\)(?!.*INDEX)'
+      - 'FOREIGN KEY\s*\([^)]+\)\s*REFERENCES(?!.*INDEX)'
+    message: "Foreign key without index. JOINs and cascade deletes will be slow."
+    fix_action: "Create index on foreign key column"
+    applies_to:
+      - "**/*.sql"
+      - "**/migrations/**/*.py"
+
+  - id: query-without-limit
+    name: Query Without LIMIT
+    severity: info
+    type: regex
+    pattern:
+      - 'SELECT[^;]+FROM[^;]+WHERE[^;]+(?!LIMIT)[^;]*;'
+      - '\.find\(\{[^}]*\}\)(?!.*limit)'
+      - '\.filter\([^)]+\)(?!.*\[:|\[0:|\.first)'
+    message: "Query without LIMIT may return unbounded results."
+    fix_action: "Add LIMIT clause or implement pagination"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.sql"
+
+  - id: like-without-index
+    name: LIKE Query With Leading Wildcard
+    severity: warning
+    type: regex
+    pattern:
+      - "LIKE\\s*'%[^']+'"
+      - 'LIKE\\s*\\$[0-9]+(?=.*%)'
+      - "ILIKE\\s*'%"
+    message: "LIKE with leading wildcard can't use index. Will scan entire table."
+    fix_action: "Use full-text search (tsvector), trigram index, or restructure query"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.sql"
+
+  - id: no-prepared-statement
+    name: SQL String Concatenation
+    severity: error
+    type: regex
+    pattern:
+      - 'execute\s*\(\s*f"[^"]*\{[^}]+\}'
+      - "execute\\s*\\(\\s*f'[^']*\\{[^}]+\\}"
+      - 'query\s*\+\s*["\'][^"\']+["\']\s*\+'
+      - '`SELECT.*\$\{.*\}`'
+    message: "SQL string concatenation. SQL injection vulnerability."
+    fix_action: "Use parameterized queries: execute(sql, (param,))"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: transaction-in-loop
+    name: Transaction Per Item in Loop
+    severity: error
+    type: regex
+    pattern:
+      - 'for.*:.*await.*commit\(\)'
+      - 'for.*:.*await.*execute\('
+      - '\.forEach.*await.*query\('
+    message: "Transaction per item in loop. N transactions instead of 1."
+    fix_action: "Batch operations in single transaction or use executemany/COPY"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+
+  - id: missing-connection-pool
+    name: Creating Connection Per Request
+    severity: error
+    type: regex
+    pattern:
+      - 'async def.*:.*asyncpg\.connect\('
+      - 'def.*:.*psycopg2\.connect\('
+      - 'new Pool\(\)(?!.*max:)'
+    message: "Creating connection per request. Use connection pool."
+    fix_action: "Use asyncpg.create_pool() or PgBouncer"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+
+  - id: no-timeout-on-query
+    name: Query Without Timeout
+    severity: warning
+    type: regex
+    pattern:
+      - 'execute\([^)]+\)(?!.*timeout)'
+      - 'fetch\([^)]+\)(?!.*timeout)'
+      - '\.query\([^)]+\)(?!.*timeout)'
+    message: "Query without timeout. Runaway query can block pool connections."
+    fix_action: "Set statement_timeout or pass timeout parameter"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+
+  - id: order-by-without-index
+    name: ORDER BY Random/Expression
+    severity: info
+    type: regex
+    pattern:
+      - 'ORDER BY\s+RANDOM\(\)'
+      - 'ORDER BY\s+\w+\s*\+\s*\w+'
+      - 'ORDER BY\s+LOWER\('
+    message: "ORDER BY expression can't use index. May be slow on large result sets."
+    fix_action: "Create expression index or limit result set first"
+    applies_to:
+      - "**/*.sql"
+      - "**/*.py"
+      - "**/*.ts"
+
+  - id: count-star-for-existence
+    name: COUNT(*) to Check Existence
+    severity: info
+    type: regex
+    pattern:
+      - 'COUNT\(\*\)\s*>\s*0'
+      - 'count\(\*\)\s*[!=]=\s*0'
+      - 'len\(.*SELECT.*COUNT'
+    message: "COUNT(*) scans all matching rows. EXISTS is faster for existence check."
+    fix_action: "Use EXISTS(SELECT 1 FROM ... WHERE ... LIMIT 1)"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.sql"
+
+  - id: unbounded-in-clause
+    name: Unbounded IN Clause
+    severity: warning
+    type: regex
+    pattern:
+      - 'WHERE\s+\w+\s+IN\s*\(\s*SELECT'
+      - 'IN\s*\(\s*\$[0-9]+\s*\)'
+      - 'IN\s*\(\s*%s\s*\)'
+    message: "IN clause with subquery or parameter may be unbounded."
+    fix_action: "Use JOIN instead of IN subquery, or limit array size"
+    applies_to:
+      - "**/*.sql"
+      - "**/*.py"
+      - "**/*.ts"
+
+  - id: json-extract-in-where
+    name: JSON Extraction in WHERE Without Index
+    severity: info
+    type: regex
+    pattern:
+      - "WHERE.*->>'[^']+'"
+      - "WHERE.*->'[^']+'"
+      - "data\\['[^']+'\\]\\s*=="
+    message: "JSON path in WHERE clause. Ensure GIN or expression index exists."
+    fix_action: "Create index: CREATE INDEX ON t ((data->>'key'))"
+    applies_to:
+      - "**/*.sql"
+      - "**/*.py"
+      - "**/*.ts"
