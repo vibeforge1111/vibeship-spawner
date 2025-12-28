@@ -1,0 +1,210 @@
+# Caching Patterns Validations
+# Automated checks to catch caching anti-patterns and issues
+
+validations:
+  - id: cache-no-ttl
+    name: Cache Set Without TTL
+    severity: warning
+    type: regex
+    pattern:
+      - 'redis\\.set\\([^)]+\\)(?!.*EX|ex|setex|expire)'
+      - 'cache\\.set\\([^)]+\\)(?!.*ttl|expire)'
+      - '\\.set\\([\'"][^,]+,\\s*JSON'
+    message: "Cache set without TTL. Data may become stale indefinitely."
+    fix_action: "Use setex or add EX option: redis.setex(key, ttl, value)"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: cache-keys-command
+    name: Redis KEYS Command Usage
+    severity: error
+    type: regex
+    pattern:
+      - 'redis\\.keys\\('
+      - '\\.keys\\([\'"].*\\*'
+      - 'KEYS \\*'
+      - 'KEYS .*\\*'
+    message: "KEYS command blocks Redis. Use SCAN for iteration in production."
+    fix_action: "Replace with SCAN: redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100)"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: cache-before-db
+    name: Cache Write Before Database
+    severity: warning
+    type: regex
+    pattern:
+      - 'redis\\.set.*\\n.*db\\.'
+      - 'cache\\.set.*\\n.*save'
+      - 'setex.*\\n.*create'
+      - 'setex.*\\n.*insert'
+    message: "Cache written before database. Data inconsistency if database fails."
+    fix_action: "Write to database first, then update cache"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: cache-no-invalidation
+    name: Database Update Without Cache Invalidation
+    severity: warning
+    type: regex
+    pattern:
+      - '\\.update\\([^)]+\\)(?![\\s\\S]*?redis\\.del|cache\\.del|invalidate)'
+      - '\\.delete\\([^)]+\\)(?![\\s\\S]*?redis\\.del|cache\\.del|invalidate)'
+    message: "Database update without cache invalidation. May serve stale data."
+    fix_action: "Add cache invalidation after database update"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: cache-caching-errors
+    name: Caching Error Responses
+    severity: warning
+    type: regex
+    pattern:
+      - 'catch.*setex|catch.*\\.set\\('
+      - 'error.*cache.*set'
+      - 'null.*setex|setex.*null'
+    message: "May be caching error/null results. Will serve errors after recovery."
+    fix_action: "Only cache successful results, use short TTL for negative cache"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: cache-no-stampede-protection
+    name: Cache Miss Without Stampede Protection
+    severity: info
+    type: regex
+    pattern:
+      - 'if.*cache\\.get.*\\n.*db\\.'
+      - 'if.*redis\\.get.*\\n.*db\\.'
+    message: "Cache-aside pattern without stampede protection."
+    fix_action: "Add lock-based or probabilistic stampede prevention for hot keys"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: cache-hardcoded-ttl
+    name: Hardcoded Cache TTL
+    severity: info
+    type: regex
+    pattern:
+      - 'setex\\([^,]+,\\s*\\d{4,}'
+      - 'ttl:\\s*\\d{4,}'
+      - 'expire:\\s*\\d{4,}'
+    message: "Hardcoded TTL value. Consider using named constants."
+    fix_action: "Extract to constant: const USER_CACHE_TTL = 3600"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: cache-json-large-object
+    name: Large Object Serialization
+    severity: info
+    type: regex
+    pattern:
+      - 'JSON\\.stringify\\(.*\\).*setex'
+      - 'setex.*JSON\\.stringify'
+    message: "JSON serialization for cache. Consider compression for large objects."
+    fix_action: "For large objects, use compression or MessagePack"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: cache-missing-error-handling
+    name: Cache Operation Without Error Handling
+    severity: warning
+    type: regex
+    pattern:
+      - 'await redis\\.[a-z]+\\([^)]+\\)(?!\\s*\\.catch|try)'
+    message: "Cache operation without error handling. Should handle cache failures gracefully."
+    fix_action: "Wrap in try-catch, continue without cache on failure"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: cache-dynamic-key-unsanitized
+    name: Unsanitized User Input in Cache Key
+    severity: warning
+    type: regex
+    pattern:
+      - 'redis\\.[a-z]+\\(`[^`]*\\$\\{.*req\\.'
+      - 'redis\\.[a-z]+\\(`[^`]*\\$\\{.*params\\.'
+      - 'cache\\..*\\$\\{.*user[Ii]nput'
+    message: "User input in cache key. May cause key injection or excessive key creation."
+    fix_action: "Sanitize and validate user input before using in cache keys"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: cache-flushall-usage
+    name: Redis FLUSHALL/FLUSHDB Usage
+    severity: error
+    type: regex
+    pattern:
+      - 'redis\\.flushall'
+      - 'redis\\.flushdb'
+      - 'FLUSHALL'
+      - 'FLUSHDB'
+    message: "FLUSHALL/FLUSHDB clears entire database. Extremely dangerous in production."
+    fix_action: "Use pattern-based deletion with SCAN instead"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: cache-no-connection-retry
+    name: Redis Client Without Retry
+    severity: info
+    type: regex
+    pattern:
+      - 'new Redis\\([^)]*\\)(?!.*retry)'
+      - 'createClient\\((?!.*retry)'
+    message: "Redis client may not have retry logic configured."
+    fix_action: "Configure retry strategy for connection resilience"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: cache-sync-operations
+    name: Synchronous Cache Operations
+    severity: warning
+    type: regex
+    pattern:
+      - '\\.getSync\\('
+      - '\\.setSync\\('
+      - 'Sync\\(.*cache'
+    message: "Synchronous cache operation may block event loop."
+    fix_action: "Use async operations: await cache.get()"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: cache-http-no-vary
+    name: HTTP Cache Without Vary Header
+    severity: info
+    type: regex
+    pattern:
+      - 'Cache-Control.*public(?!.*Vary)'
+      - 'max-age.*(?!.*Vary)'
+    message: "Public cache without Vary header. May serve wrong content to users."
+    fix_action: "Add Vary header for content that differs by request headers"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: cache-private-data-public
+    name: Private Data with Public Cache
+    severity: warning
+    type: regex
+    pattern:
+      - 'user.*Cache-Control.*public'
+      - 'profile.*max-age.*(?!.*private)'
+      - 'account.*Cache-Control.*public'
+    message: "User-specific data may be cached publicly. Use private cache."
+    fix_action: "Use 'Cache-Control: private' for user-specific data"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
