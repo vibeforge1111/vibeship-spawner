@@ -1,0 +1,422 @@
+# Validations - AI Image Editing
+# Quality checks for AI image editing implementations
+
+version: 1.0.0
+skill_id: ai-image-editing
+
+validations:
+  # API Security
+  - id: api-key-exposed
+    name: API Key in Client Code
+    severity: error
+    description: Image generation API keys should only be server-side
+    pattern: |
+      (NEXT_PUBLIC|REACT_APP|VITE).*(REPLICATE|STABILITY|FAL|OPENAI).*KEY
+    message: "API key exposed to client. Use server-side only."
+    autofix: false
+
+  - id: hardcoded-api-key
+    name: Hardcoded API Key
+    severity: error
+    description: API keys should use environment variables
+    pattern: |
+      (r8_|sk-|fal-)[A-Za-z0-9]{20,}
+    message: "Hardcoded API key. Use environment variables."
+    autofix: false
+
+  # Content Safety
+  - id: no-prompt-moderation
+    name: Missing Prompt Moderation
+    severity: error
+    description: User prompts should be checked before generation
+    pattern: |
+      request\.(body|query)\.prompt.*generate(?!.*moderat)
+    message: "User prompt passed to generation without moderation check."
+    autofix: false
+
+  - id: no-output-moderation
+    name: Missing Output Moderation
+    severity: warning
+    description: Generated images should be checked before serving
+    pattern: |
+      generate\(.*\).*return.*url(?!.*check)
+    message: "Generated image returned without content check."
+    autofix: false
+
+  - id: safety-checker-disabled
+    name: Safety Checker Explicitly Disabled
+    severity: warning
+    description: Model safety checkers should remain enabled
+    pattern: |
+      safety_checker.*false|enable_safety_checker.*false
+    message: "Safety checker disabled. Enable for production."
+    autofix: false
+
+  # Resource Management
+  - id: no-rate-limiting
+    name: Generation Without Rate Limiting
+    severity: warning
+    description: API calls should be rate limited to prevent abuse
+    pattern: |
+      async.*generate.*request(?!.*rateLimit|limit)
+    message: "Generation endpoint without rate limiting."
+    autofix: false
+
+  - id: unbounded-generation-loop
+    name: Unbounded Generation Loop
+    severity: error
+    description: Loops generating images should have limits
+    pattern: |
+      while.*True.*generate|for.*range\(.*\).*generate(?!.*limit)
+    message: "Unbounded generation loop. Add limits and rate control."
+    autofix: false
+
+  - id: no-cost-tracking
+    name: Missing Cost Tracking
+    severity: warning
+    description: Image generation costs should be tracked
+    pattern: |
+      generate\((?!.*cost|budget)
+    message: "No cost tracking for generation. Add budget controls."
+    autofix: false
+
+  # Image Processing
+  - id: no-resolution-validation
+    name: Missing Resolution Validation
+    severity: warning
+    description: Image dimensions should be validated for model compatibility
+    pattern: |
+      generate\(.*image.*(?!.*resize|divisible|resolution)
+    message: "Image passed without resolution validation. Ensure dimensions divisible by 8."
+    autofix: false
+
+  - id: mask-not-validated
+    name: Mask Not Validated
+    severity: warning
+    description: Inpainting masks should be validated before use
+    pattern: |
+      inpaint\(.*mask(?!.*validate|check)
+    message: "Mask used without validation. Check dimensions and values."
+    autofix: false
+
+  # Error Handling
+  - id: no-generation-error-handling
+    name: Missing Error Handling for Generation
+    severity: warning
+    description: API calls should handle failures gracefully
+    pattern: |
+      await.*generate\((?!.*try|catch|\.catch)
+    message: "Generation call without error handling."
+    autofix: false
+
+  - id: no-timeout-handling
+    name: Missing Timeout for Long Generation
+    severity: warning
+    description: Long-running generations should have timeouts
+    pattern: |
+      generate\((?!.*timeout).*resolution.*2048
+    message: "High-resolution generation without timeout."
+    autofix: false
+
+code_smells:
+  - id: strength-one
+    name: Maximum Strength/Denoise Value
+    description: Strength 1.0 ignores original image content
+    pattern: |
+      strength.*1\.0|denoise.*1\.0
+    suggestion: "Strength 1.0 ignores original. Use 0.5-0.85 for balanced edits."
+
+  - id: no-seed-for-iteration
+    name: No Seed for Testing/Iteration
+    description: Setting seed helps reproduce and iterate on results
+    pattern: |
+      generate\((?!.*seed)
+    suggestion: "Consider setting seed for reproducible results during development."
+
+  - id: single-pass-inpaint
+    name: Single Pass Inpainting
+    description: Multi-pass with decreasing strength often gives better results
+    pattern: |
+      inpaint\(.*strength.*0\.[89](?!.*iterati)
+    suggestion: "Consider multi-pass inpainting with decreasing strength."
+
+  - id: unfeathered-mask
+    name: Mask Without Edge Feathering
+    description: Hard mask edges create visible seams
+    pattern: |
+      mask.*convert.*L(?!.*blur|feather)
+    suggestion: "Apply blur/feather to mask edges for seamless blending."
+
+  - id: blocking-generation
+    name: Synchronous Blocking Generation
+    description: Long generations should be async with status polling
+    pattern: |
+      replicate\.run\((?!.*wait.*poll)
+    suggestion: "Consider async generation with status polling for long tasks."
+
+best_practices:
+  - id: validate-inputs
+    name: Validate All Generation Inputs
+    check: |
+      Image dimensions, mask format, and prompts validated before API calls.
+    recommendation: |
+      from PIL import Image
+
+      def validate_generation_inputs(
+          image: Image.Image | None = None,
+          mask: Image.Image | None = None,
+          prompt: str = "",
+          width: int = 1024,
+          height: int = 1024,
+      ):
+          """Validate all inputs before generation."""
+
+          errors = []
+
+          # Validate dimensions
+          if width % 8 != 0 or height % 8 != 0:
+              errors.append(f"Dimensions must be divisible by 8")
+
+          if width > 2048 or height > 2048:
+              errors.append(f"Maximum dimension is 2048")
+
+          # Validate image if provided
+          if image:
+              if image.size != (width, height):
+                  errors.append("Image size doesn't match target dimensions")
+
+          # Validate mask if provided
+          if mask:
+              if mask.mode != "L":
+                  errors.append("Mask must be grayscale (mode 'L')")
+              if mask.size != (width, height):
+                  errors.append("Mask size must match image size")
+
+          # Validate prompt
+          if len(prompt) > 1000:
+              errors.append("Prompt too long (max 1000 chars)")
+
+          if errors:
+              raise ValueError("; ".join(errors))
+
+  - id: implement-rate-limiting
+    name: Implement Rate Limiting
+    check: |
+      Generation endpoints have rate limiting per user/IP.
+    recommendation: |
+      from datetime import datetime
+      import asyncio
+
+      class GenerationRateLimiter:
+          def __init__(
+              self,
+              max_per_minute: int = 10,
+              max_per_hour: int = 100,
+          ):
+              self.max_per_minute = max_per_minute
+              self.max_per_hour = max_per_hour
+              self.requests: dict[str, list[datetime]] = {}
+
+          async def check(self, user_id: str) -> bool:
+              now = datetime.now()
+
+              if user_id not in self.requests:
+                  self.requests[user_id] = []
+
+              # Clean old requests
+              self.requests[user_id] = [
+                  t for t in self.requests[user_id]
+                  if (now - t).seconds < 3600
+              ]
+
+              # Check limits
+              minute_ago = now - timedelta(minutes=1)
+              recent = [t for t in self.requests[user_id] if t > minute_ago]
+
+              if len(recent) >= self.max_per_minute:
+                  return False
+
+              if len(self.requests[user_id]) >= self.max_per_hour:
+                  return False
+
+              # Record request
+              self.requests[user_id].append(now)
+              return True
+
+  - id: async-generation-pattern
+    name: Use Async Generation for Long Tasks
+    check: |
+      Long-running generations use async pattern with polling.
+    recommendation: |
+      import replicate
+      import asyncio
+
+      async def generate_async(
+          prompt: str,
+          timeout: int = 300,
+          poll_interval: int = 2,
+      ):
+          """Generate with async polling and timeout."""
+
+          client = replicate.Client()
+
+          # Create prediction (non-blocking)
+          prediction = client.predictions.create(
+              model="black-forest-labs/flux-pro",
+              input={"prompt": prompt}
+          )
+
+          start = time.time()
+
+          # Poll for completion
+          while True:
+              prediction = client.predictions.get(prediction.id)
+
+              if prediction.status == "succeeded":
+                  return prediction.output
+
+              if prediction.status == "failed":
+                  raise Exception(f"Generation failed: {prediction.error}")
+
+              if time.time() - start > timeout:
+                  # Cancel and raise
+                  client.predictions.cancel(prediction.id)
+                  raise TimeoutError("Generation timed out")
+
+              await asyncio.sleep(poll_interval)
+
+  - id: content-moderation-pipeline
+    name: Implement Content Moderation Pipeline
+    check: |
+      Both input prompts and output images are moderated.
+    recommendation: |
+      class ModerationPipeline:
+          def __init__(self):
+              self.openai = openai.OpenAI()
+
+          async def moderate_prompt(self, prompt: str) -> dict:
+              """Check prompt for policy violations."""
+
+              response = self.openai.moderations.create(input=prompt)
+              result = response.results[0]
+
+              return {
+                  "allowed": not result.flagged,
+                  "categories": {
+                      k: v for k, v in result.categories.__dict__.items()
+                      if v
+                  },
+              }
+
+          async def moderate_image(self, image_url: str) -> dict:
+              """Check generated image for violations."""
+              # Use image moderation API (SightEngine, AWS Rekognition, etc.)
+              ...
+
+          async def safe_generate(
+              self,
+              prompt: str,
+              generator: callable,
+          ) -> dict:
+              """Generate with full moderation pipeline."""
+
+              # Pre-check prompt
+              prompt_result = await self.moderate_prompt(prompt)
+              if not prompt_result["allowed"]:
+                  return {
+                      "success": False,
+                      "error": "prompt_blocked",
+                      "categories": prompt_result["categories"],
+                  }
+
+              # Generate
+              try:
+                  output = await generator(prompt)
+              except Exception as e:
+                  return {"success": False, "error": str(e)}
+
+              # Post-check image
+              image_result = await self.moderate_image(output["url"])
+              if not image_result["allowed"]:
+                  return {
+                      "success": False,
+                      "error": "image_blocked",
+                  }
+
+              return {
+                  "success": True,
+                  "url": output["url"],
+              }
+
+  - id: track-generation-costs
+    name: Track Generation Costs
+    check: |
+      Each generation's cost is tracked for budgeting.
+    recommendation: |
+      # Cost per generation (approximate, check current pricing)
+      MODEL_COSTS = {
+          "flux-schnell": 0.003,
+          "flux-dev": 0.025,
+          "flux-pro": 0.055,
+          "sdxl": 0.002,
+          "stability-core": 0.03,
+      }
+
+      class CostTracker:
+          def __init__(self, daily_budget: float = 50.0):
+              self.daily_budget = daily_budget
+              self.costs: dict[str, list[dict]] = {}
+
+          def record(self, user_id: str, model: str, amount: float):
+              if user_id not in self.costs:
+                  self.costs[user_id] = []
+
+              self.costs[user_id].append({
+                  "timestamp": datetime.now(),
+                  "model": model,
+                  "amount": amount,
+              })
+
+          def get_daily_cost(self, user_id: str) -> float:
+              if user_id not in self.costs:
+                  return 0.0
+
+              today = datetime.now().date()
+              return sum(
+                  c["amount"] for c in self.costs[user_id]
+                  if c["timestamp"].date() == today
+              )
+
+          def can_generate(self, user_id: str) -> bool:
+              return self.get_daily_cost(user_id) < self.daily_budget
+
+testing_checklist:
+  api_integration:
+    - "API keys loaded from environment"
+    - "Rate limiting implemented"
+    - "Error handling for API failures"
+    - "Timeout handling for long generations"
+
+  content_safety:
+    - "Prompt moderation enabled"
+    - "Output image moderation enabled"
+    - "Jailbreak patterns blocked"
+    - "Model safety checkers enabled"
+
+  image_processing:
+    - "Image dimensions validated (divisible by 8)"
+    - "Mask format validated (grayscale)"
+    - "Resolution limits enforced"
+    - "Mask edges feathered for inpainting"
+
+  user_experience:
+    - "Progress feedback for long generations"
+    - "Seed saved for reproduction"
+    - "Cost displayed to user"
+    - "Error messages are user-friendly"
+
+  resource_management:
+    - "Cost tracking implemented"
+    - "Daily/monthly budgets enforced"
+    - "Concurrent generation limits"
+    - "VRAM/memory management for local inference"

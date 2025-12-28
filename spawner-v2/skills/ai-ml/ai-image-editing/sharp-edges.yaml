@@ -1,0 +1,712 @@
+# Sharp Edges - AI Image Editing
+# Gotchas and pitfalls in AI image manipulation
+
+version: 1.0.0
+skill_id: ai-image-editing
+
+sharp_edges:
+  - id: mask-color-inversion
+    title: Inverted Mask Colors Cause Wrong Areas to Edit
+    severity: high
+    description: |
+      Different APIs use different mask conventions.
+      Most use white=edit, black=keep, but some are inverted.
+      Wrong mask colors edit the wrong parts of the image.
+
+    wrong_way: |
+      # Assuming all APIs use same mask convention
+      mask = create_mask(image)  # Black where you want to edit
+
+      # Stability AI expects: white=edit, black=keep
+      stability_api.inpaint(image, mask)  # Edits WRONG areas!
+
+      # Some ComfyUI nodes expect: black=edit, white=keep
+      # No verification of mask convention
+
+    right_way: |
+      from PIL import Image
+      import numpy as np
+
+      def ensure_mask_convention(
+          mask: Image.Image,
+          convention: str = "white_edit"  # or "black_edit"
+      ) -> Image.Image:
+          """Normalize mask to expected convention."""
+
+          # Current mask: white areas to edit
+          # If API expects black_edit, invert
+          if convention == "black_edit":
+              arr = np.array(mask)
+              inverted = 255 - arr
+              return Image.fromarray(inverted)
+          return mask
+
+      # Document expected convention per API
+      API_CONVENTIONS = {
+          "replicate": "white_edit",    # White = fill/edit
+          "stability": "white_edit",    # White = edit
+          "comfyui_flux": "white_edit", # White = edit
+          "automatic1111": "white_edit", # White = edit (default)
+      }
+
+      # Verify mask before sending
+      def validate_mask(mask: Image.Image):
+          """Check mask is binary and valid."""
+          arr = np.array(mask)
+
+          # Should be grayscale or single channel
+          if len(arr.shape) == 3:
+              mask = mask.convert("L")
+              arr = np.array(mask)
+
+          # Warn if mostly one color (might be inverted)
+          white_ratio = np.sum(arr > 128) / arr.size
+          if white_ratio > 0.9:
+              print("Warning: Mask is mostly white - will edit most of image")
+          elif white_ratio < 0.1:
+              print("Warning: Mask is mostly black - will preserve most of image")
+
+          return mask
+
+    detection_patterns:
+      - "mask.*black.*edit"
+      - "invert.*mask"
+
+    references:
+      - "https://docs.comfy.org/tutorials/basic/inpaint"
+
+  - id: strength-too-high
+    title: High Strength/Denoise Destroys Original Content
+    severity: high
+    description: |
+      Strength values above 0.85 essentially ignore the original image.
+      For edits that should preserve context, use lower values.
+      Many users set strength=1.0 and lose composition.
+
+    wrong_way: |
+      # Trying to "improve" an image
+      result = api.image_to_image(
+          image=original,
+          prompt="make it look better",
+          strength=1.0,  # Ignores original completely!
+      )
+      # Result looks nothing like original
+
+      # Inpainting with maximum denoise
+      result = api.inpaint(
+          image=original,
+          mask=small_mask,
+          prompt="fix this area",
+          strength=0.95,  # Over-edits, creates obvious patches
+      )
+
+    right_way: |
+      # Strength guide by use case
+      STRENGTH_GUIDE = {
+          "color_correction": 0.2-0.3,    # Subtle adjustments
+          "style_transfer": 0.5-0.7,      # Change style, keep composition
+          "object_replacement": 0.7-0.85, # Replace while blending
+          "complete_reimagine": 0.9-1.0,  # New image from structure only
+      }
+
+      # For subtle enhancements
+      result = api.image_to_image(
+          image=original,
+          prompt="professional photography, enhanced lighting",
+          strength=0.3,  # Preserve most of original
+      )
+
+      # For inpainting, use multi-pass with decreasing strength
+      def iterative_inpaint(image, mask, prompt):
+          strengths = [0.6, 0.4, 0.3]  # Decreasing per pass
+
+          current = image
+          for i, strength in enumerate(strengths):
+              # Slightly expand mask each iteration
+              expanded_mask = dilate_mask(mask, iterations=i * 5)
+
+              current = api.inpaint(
+                  image=current,
+                  mask=expanded_mask,
+                  prompt=prompt,
+                  strength=strength,
+              )
+
+          return current
+
+    detection_patterns:
+      - "strength.*1\\.0"
+      - "denoise.*0\\.9[5-9]"
+
+    references:
+      - "https://apatero.com/blog/z-image-turbo-inpainting-comfyui-guide-2025"
+
+  - id: resolution-mismatch
+    title: Image Dimensions Not Divisible by 8
+    severity: high
+    description: |
+      Stable Diffusion and Flux models require dimensions divisible by 8.
+      Non-conforming images get resized/stretched, causing quality loss.
+      ControlNet images must match generation resolution exactly.
+
+    wrong_way: |
+      # Upload image of any size
+      image = load_image("photo.jpg")  # 1920x1080
+
+      # API silently resizes to nearest valid size
+      result = api.generate(
+          image=image,          # 1920x1080
+          target_size=1024,     # Gets resized weirdly
+      )
+      # Output may be stretched or cropped
+
+      # ControlNet with wrong size control image
+      control = load_image("depth.png")   # 768x512
+      result = api.generate(
+          control_image=control,           # 768x512
+          prompt="...",
+          width=1024, height=1024,         # Mismatch!
+      )
+
+    right_way: |
+      from PIL import Image
+
+      def resize_for_diffusion(
+          image: Image.Image,
+          max_dimension: int = 1024,
+          divisor: int = 8
+      ) -> Image.Image:
+          """Resize image to valid dimensions for diffusion models."""
+
+          w, h = image.size
+
+          # Scale to max dimension
+          if max(w, h) > max_dimension:
+              scale = max_dimension / max(w, h)
+              w = int(w * scale)
+              h = int(h * scale)
+
+          # Round to nearest multiple of divisor
+          w = (w // divisor) * divisor
+          h = (h // divisor) * divisor
+
+          # Ensure minimum size
+          w = max(w, divisor * 8)  # At least 64
+          h = max(h, divisor * 8)
+
+          return image.resize((w, h), Image.Resampling.LANCZOS)
+
+      # Match control image to generation size
+      def prepare_controlnet_input(
+          image: Image.Image,
+          control: Image.Image,
+          target_size: tuple[int, int]
+      ) -> tuple[Image.Image, Image.Image]:
+          """Ensure image and control match target dimensions."""
+
+          # Resize both to exact target
+          image = image.resize(target_size, Image.Resampling.LANCZOS)
+          control = control.resize(target_size, Image.Resampling.LANCZOS)
+
+          return image, control
+
+      # Usage
+      image = load_image("photo.jpg")
+      image = resize_for_diffusion(image, max_dimension=1024)
+      # Now safe to use with any diffusion model
+
+    detection_patterns:
+      - "resize.*1920.*1080"
+      - "dimension.*not.*divisible"
+
+    references:
+      - "https://github.com/diodiogod/Comfy-Inpainting-Works"
+
+  - id: api-rate-limits
+    title: API Rate Limits and Cost Explosion
+    severity: high
+    description: |
+      Image generation APIs have strict rate limits and per-image costs.
+      Unbounded loops or retries can exhaust quotas quickly.
+      Production apps need rate limiting and cost tracking.
+
+    wrong_way: |
+      # Unbounded generation loop
+      async def generate_variations(prompt, count=100):
+          results = []
+          for i in range(count):
+              # No rate limiting
+              result = await api.generate(prompt=prompt)
+              results.append(result)
+          return results
+      # Hits rate limits, fails partway through
+
+      # Retry without backoff
+      def generate_with_retry(prompt, max_retries=10):
+          for i in range(max_retries):
+              try:
+                  return api.generate(prompt=prompt)
+              except RateLimitError:
+                  continue  # Immediately retries, makes it worse
+
+    right_way: |
+      import asyncio
+      from datetime import datetime, timedelta
+      import time
+
+      class RateLimitedGenerator:
+          """Image generator with rate limiting and cost tracking."""
+
+          def __init__(
+              self,
+              client,
+              max_per_minute: int = 10,
+              cost_per_image: float = 0.03,
+              daily_budget: float = 10.0
+          ):
+              self.client = client
+              self.max_per_minute = max_per_minute
+              self.cost_per_image = cost_per_image
+              self.daily_budget = daily_budget
+
+              self.requests_this_minute = 0
+              self.minute_start = datetime.now()
+              self.daily_cost = 0.0
+              self.day_start = datetime.now().date()
+
+          async def generate(self, **kwargs) -> dict:
+              """Generate with rate limiting and cost tracking."""
+
+              # Reset daily counter if new day
+              if datetime.now().date() > self.day_start:
+                  self.daily_cost = 0.0
+                  self.day_start = datetime.now().date()
+
+              # Check daily budget
+              if self.daily_cost >= self.daily_budget:
+                  raise Exception(f"Daily budget ${self.daily_budget} exceeded")
+
+              # Rate limiting
+              now = datetime.now()
+              if (now - self.minute_start).seconds >= 60:
+                  self.requests_this_minute = 0
+                  self.minute_start = now
+
+              if self.requests_this_minute >= self.max_per_minute:
+                  wait_time = 60 - (now - self.minute_start).seconds
+                  await asyncio.sleep(wait_time)
+                  self.requests_this_minute = 0
+                  self.minute_start = datetime.now()
+
+              # Generate with exponential backoff
+              for attempt in range(5):
+                  try:
+                      result = await self.client.generate(**kwargs)
+                      self.requests_this_minute += 1
+                      self.daily_cost += self.cost_per_image
+                      return result
+
+                  except RateLimitError:
+                      wait = (2 ** attempt) + random.uniform(0, 1)
+                      await asyncio.sleep(wait)
+
+              raise Exception("Max retries exceeded")
+
+          def get_stats(self) -> dict:
+              return {
+                  "daily_cost": self.daily_cost,
+                  "daily_budget": self.daily_budget,
+                  "remaining_budget": self.daily_budget - self.daily_cost,
+              }
+
+    detection_patterns:
+      - "for.*range.*generate"
+      - "while.*True.*api\\.generate"
+
+    references:
+      - "https://www.aifreeapi.com/en/posts/chatgpt-daily-image-limits-solution-2025"
+
+  - id: vram-exhaustion
+    title: VRAM Exhaustion with Large Models
+    severity: medium
+    description: |
+      ControlNet + SDXL + high resolution requires 12GB+ VRAM.
+      Multiple ControlNets multiply memory requirements.
+      Running out of VRAM crashes generation or produces errors.
+
+    wrong_way: |
+      # Loading multiple full-precision models
+      sdxl = load_model("sdxl-base", precision="fp32")
+      controlnet_depth = load_model("controlnet-depth", precision="fp32")
+      controlnet_canny = load_model("controlnet-canny", precision="fp32")
+      # 8GB GPU runs out of memory
+
+      # High resolution with multiple controls
+      result = generate(
+          width=2048, height=2048,  # 4x normal resolution
+          controlnets=[depth, canny, pose],  # 3 controls
+      )  # OOM error
+
+    right_way: |
+      # Use quantized models
+      sdxl = load_model("sdxl-base-gguf", precision="fp16")  # Half memory
+
+      # Enable memory optimizations
+      import torch
+
+      # Clear CUDA cache between generations
+      torch.cuda.empty_cache()
+
+      # Use attention slicing
+      pipe.enable_attention_slicing()
+
+      # Use xformers for memory efficiency
+      pipe.enable_xformers_memory_efficient_attention()
+
+      # Generate at lower resolution, upscale after
+      def efficient_generation(prompt, target_size=2048):
+          # Generate at 1024
+          result = generate(
+              prompt=prompt,
+              width=1024, height=1024,
+          )
+
+          # Upscale to target
+          upscaled = upscale(result, scale=target_size // 1024)
+          return upscaled
+
+      # Batch process with memory cleanup
+      def batch_with_cleanup(prompts):
+          results = []
+          for prompt in prompts:
+              result = generate(prompt)
+              results.append(result)
+
+              # Clean up between generations
+              torch.cuda.empty_cache()
+              import gc
+              gc.collect()
+
+          return results
+
+      # Monitor VRAM usage
+      def log_vram():
+          if torch.cuda.is_available():
+              allocated = torch.cuda.memory_allocated() / 1e9
+              cached = torch.cuda.memory_reserved() / 1e9
+              print(f"VRAM: {allocated:.1f}GB allocated, {cached:.1f}GB cached")
+
+    detection_patterns:
+      - "width.*2048"
+      - "multiple.*controlnet"
+
+    references:
+      - "https://railwail.com/blog/key-points-on-combining-depth-pose-and-edge-with-sdxl-multi-controlnet-lora-1743334474799"
+
+  - id: controlnet-model-mismatch
+    title: ControlNet Model Incompatibility
+    severity: high
+    description: |
+      ControlNet models are trained for specific base models.
+      SD 1.5 ControlNets don't work with SDXL or Flux.
+      Using wrong ControlNet produces garbage or errors.
+
+    wrong_way: |
+      # Using SD 1.5 ControlNet with SDXL
+      controlnet = load_model("lllyasviel/sd-controlnet-canny")  # SD 1.5
+      sdxl = load_model("stabilityai/sdxl-base")
+
+      result = generate(
+          model=sdxl,
+          controlnet=controlnet,  # Incompatible!
+          control_image=canny_map,
+      )
+      # Produces errors or garbage output
+
+    right_way: |
+      # Match ControlNet to base model
+      MODEL_CONTROLNETS = {
+          "sd-1.5": {
+              "canny": "lllyasviel/sd-controlnet-canny",
+              "depth": "lllyasviel/sd-controlnet-depth",
+              "pose": "lllyasviel/sd-controlnet-openpose",
+          },
+          "sdxl": {
+              "canny": "diffusers/controlnet-canny-sdxl-1.0",
+              "depth": "diffusers/controlnet-depth-sdxl-1.0",
+          },
+          "flux": {
+              "canny": "InstantX/FLUX.1-dev-Controlnet-Canny",
+              "depth": "black-forest-labs/flux-depth-pro",
+              "union": "InstantX/FLUX.1-dev-Controlnet-Union",
+          },
+      }
+
+      def get_compatible_controlnet(base_model: str, control_type: str):
+          """Get ControlNet compatible with base model."""
+
+          if base_model in MODEL_CONTROLNETS:
+              controls = MODEL_CONTROLNETS[base_model]
+              if control_type in controls:
+                  return controls[control_type]
+
+          raise ValueError(
+              f"No {control_type} ControlNet for {base_model}"
+          )
+
+      # Use union models for flexibility
+      # InstantX Union supports multiple control types in one model
+      flux_union = load_model("InstantX/FLUX.1-dev-Controlnet-Union")
+      result = generate(
+          controlnet=flux_union,
+          control_type="canny",  # Specify which mode
+          control_image=edges,
+      )
+
+    detection_patterns:
+      - "sd-controlnet.*sdxl"
+      - "flux.*sd-controlnet"
+
+    references:
+      - "https://blog.segmind.com/flux-1-controlnets-what-are-they-all-you-need-to-know/"
+      - "https://comfyui-wiki.com/en/resource/controlnet-models/controlnet-flux-1"
+
+  - id: no-content-moderation
+    title: Missing Content Moderation in Production
+    severity: critical
+    description: |
+      AI image generation can produce inappropriate content.
+      Without moderation, users may generate harmful images.
+      Both prompts and outputs need checking.
+
+    wrong_way: |
+      # Direct pass-through of user prompts
+      @app.post("/generate")
+      async def generate(prompt: str):
+          result = await api.generate(prompt=prompt)  # No filtering!
+          return result
+
+      # Trust user-provided images
+      @app.post("/edit")
+      async def edit(image: UploadFile, prompt: str):
+          # No check if image contains harmful content
+          result = await api.inpaint(image, prompt=prompt)
+          return result
+
+    right_way: |
+      import openai
+
+      class ModerationError(Exception):
+          pass
+
+      async def check_prompt(prompt: str) -> bool:
+          """Check prompt with OpenAI moderation (free)."""
+          client = openai.OpenAI()
+          response = await client.moderations.create(input=prompt)
+
+          result = response.results[0]
+          if result.flagged:
+              raise ModerationError(
+                  f"Prompt blocked: {[k for k, v in result.categories if v]}"
+              )
+          return True
+
+      async def check_image(image_url: str) -> bool:
+          """Check generated image for policy violations."""
+          # Use dedicated moderation API
+          result = await moderation_api.check(image_url)
+
+          if result.nudity > 0.5 or result.violence > 0.5:
+              raise ModerationError("Generated image blocked")
+          return True
+
+      @app.post("/generate")
+      async def generate_safe(prompt: str):
+          # Pre-check prompt
+          await check_prompt(prompt)
+
+          # Generate with model's safety checker
+          result = await api.generate(
+              prompt=prompt,
+              safety_checker=True,  # Model-level filter
+          )
+
+          # Post-check output
+          await check_image(result.url)
+
+          return result
+
+      # Also block known jailbreak patterns
+      BLOCKED_PATTERNS = [
+          r"ignore.*previous.*instructions",
+          r"pretend.*you.*are",
+          r"bypass.*safety",
+      ]
+
+      def sanitize_prompt(prompt: str) -> str:
+          for pattern in BLOCKED_PATTERNS:
+              if re.search(pattern, prompt, re.IGNORECASE):
+                  raise ModerationError("Blocked pattern detected")
+          return prompt
+
+    detection_patterns:
+      - "generate.*prompt.*(?!moderat)"
+      - "user.*prompt.*api\\.generate"
+
+    references:
+      - "https://www.edenai.co/post/best-image-moderation-apis"
+
+  - id: seed-inconsistency
+    title: Inconsistent Seeds for Reproducibility
+    severity: medium
+    description: |
+      Not setting seeds makes results non-reproducible.
+      Same prompt with different seeds gives different outputs.
+      For production iteration, lock seeds while tuning.
+
+    wrong_way: |
+      # Random seed each time
+      for i in range(10):
+          result = api.generate(
+              prompt="a cat sitting on a windowsill",
+              # No seed specified - random each time
+          )
+          # Each result is completely different
+          # Hard to iterate on prompt improvements
+
+    right_way: |
+      import random
+
+      # Lock seed for iteration
+      ITERATION_SEED = 42
+
+      # Test prompt variations with same seed
+      prompts = [
+          "a cat sitting on a windowsill",
+          "a fluffy cat sitting on a sunny windowsill",
+          "a tabby cat lounging on a windowsill, afternoon light",
+      ]
+
+      for prompt in prompts:
+          result = api.generate(
+              prompt=prompt,
+              seed=ITERATION_SEED,  # Same seed = isolate prompt effect
+          )
+          # Can compare how prompt changes affect same "random" generation
+
+      # Production: random seed per request but log it
+      def generate_and_log(prompt: str):
+          seed = random.randint(0, 2**32 - 1)
+
+          result = api.generate(
+              prompt=prompt,
+              seed=seed,
+          )
+
+          # Log for reproduction
+          log.info(f"Generated with seed={seed}, prompt={prompt}")
+
+          return result, seed
+
+      # Allow user to request same generation
+      @app.post("/regenerate")
+      async def regenerate(prompt: str, seed: int):
+          """Regenerate exact same image."""
+          return await api.generate(
+              prompt=prompt,
+              seed=seed,  # User provides seed from previous generation
+          )
+
+    detection_patterns:
+      - "generate(?!.*seed)"
+      - "random.*prompt"
+
+    references:
+      - "https://apatero.com/blog/z-image-turbo-controlnet-complete-guide-2025"
+
+  - id: mask-edge-artifacts
+    title: Hard Mask Edges Create Visible Seams
+    severity: medium
+    description: |
+      Sharp mask boundaries create visible edges in inpainting.
+      AI can't blend smoothly at hard mask transitions.
+      Apply blur/feather to mask edges for seamless results.
+
+    wrong_way: |
+      # Hard binary mask
+      mask = create_selection(image)  # Pure black and white
+      mask = mask.convert("L")
+
+      result = api.inpaint(
+          image=image,
+          mask=mask,  # Sharp edges
+          prompt="fill this area",
+      )
+      # Visible seam at mask boundary
+
+    right_way: |
+      from PIL import Image, ImageFilter
+      import numpy as np
+
+      def feather_mask(
+          mask: Image.Image,
+          blur_radius: int = 15,
+          grow_pixels: int = 5
+      ) -> Image.Image:
+          """Feather mask edges for seamless blending."""
+
+          # Ensure grayscale
+          mask = mask.convert("L")
+          arr = np.array(mask)
+
+          # Grow mask slightly
+          from scipy.ndimage import binary_dilation
+          binary = arr > 128
+          grown = binary_dilation(binary, iterations=grow_pixels)
+          arr = grown.astype(np.uint8) * 255
+
+          # Apply gaussian blur to edges
+          mask = Image.fromarray(arr)
+          mask = mask.filter(ImageFilter.GaussianBlur(blur_radius))
+
+          return mask
+
+      # Apply feathering before inpainting
+      mask = create_selection(image)
+      mask = feather_mask(mask, blur_radius=20)
+
+      result = api.inpaint(
+          image=image,
+          mask=mask,  # Soft edges
+          prompt="fill this area naturally",
+      )
+      # Seamless blend at boundaries
+
+      # Differential diffusion approach
+      # Mask values control edit strength (not binary)
+      def gradient_mask(
+          mask: Image.Image,
+          falloff_pixels: int = 50
+      ) -> Image.Image:
+          """Create gradient falloff from mask edges."""
+          from scipy.ndimage import distance_transform_edt
+
+          arr = np.array(mask.convert("L"))
+          binary = arr > 128
+
+          # Distance from edge
+          dist_inside = distance_transform_edt(binary)
+          dist_outside = distance_transform_edt(~binary)
+
+          # Normalize to falloff range
+          gradient = np.clip(dist_inside / falloff_pixels, 0, 1)
+          result = (gradient * 255).astype(np.uint8)
+
+          return Image.fromarray(result)
+
+    detection_patterns:
+      - "mask.*convert.*L(?!.*blur)"
+      - "binary.*mask(?!.*feather)"
+
+    references:
+      - "https://smartart.live/articles/machine-learning/comfyui-workflows/230-how-to-fix-ai-images-in-comfyui-inpainting-mask-editor-tutorial-2025.html"
