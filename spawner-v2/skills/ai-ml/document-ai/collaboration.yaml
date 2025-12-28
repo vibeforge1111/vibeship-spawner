@@ -1,0 +1,574 @@
+# Collaboration - Document AI & Extraction
+# Integration patterns with other skills and services
+
+version: 1.0.0
+skill_id: document-ai
+
+prerequisites:
+  required_knowledge:
+    - "PDF structure and text vs image layers"
+    - "JSON schema design and validation"
+    - "Async patterns for batch processing"
+    - "Token costs and budget management"
+
+  environment_setup:
+    - step: "Choose document processing approach"
+      options:
+        - provider: "Claude/GPT-4 Vision (direct)"
+          best_for: "Full control, custom prompts"
+          setup: |
+            npm install @anthropic-ai/sdk openai pdf-to-img
+
+        - provider: "LlamaParse"
+          best_for: "Specialized document parsing"
+          setup: |
+            npm install llamaindex
+            # Get API key from cloud.llamaindex.ai
+
+        - provider: "Unstructured.io"
+          best_for: "Enterprise, complex layouts"
+          setup: |
+            npm install unstructured-client
+            # Get API key from unstructured.io
+
+    - step: "Set up PDF processing libraries"
+      actions:
+        - "Install pdf-to-img for rasterization"
+        - "Install pdf-lib for metadata/manipulation"
+        - "Install sharp for image preprocessing"
+
+    - step: "Configure storage for processed documents"
+      options:
+        - "PostgreSQL with JSONB for extracted data"
+        - "Vector DB for RAG (Pinecone, Upstash)"
+        - "R2/S3 for original documents"
+
+delegation_triggers:
+  delegate_to_others:
+    - condition: "Need searchable document index"
+      delegate_to: "semantic-search skill"
+      handoff: |
+        Document search requirements:
+        - Index extracted text with embeddings
+        - Support page-level retrieval
+        - Handle hybrid search (keyword + semantic)
+        - Consider: Pinecone, Upstash Vector, Qdrant
+
+    - condition: "Need document upload UI"
+      delegate_to: "frontend skill"
+      handoff: |
+        Upload UI requirements:
+        - Drag-and-drop file upload
+        - PDF preview before processing
+        - Progress indicator during extraction
+        - Results display with confidence scores
+        - Consider: react-dropzone, uploadthing
+
+    - condition: "Need to store extracted data"
+      delegate_to: "backend skill"
+      handoff: |
+        Storage requirements:
+        - Schema for extracted documents
+        - Support for structured data (invoices, etc.)
+        - Search/filter capabilities
+        - Version tracking for re-extractions
+
+    - condition: "Need batch processing pipeline"
+      delegate_to: "background-jobs skill"
+      handoff: |
+        Batch processing requirements:
+        - Queue documents for async processing
+        - Handle failures with retry
+        - Progress tracking per document
+        - Webhook on completion
+        - Consider: Inngest, Trigger.dev, BullMQ
+
+    - condition: "Need accuracy monitoring"
+      delegate_to: "ai-observability skill"
+      handoff: |
+        Monitoring requirements:
+        - Track extraction accuracy over time
+        - Log confidence scores
+        - Alert on low-quality extractions
+        - Cost tracking per document
+
+  accept_from_others:
+    - from: "frontend skill"
+      when: "User uploads document for processing"
+      expect: |
+        I'll receive:
+        - File path or buffer
+        - Extraction type (invoice, general, etc.)
+        - Output format preferences
+        I'll provide: Structured extracted data
+
+    - from: "semantic-search skill"
+      when: "Need to parse documents for indexing"
+      expect: |
+        I'll receive:
+        - Document path
+        - Chunking preferences
+        I'll provide: Text chunks with metadata (page numbers, sections)
+
+    - from: "multimodal-ai skill"
+      when: "Need to understand document visuals"
+      expect: |
+        I'll receive:
+        - Document image
+        - Questions about content
+        I'll provide: Answers with page references
+
+workflow_integration:
+  invoice_processing_flow:
+    - step: 1
+      action: "Receive and validate document"
+      details: |
+        - Check file type (PDF, image)
+        - Validate size and page count
+        - Check for password protection
+        - Estimate processing cost
+
+    - step: 2
+      action: "Preprocess document"
+      details: |
+        - Convert PDF pages to images
+        - Enhance image quality if needed
+        - Detect document type (invoice, receipt, etc.)
+
+    - step: 3
+      action: "Extract structured data"
+      details: |
+        - Use vision model with schema prompt
+        - Validate output against Zod schema
+        - Calculate confidence scores
+
+    - step: 4
+      action: "Post-process and validate"
+      details: |
+        - Cross-check totals (lineItems sum = subtotal)
+        - Validate dates are sensible
+        - Flag low-confidence fields for review
+
+    - step: 5
+      action: "Store and index"
+      details: |
+        - Store in database with document reference
+        - Index for search
+        - Update user's document count/budget
+
+  rag_indexing_flow:
+    - step: 1
+      action: "Parse document for RAG"
+      details: |
+        - Extract text with layout awareness
+        - Identify sections and headings
+        - Extract tables separately
+
+    - step: 2
+      action: "Chunk content"
+      details: |
+        - Split by semantic sections
+        - Keep tables as atomic units
+        - Preserve page references
+
+    - step: 3
+      action: "Generate embeddings"
+      details: |
+        - Embed each chunk
+        - Include metadata (page, section, doc_id)
+        - Store images for visual queries
+
+    - step: 4
+      action: "Index in vector DB"
+      details: |
+        - Upsert to Pinecone/Upstash
+        - Enable hybrid search if available
+
+  decision_points:
+    - decision: "Vision model vs dedicated parser"
+      options:
+        - name: "Claude/GPT-4 Vision"
+          when: "Custom extraction, varied formats, need flexibility"
+          pros: "Flexible prompts, handles any format"
+          cons: "Higher cost, may hallucinate"
+
+        - name: "LlamaParse"
+          when: "Standard documents, need structure preservation"
+          pros: "Better at preserving layout, cheaper"
+          cons: "Less flexible for custom schemas"
+
+        - name: "Unstructured"
+          when: "Enterprise, complex layouts, tables"
+          pros: "Best for complex layouts, local option"
+          cons: "Setup complexity, API costs"
+
+    - decision: "Sync vs async processing"
+      options:
+        - name: "Synchronous"
+          when: "Single page, immediate feedback needed"
+          implementation: "Direct API call, return result"
+
+        - name: "Asynchronous"
+          when: "Multi-page, batch processing"
+          implementation: "Queue job, poll/webhook for completion"
+
+collaboration_patterns:
+  with_nextjs:
+    pattern: "Document upload and extraction API"
+    implementation: |
+      // app/api/documents/extract/route.ts
+      import { NextRequest, NextResponse } from "next/server";
+      import Anthropic from "@anthropic-ai/sdk";
+      import { pdf } from "pdf-to-img";
+      import { z } from "zod";
+
+      const anthropic = new Anthropic();
+
+      const ExtractionSchema = z.object({
+        type: z.enum(["invoice", "receipt", "general"]),
+        data: z.record(z.unknown()),
+        confidence: z.number(),
+        pages: z.number(),
+      });
+
+      export async function POST(req: NextRequest) {
+        const formData = await req.formData();
+        const file = formData.get("file") as File;
+        const extractionType = formData.get("type") as string || "general";
+
+        if (!file) {
+          return NextResponse.json({ error: "No file provided" }, { status: 400 });
+        }
+
+        // Validate file
+        if (file.size > 32 * 1024 * 1024) {
+          return NextResponse.json({ error: "File too large (max 32MB)" }, { status: 400 });
+        }
+
+        // Convert to buffer and process
+        const buffer = Buffer.from(await file.arrayBuffer());
+        const tempPath = `/tmp/${Date.now()}-${file.name}`;
+        fs.writeFileSync(tempPath, buffer);
+
+        try {
+          // Convert PDF to images
+          const images: string[] = [];
+          const document = await pdf(tempPath, { scale: 2 });
+
+          for await (const image of document) {
+            images.push(image.toString("base64"));
+          }
+
+          if (images.length > 100) {
+            return NextResponse.json({ error: "Too many pages (max 100)" }, { status: 400 });
+          }
+
+          // Extract from first page (or all for general)
+          const result = await extractPage(images[0], extractionType);
+
+          return NextResponse.json({
+            success: true,
+            ...result,
+            pages: images.length,
+          });
+        } finally {
+          fs.unlinkSync(tempPath);
+        }
+      }
+
+      async function extractPage(imageBase64: string, type: string) {
+        const prompts = {
+          invoice: "Extract invoice data: number, date, vendor, line items, totals",
+          receipt: "Extract receipt data: store, date, items, total",
+          general: "Extract all text and tables from this document",
+        };
+
+        const response = await anthropic.messages.create({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 4096,
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "image",
+                  source: { type: "base64", media_type: "image/png", data: imageBase64 },
+                },
+                {
+                  type: "text",
+                  text: `${prompts[type]}
+
+                  Return JSON with:
+                  - data: the extracted information
+                  - confidence: 0-1 score
+
+                  Return ONLY valid JSON.`,
+                },
+              ],
+            },
+          ],
+        });
+
+        const text = response.content[0].type === "text" ? response.content[0].text : "";
+        const json = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || "{}");
+
+        return {
+          type,
+          data: json.data || json,
+          confidence: json.confidence || 0.8,
+        };
+      }
+
+  with_inngest:
+    pattern: "Batch document processing"
+    implementation: |
+      // lib/inngest/functions.ts
+      import { inngest } from "./client";
+
+      export const processDocumentBatch = inngest.createFunction(
+        {
+          id: "process-document-batch",
+          retries: 3,
+          concurrency: { limit: 5 },
+        },
+        { event: "documents/batch.process" },
+        async ({ event, step }) => {
+          const { documentIds, userId, extractionType } = event.data;
+
+          const results = [];
+          const errors = [];
+
+          for (const docId of documentIds) {
+            const result = await step.run(`process-${docId}`, async () => {
+              try {
+                // Get document from storage
+                const doc = await getDocument(docId);
+
+                // Extract
+                const extracted = await extractDocument(doc.path, extractionType);
+
+                // Save results
+                await db.extractedDocuments.create({
+                  data: {
+                    documentId: docId,
+                    userId,
+                    data: extracted.data,
+                    confidence: extracted.confidence,
+                  },
+                });
+
+                return { docId, success: true };
+              } catch (error) {
+                return { docId, success: false, error: error.message };
+              }
+            });
+
+            if (result.success) {
+              results.push(result);
+            } else {
+              errors.push(result);
+            }
+          }
+
+          // Notify user
+          await step.run("notify-complete", async () => {
+            await sendEmail(userId, {
+              template: "batch-complete",
+              data: {
+                total: documentIds.length,
+                successful: results.length,
+                failed: errors.length,
+              },
+            });
+          });
+
+          return { results, errors };
+        }
+      );
+
+  with_vector_db:
+    pattern: "Document RAG indexing"
+    implementation: |
+      // lib/document-rag.ts
+      import { Index } from "@upstash/vector";
+      import OpenAI from "openai";
+
+      const vectorIndex = new Index();
+      const openai = new OpenAI();
+
+      interface DocumentChunk {
+        id: string;
+        documentId: string;
+        pageNumber: number;
+        sectionTitle?: string;
+        content: string;
+        embedding?: number[];
+      }
+
+      async function indexDocumentForRAG(
+        documentId: string,
+        pages: { text: string; pageNumber: number }[]
+      ) {
+        const chunks: DocumentChunk[] = [];
+
+        for (const page of pages) {
+          // Split page into chunks (by paragraphs or fixed size)
+          const pageChunks = splitIntoChunks(page.text, {
+            maxLength: 1000,
+            overlap: 100,
+          });
+
+          for (let i = 0; i < pageChunks.length; i++) {
+            const chunkId = `${documentId}-p${page.pageNumber}-c${i}`;
+
+            // Generate embedding
+            const embedding = await openai.embeddings.create({
+              model: "text-embedding-3-small",
+              input: pageChunks[i],
+            });
+
+            chunks.push({
+              id: chunkId,
+              documentId,
+              pageNumber: page.pageNumber,
+              content: pageChunks[i],
+              embedding: embedding.data[0].embedding,
+            });
+          }
+        }
+
+        // Batch upsert to vector DB
+        await vectorIndex.upsert(
+          chunks.map((chunk) => ({
+            id: chunk.id,
+            vector: chunk.embedding!,
+            metadata: {
+              documentId: chunk.documentId,
+              pageNumber: chunk.pageNumber,
+              content: chunk.content,
+            },
+          }))
+        );
+
+        return { indexedChunks: chunks.length };
+      }
+
+      async function queryDocuments(
+        query: string,
+        options?: { documentIds?: string[]; topK?: number }
+      ) {
+        const { topK = 5, documentIds } = options || {};
+
+        // Generate query embedding
+        const queryEmbedding = await openai.embeddings.create({
+          model: "text-embedding-3-small",
+          input: query,
+        });
+
+        // Search
+        const results = await vectorIndex.query({
+          vector: queryEmbedding.data[0].embedding,
+          topK,
+          includeMetadata: true,
+          filter: documentIds
+            ? { documentId: { $in: documentIds } }
+            : undefined,
+        });
+
+        return results.map((r) => ({
+          content: r.metadata?.content,
+          pageNumber: r.metadata?.pageNumber,
+          documentId: r.metadata?.documentId,
+          score: r.score,
+        }));
+      }
+
+  with_uploadthing:
+    pattern: "Document upload with extraction"
+    implementation: |
+      // lib/uploadthing.ts
+      import { createUploadthing, type FileRouter } from "uploadthing/next";
+
+      const f = createUploadthing();
+
+      export const ourFileRouter = {
+        documentUploader: f({
+          pdf: { maxFileSize: "32MB", maxFileCount: 10 },
+          image: { maxFileSize: "16MB", maxFileCount: 10 },
+        })
+          .middleware(async ({ req }) => {
+            const user = await auth(req);
+            if (!user) throw new Error("Unauthorized");
+
+            // Check user's document quota
+            const usage = await getMonthlyUsage(user.id);
+            if (usage.documents >= usage.limit) {
+              throw new Error("Monthly document limit reached");
+            }
+
+            return { userId: user.id };
+          })
+          .onUploadComplete(async ({ metadata, file }) => {
+            // Queue extraction job
+            await inngest.send({
+              name: "documents/extract",
+              data: {
+                userId: metadata.userId,
+                fileUrl: file.url,
+                fileName: file.name,
+              },
+            });
+
+            return { uploadedBy: metadata.userId };
+          }),
+      } satisfies FileRouter;
+
+anti_patterns:
+  - name: "Processing without validation"
+    why_bad: "Wastes money on invalid/oversized documents"
+    example_bad: |
+      const result = await extract(uploadedFile);
+    example_good: |
+      const validation = await validateDocument(uploadedFile);
+      if (!validation.valid) {
+        throw new Error(validation.errors.join(", "));
+      }
+      const result = await extract(uploadedFile);
+
+  - name: "No schema validation on output"
+    why_bad: "LLMs hallucinate fields, produce malformed data"
+    example_bad: |
+      const data = JSON.parse(response);
+      await db.invoices.create({ data });
+    example_good: |
+      const data = InvoiceSchema.parse(JSON.parse(response));
+      await db.invoices.create({ data });
+
+  - name: "Synchronous batch processing"
+    why_bad: "Timeouts, poor UX, no progress visibility"
+    example_bad: |
+      app.post("/batch", async (req, res) => {
+        const results = [];
+        for (const doc of req.body.documents) {
+          results.push(await extract(doc)); // Blocks for hours
+        }
+        res.json(results);
+      });
+    example_good: |
+      app.post("/batch", async (req, res) => {
+        const jobId = await queueBatch(req.body.documents);
+        res.json({ jobId, status: "processing" });
+      });
+
+  - name: "Ignoring extraction confidence"
+    why_bad: "Low-confidence extractions may be wrong"
+    example_bad: |
+      const { data } = await extract(doc);
+      await processInvoice(data); // May be garbage
+    example_good: |
+      const { data, confidence } = await extract(doc);
+      if (confidence < 0.8) {
+        await flagForReview(doc, data);
+      } else {
+        await processInvoice(data);
+      }

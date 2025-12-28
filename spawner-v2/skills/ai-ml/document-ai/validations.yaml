@@ -1,0 +1,399 @@
+# Validations - Document AI & Extraction
+# Quality checks for document processing implementations
+
+version: 1.0.0
+skill_id: document-ai
+
+validations:
+  # API Security
+  - id: doc-api-key-exposed
+    name: Document API Key in Client Code
+    severity: error
+    description: Document processing API keys must be server-side only
+    pattern: |
+      (NEXT_PUBLIC|REACT_APP|VITE).*(LLAMA|UNSTRUCTURED|ANTHROPIC|OPENAI).*KEY
+    message: "Document API key exposed to client. Use server-side routes."
+    autofix: false
+
+  # Input Validation
+  - id: no-pdf-size-check
+    name: Missing PDF Size Validation
+    severity: warning
+    description: PDF file size should be checked before processing
+    pattern: |
+      pdf.*process|extract.*pdf(?!.*size|limit|check)
+    message: "PDF processing without size check. Claude limit is 32MB."
+    autofix: false
+
+  - id: no-page-count-check
+    name: Missing Page Count Validation
+    severity: warning
+    description: Page count should be checked before processing
+    pattern: |
+      pdf.*extract|process.*document(?!.*page.*limit|max.*page)
+    message: "No page count limit. Claude limit is 100 pages per upload."
+    autofix: false
+
+  - id: no-password-check
+    name: Missing Password Protection Check
+    severity: warning
+    description: PDFs should be checked for password protection
+    pattern: |
+      PDFDocument\.load|pdf.*load(?!.*password|protect|encrypt)
+    message: "PDF loaded without checking for password protection."
+    autofix: false
+
+  # Schema Validation
+  - id: no-extraction-schema
+    name: Missing Output Schema Validation
+    severity: warning
+    description: Extracted data should be validated against schema
+    pattern: |
+      JSON\.parse\(.*response(?!.*schema|parse\(|Schema\.parse)
+    message: "Extraction without schema validation. Use Zod to validate."
+    autofix: false
+
+  - id: json-parse-unsafe
+    name: Unsafe JSON Parsing
+    severity: warning
+    description: JSON parsing should handle malformed responses
+    pattern: |
+      JSON\.parse\((?!.*try|catch)
+    message: "JSON.parse without error handling. LLMs may return invalid JSON."
+    autofix: false
+
+  # Cost Management
+  - id: no-extraction-cost-tracking
+    name: Missing Extraction Cost Tracking
+    severity: warning
+    description: Document processing costs should be tracked
+    pattern: |
+      extract.*pdf|process.*document(?!.*cost|budget|token)
+    message: "No cost tracking. PDF extraction can be expensive."
+    autofix: false
+
+  - id: unbounded-batch-processing
+    name: Unbounded Batch Processing
+    severity: warning
+    description: Batch processing should have limits
+    pattern: |
+      for.*await.*extract|Promise\.all.*extract(?!.*limit|batch)
+    message: "Unbounded batch processing. Add concurrency limits."
+    autofix: false
+
+  # Data Quality
+  - id: no-confidence-scoring
+    name: Missing Confidence Scoring
+    severity: info
+    description: Extraction should include confidence scores
+    pattern: |
+      extract.*(?:invoice|receipt|document)(?!.*confidence|score)
+    message: "Consider adding confidence scoring for extracted data."
+    autofix: false
+
+  - id: no-extraction-validation
+    name: Missing Data Validation
+    severity: warning
+    description: Extracted data should be validated for completeness
+    pattern: |
+      return.*extracted(?!.*validat|check|verify)
+    message: "Extracted data returned without validation."
+    autofix: false
+
+  # Error Handling
+  - id: no-extraction-retry
+    name: Missing Retry Logic
+    severity: warning
+    description: Document extraction should retry on transient failures
+    pattern: |
+      await.*extract(?!.*retry|attempt)
+    message: "No retry logic for extraction. API calls can fail transiently."
+    autofix: false
+
+code_smells:
+  - id: high-resolution-unnecessary
+    name: Unnecessarily High Resolution
+    description: High resolution increases cost without improving accuracy
+    pattern: |
+      scale.*[4-9]|resolution.*(?:high|max)|dpi.*[3-9][0-9][0-9]
+    suggestion: "Scale 2 (150-200 DPI) is usually sufficient for OCR."
+
+  - id: processing-all-pages
+    name: Processing All Pages When Subset Needed
+    description: Extract only relevant pages to reduce cost
+    pattern: |
+      for.*page.*in.*pages|pages\.forEach.*extract
+    suggestion: "Consider extracting only relevant pages (TOC, specific sections)."
+
+  - id: sync-large-extraction
+    name: Synchronous Large Document Processing
+    description: Large documents should be processed asynchronously
+    pattern: |
+      await.*extract.*pdf(?!.*queue|async|background)
+    suggestion: "Queue large document processing for background execution."
+
+  - id: no-caching-extractions
+    name: No Caching of Extracted Data
+    description: Cache extractions to avoid re-processing same documents
+    pattern: |
+      extract.*(?!.*cache|store|save)
+    suggestion: "Cache extraction results to avoid duplicate processing costs."
+
+best_practices:
+  - id: validate-before-processing
+    name: Validate Documents Before Processing
+    check: |
+      File size, page count, and format validated before extraction.
+    recommendation: |
+      import * as fs from "fs";
+      import { pdf } from "pdf-to-img";
+      import { PDFDocument } from "pdf-lib";
+
+      interface ValidationResult {
+        valid: boolean;
+        errors: string[];
+        warnings: string[];
+        metadata: {
+          sizeBytes: number;
+          pageCount: number;
+          isScanned: boolean;
+          isProtected: boolean;
+        };
+      }
+
+      async function validateDocument(filePath: string): Promise<ValidationResult> {
+        const errors: string[] = [];
+        const warnings: string[] = [];
+
+        // Check file exists and is readable
+        if (!fs.existsSync(filePath)) {
+          return { valid: false, errors: ["File not found"], warnings: [], metadata: null };
+        }
+
+        const stats = fs.statSync(filePath);
+
+        // Size check
+        if (stats.size > 32 * 1024 * 1024) {
+          errors.push(`File size ${(stats.size / 1024 / 1024).toFixed(1)}MB exceeds 32MB limit`);
+        }
+
+        // Page count check
+        let pageCount = 0;
+        let isScanned = false;
+        let isProtected = false;
+
+        try {
+          const pdfBytes = fs.readFileSync(filePath);
+          const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+          pageCount = pdfDoc.getPageCount();
+
+          if (pageCount > 100) {
+            errors.push(`Page count ${pageCount} exceeds 100 page limit`);
+          } else if (pageCount > 50) {
+            warnings.push(`Large document (${pageCount} pages) - consider chunking`);
+          }
+        } catch (error: any) {
+          if (error.message.includes("encrypted")) {
+            isProtected = true;
+            errors.push("PDF is password protected");
+          }
+        }
+
+        return {
+          valid: errors.length === 0,
+          errors,
+          warnings,
+          metadata: {
+            sizeBytes: stats.size,
+            pageCount,
+            isScanned,
+            isProtected,
+          },
+        };
+      }
+
+  - id: schema-enforced-extraction
+    name: Enforce Schema on Extracted Data
+    check: |
+      All extracted data validated with Zod schemas.
+    recommendation: |
+      import { z } from "zod";
+
+      const InvoiceSchema = z.object({
+        invoiceNumber: z.string().min(1),
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        vendorName: z.string(),
+        lineItems: z.array(z.object({
+          description: z.string(),
+          quantity: z.number().positive(),
+          unitPrice: z.number(),
+          amount: z.number(),
+        })),
+        subtotal: z.number(),
+        tax: z.number().optional(),
+        total: z.number(),
+      });
+
+      async function extractInvoiceWithValidation(imageBase64: string) {
+        const response = await extractWithLLM(imageBase64);
+
+        // Extract JSON from response
+        const jsonMatch = response.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+          throw new Error("No JSON found in LLM response");
+        }
+
+        // Parse and validate
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+          return InvoiceSchema.parse(parsed);
+        } catch (error) {
+          if (error instanceof z.ZodError) {
+            throw new Error(`Validation failed: ${error.errors.map(e => e.message).join(", ")}`);
+          }
+          throw new Error(`Invalid JSON: ${error.message}`);
+        }
+      }
+
+  - id: batch-with-concurrency
+    name: Batch Process with Concurrency Limits
+    check: |
+      Batch processing uses controlled concurrency to avoid rate limits.
+    recommendation: |
+      import pLimit from "p-limit";
+
+      const limit = pLimit(3); // Max 3 concurrent extractions
+
+      async function batchExtract(
+        documents: string[],
+        onProgress?: (completed: number, total: number) => void
+      ) {
+        let completed = 0;
+
+        const results = await Promise.all(
+          documents.map((doc) =>
+            limit(async () => {
+              const result = await extractDocument(doc);
+              completed++;
+              onProgress?.(completed, documents.length);
+              return result;
+            })
+          )
+        );
+
+        return results;
+      }
+
+      // With retry logic
+      async function batchExtractWithRetry(
+        documents: string[],
+        maxRetries: number = 3
+      ) {
+        const results: Map<string, any> = new Map();
+        const failures: Map<string, Error> = new Map();
+
+        for (const doc of documents) {
+          let lastError: Error | null = null;
+
+          for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+              const result = await limit(() => extractDocument(doc));
+              results.set(doc, result);
+              break;
+            } catch (error) {
+              lastError = error as Error;
+              await sleep(1000 * attempt); // Exponential backoff
+            }
+          }
+
+          if (!results.has(doc) && lastError) {
+            failures.set(doc, lastError);
+          }
+        }
+
+        return { results, failures };
+      }
+
+  - id: cost-estimation
+    name: Estimate and Track Costs
+    check: |
+      Extraction costs estimated before processing and tracked after.
+    recommendation: |
+      const COST_PER_PAGE = {
+        claude: 0.015,      // ~1500 tokens input per page
+        gpt4o: 0.020,       // GPT-4o vision
+        llamaparse: 0.003,  // LlamaParse API
+        unstructured: 0.010, // Unstructured hi_res
+      };
+
+      class DocumentCostManager {
+        async estimateCost(
+          pageCount: number,
+          provider: keyof typeof COST_PER_PAGE
+        ): Promise<number> {
+          return pageCount * COST_PER_PAGE[provider];
+        }
+
+        async processWithBudget(
+          pdfPath: string,
+          userId: string,
+          maxCostPerDoc: number = 1.0
+        ) {
+          const pageCount = await countPages(pdfPath);
+          const estimatedCost = await this.estimateCost(pageCount, "claude");
+
+          if (estimatedCost > maxCostPerDoc) {
+            throw new Error(
+              `Estimated cost $${estimatedCost.toFixed(2)} exceeds limit $${maxCostPerDoc}`
+            );
+          }
+
+          // Check user budget
+          const userBudget = await this.getUserRemainingBudget(userId);
+          if (estimatedCost > userBudget) {
+            throw new Error(`Insufficient budget. Need $${estimatedCost.toFixed(2)}, have $${userBudget.toFixed(2)}`);
+          }
+
+          // Process
+          const result = await extractFromPDF(pdfPath);
+
+          // Record actual cost
+          await this.recordCost(userId, estimatedCost);
+
+          return result;
+        }
+      }
+
+testing_checklist:
+  input_validation:
+    - "File size checked (max 32MB)"
+    - "Page count validated (max 100)"
+    - "Password protection detected"
+    - "File format validated (PDF, images)"
+    - "Corrupt files handled gracefully"
+
+  extraction_quality:
+    - "Schema validation on all outputs"
+    - "Confidence scores included"
+    - "Tables extracted with correct structure"
+    - "Multi-column layouts handled"
+    - "Handwriting handled or flagged"
+
+  cost_management:
+    - "Cost estimated before processing"
+    - "User budgets enforced"
+    - "Batch concurrency limited"
+    - "Results cached for reuse"
+
+  error_handling:
+    - "API timeouts handled"
+    - "Rate limits handled with backoff"
+    - "Malformed JSON caught"
+    - "Partial failures in batches handled"
+    - "User-friendly error messages"
+
+  security:
+    - "API keys server-side only"
+    - "Uploaded files scanned for malware"
+    - "PII handling if extracting sensitive data"
+    - "Temporary files cleaned up"

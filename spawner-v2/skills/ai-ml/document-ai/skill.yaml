@@ -1,0 +1,729 @@
+# Document AI Skill
+# Patterns for AI-powered document parsing, OCR, and data extraction
+
+version: 1.0.0
+skill_id: document-ai
+name: Document AI & Extraction
+category: ai-ml
+description: |
+  Comprehensive patterns for AI-powered document understanding including
+  PDF parsing, OCR, invoice/receipt extraction, table extraction,
+  multimodal RAG with vision models, and structured data output.
+
+triggers:
+  - "document parsing"
+  - "PDF extraction"
+  - "OCR"
+  - "invoice processing"
+  - "receipt extraction"
+  - "document understanding"
+  - "LlamaParse"
+  - "Unstructured"
+  - "vision document"
+  - "table extraction"
+  - "structured output from PDF"
+
+provides:
+  - "PDF parsing with Claude/GPT-4 vision"
+  - "Invoice and receipt data extraction"
+  - "Table extraction from documents"
+  - "Multimodal RAG for document Q&A"
+  - "Structured JSON output with schema validation"
+  - "Layout-aware document processing"
+  - "Batch document processing pipelines"
+
+patterns:
+  - name: "PDF Parsing with Claude Vision"
+    description: "Extract structured data from PDFs using Claude's vision"
+    when: "User needs to extract data from PDF documents"
+    implementation: |
+      import Anthropic from "@anthropic-ai/sdk";
+      import { pdf } from "pdf-to-img";
+      import * as fs from "fs";
+
+      const anthropic = new Anthropic();
+
+      interface ExtractionResult {
+        pages: PageContent[];
+        metadata: DocumentMetadata;
+      }
+
+      interface PageContent {
+        pageNumber: number;
+        text: string;
+        tables: Table[];
+        images: ImageDescription[];
+      }
+
+      // Convert PDF pages to base64 images
+      async function pdfToImages(pdfPath: string): Promise<string[]> {
+        const images: string[] = [];
+
+        const document = await pdf(pdfPath, { scale: 2 }); // Higher scale for OCR
+
+        for await (const image of document) {
+          const base64 = image.toString("base64");
+          images.push(base64);
+        }
+
+        return images;
+      }
+
+      // Extract structured data from a single page
+      async function extractPageContent(
+        imageBase64: string,
+        pageNumber: number,
+        schema?: string
+      ): Promise<PageContent> {
+        const systemPrompt = schema
+          ? `Extract information according to this JSON schema: ${schema}`
+          : "Extract all text, tables, and describe any images/charts.";
+
+        const response = await anthropic.messages.create({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 4096,
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: "image/png",
+                    data: imageBase64,
+                  },
+                },
+                {
+                  type: "text",
+                  text: `${systemPrompt}
+
+                  For tables, output as structured JSON arrays.
+                  For images/charts, describe what they show.
+                  Preserve the document's logical structure.`,
+                },
+              ],
+            },
+          ],
+        });
+
+        const content = response.content[0];
+        if (content.type !== "text") {
+          throw new Error("Unexpected response type");
+        }
+
+        return {
+          pageNumber,
+          text: content.text,
+          tables: extractTablesFromText(content.text),
+          images: extractImageDescriptions(content.text),
+        };
+      }
+
+      // Process entire PDF
+      async function extractFromPDF(
+        pdfPath: string,
+        options?: {
+          maxPages?: number;
+          schema?: string;
+          concurrency?: number;
+        }
+      ): Promise<ExtractionResult> {
+        const { maxPages = 100, schema, concurrency = 3 } = options || {};
+
+        // Validate file size (Claude limit: 32MB)
+        const stats = fs.statSync(pdfPath);
+        if (stats.size > 32 * 1024 * 1024) {
+          throw new Error("PDF exceeds 32MB limit. Split into smaller files.");
+        }
+
+        // Convert to images
+        const images = await pdfToImages(pdfPath);
+
+        if (images.length > maxPages) {
+          throw new Error(`PDF has ${images.length} pages, max is ${maxPages}`);
+        }
+
+        // Process pages with controlled concurrency
+        const pages: PageContent[] = [];
+
+        for (let i = 0; i < images.length; i += concurrency) {
+          const batch = images.slice(i, i + concurrency);
+          const batchResults = await Promise.all(
+            batch.map((img, idx) =>
+              extractPageContent(img, i + idx + 1, schema)
+            )
+          );
+          pages.push(...batchResults);
+        }
+
+        return {
+          pages,
+          metadata: {
+            totalPages: images.length,
+            processedAt: new Date().toISOString(),
+          },
+        };
+      }
+
+  - name: "Invoice Extraction with Schema Validation"
+    description: "Extract structured invoice data with Zod schema enforcement"
+    when: "User needs to process invoices or receipts"
+    implementation: |
+      import Anthropic from "@anthropic-ai/sdk";
+      import { z } from "zod";
+      import { zodToJsonSchema } from "zod-to-json-schema";
+
+      const anthropic = new Anthropic();
+
+      // Define strict schema for invoice data
+      const InvoiceSchema = z.object({
+        invoiceNumber: z.string().describe("Invoice ID or number"),
+        invoiceDate: z.string().describe("Date in YYYY-MM-DD format"),
+        dueDate: z.string().optional().describe("Payment due date"),
+        vendor: z.object({
+          name: z.string(),
+          address: z.string().optional(),
+          taxId: z.string().optional(),
+        }),
+        customer: z.object({
+          name: z.string(),
+          address: z.string().optional(),
+        }),
+        lineItems: z.array(
+          z.object({
+            description: z.string(),
+            quantity: z.number(),
+            unitPrice: z.number(),
+            amount: z.number(),
+          })
+        ),
+        subtotal: z.number(),
+        taxAmount: z.number().optional(),
+        total: z.number(),
+        currency: z.string().default("USD"),
+      });
+
+      type Invoice = z.infer<typeof InvoiceSchema>;
+
+      async function extractInvoice(imageBase64: string): Promise<Invoice> {
+        const jsonSchema = zodToJsonSchema(InvoiceSchema);
+
+        const response = await anthropic.messages.create({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 4096,
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: "image/png",
+                    data: imageBase64,
+                  },
+                },
+                {
+                  type: "text",
+                  text: `Extract invoice data from this image.
+
+                  Return ONLY valid JSON matching this schema:
+                  ${JSON.stringify(jsonSchema, null, 2)}
+
+                  Rules:
+                  - All amounts should be numbers, not strings
+                  - Dates must be in YYYY-MM-DD format
+                  - If a field is unclear, use your best interpretation
+                  - Do not include any text outside the JSON object`,
+                },
+              ],
+            },
+          ],
+        });
+
+        const content = response.content[0];
+        if (content.type !== "text") {
+          throw new Error("Unexpected response type");
+        }
+
+        // Parse and validate with Zod
+        const jsonMatch = content.text.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+          throw new Error("No JSON found in response");
+        }
+
+        const parsed = JSON.parse(jsonMatch[0]);
+        return InvoiceSchema.parse(parsed);
+      }
+
+      // Batch process multiple invoices
+      async function processInvoiceBatch(
+        imagePaths: string[],
+        onProgress?: (completed: number, total: number) => void
+      ): Promise<{ results: Invoice[]; errors: Error[] }> {
+        const results: Invoice[] = [];
+        const errors: Error[] = [];
+
+        for (let i = 0; i < imagePaths.length; i++) {
+          try {
+            const imageBuffer = fs.readFileSync(imagePaths[i]);
+            const base64 = imageBuffer.toString("base64");
+            const invoice = await extractInvoice(base64);
+            results.push(invoice);
+          } catch (error) {
+            errors.push(error as Error);
+          }
+
+          onProgress?.(i + 1, imagePaths.length);
+        }
+
+        return { results, errors };
+      }
+
+  - name: "Table Extraction from Documents"
+    description: "Extract tables as structured data from PDFs/images"
+    when: "User needs to extract tabular data from documents"
+    implementation: |
+      import OpenAI from "openai";
+
+      const openai = new OpenAI();
+
+      interface ExtractedTable {
+        headers: string[];
+        rows: string[][];
+        title?: string;
+        pageNumber?: number;
+      }
+
+      async function extractTables(
+        imageBase64: string,
+        options?: {
+          format?: "json" | "csv" | "markdown";
+          pageNumber?: number;
+        }
+      ): Promise<ExtractedTable[]> {
+        const { format = "json", pageNumber } = options || {};
+
+        const response = await openai.chat.completions.create({
+          model: "gpt-4o",
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: `data:image/png;base64,${imageBase64}`,
+                    detail: "high",
+                  },
+                },
+                {
+                  type: "text",
+                  text: `Extract ALL tables from this document image.
+
+                  For each table:
+                  1. Identify the table title/caption if present
+                  2. Extract all headers
+                  3. Extract all data rows
+                  4. Preserve the exact cell values
+
+                  Return as JSON array:
+                  [
+                    {
+                      "title": "Optional table title",
+                      "headers": ["Column1", "Column2", ...],
+                      "rows": [
+                        ["value1", "value2", ...],
+                        ...
+                      ]
+                    }
+                  ]
+
+                  If no tables found, return empty array [].
+                  Return ONLY the JSON, no other text.`,
+                },
+              ],
+            },
+          ],
+          max_tokens: 4096,
+          response_format: { type: "json_object" },
+        });
+
+        const content = response.choices[0].message.content;
+        if (!content) return [];
+
+        const parsed = JSON.parse(content);
+        const tables = Array.isArray(parsed) ? parsed : parsed.tables || [];
+
+        return tables.map((t: any) => ({
+          ...t,
+          pageNumber,
+        }));
+      }
+
+      // Convert extracted table to different formats
+      function tableToCSV(table: ExtractedTable): string {
+        const escape = (cell: string) =>
+          cell.includes(",") ? `"${cell}"` : cell;
+
+        const headerRow = table.headers.map(escape).join(",");
+        const dataRows = table.rows.map((row) =>
+          row.map(escape).join(",")
+        );
+
+        return [headerRow, ...dataRows].join("\n");
+      }
+
+      function tableToMarkdown(table: ExtractedTable): string {
+        const headerRow = `| ${table.headers.join(" | ")} |`;
+        const separator = `| ${table.headers.map(() => "---").join(" | ")} |`;
+        const dataRows = table.rows.map(
+          (row) => `| ${row.join(" | ")} |`
+        );
+
+        let md = "";
+        if (table.title) md += `### ${table.title}\n\n`;
+        md += [headerRow, separator, ...dataRows].join("\n");
+
+        return md;
+      }
+
+  - name: "Multimodal RAG for Document Q&A"
+    description: "Build Q&A over documents with vision-enhanced RAG"
+    when: "User needs to query large document collections"
+    implementation: |
+      import OpenAI from "openai";
+      import { Index } from "@upstash/vector";
+
+      const openai = new OpenAI();
+      const vectorIndex = new Index();
+
+      interface DocumentChunk {
+        id: string;
+        pageNumber: number;
+        content: string;
+        imageBase64?: string; // Store for visual queries
+        embedding?: number[];
+      }
+
+      // Index a document for RAG
+      async function indexDocument(
+        documentId: string,
+        pages: { text: string; imageBase64: string }[]
+      ) {
+        const chunks: DocumentChunk[] = [];
+
+        for (let i = 0; i < pages.length; i++) {
+          const { text, imageBase64 } = pages[i];
+
+          // Create text embedding
+          const embeddingResponse = await openai.embeddings.create({
+            model: "text-embedding-3-small",
+            input: text,
+          });
+
+          const chunk: DocumentChunk = {
+            id: `${documentId}-page-${i + 1}`,
+            pageNumber: i + 1,
+            content: text,
+            imageBase64,
+            embedding: embeddingResponse.data[0].embedding,
+          };
+
+          chunks.push(chunk);
+
+          // Store in vector DB
+          await vectorIndex.upsert({
+            id: chunk.id,
+            vector: chunk.embedding!,
+            metadata: {
+              documentId,
+              pageNumber: chunk.pageNumber,
+              content: chunk.content,
+              hasImage: !!imageBase64,
+            },
+          });
+        }
+
+        return chunks;
+      }
+
+      // Query documents with multimodal understanding
+      async function queryDocuments(
+        query: string,
+        options?: {
+          documentIds?: string[];
+          topK?: number;
+          useVision?: boolean;
+        }
+      ): Promise<{ answer: string; sources: DocumentChunk[] }> {
+        const { topK = 5, useVision = true } = options || {};
+
+        // Get query embedding
+        const queryEmbedding = await openai.embeddings.create({
+          model: "text-embedding-3-small",
+          input: query,
+        });
+
+        // Search vector DB
+        const results = await vectorIndex.query({
+          vector: queryEmbedding.data[0].embedding,
+          topK,
+          includeMetadata: true,
+        });
+
+        // Retrieve full chunks with images
+        const chunks = await Promise.all(
+          results.map(async (r) => {
+            // Fetch full chunk from storage
+            return getChunkById(r.id);
+          })
+        );
+
+        // Build multimodal prompt
+        const messages: any[] = [
+          {
+            role: "system",
+            content: `Answer questions based on the provided document pages.
+              Cite specific page numbers when referencing information.
+              If the answer isn't in the documents, say so.`,
+          },
+        ];
+
+        // Add retrieved pages as context
+        const userContent: any[] = [];
+
+        for (const chunk of chunks) {
+          if (useVision && chunk.imageBase64) {
+            // Include page image for visual understanding
+            userContent.push({
+              type: "image_url",
+              image_url: {
+                url: `data:image/png;base64,${chunk.imageBase64}`,
+                detail: "low", // Use low for cost efficiency
+              },
+            });
+          }
+
+          userContent.push({
+            type: "text",
+            text: `[Page ${chunk.pageNumber}]:\n${chunk.content}`,
+          });
+        }
+
+        userContent.push({
+          type: "text",
+          text: `\n\nQuestion: ${query}`,
+        });
+
+        messages.push({ role: "user", content: userContent });
+
+        const response = await openai.chat.completions.create({
+          model: "gpt-4o",
+          messages,
+          max_tokens: 1024,
+        });
+
+        return {
+          answer: response.choices[0].message.content || "",
+          sources: chunks,
+        };
+      }
+
+  - name: "Using LlamaParse for Complex Documents"
+    description: "Parse complex documents with LlamaParse API"
+    when: "Need specialized document parsing beyond basic vision"
+    implementation: |
+      import { LlamaParseReader } from "llamaindex";
+
+      const reader = new LlamaParseReader({
+        apiKey: process.env.LLAMA_CLOUD_API_KEY,
+        resultType: "markdown", // or "text", "json"
+        parsingInstruction: "Extract all tables and preserve layout",
+      });
+
+      interface ParsedDocument {
+        content: string;
+        metadata: Record<string, any>;
+      }
+
+      async function parseWithLlamaparse(
+        filePath: string,
+        options?: {
+          outputFormat?: "markdown" | "text" | "json";
+          parseInstruction?: string;
+        }
+      ): Promise<ParsedDocument[]> {
+        const { outputFormat = "markdown", parseInstruction } = options || {};
+
+        const customReader = new LlamaParseReader({
+          apiKey: process.env.LLAMA_CLOUD_API_KEY,
+          resultType: outputFormat,
+          ...(parseInstruction && { parsingInstruction: parseInstruction }),
+        });
+
+        const documents = await customReader.loadData(filePath);
+
+        return documents.map((doc) => ({
+          content: doc.text,
+          metadata: doc.metadata || {},
+        }));
+      }
+
+      // Parse with specific extraction focus
+      async function parseInvoicesWithLlamaparse(filePath: string) {
+        return parseWithLlamaparse(filePath, {
+          outputFormat: "json",
+          parseInstruction: `
+            Extract invoice data with the following structure:
+            - Invoice number
+            - Date
+            - Vendor information
+            - Line items with quantities and prices
+            - Totals and taxes
+            Return as structured JSON.
+          `,
+        });
+      }
+
+  - name: "Using Unstructured.io for Enterprise"
+    description: "Process documents with Unstructured API"
+    when: "Need enterprise-grade document processing"
+    implementation: |
+      import { UnstructuredClient } from "unstructured-client";
+      import { Strategy } from "unstructured-client/sdk/models/shared";
+
+      const client = new UnstructuredClient({
+        serverURL: "https://api.unstructured.io",
+        security: {
+          apiKeyAuth: process.env.UNSTRUCTURED_API_KEY,
+        },
+      });
+
+      interface UnstructuredElement {
+        type: string;
+        text: string;
+        metadata: {
+          page_number?: number;
+          coordinates?: any;
+          parent_id?: string;
+        };
+      }
+
+      async function processWithUnstructured(
+        filePath: string,
+        options?: {
+          strategy?: "fast" | "hi_res" | "ocr_only";
+          extractTables?: boolean;
+          extractImages?: boolean;
+        }
+      ): Promise<UnstructuredElement[]> {
+        const {
+          strategy = "hi_res",
+          extractTables = true,
+          extractImages = false,
+        } = options || {};
+
+        const fileBuffer = fs.readFileSync(filePath);
+        const fileName = path.basename(filePath);
+
+        const response = await client.general.partition({
+          partitionParameters: {
+            files: {
+              content: fileBuffer,
+              fileName,
+            },
+            strategy: strategy as Strategy,
+            extractImageBlockTypes: extractImages ? ["Image", "Table"] : [],
+            includePageBreaks: true,
+          },
+        });
+
+        return response.elements as UnstructuredElement[];
+      }
+
+      // Extract structured data from elements
+      function extractStructuredData(elements: UnstructuredElement[]) {
+        const tables = elements.filter((e) => e.type === "Table");
+        const text = elements
+          .filter((e) => e.type === "NarrativeText" || e.type === "Title")
+          .map((e) => e.text)
+          .join("\n\n");
+
+        const byPage = elements.reduce((acc, el) => {
+          const page = el.metadata.page_number || 1;
+          if (!acc[page]) acc[page] = [];
+          acc[page].push(el);
+          return acc;
+        }, {} as Record<number, UnstructuredElement[]>);
+
+        return { tables, text, byPage };
+      }
+
+anti_patterns:
+  - name: "Processing large PDFs without chunking"
+    why_bad: "Exceeds token limits, causes timeouts, high costs"
+    example_bad: |
+      // BAD: Send entire 100-page PDF at once
+      const result = await extractFromPDF(largePdf);
+    example_good: |
+      // GOOD: Process page by page with limits
+      const pages = await pdfToImages(pdfPath);
+      if (pages.length > 50) {
+        throw new Error("Split PDF into smaller sections");
+      }
+      for (const page of pages) {
+        await extractPageContent(page);
+      }
+
+  - name: "No schema validation on extracted data"
+    why_bad: "LLMs can hallucinate fields, produce invalid JSON"
+    example_bad: |
+      const data = JSON.parse(response);
+      await db.invoices.create({ data }); // May be malformed
+    example_good: |
+      const data = InvoiceSchema.parse(JSON.parse(response));
+      await db.invoices.create({ data }); // Validated
+
+  - name: "Ignoring low image quality"
+    why_bad: "Poor scans produce garbage extraction"
+    example_bad: |
+      const result = await extract(anyImage);
+    example_good: |
+      // Check image quality first
+      const quality = await assessImageQuality(image);
+      if (quality.dpi < 150 || quality.blur > 0.5) {
+        throw new Error("Image quality too low for reliable extraction");
+      }
+
+  - name: "Not handling multi-column layouts"
+    why_bad: "Text gets jumbled between columns"
+    example_bad: |
+      // Assume single-column layout
+      const text = await extractText(pdf);
+    example_good: |
+      // Use layout-aware extraction
+      const result = await extractWithLayout(pdf, {
+        preserveLayout: true,
+        detectColumns: true,
+      });
+
+handoffs:
+  - to: "semantic-search"
+    when: "Extracted documents need to be searchable"
+    context: "Documents are parsed. Semantic search skill can index for retrieval."
+
+  - to: "backend"
+    when: "Need to store extracted data in database"
+    context: "Data is structured. Backend skill can design storage schema."
+
+  - to: "ai-observability"
+    when: "Need to monitor extraction accuracy"
+    context: "Track extraction quality, errors, and costs."
+
+references:
+  - "https://docs.anthropic.com/en/docs/build-with-claude/pdf-support"
+  - "https://cookbook.openai.com/examples/parse_pdf_docs_for_rag"
+  - "https://docs.llamaindex.ai/en/stable/examples/multi_modal/multi_modal_pdf_tables/"
+  - "https://unstructured-io.github.io/unstructured/"
