@@ -1,0 +1,477 @@
+# Sharp Edges - AI Music & Audio Generation
+# Gotchas that cause failures, security issues, or unexpected behavior
+
+version: 1.0.0
+skill_id: ai-music-audio
+
+sharp_edges:
+  - id: voice-cloning-legal-liability
+    summary: "Voice cloning without consent creates deepfakes"
+    severity: critical
+    situation: "Cloning voices from public audio without explicit permission"
+    why: |
+      Voice cloning technology can perfectly replicate anyone's voice.
+      Using someone's voice without consent:
+      - Creates potential deepfakes for fraud/misinformation
+      - Violates right of publicity laws in most jurisdictions
+      - Results in platform bans (ElevenLabs actively monitors)
+      - Can be used for voice phishing (vishing) attacks
+      - Major lawsuits pending against AI companies over this
+
+    detection_pattern: |
+      createVoiceClone|add_voice|clone.*voice(?!.*consent|verify)
+
+    solution: |
+      Always require and verify consent:
+      1. Implement voice consent verification flow
+      2. Require email/identity verification for voice owner
+      3. Store consent records with timestamps
+      4. Limit cloning to user's own voice or verified consents
+      5. Add voice watermarking for traceability
+
+      ```typescript
+      // Consent verification required
+      const consent = await db.voiceConsent.findUnique({
+        where: { voiceOwnerId: ownerId, projectId },
+      });
+
+      if (!consent?.verified || !consent?.signature) {
+        throw new Error("Voice cloning requires verified consent");
+      }
+
+      // Log for audit trail
+      await db.voiceCloneAudit.create({
+        data: {
+          clonedBy: userId,
+          voiceOwnerId: ownerId,
+          consentId: consent.id,
+          purpose: purpose,
+        },
+      });
+      ```
+
+  - id: tts-cost-explosion
+    summary: "Unbounded TTS text causes massive bills"
+    severity: high
+    situation: "User-provided text passed directly to TTS without limits"
+    why: |
+      TTS pricing is per character (e.g., ElevenLabs ~$0.03/1000 chars).
+      A single novel (~500K characters) = $15+ per generation.
+      Malicious users can exploit unlimited endpoints:
+      - Submit entire books repeatedly
+      - Bot attacks generating millions of characters
+      - Single request can consume monthly budget
+
+    detection_pattern: |
+      textToSpeech\(.*text(?!.*slice|substring|length.*<|limit)
+
+    solution: |
+      Implement multiple safeguards:
+
+      ```typescript
+      const MAX_CHARS = 5000;
+      const MAX_MONTHLY_CHARS_PER_USER = 100000;
+
+      async function safeTTS(userId: string, text: string) {
+        // 1. Hard character limit
+        if (text.length > MAX_CHARS) {
+          throw new Error(`Text exceeds ${MAX_CHARS} character limit`);
+        }
+
+        // 2. Check monthly usage
+        const monthlyUsage = await getMonthlyCharUsage(userId);
+        if (monthlyUsage + text.length > MAX_MONTHLY_CHARS_PER_USER) {
+          throw new Error("Monthly character limit reached");
+        }
+
+        // 3. Rate limit per minute
+        await rateLimit(userId, "tts", { maxRequests: 10, window: 60 });
+
+        // 4. Track and charge
+        await recordUsage(userId, text.length);
+
+        return elevenlabs.textToSpeech.convert(voiceId, { text });
+      }
+      ```
+
+  - id: music-gen-30-second-limit
+    summary: "MusicGen silently clips audio at 30 seconds"
+    severity: medium
+    situation: "Requesting music duration longer than model supports"
+    why: |
+      MusicGen (via Replicate) has a hard 30-second limit.
+      If you request 60 seconds, you get 30 seconds (no error).
+      User expects full length, receives half.
+      Wastes money on clipped generations.
+
+    detection_pattern: |
+      musicgen.*duration.*[3-9][0-9]|duration.*[1-9][0-9][0-9]
+
+    solution: |
+      Validate duration and implement concatenation for longer audio:
+
+      ```typescript
+      const MUSICGEN_MAX_DURATION = 30;
+
+      async function generateLongMusic(prompt: string, duration: number) {
+        // For short music, generate directly
+        if (duration <= MUSICGEN_MAX_DURATION) {
+          return generateMusic({ prompt, duration });
+        }
+
+        // For longer, generate segments with continuation
+        const segments: string[] = [];
+        let remaining = duration;
+
+        while (remaining > 0) {
+          const segmentDuration = Math.min(remaining, MUSICGEN_MAX_DURATION);
+          const previousAudio = segments[segments.length - 1];
+
+          const segment = await generateMusic({
+            prompt,
+            duration: segmentDuration,
+            inputAudio: previousAudio, // Use as reference
+            continuation: true,
+          });
+
+          segments.push(segment);
+          remaining -= segmentDuration;
+        }
+
+        // Concatenate with crossfade
+        return concatenateWithCrossfade(segments);
+      }
+      ```
+
+  - id: voice-settings-instability
+    summary: "Low stability settings produce inconsistent output"
+    severity: medium
+    situation: "Using ElevenLabs with stability < 0.3"
+    why: |
+      ElevenLabs stability setting (0-1) controls voice consistency:
+      - Low stability = more expressive but unpredictable
+      - Can produce different voices on same text
+      - May include artifacts, breathing, emotional breaks
+      - Problematic for long-form content or audiobooks
+      - Inconsistent between API calls
+
+    detection_pattern: |
+      stability.*0\.[0-2]|stability.*0(?!\.)|voice_settings.*stability.*0\.[0-2]
+
+    solution: |
+      Use appropriate stability for use case:
+
+      ```typescript
+      const STABILITY_PRESETS = {
+        // High consistency for narration/audiobooks
+        narration: { stability: 0.75, similarityBoost: 0.75 },
+
+        // Medium for conversational content
+        conversational: { stability: 0.5, similarityBoost: 0.75 },
+
+        // Low for expressive/emotional content (with review)
+        expressive: { stability: 0.35, similarityBoost: 0.5 },
+      };
+
+      function getVoiceSettings(useCase: keyof typeof STABILITY_PRESETS) {
+        return STABILITY_PRESETS[useCase];
+      }
+
+      // Always use presets, avoid raw low values
+      const settings = getVoiceSettings("narration");
+      ```
+
+  - id: audio-format-compatibility
+    summary: "Generated audio format incompatible with target platform"
+    severity: medium
+    situation: "Using mp3/wav without checking platform requirements"
+    why: |
+      Different platforms/browsers have format limitations:
+      - Safari has limited WebM/Opus support
+      - Some mobile browsers can't play certain codecs
+      - Streaming requires specific container formats
+      - Sample rate mismatches cause playback issues
+      - Bitrate affects both quality and file size
+
+    detection_pattern: |
+      output_format.*(?!mp3|wav)|audio\/(?!mpeg|wav|mp3)
+
+    solution: |
+      Use widely compatible formats and transcode when needed:
+
+      ```typescript
+      // Default to MP3 for maximum compatibility
+      const SAFE_FORMATS = {
+        web: { format: "mp3", bitrate: 128 },
+        mobile: { format: "mp3", bitrate: 96 },
+        highQuality: { format: "wav", bitrate: null },
+        streaming: { format: "mp3", bitrate: 64 },
+      };
+
+      async function generateCompatibleAudio(
+        prompt: string,
+        platform: keyof typeof SAFE_FORMATS
+      ) {
+        const { format, bitrate } = SAFE_FORMATS[platform];
+
+        const audio = await generate(prompt, { outputFormat: format });
+
+        // Verify format
+        const mimeType = await detectAudioFormat(audio);
+        if (!isSupportedOn(mimeType, platform)) {
+          return transcodeAudio(audio, format, bitrate);
+        }
+
+        return audio;
+      }
+      ```
+
+  - id: prompt-injection-audio
+    summary: "Malicious prompts generate harmful audio content"
+    severity: high
+    situation: "User prompts passed to TTS without sanitization"
+    why: |
+      TTS can be used to generate:
+      - Hate speech and slurs
+      - Misinformation/fake news
+      - Instructions for harm
+      - Impersonation of real people
+      - Political manipulation content
+
+      Content moderation on text is essential before synthesis.
+
+    detection_pattern: |
+      textToSpeech\(.*(?:req|request|user)\.(?:body|query|input)(?!.*moderat)
+
+    solution: |
+      Always moderate text before synthesis:
+
+      ```typescript
+      import OpenAI from "openai";
+
+      const openai = new OpenAI();
+
+      async function moderatedTTS(text: string) {
+        // 1. OpenAI moderation
+        const moderation = await openai.moderations.create({ input: text });
+        if (moderation.results[0].flagged) {
+          throw new Error("Content violates content policy");
+        }
+
+        // 2. Check for impersonation patterns
+        const impersonationPatterns = [
+          /this is (president|senator|ceo|celebrity name)/i,
+          /I am (elon musk|joe biden|famous person)/i,
+          /speaking as the (ceo|president|official)/i,
+        ];
+
+        for (const pattern of impersonationPatterns) {
+          if (pattern.test(text)) {
+            throw new Error("Potential impersonation detected");
+          }
+        }
+
+        // 3. Generate only if passes checks
+        return textToSpeech(text);
+      }
+      ```
+
+  - id: no-watermarking
+    summary: "AI audio released without provenance markers"
+    severity: medium
+    situation: "Generated audio shared publicly without watermarking"
+    why: |
+      Without watermarking:
+      - Cannot prove audio is AI-generated
+      - Enables deepfakes and misinformation
+      - No accountability for misuse
+      - Increasingly required by regulations
+      - Platforms may require C2PA compliance
+
+    detection_pattern: |
+      generate.*audio.*return(?!.*watermark|seal)
+
+    solution: |
+      Embed AudioSeal or similar watermark before distribution:
+
+      ```typescript
+      async function generateWatermarkedAudio(prompt: string) {
+        // 1. Generate audio
+        const audio = await generateAudio(prompt);
+
+        // 2. Add watermark with provenance info
+        const watermarked = await embedWatermark(audio, {
+          source: "ai-generated",
+          model: "elevenlabs-v2",
+          timestamp: Date.now(),
+          creator: userId,
+        });
+
+        // 3. Add C2PA manifest for platforms that support it
+        const withManifest = await addC2PAManifest(watermarked, {
+          assertions: [
+            { label: "c2pa.ai_generative_training", data: { model: "elevenlabs" } },
+          ],
+        });
+
+        return withManifest;
+      }
+      ```
+
+  - id: streaming-memory-leak
+    summary: "Audio streams not properly closed cause memory leaks"
+    severity: medium
+    situation: "Streaming TTS without proper stream handling"
+    why: |
+      Audio streams consume memory until closed:
+      - Unclosed streams accumulate
+      - Server memory exhaustion
+      - Connection pool exhaustion
+      - Especially bad with long audio or errors mid-stream
+
+    detection_pattern: |
+      convertAsStream\((?!.*finally|close|destroy)
+
+    solution: |
+      Always properly handle and close streams:
+
+      ```typescript
+      async function safeStreamTTS(text: string, voiceId: string) {
+        let stream: AsyncIterable<Buffer> | null = null;
+
+        try {
+          stream = await elevenlabs.textToSpeech.convertAsStream(voiceId, {
+            text,
+          });
+
+          const chunks: Buffer[] = [];
+          for await (const chunk of stream) {
+            chunks.push(Buffer.from(chunk));
+          }
+
+          return Buffer.concat(chunks);
+        } catch (error) {
+          console.error("TTS stream error:", error);
+          throw error;
+        } finally {
+          // Cleanup - stream should auto-close but be explicit
+          if (stream && typeof (stream as any).destroy === "function") {
+            (stream as any).destroy();
+          }
+        }
+      }
+
+      // For HTTP responses, pipe properly
+      export async function GET(req: NextRequest) {
+        const stream = await elevenlabs.textToSpeech.convertAsStream(...);
+
+        return new NextResponse(
+          new ReadableStream({
+            async start(controller) {
+              try {
+                for await (const chunk of stream) {
+                  controller.enqueue(chunk);
+                }
+              } finally {
+                controller.close();
+              }
+            },
+            cancel() {
+              // Handle client disconnect
+              if (typeof (stream as any).destroy === "function") {
+                (stream as any).destroy();
+              }
+            },
+          }),
+          { headers: { "Content-Type": "audio/mpeg" } }
+        );
+      }
+      ```
+
+  - id: sample-rate-mismatch
+    summary: "Mixed sample rates cause audio artifacts"
+    severity: low
+    situation: "Concatenating or mixing audio with different sample rates"
+    why: |
+      Different models output different sample rates:
+      - MusicGen: 32kHz
+      - ElevenLabs: 44.1kHz or 22.05kHz
+      - AudioSeal: 16kHz
+      - Bark: 24kHz
+
+      Mixing without resampling causes pitch/speed issues.
+
+    detection_pattern: |
+      concat.*audio|merge.*audio|mix.*audio(?!.*resample|rate)
+
+    solution: |
+      Normalize sample rates before combining:
+
+      ```typescript
+      import ffmpeg from "fluent-ffmpeg";
+
+      const TARGET_SAMPLE_RATE = 44100;
+
+      async function normalizeAndConcatenate(audioPaths: string[]) {
+        const normalizedPaths: string[] = [];
+
+        // Normalize each to target sample rate
+        for (const path of audioPaths) {
+          const normalized = path.replace(".mp3", "_normalized.mp3");
+
+          await new Promise((resolve, reject) => {
+            ffmpeg(path)
+              .audioFrequency(TARGET_SAMPLE_RATE)
+              .audioChannels(2) // Stereo
+              .audioBitrate("128k")
+              .output(normalized)
+              .on("end", resolve)
+              .on("error", reject)
+              .run();
+          });
+
+          normalizedPaths.push(normalized);
+        }
+
+        // Now safe to concatenate
+        return concatenateAudio(normalizedPaths);
+      }
+      ```
+
+  - id: unofficial-api-instability
+    summary: "Unofficial Suno/Udio APIs break frequently"
+    severity: high
+    situation: "Using unofficial wrapper APIs for Suno or Udio"
+    why: |
+      Suno and Udio don't offer official APIs.
+      Unofficial wrappers:
+      - Scrape web interfaces (break with UI changes)
+      - Require solving CAPTCHAs
+      - Violate Terms of Service
+      - Can get your account banned
+      - Major lawsuit risk (Sony, Universal, Warner suing both)
+
+    detection_pattern: |
+      suno-api|udio.*api|gcui-art/suno|SUNO_COOKIE
+
+    solution: |
+      Use officially supported alternatives:
+
+      ```typescript
+      // AVOID: Unofficial Suno API
+      // const suno = new SunoAPI({ cookie: process.env.SUNO_COOKIE });
+
+      // USE: Official APIs with proper licensing
+      // Option 1: Meta MusicGen (MIT license, CC-BY-NC for weights)
+      import Replicate from "replicate";
+      const music = await replicate.run("meta/musicgen");
+
+      // Option 2: Stable Audio (commercial license available)
+      // Option 3: Soundraw API (commercial license)
+      // Option 4: AIVA API (commercial license)
+
+      // For production, only use services with:
+      // - Official API documentation
+      // - Clear licensing terms
+      // - Commercial use rights
+      ```

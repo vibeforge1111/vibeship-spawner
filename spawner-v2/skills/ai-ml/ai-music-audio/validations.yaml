@@ -1,0 +1,515 @@
+# Validations - AI Music & Audio Generation
+# Quality checks for AI audio implementations
+
+version: 1.0.0
+skill_id: ai-music-audio
+
+validations:
+  # API Security
+  - id: audio-api-key-exposed
+    name: Audio API Key in Client Code
+    severity: error
+    description: Audio generation API keys must be server-side only
+    pattern: |
+      (NEXT_PUBLIC|REACT_APP|VITE).*(ELEVENLABS|REPLICATE|FAL|OPENAI).*KEY
+    message: "Audio API key exposed to client. Use server-side routes only."
+    autofix: false
+
+  - id: hardcoded-audio-api-key
+    name: Hardcoded Audio API Key
+    severity: error
+    description: API keys should use environment variables
+    pattern: |
+      (xi-|sk-|r8_|fal_)[A-Za-z0-9]{20,}
+    message: "Hardcoded API key detected. Use environment variables."
+    autofix: false
+
+  # Content Safety
+  - id: no-tts-moderation
+    name: Missing TTS Content Moderation
+    severity: error
+    description: Text must be moderated before speech synthesis
+    pattern: |
+      textToSpeech\(.*(?:req|request|user)\.(?:body|query)(?!.*moderat)
+    message: "User text passed to TTS without moderation. Add content check."
+    autofix: false
+
+  - id: voice-clone-no-consent
+    name: Voice Cloning Without Consent Check
+    severity: error
+    description: Voice cloning requires verified consent
+    pattern: |
+      createVoiceClone|add.*voice|clone.*voice(?!.*consent|verify|permission)
+    message: "Voice cloning without consent verification. Implement consent flow."
+    autofix: false
+
+  - id: no-deepfake-prevention
+    name: Missing Deepfake Prevention
+    severity: warning
+    description: Check for impersonation attempts in TTS requests
+    pattern: |
+      textToSpeech.*(?:as|voice.*of|impersonate).*(?:president|ceo|celebrity)
+    message: "Potential impersonation content. Add impersonation detection."
+    autofix: false
+
+  # Resource Management
+  - id: no-tts-rate-limiting
+    name: TTS Without Rate Limiting
+    severity: warning
+    description: TTS endpoints should be rate limited
+    pattern: |
+      async.*textToSpeech.*request(?!.*rateLimit|limit)
+    message: "TTS endpoint without rate limiting."
+    autofix: false
+
+  - id: no-character-limit
+    name: TTS Without Character Limit
+    severity: warning
+    description: Text length should be limited to prevent cost abuse
+    pattern: |
+      textToSpeech\(.*text(?!.*length.*<|slice|substring|limit)
+    message: "TTS without text length limit. Add maximum character check."
+    autofix: false
+
+  - id: no-audio-cost-tracking
+    name: Missing Audio Cost Tracking
+    severity: warning
+    description: Audio generation costs should be tracked per user
+    pattern: |
+      (textToSpeech|generateMusic)\((?!.*cost|credits|budget)
+    message: "No cost tracking for audio generation. Add usage tracking."
+    autofix: false
+
+  - id: unbounded-music-duration
+    name: Unbounded Music Duration
+    severity: warning
+    description: Music duration should be capped
+    pattern: |
+      duration.*request\.(body|query)(?!.*Math\.min|clamp|max)
+    message: "User-controlled duration without limit. Cap at maximum allowed."
+    autofix: false
+
+  # Audio Processing
+  - id: no-sample-rate-normalization
+    name: Missing Sample Rate Normalization
+    severity: warning
+    description: Audio should be normalized before mixing/concatenation
+    pattern: |
+      concat.*audio|merge.*audio(?!.*resample|normalize|rate)
+    message: "Audio concatenation without sample rate normalization."
+    autofix: false
+
+  - id: no-audio-format-validation
+    name: Missing Audio Format Validation
+    severity: warning
+    description: Uploaded audio should be validated
+    pattern: |
+      upload.*audio|audio.*file(?!.*validate|check|format)
+    message: "Audio upload without format validation."
+    autofix: false
+
+  # Streaming
+  - id: stream-not-closed
+    name: Audio Stream Not Properly Closed
+    severity: warning
+    description: Audio streams should be properly closed
+    pattern: |
+      convertAsStream\((?!.*finally|close|destroy)
+    message: "Audio stream without proper cleanup. Add finally block."
+    autofix: false
+
+  - id: no-stream-timeout
+    name: Streaming Without Timeout
+    severity: warning
+    description: Audio streams should have timeouts
+    pattern: |
+      Stream.*audio(?!.*timeout|AbortController)
+    message: "Audio streaming without timeout. Add timeout handling."
+    autofix: false
+
+  # Watermarking & Provenance
+  - id: no-audio-watermark
+    name: Missing Audio Watermark
+    severity: warning
+    description: AI-generated audio should be watermarked
+    pattern: |
+      generate.*audio.*return(?!.*watermark|seal|c2pa)
+    message: "AI audio returned without watermark. Add AudioSeal or similar."
+    autofix: false
+
+code_smells:
+  - id: low-stability-setting
+    name: Low Voice Stability Setting
+    description: Low stability produces inconsistent output
+    pattern: |
+      stability.*0\.[0-2]
+    suggestion: "Stability < 0.3 causes inconsistent output. Use 0.5+ for narration."
+
+  - id: high-temperature-audio
+    name: High Temperature for Audio Generation
+    description: High temperature increases randomness and potential artifacts
+    pattern: |
+      temperature.*[2-9]\.|temperature.*1\.[5-9]
+    suggestion: "High temperature (>1.5) may produce artifacts. Use 0.7-1.0."
+
+  - id: no-seed-audio
+    name: No Seed for Audio Testing
+    description: Setting seed helps reproduce results
+    pattern: |
+      (generateMusic|generateAudio)\((?!.*seed)
+    suggestion: "Consider setting seed for reproducible results during development."
+
+  - id: sync-long-audio
+    name: Synchronous Long Audio Generation
+    description: Long audio should be generated asynchronously
+    pattern: |
+      await.*(generateMusic|generateAudio).*duration.*[1-9][0-9]
+    suggestion: "Long audio (>10s) should use async queue pattern."
+
+  - id: large-audio-in-memory
+    name: Large Audio Loaded in Memory
+    description: Stream large audio files instead of loading fully
+    pattern: |
+      Buffer\.from\(.*audio|readFile.*audio|fs\.read.*\.mp3
+    suggestion: "Stream audio data instead of loading entirely into memory."
+
+best_practices:
+  - id: implement-voice-consent
+    name: Implement Voice Consent System
+    check: |
+      Voice cloning requires verified consent from voice owner.
+    recommendation: |
+      interface VoiceConsent {
+        voiceOwnerId: string;
+        voiceOwnerEmail: string;
+        projectId: string;
+        purpose: string;
+        verified: boolean;
+        signature?: string;
+        createdAt: Date;
+        expiresAt?: Date;
+      }
+
+      class VoiceConsentManager {
+        async requestConsent(data: Omit<VoiceConsent, "verified" | "createdAt">) {
+          // 1. Create consent record
+          const consent = await db.voiceConsent.create({
+            data: { ...data, verified: false },
+          });
+
+          // 2. Send verification email to voice owner
+          await sendEmail({
+            to: data.voiceOwnerEmail,
+            template: "voice-consent-request",
+            data: {
+              consentId: consent.id,
+              requesterName: data.requesterName,
+              purpose: data.purpose,
+              verifyUrl: `${BASE_URL}/consent/verify/${consent.id}`,
+            },
+          });
+
+          return consent;
+        }
+
+        async verifyConsent(consentId: string, signature: string) {
+          await db.voiceConsent.update({
+            where: { id: consentId },
+            data: { verified: true, signature, verifiedAt: new Date() },
+          });
+        }
+
+        async canCloneVoice(voiceOwnerId: string, projectId: string) {
+          const consent = await db.voiceConsent.findFirst({
+            where: {
+              voiceOwnerId,
+              projectId,
+              verified: true,
+              OR: [
+                { expiresAt: null },
+                { expiresAt: { gt: new Date() } },
+              ],
+            },
+          });
+
+          return !!consent;
+        }
+      }
+
+  - id: implement-tts-cost-controls
+    name: Implement TTS Cost Controls
+    check: |
+      Character limits and usage tracking in place for TTS.
+    recommendation: |
+      const TTS_PRICING = {
+        elevenlabs: 0.00003,    // $0.03 per 1000 chars
+        openai: 0.000015,       // $0.015 per 1000 chars
+        playht: 0.00002,        // $0.02 per 1000 chars
+      };
+
+      const LIMITS = {
+        free: { charsPerRequest: 500, monthlyChars: 10000 },
+        pro: { charsPerRequest: 5000, monthlyChars: 500000 },
+        enterprise: { charsPerRequest: 50000, monthlyChars: 5000000 },
+      };
+
+      class TTSCostController {
+        async checkAndRecordUsage(
+          userId: string,
+          text: string,
+          tier: keyof typeof LIMITS
+        ) {
+          const limits = LIMITS[tier];
+
+          // Check per-request limit
+          if (text.length > limits.charsPerRequest) {
+            throw new Error(
+              `Text exceeds ${limits.charsPerRequest} character limit`
+            );
+          }
+
+          // Check monthly limit
+          const monthlyUsage = await this.getMonthlyUsage(userId);
+          if (monthlyUsage + text.length > limits.monthlyChars) {
+            throw new Error("Monthly character limit reached");
+          }
+
+          // Record usage
+          await db.ttsUsage.create({
+            data: {
+              userId,
+              characters: text.length,
+              estimatedCost: text.length * TTS_PRICING.elevenlabs,
+            },
+          });
+
+          return {
+            used: text.length,
+            remaining: limits.monthlyChars - monthlyUsage - text.length,
+          };
+        }
+      }
+
+  - id: implement-audio-moderation
+    name: Implement Audio Content Moderation
+    check: |
+      Text is moderated before synthesis, impersonation is blocked.
+    recommendation: |
+      import OpenAI from "openai";
+
+      class AudioModerationPipeline {
+        private openai = new OpenAI();
+
+        private impersonationPatterns = [
+          /this is (president|senator|ceo|chairman)/i,
+          /I am (famous person|celebrity|politician)/i,
+          /speaking (as|on behalf of) (the|a) (president|official)/i,
+          /official statement from/i,
+          /breaking news.*(?:says|announces)/i,
+        ];
+
+        async moderateText(text: string): Promise<ModerationResult> {
+          // 1. OpenAI content moderation
+          const moderation = await this.openai.moderations.create({
+            input: text,
+          });
+
+          if (moderation.results[0].flagged) {
+            return {
+              allowed: false,
+              reason: "content_policy",
+              categories: moderation.results[0].categories,
+            };
+          }
+
+          // 2. Check for impersonation
+          for (const pattern of this.impersonationPatterns) {
+            if (pattern.test(text)) {
+              return {
+                allowed: false,
+                reason: "potential_impersonation",
+                match: text.match(pattern)?.[0],
+              };
+            }
+          }
+
+          // 3. Check for known celebrity names
+          const celebrities = await this.checkCelebrityNames(text);
+          if (celebrities.length > 0) {
+            return {
+              allowed: false,
+              reason: "celebrity_reference",
+              names: celebrities,
+            };
+          }
+
+          return { allowed: true };
+        }
+
+        async safeTTS(text: string, voiceId: string) {
+          const moderation = await this.moderateText(text);
+
+          if (!moderation.allowed) {
+            throw new ModerationError(moderation);
+          }
+
+          return elevenlabs.textToSpeech.convert(voiceId, { text });
+        }
+      }
+
+  - id: implement-audio-watermarking
+    name: Implement Audio Watermarking
+    check: |
+      AI-generated audio is watermarked for provenance.
+    recommendation: |
+      // Integration with AudioSeal for watermarking
+      // Requires Python backend with AudioSeal installed
+
+      interface WatermarkMetadata {
+        source: "ai-generated";
+        model: string;
+        timestamp: number;
+        creator: string;
+        purpose?: string;
+      }
+
+      class AudioWatermarkService {
+        private pythonEndpoint = process.env.AUDIOSEAL_ENDPOINT;
+
+        async embedWatermark(
+          audioBuffer: Buffer,
+          metadata: WatermarkMetadata
+        ): Promise<Buffer> {
+          // Encode metadata as bits
+          const message = this.encodeMetadata(metadata);
+
+          const response = await fetch(`${this.pythonEndpoint}/watermark`, {
+            method: "POST",
+            headers: { "Content-Type": "application/octet-stream" },
+            body: audioBuffer,
+          });
+
+          if (!response.ok) {
+            throw new Error("Watermarking failed");
+          }
+
+          return Buffer.from(await response.arrayBuffer());
+        }
+
+        async detectWatermark(audioBuffer: Buffer): Promise<{
+          isWatermarked: boolean;
+          confidence: number;
+          metadata?: WatermarkMetadata;
+        }> {
+          const response = await fetch(`${this.pythonEndpoint}/detect`, {
+            method: "POST",
+            headers: { "Content-Type": "application/octet-stream" },
+            body: audioBuffer,
+          });
+
+          return response.json();
+        }
+
+        private encodeMetadata(metadata: WatermarkMetadata): string {
+          return Buffer.from(JSON.stringify(metadata))
+            .toString("base64")
+            .slice(0, 16); // AudioSeal uses 16 bits
+        }
+      }
+
+      // Usage in generation pipeline
+      async function generateAndWatermark(prompt: string, userId: string) {
+        const audio = await generateAudio(prompt);
+
+        const watermarked = await watermarkService.embedWatermark(audio, {
+          source: "ai-generated",
+          model: "elevenlabs-v2",
+          timestamp: Date.now(),
+          creator: userId,
+        });
+
+        return watermarked;
+      }
+
+  - id: implement-streaming-tts
+    name: Implement Streaming TTS Properly
+    check: |
+      TTS streaming handles errors and cleanup correctly.
+    recommendation: |
+      import { NextRequest, NextResponse } from "next/server";
+
+      export async function POST(req: NextRequest) {
+        const { text, voiceId } = await req.json();
+        const controller = new AbortController();
+
+        // Set timeout
+        const timeout = setTimeout(() => controller.abort(), 30000);
+
+        try {
+          const audioStream = await elevenlabs.textToSpeech.convertAsStream(
+            voiceId,
+            { text, model_id: "eleven_turbo_v2" },
+            { signal: controller.signal }
+          );
+
+          const readable = new ReadableStream({
+            async start(streamController) {
+              try {
+                for await (const chunk of audioStream) {
+                  streamController.enqueue(chunk);
+                }
+                streamController.close();
+              } catch (error) {
+                streamController.error(error);
+              }
+            },
+            cancel() {
+              // Cleanup on client disconnect
+              controller.abort();
+            },
+          });
+
+          return new NextResponse(readable, {
+            headers: {
+              "Content-Type": "audio/mpeg",
+              "Transfer-Encoding": "chunked",
+              "Cache-Control": "no-cache",
+            },
+          });
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
+
+testing_checklist:
+  api_integration:
+    - "API keys loaded from environment"
+    - "Rate limiting per user"
+    - "Character/duration limits enforced"
+    - "Error handling for API failures"
+    - "Timeout handling"
+
+  content_safety:
+    - "Text moderation before TTS"
+    - "Impersonation detection"
+    - "Voice consent verification"
+    - "Celebrity name blocking"
+    - "Output content validation"
+
+  resource_management:
+    - "Cost tracking per generation"
+    - "Usage quotas enforced"
+    - "Stream cleanup on errors"
+    - "Memory usage optimized"
+
+  audio_quality:
+    - "Sample rate normalization"
+    - "Format compatibility checked"
+    - "Streaming playback tested"
+    - "Mobile browser tested"
+
+  compliance:
+    - "Audio watermarking enabled"
+    - "Consent records stored"
+    - "Audit trail maintained"
+    - "C2PA metadata if required"

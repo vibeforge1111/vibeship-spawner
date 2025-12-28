@@ -1,0 +1,668 @@
+# Collaboration - AI Music & Audio Generation
+# Integration patterns with other skills and services
+
+version: 1.0.0
+skill_id: ai-music-audio
+
+prerequisites:
+  required_knowledge:
+    - "Audio formats (MP3, WAV, OGG) and codecs"
+    - "Streaming audio in web browsers"
+    - "Async patterns for long-running operations"
+    - "Content moderation principles"
+
+  environment_setup:
+    - step: "Choose audio generation provider"
+      options:
+        - provider: "ElevenLabs"
+          best_for: "Text-to-speech, voice cloning"
+          setup: |
+            npm install elevenlabs
+            # Get API key from elevenlabs.io
+
+        - provider: "Replicate (MusicGen)"
+          best_for: "Music generation"
+          setup: |
+            npm install replicate
+            # Get API key from replicate.com
+
+        - provider: "Fal.ai (Lyria)"
+          best_for: "High-quality music"
+          setup: |
+            npm install @fal-ai/serverless-client
+            # Get API key from fal.ai
+
+        - provider: "OpenAI TTS"
+          best_for: "Simple TTS, cost-effective"
+          setup: |
+            npm install openai
+            # Use existing OpenAI API key
+
+    - step: "Set up environment variables"
+      actions:
+        - "Store API keys in .env (never in client code)"
+        - "Configure rate limiting"
+        - "Set up cost tracking database"
+
+    - step: "Configure audio storage"
+      options:
+        - "Cloudflare R2 for generated audio files"
+        - "AWS S3 with CloudFront CDN"
+        - "Vercel Blob for simple storage"
+
+    - step: "Set up watermarking (optional but recommended)"
+      actions:
+        - "Deploy AudioSeal Python service"
+        - "Or use third-party watermarking API"
+
+delegation_triggers:
+  delegate_to_others:
+    - condition: "Need audio player UI component"
+      delegate_to: "frontend skill"
+      handoff: |
+        Audio player requirements:
+        - Support streaming playback (chunked transfer)
+        - Show loading state during generation
+        - Progress bar for long audio
+        - Mobile-responsive controls
+        - Consider: howler.js, react-player, custom Audio element
+
+    - condition: "Need to process uploaded audio"
+      delegate_to: "audio-processing skill"
+      handoff: |
+        Audio processing requirements:
+        - Convert formats (ffmpeg)
+        - Extract samples for voice cloning
+        - Normalize volume levels
+        - Trim silence
+        - Get audio metadata (duration, sample rate)
+
+    - condition: "Need to store generated audio"
+      delegate_to: "storage skill"
+      handoff: |
+        Storage requirements:
+        - Upload generated audio to R2/S3
+        - Generate signed URLs for playback
+        - Set cache headers
+        - Handle cleanup/expiry
+        - Track storage costs
+
+    - condition: "Need background job for generation"
+      delegate_to: "backend skill"
+      handoff: |
+        Background job requirements:
+        - Queue music generation (30s+ operations)
+        - Handle retries on failure
+        - Update status in database
+        - Send completion notifications
+        - Consider: Inngest, Trigger.dev, BullMQ
+
+    - condition: "Need payments for audio credits"
+      delegate_to: "payments skill"
+      handoff: |
+        Credits system requirements:
+        - Charge per character (TTS) or per second (music)
+        - Show cost estimates before generation
+        - Track usage per user
+        - Handle refunds on failures
+        - Tier-based limits
+
+  accept_from_others:
+    - from: "text-to-video skill"
+      when: "Video needs background music or narration"
+      expect: |
+        I'll receive:
+        - Music prompt or voiceover script
+        - Duration to match video length
+        - Style preferences
+        I'll provide: Audio URL synchronized with video length
+
+    - from: "frontend skill"
+      when: "User triggers TTS or music generation"
+      expect: |
+        I'll receive:
+        - Text to synthesize or music prompt
+        - Voice ID or music style
+        - User ID for quota tracking
+        I'll provide: Audio URL or stream
+
+    - from: "ai-personalization skill"
+      when: "Need personalized voice/music style"
+      expect: |
+        I'll receive:
+        - User preferences for voice/music
+        - Previous generation history
+        I'll provide: Customized audio matching preferences
+
+workflow_integration:
+  tts_flow:
+    - step: 1
+      action: "Validate and moderate text"
+      details: |
+        - Check text length against user tier limit
+        - Run content moderation (OpenAI)
+        - Check for impersonation patterns
+        - Verify user has quota remaining
+
+    - step: 2
+      action: "Generate speech"
+      details: |
+        - Select appropriate voice and model
+        - For short text: direct generation
+        - For long text: chunk and generate
+        - Stream response for real-time playback
+
+    - step: 3
+      action: "Post-process"
+      details: |
+        - Add watermark for provenance
+        - Upload to storage if caching
+        - Record usage for billing
+        - Return URL or stream
+
+  music_flow:
+    - step: 1
+      action: "Validate request"
+      details: |
+        - Check duration limit
+        - Verify prompt is appropriate
+        - Estimate cost and confirm
+        - Check user quota
+
+    - step: 2
+      action: "Queue generation"
+      details: |
+        - Create job in database
+        - Add to background queue
+        - Return job ID immediately
+        - Start status polling or webhook
+
+    - step: 3
+      action: "Execute generation"
+      details: |
+        - Call MusicGen/Lyria API
+        - Poll for completion
+        - Handle retries on transient errors
+        - Update progress in real-time
+
+    - step: 4
+      action: "Deliver result"
+      details: |
+        - Download generated audio
+        - Add watermark
+        - Upload to storage
+        - Notify user (websocket/push)
+        - Deduct credits
+
+  decision_points:
+    - decision: "ElevenLabs vs OpenAI TTS"
+      options:
+        - name: "ElevenLabs"
+          pros: "Best quality, voice cloning, streaming"
+          cons: "More expensive (~$0.03/1000 chars)"
+          best_for: "Premium content, podcasts, audiobooks"
+
+        - name: "OpenAI TTS"
+          pros: "Cheap (~$0.015/1000 chars), simple API"
+          cons: "No voice cloning, fewer voices"
+          best_for: "Basic narration, notifications"
+
+    - decision: "Streaming vs complete download"
+      options:
+        - name: "Streaming"
+          when: "Real-time playback needed, short content"
+          implementation: "Use convertAsStream, pipe to response"
+
+        - name: "Complete download"
+          when: "Need to cache, post-process, or watermark"
+          implementation: "Generate fully, store, return URL"
+
+    - decision: "MusicGen vs Lyria vs Stable Audio"
+      options:
+        - name: "MusicGen (via Replicate)"
+          pros: "Open source, melody conditioning"
+          cons: "30s max, lower quality"
+          best_for: "Short clips, development"
+
+        - name: "Lyria (Fal.ai)"
+          pros: "Higher quality, longer duration"
+          cons: "Higher cost"
+          best_for: "Production music"
+
+        - name: "Stable Audio"
+          pros: "Good quality, commercial license"
+          cons: "Requires setup"
+          best_for: "Commercial projects"
+
+collaboration_patterns:
+  with_nextjs:
+    pattern: "Full-stack TTS application"
+    implementation: |
+      // app/api/tts/route.ts - Server route
+      import { NextRequest, NextResponse } from "next/server";
+      import { ElevenLabsClient } from "elevenlabs";
+      import { auth } from "@/lib/auth";
+      import { db } from "@/lib/db";
+
+      const elevenlabs = new ElevenLabsClient({
+        apiKey: process.env.ELEVENLABS_API_KEY,
+      });
+
+      export async function POST(req: NextRequest) {
+        const session = await auth();
+        if (!session) {
+          return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
+        const { text, voiceId } = await req.json();
+
+        // Validate
+        if (text.length > 5000) {
+          return NextResponse.json(
+            { error: "Text too long (max 5000 chars)" },
+            { status: 400 }
+          );
+        }
+
+        // Check quota
+        const usage = await db.ttsUsage.aggregate({
+          where: { userId: session.user.id, createdAt: { gte: startOfMonth() } },
+          _sum: { characters: true },
+        });
+
+        if ((usage._sum.characters || 0) + text.length > 100000) {
+          return NextResponse.json(
+            { error: "Monthly quota exceeded" },
+            { status: 402 }
+          );
+        }
+
+        // Moderate
+        const moderation = await openai.moderations.create({ input: text });
+        if (moderation.results[0].flagged) {
+          return NextResponse.json(
+            { error: "Content violates policy" },
+            { status: 400 }
+          );
+        }
+
+        // Generate (streaming)
+        const audioStream = await elevenlabs.textToSpeech.convertAsStream(
+          voiceId,
+          { text, model_id: "eleven_turbo_v2" }
+        );
+
+        // Record usage
+        await db.ttsUsage.create({
+          data: { userId: session.user.id, characters: text.length },
+        });
+
+        return new NextResponse(
+          new ReadableStream({
+            async start(controller) {
+              for await (const chunk of audioStream) {
+                controller.enqueue(chunk);
+              }
+              controller.close();
+            },
+          }),
+          { headers: { "Content-Type": "audio/mpeg" } }
+        );
+      }
+
+  with_inngest:
+    pattern: "Background music generation"
+    implementation: |
+      // lib/inngest/functions.ts
+      import { inngest } from "./client";
+      import Replicate from "replicate";
+
+      export const generateMusic = inngest.createFunction(
+        {
+          id: "generate-music",
+          retries: 3,
+          timeout: "5m",
+        },
+        { event: "music/generate" },
+        async ({ event, step }) => {
+          const { prompt, duration, userId, jobId } = event.data;
+
+          // Update status
+          await step.run("update-status-processing", async () => {
+            await db.musicJob.update({
+              where: { id: jobId },
+              data: { status: "processing" },
+            });
+          });
+
+          // Generate
+          const replicate = new Replicate();
+          const output = await step.run("generate-music", async () => {
+            return replicate.run("meta/musicgen", {
+              input: {
+                prompt,
+                duration: Math.min(duration, 30),
+                model_version: "stereo-large",
+              },
+            });
+          });
+
+          // Upload to storage
+          const audioUrl = await step.run("upload-audio", async () => {
+            const response = await fetch(output as string);
+            const buffer = await response.arrayBuffer();
+            return uploadToR2(Buffer.from(buffer), `${jobId}.mp3`);
+          });
+
+          // Update job
+          await step.run("complete-job", async () => {
+            await db.musicJob.update({
+              where: { id: jobId },
+              data: { status: "completed", audioUrl },
+            });
+
+            // Deduct credits
+            await db.credits.decrement({
+              where: { userId },
+              data: { amount: calculateCost(duration) },
+            });
+          });
+
+          return { audioUrl };
+        }
+      );
+
+  with_react_audio_player:
+    pattern: "Frontend audio playback"
+    implementation: |
+      // components/TTSPlayer.tsx
+      import { useState, useRef } from "react";
+
+      export function TTSPlayer({ text, voiceId }: Props) {
+        const [isLoading, setIsLoading] = useState(false);
+        const [isPlaying, setIsPlaying] = useState(false);
+        const audioRef = useRef<HTMLAudioElement>(null);
+
+        const handleGenerate = async () => {
+          setIsLoading(true);
+
+          try {
+            const response = await fetch("/api/tts", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text, voiceId }),
+            });
+
+            if (!response.ok) throw new Error("Generation failed");
+
+            // Create blob URL from stream
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+
+            if (audioRef.current) {
+              audioRef.current.src = url;
+              await audioRef.current.play();
+              setIsPlaying(true);
+            }
+          } catch (error) {
+            console.error(error);
+          } finally {
+            setIsLoading(false);
+          }
+        };
+
+        return (
+          <div>
+            <button onClick={handleGenerate} disabled={isLoading}>
+              {isLoading ? "Generating..." : "Play"}
+            </button>
+
+            <audio
+              ref={audioRef}
+              onEnded={() => setIsPlaying(false)}
+              controls={isPlaying}
+            />
+          </div>
+        );
+      }
+
+      // For streaming playback with progress
+      async function streamAudio(text: string, voiceId: string) {
+        const response = await fetch("/api/tts/stream", {
+          method: "POST",
+          body: JSON.stringify({ text, voiceId }),
+        });
+
+        const mediaSource = new MediaSource();
+        const audio = new Audio(URL.createObjectURL(mediaSource));
+
+        mediaSource.addEventListener("sourceopen", async () => {
+          const sourceBuffer = mediaSource.addSourceBuffer("audio/mpeg");
+          const reader = response.body!.getReader();
+
+          const pump = async () => {
+            const { done, value } = await reader.read();
+            if (done) {
+              mediaSource.endOfStream();
+              return;
+            }
+
+            // Wait for buffer ready
+            if (sourceBuffer.updating) {
+              await new Promise((r) =>
+                sourceBuffer.addEventListener("updateend", r, { once: true })
+              );
+            }
+
+            sourceBuffer.appendBuffer(value);
+            pump();
+          };
+
+          pump();
+        });
+
+        return audio.play();
+      }
+
+  with_r2_storage:
+    pattern: "Audio storage and CDN"
+    implementation: |
+      // lib/storage.ts
+      import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+      import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+      const r2 = new S3Client({
+        region: "auto",
+        endpoint: process.env.R2_ENDPOINT,
+        credentials: {
+          accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+          secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+        },
+      });
+
+      export async function uploadAudio(
+        buffer: Buffer,
+        filename: string
+      ): Promise<string> {
+        const key = `audio/${Date.now()}-${filename}`;
+
+        await r2.send(
+          new PutObjectCommand({
+            Bucket: process.env.R2_BUCKET,
+            Key: key,
+            Body: buffer,
+            ContentType: "audio/mpeg",
+            CacheControl: "public, max-age=31536000", // 1 year
+          })
+        );
+
+        // Return public URL (if bucket is public)
+        return `${process.env.R2_PUBLIC_URL}/${key}`;
+
+        // Or generate signed URL for private bucket
+        // return getSignedUrl(r2, new GetObjectCommand({
+        //   Bucket: process.env.R2_BUCKET,
+        //   Key: key,
+        // }), { expiresIn: 3600 });
+      }
+
+  with_voice_consent:
+    pattern: "Voice cloning with consent verification"
+    implementation: |
+      // lib/voice-consent.ts
+      import { db } from "./db";
+      import { sendEmail } from "./email";
+
+      export class VoiceConsentService {
+        async requestConsent(data: {
+          voiceOwnerId: string;
+          voiceOwnerEmail: string;
+          requesterId: string;
+          projectId: string;
+          purpose: string;
+        }) {
+          // Create pending consent
+          const consent = await db.voiceConsent.create({
+            data: {
+              ...data,
+              status: "pending",
+              token: crypto.randomUUID(),
+            },
+          });
+
+          // Send verification email
+          await sendEmail({
+            to: data.voiceOwnerEmail,
+            subject: "Voice Clone Authorization Request",
+            template: "voice-consent",
+            data: {
+              approveUrl: `${BASE_URL}/consent/approve/${consent.token}`,
+              denyUrl: `${BASE_URL}/consent/deny/${consent.token}`,
+              requesterName: await this.getRequesterName(data.requesterId),
+              purpose: data.purpose,
+            },
+          });
+
+          return { consentId: consent.id, status: "pending" };
+        }
+
+        async approveConsent(token: string) {
+          await db.voiceConsent.update({
+            where: { token },
+            data: { status: "approved", approvedAt: new Date() },
+          });
+        }
+
+        async denyConsent(token: string) {
+          await db.voiceConsent.update({
+            where: { token },
+            data: { status: "denied", deniedAt: new Date() },
+          });
+        }
+
+        async canClone(voiceOwnerId: string, projectId: string): Promise<boolean> {
+          const consent = await db.voiceConsent.findFirst({
+            where: {
+              voiceOwnerId,
+              projectId,
+              status: "approved",
+            },
+          });
+
+          return !!consent;
+        }
+      }
+
+      // Usage in voice clone endpoint
+      export async function POST(req: NextRequest) {
+        const { voiceOwnerId, samples, projectId } = await req.json();
+
+        const consentService = new VoiceConsentService();
+
+        if (!(await consentService.canClone(voiceOwnerId, projectId))) {
+          return NextResponse.json(
+            { error: "Voice consent not approved" },
+            { status: 403 }
+          );
+        }
+
+        // Proceed with cloning
+        const voice = await elevenlabs.voices.add({
+          name: `Clone-${voiceOwnerId}`,
+          files: samples,
+        });
+
+        // Log for audit
+        await db.voiceCloneAudit.create({
+          data: {
+            voiceOwnerId,
+            clonedBy: session.user.id,
+            projectId,
+            voiceId: voice.voice_id,
+          },
+        });
+
+        return NextResponse.json({ voiceId: voice.voice_id });
+      }
+
+anti_patterns:
+  - name: "Client-side audio API calls"
+    why_bad: "Exposes API keys, enables abuse"
+    example_bad: |
+      // BAD: API key in browser
+      const tts = new ElevenLabsClient({
+        apiKey: process.env.NEXT_PUBLIC_ELEVENLABS_KEY,
+      });
+    example_good: |
+      // GOOD: Server-side only
+      // app/api/tts/route.ts
+      const tts = new ElevenLabsClient({
+        apiKey: process.env.ELEVENLABS_API_KEY, // No NEXT_PUBLIC_
+      });
+
+  - name: "No length limits on TTS"
+    why_bad: "Enables cost attacks, single request can cost $50+"
+    example_bad: |
+      async function speak(text: string) {
+        return elevenlabs.generate(text); // No limit!
+      }
+    example_good: |
+      async function speak(text: string, userId: string) {
+        if (text.length > 5000) throw new Error("Too long");
+        await checkQuota(userId, text.length);
+        return elevenlabs.generate(text);
+      }
+
+  - name: "Voice cloning without consent"
+    why_bad: "Legal liability, ethical issues, platform bans"
+    example_bad: |
+      // Clone any uploaded audio
+      await createClone(uploadedFile);
+    example_good: |
+      // Require verified consent
+      if (!(await consentService.hasConsent(ownerId))) {
+        throw new Error("Consent required");
+      }
+      await createClone(uploadedFile);
+
+  - name: "Synchronous music generation"
+    why_bad: "Music generation takes 30-120+ seconds"
+    example_bad: |
+      app.post("/music", async (req, res) => {
+        const audio = await generateMusic(req.body.prompt);
+        res.json({ audio }); // Client waits 2+ minutes
+      });
+    example_good: |
+      app.post("/music", async (req, res) => {
+        const job = await queue.add("generate", req.body);
+        res.json({ jobId: job.id }); // Immediate response
+      });
+
+  - name: "No content moderation"
+    why_bad: "AI can synthesize hate speech, misinformation"
+    example_bad: |
+      return elevenlabs.generate(userInput);
+    example_good: |
+      const mod = await openai.moderations.create({ input: userInput });
+      if (mod.results[0].flagged) throw new Error("Policy violation");
+      return elevenlabs.generate(userInput);
