@@ -1,0 +1,773 @@
+# Sharp Edges - Synthetic Data Generation
+# Gotchas that cause data quality issues, privacy leaks, or model failures
+
+version: 1.0.0
+skill_id: synthetic-data
+
+sharp_edges:
+  - id: bias-amplification
+    summary: "Synthetic data amplifies existing biases"
+    severity: critical
+    situation: "Generating data from biased source"
+    why: |
+      Synthetic data models learn from real data. If real data has biases:
+      - Gender representation skewed
+      - Racial stereotypes in text
+      - Age discrimination patterns
+      - Geographic over-representation
+
+      Synthetic data doesn't fix bias - it often amplifies it because
+      models may exaggerate learned patterns.
+
+    detection_pattern: |
+      generateSynthetic(?!.*bias.*audit|demographic.*check)
+
+    solution: |
+      Audit and balance before and after generation:
+
+      ```typescript
+      interface BiasAudit {
+        field: string;
+        distribution: Record<string, number>;
+        expectedDistribution?: Record<string, number>;
+        deviation: number;
+      }
+
+      async function auditBias<T extends Record<string, unknown>>(
+        data: T[],
+        sensitiveFields: string[],
+        expectedDistributions?: Record<string, Record<string, number>>
+      ): Promise<BiasAudit[]> {
+        const audits: BiasAudit[] = [];
+
+        for (const field of sensitiveFields) {
+          const distribution: Record<string, number> = {};
+
+          for (const item of data) {
+            const value = String(item[field] ?? "unknown");
+            distribution[value] = (distribution[value] || 0) + 1;
+          }
+
+          // Normalize to percentages
+          const total = data.length;
+          for (const key in distribution) {
+            distribution[key] = distribution[key] / total;
+          }
+
+          // Calculate deviation from expected
+          const expected = expectedDistributions?.[field];
+          let deviation = 0;
+          if (expected) {
+            for (const key in expected) {
+              deviation += Math.abs((distribution[key] || 0) - expected[key]);
+            }
+          }
+
+          audits.push({
+            field,
+            distribution,
+            expectedDistribution: expected,
+            deviation,
+          });
+        }
+
+        return audits;
+      }
+
+      // Rebalance synthetic data to match expected distribution
+      async function rebalanceData<T extends Record<string, unknown>>(
+        syntheticData: T[],
+        field: string,
+        targetDistribution: Record<string, number>,
+        generateMore: (category: string, count: number) => Promise<T[]>
+      ): Promise<T[]> {
+        const current = await auditBias(syntheticData, [field]);
+        const currentDist = current[0].distribution;
+
+        const totalTarget = syntheticData.length;
+        const rebalanced: T[] = [];
+
+        for (const [category, targetRatio] of Object.entries(targetDistribution)) {
+          const targetCount = Math.round(totalTarget * targetRatio);
+          const existing = syntheticData.filter((d) => d[field] === category);
+
+          if (existing.length >= targetCount) {
+            // Downsample
+            rebalanced.push(...existing.slice(0, targetCount));
+          } else {
+            // Need more - generate additional
+            rebalanced.push(...existing);
+            const needed = targetCount - existing.length;
+            const additional = await generateMore(category, needed);
+            rebalanced.push(...additional);
+          }
+        }
+
+        return rebalanced;
+      }
+      ```
+
+  - id: data-leakage-memorization
+    summary: "LLM memorizes and reproduces real data"
+    severity: critical
+    situation: "Using LLM for synthetic generation"
+    why: |
+      LLMs trained on internet data may reproduce:
+      - Real email addresses, phone numbers
+      - Copyrighted content
+      - Actual company/person names
+      - Training data verbatim
+
+      Your "synthetic" data may actually be real data from training.
+
+    detection_pattern: |
+      generate.*model.*gpt|claude(?!.*privacy.*check|pii.*filter)
+
+    solution: |
+      Filter outputs and check for real data:
+
+      ```typescript
+      import OpenAI from "openai";
+
+      const openai = new OpenAI();
+
+      interface PrivacyCheckResult {
+        safe: boolean;
+        issues: Array<{
+          type: "pii" | "memorized" | "copyrighted";
+          content: string;
+          replacement?: string;
+        }>;
+        sanitized: unknown;
+      }
+
+      async function checkForMemorization<T>(
+        syntheticData: T[],
+        options?: { sampleRate?: number }
+      ): Promise<PrivacyCheckResult> {
+        const issues: PrivacyCheckResult["issues"] = [];
+        const sampleRate = options?.sampleRate ?? 0.1;
+
+        // Sample subset for efficiency
+        const sample = syntheticData.filter(() => Math.random() < sampleRate);
+
+        for (const item of sample) {
+          const text = JSON.stringify(item);
+
+          // Check for PII patterns
+          const piiPatterns = [
+            { regex: /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/gi, type: "email" },
+            { regex: /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/g, type: "phone" },
+            { regex: /\b\d{3}-\d{2}-\d{4}\b/g, type: "ssn" },
+          ];
+
+          for (const { regex, type } of piiPatterns) {
+            const matches = text.match(regex);
+            if (matches) {
+              for (const match of matches) {
+                // Verify if it looks like real data (not obviously fake)
+                if (!isClearlyFake(match)) {
+                  issues.push({
+                    type: "pii",
+                    content: match,
+                    replacement: generateFake(type),
+                  });
+                }
+              }
+            }
+          }
+        }
+
+        // Sanitize if issues found
+        let sanitized = syntheticData;
+        if (issues.length > 0) {
+          sanitized = syntheticData.map((item) => {
+            let text = JSON.stringify(item);
+            for (const issue of issues) {
+              text = text.replace(issue.content, issue.replacement || "[REDACTED]");
+            }
+            return JSON.parse(text);
+          });
+        }
+
+        return {
+          safe: issues.length === 0,
+          issues,
+          sanitized,
+        };
+      }
+
+      function isClearlyFake(value: string): boolean {
+        // Check for obvious fake patterns
+        const fakePatterns = [
+          /example\.com$/i,
+          /test@/i,
+          /fake/i,
+          /123-456-7890/,
+          /000-00-0000/,
+        ];
+        return fakePatterns.some((p) => p.test(value));
+      }
+
+      function generateFake(type: string): string {
+        switch (type) {
+          case "email":
+            return `user${Math.random().toString(36).slice(2, 8)}@example.com`;
+          case "phone":
+            return `555-${Math.floor(Math.random() * 900 + 100)}-${Math.floor(Math.random() * 9000 + 1000)}`;
+          case "ssn":
+            return "000-00-0000";
+          default:
+            return "[REDACTED]";
+        }
+      }
+      ```
+
+  - id: distribution-drift
+    summary: "Synthetic data drifts from real distribution"
+    severity: high
+    situation: "Generating large synthetic datasets"
+    why: |
+      As you generate more data, distribution can drift:
+      - LLM temperature causes variance accumulation
+      - Mode collapse in GANs (generates same patterns)
+      - Rare categories get rarer
+      - Correlations between fields degrade
+
+      Training on drifted data produces poor models.
+
+    detection_pattern: |
+      generate.*count.*100(?!.*validate.*distribution)
+
+    solution: |
+      Monitor and correct distribution continuously:
+
+      ```typescript
+      interface DistributionMonitor {
+        real: Record<string, number>;
+        synthetic: Record<string, number>;
+        drift: number;
+      }
+
+      class SyntheticDataPipeline<T extends Record<string, unknown>> {
+        private realDistribution: Map<string, Record<string, number>> = new Map();
+        private generated: T[] = [];
+        private maxDrift = 0.1; // 10% drift threshold
+
+        constructor(private realData: T[], private keyFields: string[]) {
+          this.computeRealDistribution();
+        }
+
+        private computeRealDistribution(): void {
+          for (const field of this.keyFields) {
+            const dist: Record<string, number> = {};
+            for (const item of this.realData) {
+              const value = String(item[field]);
+              dist[value] = (dist[value] || 0) + 1;
+            }
+            // Normalize
+            const total = this.realData.length;
+            for (const key in dist) {
+              dist[key] = dist[key] / total;
+            }
+            this.realDistribution.set(field, dist);
+          }
+        }
+
+        async generate(
+          count: number,
+          generator: () => Promise<T>
+        ): Promise<{ data: T[]; driftWarnings: DistributionMonitor[] }> {
+          const batchSize = 100;
+          const driftWarnings: DistributionMonitor[] = [];
+
+          for (let i = 0; i < count; i += batchSize) {
+            const batch: T[] = [];
+            for (let j = 0; j < Math.min(batchSize, count - i); j++) {
+              batch.push(await generator());
+            }
+
+            this.generated.push(...batch);
+
+            // Check drift every batch
+            const drift = this.checkDrift();
+            const driftedFields = drift.filter((d) => d.drift > this.maxDrift);
+
+            if (driftedFields.length > 0) {
+              console.warn("Distribution drift detected:", driftedFields);
+              driftWarnings.push(...driftedFields);
+
+              // Optionally: stop and resample, or adjust generator
+            }
+          }
+
+          return { data: this.generated, driftWarnings };
+        }
+
+        private checkDrift(): DistributionMonitor[] {
+          const monitors: DistributionMonitor[] = [];
+
+          for (const field of this.keyFields) {
+            const real = this.realDistribution.get(field)!;
+            const synth: Record<string, number> = {};
+
+            for (const item of this.generated) {
+              const value = String(item[field]);
+              synth[value] = (synth[value] || 0) + 1;
+            }
+
+            // Normalize
+            const total = this.generated.length;
+            for (const key in synth) {
+              synth[key] = synth[key] / total;
+            }
+
+            // Calculate JS divergence or simpler metric
+            let drift = 0;
+            for (const key in real) {
+              drift += Math.abs((real[key] || 0) - (synth[key] || 0));
+            }
+
+            monitors.push({ real, synthetic: synth, drift });
+          }
+
+          return monitors;
+        }
+      }
+      ```
+
+  - id: overfitting-to-synthetic
+    summary: "Model overfits to synthetic data artifacts"
+    severity: high
+    situation: "Training only on synthetic data"
+    why: |
+      Synthetic data has artifacts that real data doesn't:
+      - Consistent formatting from templates
+      - LLM writing patterns and phrases
+      - Missing edge cases not in generation
+      - Unrealistic correlations
+
+      Models learn these artifacts instead of real patterns.
+
+    detection_pattern: |
+      train.*synthetic(?!.*real.*validation|holdout)
+
+    solution: |
+      Always validate on real data:
+
+      ```typescript
+      interface TrainingConfig {
+        syntheticData: unknown[];
+        realData: unknown[];
+        validationSplit: number;
+      }
+
+      function prepareTrainingData(config: TrainingConfig) {
+        const { syntheticData, realData, validationSplit } = config;
+
+        // CRITICAL: Validation must be ONLY real data
+        const validationSize = Math.floor(realData.length * validationSplit);
+        const validationData = realData.slice(0, validationSize);
+        const realTrainData = realData.slice(validationSize);
+
+        // Training can mix synthetic + real
+        const trainData = [
+          ...syntheticData,
+          ...realTrainData,
+        ];
+
+        // Shuffle
+        trainData.sort(() => Math.random() - 0.5);
+
+        return {
+          train: trainData,
+          validation: validationData, // Only real!
+          metadata: {
+            syntheticRatio: syntheticData.length / trainData.length,
+            realRatio: realTrainData.length / trainData.length,
+          },
+        };
+      }
+
+      // Monitor for synthetic overfitting
+      interface OverfitMetrics {
+        trainLoss: number;
+        syntheticValLoss: number;
+        realValLoss: number;
+        gap: number; // Large gap = overfitting to synthetic
+      }
+
+      function checkOverfitting(metrics: OverfitMetrics): string[] {
+        const warnings: string[] = [];
+
+        if (metrics.realValLoss - metrics.syntheticValLoss > 0.2) {
+          warnings.push("Model performs much better on synthetic than real data. Likely overfitting to synthetic artifacts.");
+        }
+
+        if (metrics.trainLoss < 0.1 && metrics.realValLoss > 0.5) {
+          warnings.push("Training loss very low but real validation high. Check for data leakage or artifact learning.");
+        }
+
+        return warnings;
+      }
+      ```
+
+  - id: privacy-not-guaranteed
+    summary: "Synthetic data doesn't guarantee privacy"
+    severity: high
+    situation: "Using synthetic data for privacy"
+    why: |
+      Common misconception: "synthetic = private". Reality:
+      - Outliers in real data may be reproduced exactly
+      - Rare combinations are memorizable
+      - Membership inference attacks still work
+      - Attribute inference from correlations
+
+      Synthetic data needs explicit privacy measures.
+
+    detection_pattern: |
+      generateSynthetic.*privacy(?!.*differential|noise|epsilon)
+
+    solution: |
+      Add differential privacy to generation:
+
+      ```typescript
+      interface DPConfig {
+        epsilon: number; // Lower = more private, less accurate
+        delta: number;
+        sensitivity: number;
+      }
+
+      // Add Laplacian noise for differential privacy
+      function addLaplacianNoise(value: number, config: DPConfig): number {
+        const scale = config.sensitivity / config.epsilon;
+        // Laplacian distribution
+        const u = Math.random() - 0.5;
+        const noise = -scale * Math.sign(u) * Math.log(1 - 2 * Math.abs(u));
+        return value + noise;
+      }
+
+      // For categorical data, use randomized response
+      function randomizedResponse<T>(
+        value: T,
+        allValues: T[],
+        epsilon: number
+      ): T {
+        const p = Math.exp(epsilon) / (Math.exp(epsilon) + allValues.length - 1);
+
+        if (Math.random() < p) {
+          return value; // Report true value
+        } else {
+          // Report random value
+          const otherValues = allValues.filter((v) => v !== value);
+          return otherValues[Math.floor(Math.random() * otherValues.length)];
+        }
+      }
+
+      // Validate privacy with membership inference test
+      async function testMembershipInference(
+        realData: unknown[],
+        syntheticData: unknown[],
+        testSplit: number = 0.2
+      ): Promise<{
+        accuracy: number;
+        privacyRisk: "low" | "medium" | "high";
+      }> {
+        // Split real data: some in training, some held out
+        const splitIdx = Math.floor(realData.length * (1 - testSplit));
+        const trainReal = realData.slice(0, splitIdx);
+        const heldOut = realData.slice(splitIdx);
+
+        // Attacker tries to distinguish:
+        // 1. Records that were used to generate synthetic (trainReal)
+        // 2. Records never seen (heldOut)
+
+        // Simple nearest-neighbor attack
+        let correct = 0;
+        const total = trainReal.length + heldOut.length;
+
+        for (const record of trainReal) {
+          const dist = nearestDistance(record, syntheticData);
+          if (dist < 0.1) correct++; // Guesses "in training" if very similar
+        }
+
+        for (const record of heldOut) {
+          const dist = nearestDistance(record, syntheticData);
+          if (dist >= 0.1) correct++; // Guesses "not in training" if dissimilar
+        }
+
+        const accuracy = correct / total;
+
+        return {
+          accuracy,
+          privacyRisk: accuracy > 0.7 ? "high" : accuracy > 0.55 ? "medium" : "low",
+        };
+      }
+
+      function nearestDistance(record: unknown, dataset: unknown[]): number {
+        // Simplified - would use proper distance metric
+        const recordStr = JSON.stringify(record);
+        let minDist = Infinity;
+
+        for (const item of dataset) {
+          const dist = levenshtein(recordStr, JSON.stringify(item));
+          if (dist < minDist) minDist = dist;
+        }
+
+        return minDist / recordStr.length; // Normalize
+      }
+      ```
+
+  - id: mode-collapse
+    summary: "Generator produces repetitive outputs"
+    severity: medium
+    situation: "Using GANs or low temperature"
+    why: |
+      Mode collapse happens when generator:
+      - Only produces subset of possible outputs
+      - Ignores rare categories
+      - Converges to "safe" average patterns
+
+      Results in low diversity, missing edge cases.
+
+    detection_pattern: |
+      temperature.*0\.[0-3]|CTGAN(?!.*mode.*collapse.*check)
+
+    solution: |
+      Monitor diversity and adjust generation:
+
+      ```typescript
+      interface DiversityMetrics {
+        uniqueRatio: number;
+        entropyByField: Record<string, number>;
+        categoryConverage: Record<string, number>;
+        repetitionRate: number;
+      }
+
+      function measureDiversity<T extends Record<string, unknown>>(
+        data: T[],
+        categoricalFields: string[]
+      ): DiversityMetrics {
+        // Unique ratio
+        const unique = new Set(data.map((d) => JSON.stringify(d)));
+        const uniqueRatio = unique.size / data.length;
+
+        // Entropy per categorical field
+        const entropyByField: Record<string, number> = {};
+        const categoryConverage: Record<string, number> = {};
+
+        for (const field of categoricalFields) {
+          const counts: Record<string, number> = {};
+          for (const item of data) {
+            const value = String(item[field]);
+            counts[value] = (counts[value] || 0) + 1;
+          }
+
+          // Entropy
+          let entropy = 0;
+          for (const count of Object.values(counts)) {
+            const p = count / data.length;
+            entropy -= p * Math.log2(p);
+          }
+          entropyByField[field] = entropy;
+
+          // Coverage (categories represented)
+          categoryConverage[field] = Object.keys(counts).length;
+        }
+
+        // Repetition rate (consecutive duplicates)
+        let repetitions = 0;
+        for (let i = 1; i < data.length; i++) {
+          if (JSON.stringify(data[i]) === JSON.stringify(data[i - 1])) {
+            repetitions++;
+          }
+        }
+
+        return {
+          uniqueRatio,
+          entropyByField,
+          categoryConverage,
+          repetitionRate: repetitions / data.length,
+        };
+      }
+
+      // Adaptive temperature based on diversity
+      function adaptiveTemperature(
+        currentDiversity: DiversityMetrics,
+        targetUniqueRatio: number = 0.95
+      ): number {
+        const gap = targetUniqueRatio - currentDiversity.uniqueRatio;
+
+        // If diversity too low, increase temperature
+        // If diversity fine, use base temperature
+        const baseTemp = 0.8;
+        const adjustment = Math.max(0, gap) * 0.5;
+
+        return Math.min(1.0, baseTemp + adjustment);
+      }
+      ```
+
+  - id: llm-hallucination-in-data
+    summary: "LLM generates factually incorrect data"
+    severity: medium
+    situation: "Generating domain-specific data"
+    why: |
+      LLMs hallucinate plausible-looking but wrong data:
+      - Invalid zip codes for cities
+      - Impossible date combinations
+      - Wrong technical specifications
+      - Inconsistent within same record
+
+      Training on hallucinated data teaches wrong patterns.
+
+    detection_pattern: |
+      generate.*domain.*specific(?!.*validate|verify)
+
+    solution: |
+      Validate domain-specific constraints:
+
+      ```typescript
+      import { z } from "zod";
+
+      // Define strict domain constraints
+      const USAddress = z.object({
+        street: z.string(),
+        city: z.string(),
+        state: z.string().regex(/^[A-Z]{2}$/),
+        zipCode: z.string().regex(/^\d{5}(-\d{4})?$/),
+      }).refine(
+        async (data) => {
+          // Validate zip matches city/state
+          return await validateZipCityState(data.zipCode, data.city, data.state);
+        },
+        { message: "ZIP code doesn't match city/state" }
+      );
+
+      const DateRange = z.object({
+        startDate: z.date(),
+        endDate: z.date(),
+      }).refine(
+        (data) => data.startDate <= data.endDate,
+        { message: "Start date must be before end date" }
+      );
+
+      // Domain-specific validation
+      const MedicalRecord = z.object({
+        age: z.number().min(0).max(150),
+        diagnosisCode: z.string(),
+        medications: z.array(z.string()),
+        bloodPressure: z.object({
+          systolic: z.number().min(70).max(250),
+          diastolic: z.number().min(40).max(150),
+        }),
+      }).refine(
+        (data) => data.bloodPressure.systolic > data.bloodPressure.diastolic,
+        { message: "Systolic must be higher than diastolic" }
+      );
+
+      // Validate and filter synthetic data
+      async function validateSyntheticBatch<T>(
+        data: unknown[],
+        schema: z.ZodType<T>
+      ): Promise<{
+        valid: T[];
+        invalid: unknown[];
+        errorRate: number;
+      }> {
+        const valid: T[] = [];
+        const invalid: unknown[] = [];
+
+        for (const item of data) {
+          const result = await schema.safeParseAsync(item);
+          if (result.success) {
+            valid.push(result.data);
+          } else {
+            invalid.push({ item, errors: result.error.issues });
+          }
+        }
+
+        return {
+          valid,
+          invalid,
+          errorRate: invalid.length / data.length,
+        };
+      }
+      ```
+
+  - id: cost-explosion
+    summary: "LLM generation costs spiral out of control"
+    severity: medium
+    situation: "Generating large datasets with LLM"
+    why: |
+      Generating 10,000 examples with GPT-4:
+      - ~500 tokens per example (input + output)
+      - 5M tokens total
+      - ~$50-100 for GPT-4o
+      - ~$150-300 for Claude Sonnet
+
+      Iteration and regeneration multiply costs.
+
+    detection_pattern: |
+      generate.*count.*\d{4,}(?!.*cost.*estimate|budget)
+
+    solution: |
+      Estimate costs and use tiered approach:
+
+      ```typescript
+      interface CostEstimate {
+        inputTokens: number;
+        outputTokens: number;
+        estimatedCost: number;
+        model: string;
+      }
+
+      const MODEL_PRICING = {
+        "gpt-4o": { input: 2.5, output: 10 }, // per 1M tokens
+        "gpt-4o-mini": { input: 0.15, output: 0.6 },
+        "claude-sonnet-4-20250514": { input: 3, output: 15 },
+        "claude-3-5-haiku-20241022": { input: 0.8, output: 4 },
+      };
+
+      function estimateGenerationCost(
+        exampleCount: number,
+        avgInputTokens: number,
+        avgOutputTokens: number,
+        model: keyof typeof MODEL_PRICING
+      ): CostEstimate {
+        const pricing = MODEL_PRICING[model];
+        const totalInput = exampleCount * avgInputTokens;
+        const totalOutput = exampleCount * avgOutputTokens;
+
+        const inputCost = (totalInput / 1_000_000) * pricing.input;
+        const outputCost = (totalOutput / 1_000_000) * pricing.output;
+
+        return {
+          inputTokens: totalInput,
+          outputTokens: totalOutput,
+          estimatedCost: inputCost + outputCost,
+          model,
+        };
+      }
+
+      // Tiered generation: cheap model for quantity, expensive for quality
+      async function tieredGeneration<T>(
+        count: number,
+        generator: (model: string) => Promise<T>
+      ): Promise<T[]> {
+        const results: T[] = [];
+
+        // 80% with cheap model
+        const cheapCount = Math.floor(count * 0.8);
+        for (let i = 0; i < cheapCount; i++) {
+          results.push(await generator("gpt-4o-mini"));
+        }
+
+        // 20% with quality model for diversity
+        const qualityCount = count - cheapCount;
+        for (let i = 0; i < qualityCount; i++) {
+          results.push(await generator("gpt-4o"));
+        }
+
+        return results;
+      }
+      ```

@@ -1,0 +1,634 @@
+# Collaboration - Synthetic Data Generation
+# Integration patterns with other skills
+
+version: 1.0.0
+skill_id: synthetic-data
+
+prerequisites:
+  required:
+    - skill: llm-integration
+      reason: "LLM-based generation requires proper API setup"
+
+  recommended:
+    - skill: ai-observability
+      reason: "Track generation costs and quality metrics"
+    - skill: data-pipelines
+      reason: "Automate data generation workflows"
+
+delegates_to:
+  - skill: ai-observability
+    when: "Need to track generation costs and quality"
+    handoff: "Use Langfuse to trace generation runs and costs"
+
+  - skill: semantic-search
+    when: "Need to check for near-duplicates in generated data"
+    handoff: "Use vector search to find semantically similar examples"
+
+  - skill: llm-integration
+    when: "Optimizing LLM calls for generation"
+    handoff: "Apply batching and caching patterns"
+
+receives_from:
+  - skill: ml-training
+    when: "Need synthetic data for model training"
+    input: "Schema, count requirements, quality thresholds"
+
+  - skill: testing
+    when: "Need test data fixtures"
+    input: "Data models and edge case requirements"
+
+integration_patterns:
+  inngest_generation_pipeline:
+    description: "Background synthetic data generation with Inngest"
+    pattern: |
+      // inngest/synthetic-data.ts
+      import { inngest } from "./client";
+      import OpenAI from "openai";
+      import { z } from "zod";
+      import { db } from "@/lib/db";
+
+      const openai = new OpenAI();
+
+      // Request synthetic data generation
+      export const requestSyntheticData = inngest.createFunction(
+        { id: "request-synthetic-data" },
+        { event: "synthetic/data.requested" },
+        async ({ event, step }) => {
+          const { schema, count, context, jobId } = event.data;
+
+          // Step 1: Estimate costs and validate budget
+          const estimate = await step.run("estimate-cost", async () => {
+            const avgTokens = 500;
+            const totalTokens = count * avgTokens;
+            const cost = (totalTokens / 1_000_000) * 0.6; // gpt-4o-mini
+
+            return { totalTokens, estimatedCost: cost };
+          });
+
+          // Step 2: Update job status
+          await step.run("update-status", async () => {
+            await db.syntheticJob.update({
+              where: { id: jobId },
+              data: {
+                status: "generating",
+                estimatedCost: estimate.estimatedCost,
+                totalRequested: count,
+              },
+            });
+          });
+
+          // Step 3: Generate in batches
+          const batchSize = 50;
+          let generated = 0;
+          let totalCost = 0;
+
+          while (generated < count) {
+            const batchCount = Math.min(batchSize, count - generated);
+
+            const batch = await step.run(`generate-batch-${generated}`, async () => {
+              const response = await openai.chat.completions.create({
+                model: "gpt-4o-mini",
+                temperature: 0.8,
+                messages: [
+                  {
+                    role: "system",
+                    content: `Generate ${batchCount} diverse, realistic examples. Output as JSON array.`,
+                  },
+                  {
+                    role: "user",
+                    content: `Schema: ${JSON.stringify(schema)}\nContext: ${context}`,
+                  },
+                ],
+              });
+
+              const usage = response.usage;
+              const cost = usage
+                ? ((usage.prompt_tokens * 0.15 + usage.completion_tokens * 0.6) / 1_000_000)
+                : 0;
+
+              const content = response.choices[0].message.content ?? "[]";
+              const data = JSON.parse(content);
+
+              return { data, cost };
+            });
+
+            // Step 4: Validate and store batch
+            await step.run(`store-batch-${generated}`, async () => {
+              const validItems = batch.data.filter((item: unknown) => {
+                try {
+                  const parsed = z.object(schema).safeParse(item);
+                  return parsed.success;
+                } catch {
+                  return false;
+                }
+              });
+
+              await db.syntheticData.createMany({
+                data: validItems.map((item: unknown) => ({
+                  jobId,
+                  data: item as Record<string, unknown>,
+                  createdAt: new Date(),
+                })),
+              });
+
+              await db.syntheticJob.update({
+                where: { id: jobId },
+                data: {
+                  generatedCount: { increment: validItems.length },
+                  actualCost: { increment: batch.cost },
+                },
+              });
+            });
+
+            generated += batchCount;
+            totalCost += batch.cost;
+
+            // Check for budget exceeded
+            if (totalCost > (event.data.maxBudget ?? 10)) {
+              await step.sendEvent("budget-exceeded", {
+                name: "synthetic/budget.exceeded",
+                data: { jobId, spent: totalCost },
+              });
+              break;
+            }
+          }
+
+          // Step 5: Quality validation
+          const quality = await step.run("validate-quality", async () => {
+            const allData = await db.syntheticData.findMany({
+              where: { jobId },
+            });
+
+            // Run quality checks
+            const uniqueRatio = new Set(allData.map((d) => JSON.stringify(d.data))).size / allData.length;
+
+            return {
+              totalGenerated: allData.length,
+              uniqueRatio,
+              totalCost,
+            };
+          });
+
+          // Step 6: Complete job
+          await step.run("complete-job", async () => {
+            await db.syntheticJob.update({
+              where: { id: jobId },
+              data: {
+                status: "completed",
+                completedAt: new Date(),
+                qualityMetrics: quality,
+              },
+            });
+          });
+
+          return quality;
+        }
+      );
+
+  nextjs_api_endpoint:
+    description: "API endpoint for synthetic data generation"
+    pattern: |
+      // app/api/synthetic/route.ts
+      import { NextRequest, NextResponse } from "next/server";
+      import { z } from "zod";
+      import { inngest } from "@/inngest/client";
+      import { db } from "@/lib/db";
+
+      const RequestSchema = z.object({
+        schema: z.record(z.unknown()),
+        count: z.number().min(1).max(10000),
+        context: z.string(),
+        maxBudget: z.number().optional().default(10),
+      });
+
+      export async function POST(req: NextRequest) {
+        const userId = req.headers.get("x-user-id");
+        if (!userId) {
+          return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
+        const body = await req.json();
+        const parsed = RequestSchema.safeParse(body);
+
+        if (!parsed.success) {
+          return NextResponse.json({ error: parsed.error.issues }, { status: 400 });
+        }
+
+        const { schema, count, context, maxBudget } = parsed.data;
+
+        // Check user quota
+        const user = await db.user.findUnique({ where: { id: userId } });
+        if (!user || user.syntheticQuotaRemaining < maxBudget) {
+          return NextResponse.json({ error: "Insufficient quota" }, { status: 403 });
+        }
+
+        // Create job
+        const job = await db.syntheticJob.create({
+          data: {
+            userId,
+            schema,
+            context,
+            totalRequested: count,
+            maxBudget,
+            status: "pending",
+          },
+        });
+
+        // Trigger generation
+        await inngest.send({
+          name: "synthetic/data.requested",
+          data: {
+            jobId: job.id,
+            schema,
+            count,
+            context,
+            maxBudget,
+          },
+        });
+
+        return NextResponse.json({
+          jobId: job.id,
+          status: "pending",
+          estimatedTimeMinutes: Math.ceil(count / 100),
+        });
+      }
+
+      // GET endpoint to check status
+      export async function GET(req: NextRequest) {
+        const jobId = req.nextUrl.searchParams.get("jobId");
+
+        if (!jobId) {
+          return NextResponse.json({ error: "jobId required" }, { status: 400 });
+        }
+
+        const job = await db.syntheticJob.findUnique({
+          where: { id: jobId },
+          include: { _count: { select: { syntheticData: true } } },
+        });
+
+        if (!job) {
+          return NextResponse.json({ error: "Job not found" }, { status: 404 });
+        }
+
+        return NextResponse.json({
+          id: job.id,
+          status: job.status,
+          generatedCount: job._count.syntheticData,
+          totalRequested: job.totalRequested,
+          estimatedCost: job.estimatedCost,
+          actualCost: job.actualCost,
+          qualityMetrics: job.qualityMetrics,
+        });
+      }
+
+  langfuse_generation_tracing:
+    description: "Trace synthetic generation with Langfuse"
+    pattern: |
+      // lib/traced-generation.ts
+      import { Langfuse } from "langfuse";
+      import OpenAI from "openai";
+      import { z } from "zod";
+
+      const langfuse = new Langfuse({
+        publicKey: process.env.LANGFUSE_PUBLIC_KEY!,
+        secretKey: process.env.LANGFUSE_SECRET_KEY!,
+      });
+
+      const openai = new OpenAI();
+
+      interface TracedGenerationResult<T> {
+        data: T[];
+        trace: ReturnType<typeof langfuse.trace>;
+        metrics: {
+          totalTokens: number;
+          cost: number;
+          validRatio: number;
+          uniqueRatio: number;
+          latencyMs: number;
+        };
+      }
+
+      export async function tracedSyntheticGeneration<T>(
+        schema: z.ZodType<T>,
+        context: string,
+        count: number,
+        userId?: string
+      ): Promise<TracedGenerationResult<T>> {
+        const trace = langfuse.trace({
+          name: "synthetic-data-generation",
+          userId,
+          metadata: { count, context: context.slice(0, 100) },
+        });
+
+        const startTime = Date.now();
+        const results: T[] = [];
+        let totalTokens = 0;
+        let cost = 0;
+        let validCount = 0;
+
+        try {
+          // Generation span
+          const genSpan = trace.span({ name: "generation" });
+
+          const batchSize = 25;
+          for (let i = 0; i < count; i += batchSize) {
+            const batchCount = Math.min(batchSize, count - i);
+
+            const generation = trace.generation({
+              name: `batch-${i}`,
+              model: "gpt-4o-mini",
+              input: { schema, context, batchCount },
+            });
+
+            const response = await openai.chat.completions.create({
+              model: "gpt-4o-mini",
+              temperature: 0.8,
+              messages: [
+                {
+                  role: "system",
+                  content: `Generate ${batchCount} diverse examples as JSON array.`,
+                },
+                {
+                  role: "user",
+                  content: `Schema: ${JSON.stringify(schema)}\nContext: ${context}`,
+                },
+              ],
+            });
+
+            const usage = response.usage;
+            if (usage) {
+              totalTokens += usage.prompt_tokens + usage.completion_tokens;
+              cost += (usage.prompt_tokens * 0.15 + usage.completion_tokens * 0.6) / 1_000_000;
+            }
+
+            // Parse and validate
+            const content = response.choices[0].message.content ?? "[]";
+            const items = JSON.parse(content);
+
+            for (const item of items) {
+              const parsed = schema.safeParse(item);
+              if (parsed.success) {
+                results.push(parsed.data);
+                validCount++;
+              }
+            }
+
+            generation.end({
+              output: { itemsGenerated: items.length, validItems: validCount - (results.length - items.length) },
+              usage: usage ? { input: usage.prompt_tokens, output: usage.completion_tokens } : undefined,
+            });
+          }
+
+          genSpan.end();
+
+          // Validation span
+          const valSpan = trace.span({ name: "validation" });
+
+          const unique = new Set(results.map((r) => JSON.stringify(r)));
+          const uniqueRatio = unique.size / results.length;
+
+          valSpan.end({
+            output: { validRatio: validCount / count, uniqueRatio },
+          });
+
+          trace.update({
+            output: {
+              totalGenerated: results.length,
+              cost,
+              uniqueRatio,
+            },
+          });
+
+          return {
+            data: results,
+            trace,
+            metrics: {
+              totalTokens,
+              cost,
+              validRatio: validCount / count,
+              uniqueRatio,
+              latencyMs: Date.now() - startTime,
+            },
+          };
+        } catch (error) {
+          trace.update({
+            level: "ERROR",
+            statusMessage: error instanceof Error ? error.message : "Unknown error",
+          });
+          throw error;
+        } finally {
+          await langfuse.flushAsync();
+        }
+      }
+
+  sdv_python_integration:
+    description: "SDV integration via Python subprocess"
+    pattern: |
+      // lib/sdv-client.ts
+      import { spawn } from "child_process";
+      import { writeFile, readFile, unlink } from "fs/promises";
+      import { randomUUID } from "crypto";
+      import path from "path";
+
+      interface SDVConfig {
+        synthesizer: "gaussian_copula" | "ctgan" | "tvae";
+        epochs?: number;
+        batchSize?: number;
+      }
+
+      export class SDVClient {
+        private pythonPath: string;
+
+        constructor(pythonPath: string = "python3") {
+          this.pythonPath = pythonPath;
+        }
+
+        async generateTabular<T>(
+          realData: T[],
+          sampleCount: number,
+          config: SDVConfig = { synthesizer: "gaussian_copula" }
+        ): Promise<T[]> {
+          const jobId = randomUUID();
+          const inputPath = path.join("/tmp", `sdv_input_${jobId}.json`);
+          const outputPath = path.join("/tmp", `sdv_output_${jobId}.json`);
+
+          try {
+            // Write input data
+            await writeFile(inputPath, JSON.stringify(realData));
+
+            // Python script
+            const script = `
+import json
+import pandas as pd
+from sdv.single_table import GaussianCopulaSynthesizer, CTGANSynthesizer, TVAESynthesizer
+from sdv.metadata import SingleTableMetadata
+
+with open('${inputPath}', 'r') as f:
+    data = json.load(f)
+
+df = pd.DataFrame(data)
+metadata = SingleTableMetadata()
+metadata.detect_from_dataframe(df)
+
+synthesizers = {
+    'gaussian_copula': GaussianCopulaSynthesizer,
+    'ctgan': CTGANSynthesizer,
+    'tvae': TVAESynthesizer,
+}
+
+Synthesizer = synthesizers['${config.synthesizer}']
+synth = Synthesizer(metadata)
+synth.fit(df)
+synthetic = synth.sample(${sampleCount})
+
+synthetic.to_json('${outputPath}', orient='records')
+`;
+
+            // Execute Python
+            await this.runPython(script);
+
+            // Read output
+            const output = await readFile(outputPath, "utf-8");
+            return JSON.parse(output);
+          } finally {
+            // Cleanup
+            await unlink(inputPath).catch(() => {});
+            await unlink(outputPath).catch(() => {});
+          }
+        }
+
+        async evaluateQuality<T>(
+          realData: T[],
+          syntheticData: T[]
+        ): Promise<{
+          score: number;
+          columnShapes: number;
+          columnPairTrends: number;
+        }> {
+          const jobId = randomUUID();
+          const realPath = path.join("/tmp", `sdv_real_${jobId}.json`);
+          const synthPath = path.join("/tmp", `sdv_synth_${jobId}.json`);
+
+          try {
+            await writeFile(realPath, JSON.stringify(realData));
+            await writeFile(synthPath, JSON.stringify(syntheticData));
+
+            const script = `
+import json
+import pandas as pd
+from sdv.evaluation.single_table import evaluate_quality
+
+real_df = pd.DataFrame(json.load(open('${realPath}')))
+synth_df = pd.DataFrame(json.load(open('${synthPath}')))
+
+report = evaluate_quality(real_df, synth_df)
+
+print(json.dumps({
+    'score': report.get_score(),
+    'columnShapes': report.get_property('Column Shapes').get('Score', 0),
+    'columnPairTrends': report.get_property('Column Pair Trends').get('Score', 0)
+}))
+`;
+
+            const output = await this.runPython(script);
+            return JSON.parse(output);
+          } finally {
+            await unlink(realPath).catch(() => {});
+            await unlink(synthPath).catch(() => {});
+          }
+        }
+
+        private runPython(script: string): Promise<string> {
+          return new Promise((resolve, reject) => {
+            const proc = spawn(this.pythonPath, ["-c", script]);
+            let stdout = "";
+            let stderr = "";
+
+            proc.stdout.on("data", (data) => (stdout += data));
+            proc.stderr.on("data", (data) => (stderr += data));
+
+            proc.on("close", (code) => {
+              if (code === 0) {
+                resolve(stdout.trim());
+              } else {
+                reject(new Error(`Python error: ${stderr}`));
+              }
+            });
+          });
+        }
+      }
+
+  react_query_hooks:
+    description: "React Query hooks for synthetic data"
+    pattern: |
+      // hooks/use-synthetic-data.ts
+      import { useMutation, useQuery } from "@tanstack/react-query";
+
+      interface SyntheticJobRequest {
+        schema: Record<string, unknown>;
+        count: number;
+        context: string;
+        maxBudget?: number;
+      }
+
+      interface SyntheticJob {
+        id: string;
+        status: "pending" | "generating" | "completed" | "failed";
+        generatedCount: number;
+        totalRequested: number;
+        estimatedCost: number;
+        actualCost: number;
+        qualityMetrics?: {
+          uniqueRatio: number;
+          validRatio: number;
+        };
+      }
+
+      export function useCreateSyntheticJob() {
+        return useMutation({
+          mutationFn: async (request: SyntheticJobRequest): Promise<{ jobId: string }> => {
+            const res = await fetch("/api/synthetic", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(request),
+            });
+
+            if (!res.ok) {
+              throw new Error("Failed to create job");
+            }
+
+            return res.json();
+          },
+        });
+      }
+
+      export function useSyntheticJob(jobId: string | null) {
+        return useQuery({
+          queryKey: ["synthetic-job", jobId],
+          queryFn: async (): Promise<SyntheticJob> => {
+            const res = await fetch(`/api/synthetic?jobId=${jobId}`);
+            if (!res.ok) throw new Error("Failed to fetch job");
+            return res.json();
+          },
+          enabled: !!jobId,
+          refetchInterval: (data) => {
+            // Poll while pending or generating
+            if (data?.status === "pending" || data?.status === "generating") {
+              return 2000;
+            }
+            return false;
+          },
+        });
+      }
+
+      export function useSyntheticData(jobId: string | null) {
+        return useQuery({
+          queryKey: ["synthetic-data", jobId],
+          queryFn: async () => {
+            const res = await fetch(`/api/synthetic/${jobId}/data`);
+            if (!res.ok) throw new Error("Failed to fetch data");
+            return res.json();
+          },
+          enabled: !!jobId,
+        });
+      }

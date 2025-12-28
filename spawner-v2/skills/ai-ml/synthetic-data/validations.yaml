@@ -1,0 +1,454 @@
+# Validations - Synthetic Data Generation
+# Quality checks for synthetic data implementations
+
+version: 1.0.0
+skill_id: synthetic-data
+
+validations:
+  # Quality Validation
+  - id: no-quality-check
+    name: Synthetic Data Without Quality Check
+    severity: error
+    description: Always validate synthetic data quality before use
+    pattern: |
+      generateSynthetic|syntheticData(?!.*validate|quality|check|verify)
+    message: "Synthetic data must be validated for quality before training."
+    autofix: false
+
+  - id: no-distribution-check
+    name: No Distribution Comparison
+    severity: warning
+    description: Compare synthetic distribution to real data
+    pattern: |
+      synthetic.*push(?!.*distribution|compare|audit)
+    message: "Compare synthetic data distribution to real data."
+    autofix: false
+
+  - id: missing-uniqueness-check
+    name: No Uniqueness Verification
+    severity: warning
+    description: Check for duplicate or near-duplicate examples
+    pattern: |
+      synthetic.*length|syntheticData\.length(?!.*unique|duplicate|Set)
+    message: "Check synthetic data for duplicates before use."
+    autofix: false
+
+  # Privacy Validation
+  - id: no-privacy-check
+    name: No Privacy Validation
+    severity: error
+    description: Synthetic data needs privacy validation
+    pattern: |
+      generateSynthetic.*privacy(?!.*check|validate|dp|epsilon)
+    message: "Validate synthetic data doesn't leak real data information."
+    autofix: false
+
+  - id: no-pii-filter
+    name: No PII Filtering
+    severity: error
+    description: Filter PII from synthetic outputs
+    pattern: |
+      llm.*generate.*data(?!.*pii|filter|sanitize|redact)
+    message: "LLM-generated data may contain memorized PII. Filter outputs."
+    autofix: false
+
+  - id: no-memorization-check
+    name: No Memorization Check
+    severity: warning
+    description: Check if synthetic data matches real data exactly
+    pattern: |
+      synthetic.*real(?!.*overlap|match|memoriz)
+    message: "Check for exact matches between synthetic and real data."
+    autofix: false
+
+  # Schema Validation
+  - id: no-schema-validation
+    name: No Schema Validation
+    severity: error
+    description: Validate synthetic data against schema
+    pattern: |
+      generateSynthetic|syntheticData(?!.*schema|parse|validate|zod)
+    message: "Validate synthetic data against expected schema."
+    autofix: false
+
+  - id: no-constraint-check
+    name: No Domain Constraint Check
+    severity: warning
+    description: Validate domain-specific constraints
+    pattern: |
+      synthetic.*domain(?!.*constraint|rule|validate)
+    message: "Validate domain-specific constraints (e.g., date ranges, zip codes)."
+    autofix: false
+
+  # Cost Management
+  - id: no-cost-estimate
+    name: No Cost Estimation
+    severity: info
+    description: Estimate costs before large generation runs
+    pattern: |
+      generate.*count.*\d{3,}(?!.*cost|estimate|budget)
+    message: "Estimate costs before generating large datasets."
+    autofix: false
+
+  - id: using-expensive-model
+    name: Using Expensive Model for Bulk Generation
+    severity: info
+    description: Use cheaper models for high-volume generation
+    pattern: |
+      generate.*count.*\d{4,}.*gpt-4o[^-]|claude-sonnet
+    message: "Consider gpt-4o-mini or haiku for bulk generation."
+    autofix: false
+
+  # Diversity Checks
+  - id: low-temperature-generation
+    name: Low Temperature for Synthetic Data
+    severity: warning
+    description: Low temperature reduces diversity
+    pattern: |
+      temperature.*0\.[0-3].*synthetic|synthetic.*temperature.*0\.[0-3]
+    message: "Low temperature reduces diversity. Use 0.7-1.0 for synthetic data."
+    autofix: false
+
+  - id: no-diversity-check
+    name: No Diversity Metrics
+    severity: warning
+    description: Monitor diversity during generation
+    pattern: |
+      synthetic.*batch(?!.*diversity|entropy|coverage)
+    message: "Monitor diversity metrics during synthetic generation."
+    autofix: false
+
+  # Training Integration
+  - id: synthetic-only-training
+    name: Training Only on Synthetic Data
+    severity: error
+    description: Include real data in validation set
+    pattern: |
+      train.*synthetic(?!.*real.*valid|holdout)
+    message: "Always validate on real data, even when training on synthetic."
+    autofix: false
+
+  - id: no-synthetic-flag
+    name: No Synthetic Data Flag
+    severity: info
+    description: Mark synthetic examples for tracking
+    pattern: |
+      syntheticData\.push(?!.*synthetic.*true|source.*synthetic)
+    message: "Mark synthetic examples with a flag for analysis."
+    autofix: false
+
+code_smells:
+  - id: single-batch-generation
+    name: Single Batch Generation
+    description: Large batches should check quality incrementally
+    pattern: |
+      generate.*count.*\d{4,}(?!.*batch|chunk|incremental)
+    suggestion: "Generate in batches with quality checks between batches."
+
+  - id: no-seed-reproducibility
+    name: No Seed for Reproducibility
+    description: Set seeds for reproducible generation
+    pattern: |
+      faker(?!.*seed)|random(?!.*seed)
+    suggestion: "Set random seeds for reproducible synthetic data."
+
+  - id: hardcoded-example-count
+    name: Hardcoded Example Count
+    description: Make generation count configurable
+    pattern: |
+      generate.*count.*=.*\d+(?!.*config|env|param)
+    suggestion: "Make example count configurable for experimentation."
+
+  - id: sync-generation
+    name: Synchronous Large Generation
+    description: Large generation should be async/batched
+    pattern: |
+      for.*generate.*await(?!.*batch|chunk)
+    suggestion: "Use batched async generation for large datasets."
+
+best_practices:
+  - id: quality-first-pipeline
+    name: Quality-First Generation Pipeline
+    check: |
+      Synthetic data pipeline includes quality validation.
+    recommendation: |
+      interface SyntheticDataPipeline<T> {
+        generate(count: number): Promise<T[]>;
+        validate(data: T[]): Promise<QualityReport>;
+        filter(data: T[], report: QualityReport): T[];
+        export(data: T[], format: "jsonl" | "csv"): Promise<string>;
+      }
+
+      class QualityFirstPipeline<T extends Record<string, unknown>> implements SyntheticDataPipeline<T> {
+        constructor(
+          private generator: (count: number) => Promise<T[]>,
+          private schema: z.ZodType<T>,
+          private realData: T[]
+        ) {}
+
+        async generate(count: number): Promise<T[]> {
+          const batchSize = 100;
+          const allData: T[] = [];
+          let attempts = 0;
+          const maxAttempts = Math.ceil(count * 1.5); // Allow 50% retry budget
+
+          while (allData.length < count && attempts < maxAttempts) {
+            const needed = Math.min(batchSize, count - allData.length);
+            const batch = await this.generator(needed);
+
+            // Validate each item
+            for (const item of batch) {
+              const result = this.schema.safeParse(item);
+              if (result.success) {
+                allData.push(result.data);
+              }
+              attempts++;
+            }
+
+            // Quality check every batch
+            if (allData.length % (batchSize * 5) === 0) {
+              const report = await this.validate(allData);
+              if (report.overall < 0.7) {
+                console.warn("Quality degrading, adjusting parameters...");
+              }
+            }
+          }
+
+          return allData;
+        }
+
+        async validate(data: T[]): Promise<QualityReport> {
+          // Distribution comparison
+          const realDist = computeDistribution(this.realData);
+          const synthDist = computeDistribution(data);
+          const distributionMatch = compareDistributions(realDist, synthDist);
+
+          // Uniqueness
+          const unique = new Set(data.map(d => JSON.stringify(d)));
+          const uniqueness = unique.size / data.length;
+
+          // Schema compliance (already filtered, but double-check)
+          let schemaCompliance = 0;
+          for (const item of data) {
+            if (this.schema.safeParse(item).success) schemaCompliance++;
+          }
+          schemaCompliance /= data.length;
+
+          // Privacy check
+          const realSet = new Set(this.realData.map(d => JSON.stringify(d)));
+          let memorized = 0;
+          for (const item of data) {
+            if (realSet.has(JSON.stringify(item))) memorized++;
+          }
+          const privacyScore = 1 - (memorized / data.length);
+
+          const overall = (distributionMatch + uniqueness + schemaCompliance + privacyScore) / 4;
+
+          return {
+            distributionMatch,
+            uniqueness,
+            schemaCompliance,
+            privacyScore,
+            overall,
+            recommendations: this.getRecommendations({ distributionMatch, uniqueness, schemaCompliance, privacyScore }),
+          };
+        }
+
+        filter(data: T[], report: QualityReport): T[] {
+          // Remove duplicates
+          const seen = new Set<string>();
+          return data.filter(item => {
+            const key = JSON.stringify(item);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+        }
+
+        async export(data: T[], format: "jsonl" | "csv"): Promise<string> {
+          if (format === "jsonl") {
+            return data.map(d => JSON.stringify(d)).join("\n");
+          }
+          // CSV implementation
+          return "";
+        }
+
+        private getRecommendations(metrics: Record<string, number>): string[] {
+          const recs: string[] = [];
+          if (metrics.distributionMatch < 0.8) {
+            recs.push("Distribution mismatch - check category balance");
+          }
+          if (metrics.uniqueness < 0.95) {
+            recs.push("High duplicate rate - increase temperature/diversity");
+          }
+          if (metrics.privacyScore < 0.99) {
+            recs.push("Memorization detected - add noise or filter matches");
+          }
+          return recs;
+        }
+      }
+
+  - id: privacy-aware-generation
+    name: Privacy-Aware Generation
+    check: |
+      Synthetic data generation includes privacy measures.
+    recommendation: |
+      interface PrivacyConfig {
+        checkMemorization: boolean;
+        minDistance: number; // Minimum edit distance from real data
+        useDP: boolean;
+        epsilon?: number;
+      }
+
+      async function privacyAwareGeneration<T>(
+        generator: () => Promise<T>,
+        realData: T[],
+        count: number,
+        config: PrivacyConfig
+      ): Promise<T[]> {
+        const results: T[] = [];
+        const realStrings = new Set(realData.map(d => JSON.stringify(d)));
+        let generated = 0;
+        let rejected = 0;
+
+        while (results.length < count && generated < count * 3) {
+          const item = await generator();
+          generated++;
+
+          const itemStr = JSON.stringify(item);
+
+          // Check exact match
+          if (config.checkMemorization && realStrings.has(itemStr)) {
+            rejected++;
+            continue;
+          }
+
+          // Check minimum distance
+          if (config.minDistance > 0) {
+            let tooClose = false;
+            for (const real of realData) {
+              const dist = normalizedEditDistance(itemStr, JSON.stringify(real));
+              if (dist < config.minDistance) {
+                tooClose = true;
+                break;
+              }
+            }
+            if (tooClose) {
+              rejected++;
+              continue;
+            }
+          }
+
+          results.push(item);
+        }
+
+        console.log(`Generated: ${generated}, Accepted: ${results.length}, Rejected: ${rejected}`);
+
+        // Apply differential privacy noise if configured
+        if (config.useDP && config.epsilon) {
+          return applyDPNoise(results, config.epsilon);
+        }
+
+        return results;
+      }
+
+  - id: cost-aware-generation
+    name: Cost-Aware Generation
+    check: |
+      Generation costs are estimated and monitored.
+    recommendation: |
+      interface CostTracker {
+        estimatedCost: number;
+        actualCost: number;
+        tokensUsed: number;
+        budget: number;
+      }
+
+      class CostAwareGenerator {
+        private tracker: CostTracker = {
+          estimatedCost: 0,
+          actualCost: 0,
+          tokensUsed: 0,
+          budget: 10, // Default $10 budget
+        };
+
+        constructor(private budget: number = 10) {
+          this.tracker.budget = budget;
+        }
+
+        async generateWithBudget<T>(
+          count: number,
+          generator: (model: string) => Promise<{ data: T; tokens: number }>,
+          options?: { preferCheap?: boolean }
+        ): Promise<{ data: T[]; cost: number; interrupted: boolean }> {
+          const results: T[] = [];
+          let interrupted = false;
+
+          // Estimate cost first
+          const avgTokensPerItem = 500;
+          const estimatedTokens = count * avgTokensPerItem;
+          const cheapModel = options?.preferCheap ?? true;
+          const pricePerMToken = cheapModel ? 0.6 : 10; // mini vs 4o output
+
+          this.tracker.estimatedCost = (estimatedTokens / 1_000_000) * pricePerMToken;
+
+          if (this.tracker.estimatedCost > this.tracker.budget) {
+            console.warn(`Estimated cost $${this.tracker.estimatedCost.toFixed(2)} exceeds budget $${this.tracker.budget}`);
+            // Reduce count to fit budget
+            count = Math.floor((this.tracker.budget / this.tracker.estimatedCost) * count);
+          }
+
+          for (let i = 0; i < count; i++) {
+            // Check budget before each generation
+            if (this.tracker.actualCost >= this.tracker.budget) {
+              console.warn("Budget exhausted, stopping generation");
+              interrupted = true;
+              break;
+            }
+
+            const model = cheapModel ? "gpt-4o-mini" : "gpt-4o";
+            const result = await generator(model);
+
+            results.push(result.data);
+            this.tracker.tokensUsed += result.tokens;
+            this.tracker.actualCost = (this.tracker.tokensUsed / 1_000_000) * pricePerMToken;
+          }
+
+          return {
+            data: results,
+            cost: this.tracker.actualCost,
+            interrupted,
+          };
+        }
+      }
+
+testing_checklist:
+  quality:
+    - "Schema validation passes for all generated items"
+    - "Distribution matches real data within acceptable threshold"
+    - "Uniqueness ratio above 95%"
+    - "No exact matches with real data"
+    - "Domain constraints validated"
+
+  diversity:
+    - "All categories/classes represented"
+    - "Edge cases included"
+    - "Entropy metrics acceptable"
+    - "No mode collapse detected"
+
+  privacy:
+    - "No PII in generated data"
+    - "Membership inference attack accuracy below 55%"
+    - "Minimum distance from real records maintained"
+    - "Differential privacy applied if required"
+
+  utility:
+    - "Model trained on synthetic validates well on real"
+    - "Performance gap acceptable (< 10%)"
+    - "No synthetic-specific artifacts learned"
+
+  cost:
+    - "Cost estimated before generation"
+    - "Budget limits enforced"
+    - "Tiered model strategy used"
+    - "Generation can be resumed if interrupted"
