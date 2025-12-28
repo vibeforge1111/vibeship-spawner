@@ -1,0 +1,321 @@
+# Validations - Browser Automation
+# Automated checks for browser automation quality
+
+version: 1.0.0
+skill_id: browser-automation
+
+validations:
+  # Wait Pattern Checks
+  - id: arbitrary-timeout
+    name: Using waitForTimeout
+    severity: error
+    description: waitForTimeout causes flaky tests and slow execution
+    pattern: |
+      waitForTimeout\(|page\.waitForTimeout
+    message: "Using waitForTimeout - remove it. Playwright auto-waits for elements. Use waitForResponse, waitForURL, or assertions instead."
+    autofix: false
+
+  - id: set-timeout-in-test
+    name: Using setTimeout in Test Code
+    severity: warning
+    description: setTimeout is unreliable for timing in tests
+    pattern: |
+      setTimeout\([^,]+,\s*\d+\)
+    message: "Using setTimeout instead of Playwright waits. Replace with await expect(...).toBeVisible() or page.waitFor*."
+    autofix: false
+
+  - id: sleep-function
+    name: Custom Sleep Function
+    severity: warning
+    description: Sleep functions indicate improper waiting strategy
+    pattern: |
+      const\s+sleep|function\s+sleep|async.*sleep.*=>.*Promise
+    message: "Custom sleep function detected. Use Playwright's built-in waiting mechanisms instead."
+    autofix: false
+
+  # Selector Checks
+  - id: css-class-selector
+    name: CSS Class Selector Used
+    severity: warning
+    description: CSS class selectors are fragile
+    pattern: |
+      locator\(['"]\.[\w-]+['"]\)|page\.\$\(['"]\.[\w-]+['"]\)
+    message: "Using CSS class selector. Prefer getByRole, getByText, getByLabel, or getByTestId for more stable selectors."
+    autofix: false
+
+  - id: nth-child-selector
+    name: nth-child CSS Selector
+    severity: warning
+    description: Position-based selectors are very fragile
+    pattern: |
+      nth-child\(|:nth-of-type\(|:first-child|:last-child
+    message: "Using position-based selector. These break when DOM order changes. Use user-facing locators instead."
+    autofix: false
+
+  - id: xpath-selector
+    name: XPath Selector Used
+    severity: info
+    description: XPath should be last resort
+    pattern: |
+      locator\(['"]/|page\.locator\(['"]/|xpath=
+    message: "Using XPath selector. Consider getByRole, getByText first. XPath should be last resort for complex DOM traversal."
+    autofix: false
+
+  - id: auto-generated-selector
+    name: Auto-Generated Selector
+    severity: warning
+    description: Framework-generated selectors are extremely fragile
+    pattern: |
+      data-v-[\da-f]+|data-reactid|__next|_ngcontent|ng-reflect
+    message: "Using auto-generated selector. These change on every build. Use data-testid instead."
+    autofix: false
+
+  # Anti-Detection
+  - id: no-stealth-plugin
+    name: Puppeteer Without Stealth Plugin
+    severity: info
+    description: Scraping without stealth is easily detected
+    pattern: |
+      require\(['"]puppeteer['"]\)|from\s+['"]puppeteer['"]
+    anti_pattern: |
+      puppeteer-extra|StealthPlugin|stealth
+    message: "Using Puppeteer without stealth plugin. Consider puppeteer-extra-plugin-stealth for anti-detection."
+    autofix: false
+
+  - id: webdriver-exposed
+    name: navigator.webdriver Not Hidden
+    severity: info
+    description: navigator.webdriver exposes automation
+    pattern: |
+      chromium\.launch|puppeteer\.launch
+    anti_pattern: |
+      AutomationControlled|webdriver.*undefined|stealth
+    message: "Launching browser without hiding automation flags. For scraping, add stealth measures."
+    autofix: false
+
+  # Error Handling
+  - id: no-try-catch-in-loop
+    name: Scraping Loop Without Error Handling
+    severity: warning
+    description: One failure shouldn't crash entire scrape
+    pattern: |
+      for.*await.*goto\(|for.*await.*page\.|forEach.*await.*goto
+    anti_pattern: |
+      try|catch
+    message: "Scraping loop without try/catch. One page failure will crash the entire scrape. Add error handling."
+    autofix: false
+
+  - id: no-screenshot-on-error
+    name: Error Handler Without Screenshot
+    severity: info
+    description: Screenshots are essential for debugging failures
+    pattern: |
+      catch.*\{[^}]*throw|catch.*\{[^}]*console\.error
+    anti_pattern: |
+      screenshot
+    message: "Error handler without screenshot capture. Add page.screenshot() for debugging."
+    autofix: false
+
+  # Test Isolation
+  - id: shared-page-variable
+    name: Shared Page Variable Across Tests
+    severity: warning
+    description: Shared page causes test pollution
+    pattern: |
+      let\s+page\s*:\s*Page|let\s+page\s*=|var\s+page\s*=
+    message: "Global page variable detected. Each test should get fresh page from context for isolation."
+    autofix: false
+
+  - id: beforeall-login
+    name: Login in beforeAll Hook
+    severity: warning
+    description: Shared authentication state can cause issues
+    pattern: |
+      beforeAll.*login|beforeAll.*signIn|beforeAll.*authenticate
+    message: "Login in beforeAll shares auth state. Use storageState for auth instead."
+    autofix: false
+
+  # Resource Management
+  - id: browser-not-closed
+    name: Browser Not Closed
+    severity: warning
+    description: Unclosed browsers leak resources
+    pattern: |
+      await.*browser\.launch\(|await.*chromium\.launch\(
+    anti_pattern: |
+      browser\.close\(\)|finally.*close
+    message: "Browser launched but may not be closed. Add browser.close() in finally block."
+    autofix: false
+
+  - id: context-not-closed
+    name: Context Not Closed in Loop
+    severity: warning
+    description: Unclosed contexts leak memory
+    pattern: |
+      for.*newContext\(|map.*newContext\(
+    anti_pattern: |
+      context\.close\(\)|finally.*close
+    message: "Context created in loop but may not be closed. Add context.close() in finally block."
+    autofix: false
+
+  # Rate Limiting
+  - id: no-delay-between-requests
+    name: No Delay Between Requests
+    severity: info
+    description: Rapid requests may cause rate limiting
+    pattern: |
+      for.*await.*goto\([^)]*\)|Promise\.all.*goto
+    anti_pattern: |
+      setTimeout|delay|sleep|randomDelay|wait
+    message: "Multiple requests without delay. Consider adding delays to avoid rate limiting."
+    autofix: false
+
+code_smells:
+  - id: magic-timeout-numbers
+    name: Magic Number Timeouts
+    description: Hard-coded timeout values are unclear
+    pattern: |
+      timeout:\s*\d{4,}|waitForTimeout\(\d{4,}\)
+    suggestion: "Extract timeout to named constant with clear intent (e.g., PAGE_LOAD_TIMEOUT)"
+
+  - id: duplicate-selectors
+    name: Same Selector Repeated
+    description: Repeated selectors should be extracted
+    pattern: |
+      getByRole\([^)]+\).*\n.*getByRole\([^)]+\)
+    suggestion: "Extract repeated locator to variable for reuse and clarity"
+
+  - id: long-selector-chain
+    name: Long Selector Chain
+    description: Complex chains are hard to debug
+    pattern: |
+      locator\([^)]+\)\.locator\([^)]+\)\.locator\([^)]+\)\.locator
+    suggestion: "Break long chains into intermediate variables with meaningful names"
+
+best_practices:
+  - id: use-getbyrole-first
+    name: Prefer getByRole Locator
+    check: |
+      Always try getByRole first - it matches how users perceive the page.
+    recommendation: |
+      # Instead of:
+      await page.locator('.submit-button').click();
+      await page.locator('#email-input').fill('...');
+
+      # Use:
+      await page.getByRole('button', { name: 'Submit' }).click();
+      await page.getByRole('textbox', { name: 'Email' }).fill('...');
+
+  - id: test-id-fallback
+    name: Use data-testid as Fallback
+    check: |
+      When user-facing locators aren't possible, use data-testid.
+    recommendation: |
+      # In component:
+      <div data-testid="user-profile-card">...</div>
+
+      # In test:
+      await page.getByTestId('user-profile-card').click();
+
+      # This creates explicit contract between code and tests
+
+  - id: trace-for-debugging
+    name: Enable Traces for CI Failures
+    check: |
+      Traces should be captured on failure for debugging.
+    recommendation: |
+      # playwright.config.ts
+      export default defineConfig({
+        use: {
+          trace: 'retain-on-failure',
+          screenshot: 'only-on-failure',
+          video: 'retain-on-failure',
+        },
+      });
+
+      # View: npx playwright show-trace trace.zip
+
+  - id: assertions-over-waits
+    name: Use Assertions Instead of Waits
+    check: |
+      Prefer expect assertions which auto-wait over explicit waits.
+    recommendation: |
+      # Instead of:
+      await page.waitForSelector('.success-message');
+      const text = await page.locator('.success-message').textContent();
+      expect(text).toContain('Success');
+
+      # Use:
+      await expect(page.getByText('Success')).toBeVisible();
+
+  - id: parallel-contexts
+    name: Use Browser Contexts for Parallelism
+    check: |
+      Browser contexts are cheaper than new browsers.
+    recommendation: |
+      # Instead of launching multiple browsers:
+      const browser = await chromium.launch();
+
+      const results = await Promise.all(
+        urls.map(async (url) => {
+          const context = await browser.newContext();  # Lightweight
+          const page = await context.newPage();
+          // ... process ...
+          await context.close();
+        })
+      );
+
+      await browser.close();
+
+testing_recommendations:
+  - id: test-with-slow-network
+    name: Test with Throttled Network
+    check: |
+      Tests should work on slow connections.
+    approach: |
+      const context = await browser.newContext();
+      const page = await context.newPage();
+
+      // Simulate slow 3G
+      await page.route('**/*', async (route) => {
+        await new Promise(r => setTimeout(r, 100));
+        await route.continue();
+      });
+
+  - id: test-retries-in-ci
+    name: Configure Retries for CI
+    check: |
+      CI environments can be flaky - use retries.
+    approach: |
+      # playwright.config.ts
+      export default defineConfig({
+        retries: process.env.CI ? 2 : 0,  # Retry in CI only
+        workers: process.env.CI ? 4 : undefined,
+      });
+
+  - id: test-across-browsers
+    name: Run Tests in Multiple Browsers
+    check: |
+      Don't assume Chromium behavior matches Firefox/WebKit.
+    approach: |
+      # playwright.config.ts
+      export default defineConfig({
+        projects: [
+          { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+          { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+          { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+        ],
+      });
+
+  - id: test-mobile-viewports
+    name: Test Mobile Viewports
+    check: |
+      Mobile layouts may have different elements/behavior.
+    approach: |
+      # playwright.config.ts
+      export default defineConfig({
+        projects: [
+          { name: 'Mobile Chrome', use: { ...devices['Pixel 5'] } },
+          { name: 'Mobile Safari', use: { ...devices['iPhone 12'] } },
+        ],
+      });

@@ -1,0 +1,441 @@
+# Sharp Edges - Browser Automation
+# The gotchas that cause browser automation failures
+
+version: 1.0.0
+skill_id: browser-automation
+
+sharp_edges:
+  - id: manual-timeout-flakiness
+    severity: critical
+    title: Using waitForTimeout Instead of Proper Waits
+    situation: Waiting for elements or page state
+    symptom: |
+      Tests pass locally, fail in CI. Pass 9 times, fail on the 10th.
+      "Element not found" errors that seem random. Tests take 30+ seconds
+      when they should take 3.
+    why: |
+      waitForTimeout is a fixed delay. If the page loads in 500ms, you wait
+      2000ms anyway. If the page takes 2100ms (CI is slower), you fail.
+      There's no correct value - it's always either too short or too long.
+    solution: |
+      # REMOVE all waitForTimeout calls
+
+      # WRONG:
+      await page.goto('/dashboard');
+      await page.waitForTimeout(2000);  # Arbitrary!
+      await page.click('.submit');
+
+      # CORRECT - Auto-wait handles it:
+      await page.goto('/dashboard');
+      await page.getByRole('button', { name: 'Submit' }).click();
+
+      # If you need to wait for specific condition:
+      await expect(page.getByText('Dashboard')).toBeVisible();
+      await page.waitForURL('**/dashboard');
+      await page.waitForResponse(resp => resp.url().includes('/api/data'));
+
+      # For animations, wait for element to be stable:
+      await page.getByRole('button').click();  # Auto-waits for stable
+
+      # NEVER use setTimeout or waitForTimeout in production code
+    detection_pattern:
+      - "waitForTimeout"
+      - "setTimeout"
+      - "sleep"
+
+  - id: fragile-css-selectors
+    severity: high
+    title: CSS Selectors Tied to Styling Classes
+    situation: Selecting elements for interaction
+    symptom: |
+      Tests break after CSS refactoring. Selectors like .btn-primary stop
+      working. Frontend redesign breaks all tests without changing behavior.
+    why: |
+      CSS class names are implementation details for styling, not semantic
+      meaning. When designers change from .btn-primary to .button--primary,
+      your tests break even though behavior is identical.
+    solution: |
+      # Use user-facing locators instead:
+
+      # WRONG - Tied to CSS:
+      await page.locator('.btn-primary.submit-form').click();
+      await page.locator('#sidebar > div.menu > ul > li:nth-child(3)').click();
+
+      # CORRECT - User-facing:
+      await page.getByRole('button', { name: 'Submit' }).click();
+      await page.getByRole('menuitem', { name: 'Settings' }).click();
+
+      # If you must use CSS, use data-testid:
+      <button data-testid="submit-order">Submit</button>
+
+      await page.getByTestId('submit-order').click();
+
+      # Locator priority:
+      # 1. getByRole - matches accessibility
+      # 2. getByText - matches visible content
+      # 3. getByLabel - matches form labels
+      # 4. getByTestId - explicit test contract
+      # 5. CSS/XPath - last resort only
+    detection_pattern:
+      - "locator.*\\."
+      - "querySelector"
+      - "\\$\\("
+
+  - id: navigator-webdriver-detection
+    severity: high
+    title: navigator.webdriver Exposes Automation
+    situation: Scraping sites with bot detection
+    symptom: |
+      Immediate 403 errors. CAPTCHA challenges. Empty pages. "Access Denied"
+      messages. Works for 1 request, then gets blocked.
+    why: |
+      By default, headless browsers set navigator.webdriver = true. This is
+      the first thing bot detection checks. It's a bright red flag that
+      says "I'm automated."
+    solution: |
+      # Use stealth plugins:
+
+      ## Puppeteer Stealth (best option):
+      import puppeteer from 'puppeteer-extra';
+      import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+
+      puppeteer.use(StealthPlugin());
+
+      const browser = await puppeteer.launch({
+        headless: 'new',
+        args: ['--disable-blink-features=AutomationControlled'],
+      });
+
+      ## Playwright Stealth:
+      import { chromium } from 'playwright-extra';
+      import stealth from 'puppeteer-extra-plugin-stealth';
+
+      chromium.use(stealth());
+
+      ## Manual (partial):
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', {
+          get: () => undefined,
+        });
+      });
+
+      # Note: This is cat-and-mouse. Detection evolves.
+      # For serious scraping, consider managed solutions like Browserbase.
+    detection_pattern:
+      - "puppeteer.launch"
+      - "chromium.launch"
+      - "headless"
+
+  - id: test-pollution
+    severity: high
+    title: Tests Share State and Affect Each Other
+    situation: Running multiple tests in sequence
+    symptom: |
+      Tests pass individually but fail when run together. Order matters -
+      test B fails if test A runs first. Random failures that "fix themselves"
+      on rerun.
+    why: |
+      Shared browser context means shared cookies, localStorage, and session
+      state. Test A logs in, test B expects logged-out state. Test A adds
+      item to cart, test B's cart count is wrong.
+    solution: |
+      # Each test must be fully isolated:
+
+      ## Playwright Test (automatic isolation):
+      test('first test', async ({ page }) => {
+        // Fresh context, fresh page
+      });
+
+      test('second test', async ({ page }) => {
+        // Completely isolated from first test
+      });
+
+      ## Manual isolation:
+      const context = await browser.newContext();  // Fresh context
+      const page = await context.newPage();
+      // ... test code ...
+      await context.close();  // Clean up
+
+      ## Shared authentication (the right way):
+      // 1. Save auth state to file
+      await context.storageState({ path: './auth.json' });
+
+      // 2. Reuse in other tests
+      const context = await browser.newContext({
+        storageState: './auth.json'
+      });
+
+      # Never modify global state in tests
+      # Never rely on previous test's actions
+    detection_pattern:
+      - "browser.newPage"
+      - "beforeAll.*login"
+      - "global"
+
+  - id: missing-traces-in-ci
+    severity: medium
+    title: No Trace Capture for CI Failures
+    situation: Debugging test failures in CI
+    symptom: |
+      "Test failed in CI" with no useful information. Can't reproduce
+      locally. Screenshot shows page but not what went wrong. Guessing
+      at root cause.
+    why: |
+      CI runs headless on different hardware. Timing is different. Network
+      is different. Without traces, you can't see what actually happened -
+      the sequence of actions, network requests, console logs.
+    solution: |
+      # Enable traces for failures:
+
+      ## playwright.config.ts:
+      export default defineConfig({
+        use: {
+          trace: 'retain-on-failure',    # Keep trace on failure
+          screenshot: 'only-on-failure', # Screenshot on failure
+          video: 'retain-on-failure',    # Video on failure
+        },
+        outputDir: './test-results',
+      });
+
+      ## View trace locally:
+      npx playwright show-trace test-results/path/to/trace.zip
+
+      ## In CI, upload test-results as artifact:
+      # GitHub Actions:
+      - uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+          name: playwright-traces
+          path: test-results/
+
+      # Trace shows:
+      # - Timeline of actions
+      # - Screenshots at each step
+      # - Network requests and responses
+      # - Console logs
+      # - DOM snapshots
+    detection_pattern:
+      - "playwright.config"
+      - "defineConfig"
+
+  - id: headless-vs-headed-differences
+    severity: medium
+    title: Tests Pass Headed but Fail Headless
+    situation: Running tests in headless mode for CI
+    symptom: |
+      Works perfectly when you watch it. Fails mysteriously in CI.
+      "Element not visible" in headless but visible in headed mode.
+    why: |
+      Headless browsers have no display, which affects some CSS (visibility
+      calculations), viewport sizing, and font rendering. Some animations
+      behave differently. Popup windows may not work.
+    solution: |
+      # Set consistent viewport:
+      const browser = await chromium.launch({
+        headless: true,
+      });
+
+      const context = await browser.newContext({
+        viewport: { width: 1280, height: 720 },
+      });
+
+      # Or in config:
+      export default defineConfig({
+        use: {
+          viewport: { width: 1280, height: 720 },
+        },
+      });
+
+      # Debug headless failures:
+      # 1. Run with headed mode locally
+      npx playwright test --headed
+
+      # 2. Slow down to watch
+      npx playwright test --headed --slowmo 100
+
+      # 3. Use trace viewer for CI failures
+      npx playwright show-trace trace.zip
+
+      # 4. For stubborn issues, screenshot at failure point:
+      await page.screenshot({ path: 'debug.png', fullPage: true });
+    detection_pattern:
+      - "headless.*true"
+      - "launch"
+
+  - id: rate-limiting-blocks
+    severity: high
+    title: Getting Blocked by Rate Limiting
+    situation: Scraping multiple pages quickly
+    symptom: |
+      Works for first 50 pages, then 429 errors. Suddenly all requests fail.
+      IP gets blocked. CAPTCHA starts appearing after successful requests.
+    why: |
+      Sites monitor request patterns. 100 requests per second from one IP
+      is obviously automated. Rate limits protect servers and catch scrapers.
+    solution: |
+      # Add delays between requests:
+
+      const randomDelay = () =>
+        new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
+
+      for (const url of urls) {
+        await randomDelay();  // 1-3 second delay
+        await page.goto(url);
+        // ... scrape ...
+      }
+
+      # Use rotating proxies:
+      const proxies = ['http://proxy1:8080', 'http://proxy2:8080'];
+      let proxyIndex = 0;
+
+      const getNextProxy = () => proxies[proxyIndex++ % proxies.length];
+
+      const context = await browser.newContext({
+        proxy: { server: getNextProxy() },
+      });
+
+      # Limit concurrent requests:
+      import pLimit from 'p-limit';
+      const limit = pLimit(3);  // Max 3 concurrent
+
+      await Promise.all(
+        urls.map(url => limit(() => scrapePage(url)))
+      );
+
+      # Rotate user agents:
+      const userAgents = [
+        'Mozilla/5.0 (Windows...',
+        'Mozilla/5.0 (Macintosh...',
+      ];
+
+      await page.setExtraHTTPHeaders({
+        'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)]
+      });
+    detection_pattern:
+      - "for.*goto"
+      - "Promise.all.*goto"
+      - "scrape"
+
+  - id: popup-handling-failure
+    severity: medium
+    title: New Windows/Popups Not Handled
+    situation: Clicking links that open new windows
+    symptom: |
+      Click button, nothing happens. Test hangs. "Window not found" errors.
+      Actions succeed but verification fails because you're on wrong page.
+    why: |
+      target="_blank" links open new windows. Your page reference still
+      points to the original page. The new window exists but you're not
+      listening for it.
+    solution: |
+      # Wait for popup BEFORE triggering it:
+
+      ## New window/tab:
+      const pagePromise = context.waitForEvent('page');
+      await page.getByRole('link', { name: 'Open in new tab' }).click();
+      const newPage = await pagePromise;
+      await newPage.waitForLoadState();
+
+      // Now interact with new page
+      await expect(newPage.getByRole('heading')).toBeVisible();
+
+      // Close when done
+      await newPage.close();
+
+      ## Popup windows:
+      const popupPromise = page.waitForEvent('popup');
+      await page.getByRole('button', { name: 'Open popup' }).click();
+      const popup = await popupPromise;
+      await popup.waitForLoadState();
+
+      ## Multiple windows:
+      const pages = context.pages();  // Get all open pages
+    detection_pattern:
+      - "target=.*_blank"
+      - "window.open"
+      - "popup"
+
+  - id: iframe-not-accessible
+    severity: medium
+    title: Can't Interact with Elements in iframes
+    situation: Page contains embedded iframes
+    symptom: |
+      Element clearly visible but "not found". Selector works in DevTools
+      but not in Playwright. Parent page selectors work, iframe content
+      doesn't.
+    why: |
+      iframes are separate documents. page.locator only searches the main
+      frame. You need to explicitly get the iframe's frame to interact
+      with its contents.
+    solution: |
+      # Get frame by name or selector:
+
+      ## By frame name:
+      const frame = page.frame('payment-iframe');
+      await frame.getByRole('textbox', { name: 'Card number' }).fill('4242...');
+
+      ## By selector:
+      const frame = page.frameLocator('iframe#payment');
+      await frame.getByRole('textbox', { name: 'Card number' }).fill('4242...');
+
+      ## Nested iframes:
+      const outer = page.frameLocator('iframe#outer');
+      const inner = outer.frameLocator('iframe#inner');
+      await inner.getByRole('button').click();
+
+      ## Wait for iframe to load:
+      await page.waitForSelector('iframe#payment');
+      const frame = page.frameLocator('iframe#payment');
+      await frame.getByText('Secure Payment').waitFor();
+    detection_pattern:
+      - "iframe"
+      - "frame"
+      - "embed"
+
+common_mistakes:
+  - mistake: "Adding waitForTimeout after every action"
+    frequency: very_common
+    impact: "Slow tests, still flaky, false confidence"
+    fix: "Remove all waitForTimeout. Trust Playwright's auto-wait."
+
+  - mistake: "Using CSS selectors from browser DevTools"
+    frequency: very_common
+    impact: "Selectors break on any UI change"
+    fix: "Use getByRole, getByText, getByLabel, getByTestId"
+
+  - mistake: "Running all tests in single browser context"
+    frequency: common
+    impact: "Test pollution, random failures, debugging nightmare"
+    fix: "Each test gets fresh context. Use storageState for auth."
+
+  - mistake: "No error handling in scraping loops"
+    frequency: common
+    impact: "One failure crashes entire scrape"
+    fix: "Try/catch each page, capture screenshot, continue processing"
+
+  - mistake: "Ignoring robots.txt and rate limits"
+    frequency: common
+    impact: "IP blocks, legal issues, causing site problems"
+    fix: "Add delays, rotate proxies, respect robots.txt"
+
+framework_gotchas:
+  playwright:
+    - "waitForTimeout exists but should almost never be used"
+    - "Default timeout is 30 seconds - set explicit timeouts"
+    - "page.click() waits for actionability automatically"
+    - "Traces are gold for debugging - enable them"
+    - "Browser binaries are separate downloads - npx playwright install"
+
+  puppeteer:
+    - "No auto-wait - must manually waitForSelector"
+    - "stealth plugin is separate package (puppeteer-extra)"
+    - "Headless 'new' mode is different from old headless"
+    - "Page.evaluate runs in browser context, not Node"
+    - "Memory leaks if you don't close contexts"
+
+  common_to_both:
+    - "Navigation waits for load, not DOMContentLoaded by default"
+    - "page.content() returns HTML after JS execution"
+    - "Cookies don't persist across contexts by default"
+    - "Downloads need explicit handling"
+    - "PDF generation only works in Chromium"
