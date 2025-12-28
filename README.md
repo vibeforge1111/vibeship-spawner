@@ -14,7 +14,7 @@ Spawner adds capabilities Claude doesn't have by default:
 2. **Guardrails** - Actually catches code issues (not just suggests)
 3. **Sharp Edges** - Knows gotchas Claude doesn't know
 4. **Escape Hatches** - Detects when you're stuck and offers alternatives
-5. **Skill System** - 105 specialist skills loaded locally (zero cost)
+5. **Skill System** - 136 specialist skills loaded locally (zero cost)
 6. **Skill Level Detection** - Adapts guidance to your experience level
 
 ---
@@ -106,7 +106,7 @@ Spawner automatically:
 
 ## Skill System
 
-### 105 Skills (Zero Cost)
+### 136 Skills (Zero Cost)
 
 Skills are loaded locally from `~/.spawner/skills/`. No API calls, works offline.
 

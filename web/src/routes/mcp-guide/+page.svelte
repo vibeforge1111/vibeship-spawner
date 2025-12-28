@@ -683,8 +683,8 @@ New score: 91/100 (+4)`,
 
   <!-- CTA -->
   <section class="cta-section">
-    <h2>Explore 105 Skills</h2>
-    <p class="cta-desc">Spawner's real power comes from 105 specialist skills loaded locally. Browse the library or create your own.</p>
+    <h2>Explore 136 Skills</h2>
+    <p class="cta-desc">Spawner's real power comes from 136 specialist skills loaded locally. Browse the library or create your own.</p>
     <div class="cta-buttons">
       <a href="/skills" class="btn btn-primary">Browse Skills</a>
       <a href="/skill-creation" class="btn btn-secondary">Create a Skill</a>

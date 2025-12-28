@@ -52,7 +52,7 @@
 ┌────────────────────────────────────────────────────────────────────┐
 │                     LOCAL FILESYSTEM                               │
 │                                                                    │
-│   ~/.spawner/skills/              ← 105 skills (YAML)              │
+│   ~/.spawner/skills/              ← 136 skills (YAML)              │
 │   ├── development/                   Cloned from GitHub            │
 │   ├── data/                          Zero API cost                 │
 │   ├── ai/                            Works offline                 │

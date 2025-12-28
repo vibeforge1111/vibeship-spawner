@@ -113,7 +113,7 @@ vibeship-spawner/
 ### Skill System
 
 **Primary: Local Skills** - Loaded from `~/.spawner/skills/` (see Local Skills section above)
-- 105+ skills across 11 categories
+- 136 skills across 11 categories
 - Free, fast, works offline
 - Clone once, read locally forever
 

@@ -50,7 +50,7 @@ export const orchestrateInputSchema = z.object({
  */
 export const orchestrateToolDefinition = {
   name: 'spawner_orchestrate',
-  description: 'CALL THIS FIRST in every new session. Sets up local skills (105 skills, zero cost), detects project context, and routes to: resume (known project), analyze (existing codebase), or brainstorm (new project). Returns skills_setup with clone instructions if local skills not installed.',
+  description: 'CALL THIS FIRST in every new session. Sets up local skills (136 skills, zero cost), detects project context, and routes to: resume (known project), analyze (existing codebase), or brainstorm (new project). Returns skills_setup with clone instructions if local skills not installed.',
   inputSchema: {
     type: 'object' as const,
     properties: {
@@ -293,7 +293,7 @@ function buildInstruction(result: Awaited<ReturnType<typeof orchestrate>>): stri
   lines.push('3. Once cloned, load skills by reading YAML files directly:');
   lines.push('   `~/.spawner/skills/{category}/{skill}/skill.yaml`');
   lines.push('');
-  lines.push('**105 skills available** across: development, data, ai, design, frameworks, marketing, startup');
+  lines.push('**136 skills available** across: development, data, ai, design, frameworks, marketing, startup');
   lines.push('');
   lines.push('---');
 
