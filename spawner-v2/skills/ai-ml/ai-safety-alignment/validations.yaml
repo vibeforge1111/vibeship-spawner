@@ -1,0 +1,406 @@
+# Validations - AI Safety & Alignment
+# Quality checks for AI safety implementations
+
+version: 1.0.0
+skill_id: ai-safety-alignment
+
+validations:
+  # Input Validation
+  - id: no-input-validation
+    name: LLM Call Without Input Validation
+    severity: error
+    description: User input must be validated before passing to LLM
+    pattern: |
+      chat\.completions\.create\((?!.*validate|sanitize|check)
+    message: "LLM call without input validation. Add safety checks before sending to model."
+    autofix: false
+
+  - id: raw-user-input
+    name: Raw User Input to System Prompt
+    severity: error
+    description: User input interpolated directly into system prompt enables injection
+    pattern: |
+      system.*`\$\{.*user|input|query
+    message: "User input in system prompt enables injection. Use separate user message."
+    autofix: false
+
+  - id: no-moderation
+    name: No Moderation API Call
+    severity: warning
+    description: Use moderation API for content safety
+    pattern: |
+      chat\.completions\.create(?!.*moderation|moderate)
+    message: "Consider adding OpenAI Moderation API for content safety."
+    autofix: false
+
+  # Output Validation
+  - id: no-output-filtering
+    name: No Output Filtering
+    severity: warning
+    description: LLM output should be checked before returning to user
+    pattern: |
+      return.*response\.choices\[0\](?!.*filter|sanitize|validate)
+    message: "LLM output returned without filtering. Add output safety checks."
+    autofix: false
+
+  - id: unescaped-output
+    name: Unescaped LLM Output in HTML
+    severity: error
+    description: LLM output may contain XSS if rendered as HTML
+    pattern: |
+      dangerouslySetInnerHTML.*response|innerHTML.*completion
+    message: "LLM output rendered as HTML without escaping. Sanitize with DOMPurify."
+    autofix: false
+
+  # Prompt Injection Defense
+  - id: no-injection-detection
+    name: No Prompt Injection Detection
+    severity: warning
+    description: Implement prompt injection detection for user-facing LLM apps
+    pattern: |
+      messages\.push\(\{.*role.*user.*content.*\$\{(?!.*detectInjection|validatePrompt)
+    message: "User messages need prompt injection detection before LLM call."
+    autofix: false
+
+  - id: unsanitized-context
+    name: Unsanitized RAG Context
+    severity: warning
+    description: Retrieved context may contain injection attacks
+    pattern: |
+      retrieve.*chunks.*messages\.push(?!.*sanitize|validate)
+    message: "Retrieved context should be sanitized before adding to messages."
+    autofix: false
+
+  # PII Protection
+  - id: no-pii-detection
+    name: No PII Detection
+    severity: warning
+    description: User input may contain PII that should be redacted
+    pattern: |
+      trace.*input|log.*prompt(?!.*sanitize|redact|pii)
+    message: "PII may be logged or traced. Add PII detection and redaction."
+    autofix: false
+
+  - id: pii-in-llm-call
+    name: PII Sent to LLM Without Redaction
+    severity: warning
+    description: Consider redacting PII before sending to third-party LLM
+    pattern: |
+      create\(.*messages.*user(?!.*redact|anonymize)
+    message: "Consider PII redaction before sending to external LLM providers."
+    autofix: false
+
+  # Rate Limiting
+  - id: no-safety-rate-limit
+    name: Safety Check Without Rate Limiting
+    severity: warning
+    description: Rate limit safety checks to prevent abuse
+    pattern: |
+      validateInput|detectInjection(?!.*rateLimit|throttle)
+    message: "Safety checks should be rate-limited to prevent probe attacks."
+    autofix: false
+
+  - id: no-violation-tracking
+    name: No Violation Tracking
+    severity: info
+    description: Track safety violations per user for escalation
+    pattern: |
+      blocked.*true(?!.*violation|track|increment)
+    message: "Track violations per user for escalating blocks."
+    autofix: false
+
+  # Error Handling
+  - id: safety-error-exposes
+    name: Safety Error Exposes Details
+    severity: warning
+    description: Safety check errors should not expose detection logic
+    pattern: |
+      catch.*error.*reason|message.*injection.*detected
+    message: "Safety errors should be generic to not help attackers."
+    autofix: false
+
+  - id: safety-fail-open
+    name: Safety Check Fails Open
+    severity: error
+    description: Safety checks must fail closed (block on error)
+    pattern: |
+      catch.*return.*true|catch.*allowed.*true
+    message: "Safety check fails open. Should block on error (fail closed)."
+    autofix: false
+
+  # Guardrail Configuration
+  - id: hardcoded-blocklist
+    name: Hardcoded Blocklist
+    severity: info
+    description: Safety patterns should be configurable
+    pattern: |
+      const.*BLOCKED_WORDS.*=.*\[
+    message: "Safety blocklists should be configurable for updates."
+    autofix: false
+
+  - id: no-guardrail-logging
+    name: No Guardrail Action Logging
+    severity: warning
+    description: Log safety actions for audit and improvement
+    pattern: |
+      blocked.*true(?!.*log|audit|track)
+    message: "Log safety blocks for audit trail and model improvement."
+    autofix: false
+
+code_smells:
+  - id: sync-safety-check
+    name: Synchronous Safety Check
+    description: Safety checks should be async or cached
+    pattern: |
+      await.*moderation.*await.*completion(?!.*parallel|Promise\.all)
+    suggestion: "Run moderation in parallel with preflight checks."
+
+  - id: safety-per-message
+    name: Safety Check Per Message in Thread
+    description: Consider session-level safety scoring
+    pattern: |
+      for.*message.*await.*moderate
+    suggestion: "Consider session-level risk scoring instead of per-message checks."
+
+  - id: single-layer-safety
+    name: Single Layer Safety
+    description: Defense in depth requires multiple layers
+    pattern: |
+      moderation\.create(?!.*&&|additionalCheck|layer)
+    suggestion: "Add multiple safety layers (moderation + custom rules + rate limiting)."
+
+  - id: global-safety-threshold
+    name: Same Threshold for All Content
+    description: Different contexts need different thresholds
+    pattern: |
+      threshold.*=.*0\.\d+(?!.*context|domain|category)
+    suggestion: "Adjust safety thresholds by content domain and user context."
+
+best_practices:
+  - id: defense-in-depth
+    name: Defense in Depth
+    check: |
+      Multiple safety layers are implemented.
+    recommendation: |
+      interface SafetyPipeline {
+        layers: SafetyLayer[];
+        execute(input: string): Promise<SafetyResult>;
+      }
+
+      class MultiLayerSafety implements SafetyPipeline {
+        layers = [
+          new RateLimitLayer(),      // Layer 1: Prevent abuse
+          new PatternMatchLayer(),   // Layer 2: Catch obvious attacks
+          new ModerationAPILayer(),  // Layer 3: General content safety
+          new SemanticDetectLayer(), // Layer 4: LLM-based detection
+        ];
+
+        async execute(input: string): Promise<SafetyResult> {
+          for (const layer of this.layers) {
+            const result = await layer.check(input);
+            if (!result.pass) {
+              return {
+                safe: false,
+                blockedBy: layer.name,
+                reason: result.reason,
+              };
+            }
+          }
+          return { safe: true };
+        }
+      }
+
+  - id: fail-closed-pattern
+    name: Fail Closed Pattern
+    check: |
+      Safety checks block on error rather than allowing.
+    recommendation: |
+      async function safetyCheck(input: string): Promise<{
+        allowed: boolean;
+        reason?: string;
+      }> {
+        try {
+          const result = await runSafetyChecks(input);
+          return result;
+        } catch (error) {
+          // ALWAYS fail closed - block on error
+          console.error("Safety check failed:", error);
+
+          // Log for investigation
+          await logSafetyFailure({
+            input: hashInput(input),
+            error: error instanceof Error ? error.message : "Unknown",
+            timestamp: new Date(),
+          });
+
+          return {
+            allowed: false,
+            reason: "safety_check_failed",
+          };
+        }
+      }
+
+  - id: generic-error-messages
+    name: Generic Safety Error Messages
+    check: |
+      Safety errors don't reveal detection logic.
+    recommendation: |
+      // BAD: Reveals detection logic
+      function badSafetyResponse(result: SafetyResult): string {
+        if (result.injection) return "Prompt injection detected";
+        if (result.harmful) return "Harmful content detected";
+        if (result.pii) return "PII found in input";
+      }
+
+      // GOOD: Generic responses
+      function goodSafetyResponse(result: SafetyResult): string {
+        // Always use generic message
+        return "I'm not able to help with that request.";
+
+        // Log specific reason internally
+        internalLog({
+          reason: result.reason,
+          category: result.category,
+          confidence: result.confidence,
+        });
+      }
+
+  - id: contextual-moderation
+    name: Contextual Moderation
+    check: |
+      Safety thresholds adapt to content domain and user.
+    recommendation: |
+      interface ModerationContext {
+        domain: "general" | "medical" | "legal" | "educational";
+        userTrust: number;
+        sessionRisk: number;
+      }
+
+      function getThresholds(ctx: ModerationContext): Record<string, number> {
+        const base = {
+          violence: 0.7,
+          selfHarm: 0.6,
+          sexual: 0.7,
+          hate: 0.6,
+        };
+
+        // Medical domain: Higher threshold for medical discussions
+        if (ctx.domain === "medical") {
+          base.selfHarm = 0.9; // Allow clinical discussions
+          base.violence = 0.85; // Allow surgical content
+        }
+
+        // Educational domain: Allow historical discussions
+        if (ctx.domain === "educational") {
+          base.hate = 0.85; // Allow discussing historical events
+        }
+
+        // Lower thresholds for high-risk sessions
+        if (ctx.sessionRisk > 0.7) {
+          Object.keys(base).forEach(k => {
+            base[k as keyof typeof base] *= 0.8;
+          });
+        }
+
+        // Higher thresholds for trusted users
+        if (ctx.userTrust > 0.8) {
+          Object.keys(base).forEach(k => {
+            base[k as keyof typeof base] = Math.min(0.95, base[k as keyof typeof base] * 1.2);
+          });
+        }
+
+        return base;
+      }
+
+  - id: audit-trail
+    name: Safety Audit Trail
+    check: |
+      All safety decisions are logged for review.
+    recommendation: |
+      interface SafetyAuditLog {
+        timestamp: Date;
+        userId: string;
+        sessionId: string;
+        action: "allow" | "block" | "review";
+        inputHash: string; // Never log raw input
+        layers: Array<{
+          name: string;
+          result: boolean;
+          confidence?: number;
+          latencyMs: number;
+        }>;
+        outputAction?: "filtered" | "sanitized" | "blocked";
+      }
+
+      async function logSafetyDecision(log: SafetyAuditLog): Promise<void> {
+        // Store in append-only log
+        await db.safetyAudit.create({
+          data: {
+            ...log,
+            // Never store raw input, only hash
+            inputHash: crypto.createHash("sha256").update(input).digest("hex"),
+          },
+        });
+
+        // Alert on suspicious patterns
+        if (log.action === "block") {
+          await checkAlertConditions(log);
+        }
+      }
+
+      async function checkAlertConditions(log: SafetyAuditLog): Promise<void> {
+        // Alert on repeated blocks from same user
+        const recentBlocks = await db.safetyAudit.count({
+          where: {
+            userId: log.userId,
+            action: "block",
+            timestamp: { gte: new Date(Date.now() - 3600000) },
+          },
+        });
+
+        if (recentBlocks >= 5) {
+          await alertSecurityTeam({
+            type: "repeated_blocks",
+            userId: log.userId,
+            count: recentBlocks,
+          });
+        }
+      }
+
+testing_checklist:
+  input_validation:
+    - "Prompt injection patterns are detected"
+    - "Unicode normalization applied before checks"
+    - "Base64/encoded attacks detected"
+    - "Multi-turn injection attempts caught"
+    - "Rate limiting prevents probe attacks"
+
+  output_filtering:
+    - "Harmful output blocked before user sees it"
+    - "XSS content sanitized if rendering HTML"
+    - "PII redacted from responses"
+    - "Hallucinated harmful content caught"
+
+  moderation:
+    - "OpenAI Moderation API integrated"
+    - "False positives handled with review flow"
+    - "Domain-specific thresholds configured"
+    - "Multi-language content handled"
+
+  privacy:
+    - "PII detected with ML, not just regex"
+    - "Redaction preserves context"
+    - "Logs don't contain raw user input"
+    - "Audit trail hashes sensitive data"
+
+  error_handling:
+    - "Safety checks fail closed"
+    - "Error messages are generic"
+    - "Failures logged for investigation"
+    - "Fallback safety exists"
+
+  monitoring:
+    - "Block rate tracked"
+    - "False positive rate monitored"
+    - "Per-user violation history"
+    - "Security team alerts configured"

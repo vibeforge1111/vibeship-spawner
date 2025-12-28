@@ -1,0 +1,599 @@
+# Collaboration - AI Safety & Alignment
+# Integration patterns with other skills
+
+version: 1.0.0
+skill_id: ai-safety-alignment
+
+prerequisites:
+  required:
+    - skill: backend
+      reason: "Safety middleware requires API infrastructure"
+    - skill: llm-integration
+      reason: "Safety wraps LLM calls"
+
+  recommended:
+    - skill: ai-observability
+      reason: "Track safety metrics and audit logs"
+    - skill: redis-specialist
+      reason: "Rate limiting and violation tracking"
+
+delegates_to:
+  - skill: ai-observability
+    when: "Need to trace safety decisions"
+    handoff: "Use Langfuse to trace safety layer results"
+
+  - skill: redis-specialist
+    when: "Implementing rate limiting or violation tracking"
+    handoff: "Use Redis for per-user rate limits and violation counters"
+
+  - skill: auth-specialist
+    when: "Safety thresholds depend on user trust level"
+    handoff: "Get user trust score from auth system"
+
+receives_from:
+  - skill: llm-integration
+    when: "LLM integration needs safety layer"
+    input: "LLM configuration and message format"
+
+  - skill: rag-architect
+    when: "RAG system needs context sanitization"
+    input: "Retrieved chunks to validate"
+
+integration_patterns:
+  nextjs_middleware:
+    description: "Safety middleware for Next.js API routes"
+    pattern: |
+      // middleware/safety.ts
+      import { NextRequest, NextResponse } from "next/server";
+      import OpenAI from "openai";
+      import { Ratelimit } from "@upstash/ratelimit";
+      import { Redis } from "@upstash/redis";
+
+      const openai = new OpenAI();
+      const redis = new Redis({
+        url: process.env.UPSTASH_REDIS_URL!,
+        token: process.env.UPSTASH_REDIS_TOKEN!,
+      });
+
+      const ratelimit = new Ratelimit({
+        redis,
+        limiter: Ratelimit.slidingWindow(20, "1m"),
+      });
+
+      export async function safetyMiddleware(
+        req: NextRequest,
+        handler: () => Promise<NextResponse>
+      ): Promise<NextResponse> {
+        const userId = req.headers.get("x-user-id") ?? "anonymous";
+
+        // 1. Rate limit check
+        const { success: rateLimitOk } = await ratelimit.limit(userId);
+        if (!rateLimitOk) {
+          return NextResponse.json(
+            { error: "Too many requests" },
+            { status: 429 }
+          );
+        }
+
+        // 2. Check violation history
+        const violations = parseInt((await redis.get(`violations:${userId}`)) || "0");
+        if (violations >= 5) {
+          return NextResponse.json(
+            { error: "Account temporarily restricted" },
+            { status: 403 }
+          );
+        }
+
+        // 3. Extract and validate input
+        const body = await req.json();
+        const userMessage = body.message || body.prompt || "";
+
+        // 4. Run safety checks
+        const safetyResult = await runSafetyPipeline(userMessage, userId);
+
+        if (!safetyResult.allowed) {
+          // Track violation
+          await redis.incr(`violations:${userId}`);
+          await redis.expire(`violations:${userId}`, 86400);
+
+          return NextResponse.json(
+            { error: "I can't help with that request." },
+            { status: 400 }
+          );
+        }
+
+        // 5. Continue to handler
+        return handler();
+      }
+
+      async function runSafetyPipeline(
+        input: string,
+        userId: string
+      ): Promise<{ allowed: boolean; reason?: string }> {
+        try {
+          // Parallel safety checks
+          const [moderation, injectionCheck] = await Promise.all([
+            openai.moderations.create({ input }),
+            detectPromptInjection(input),
+          ]);
+
+          if (moderation.results[0].flagged) {
+            return { allowed: false, reason: "content_policy" };
+          }
+
+          if (injectionCheck.isInjection) {
+            return { allowed: false, reason: "injection_detected" };
+          }
+
+          return { allowed: true };
+        } catch (error) {
+          // Fail closed
+          console.error("Safety check failed:", error);
+          return { allowed: false, reason: "safety_error" };
+        }
+      }
+
+  inngest_safety_worker:
+    description: "Background safety processing with Inngest"
+    pattern: |
+      // inngest/safety-review.ts
+      import { inngest } from "./client";
+      import { db } from "@/lib/db";
+      import OpenAI from "openai";
+
+      const openai = new OpenAI();
+
+      // Async safety review for flagged content
+      export const reviewFlaggedContent = inngest.createFunction(
+        { id: "review-flagged-content" },
+        { event: "safety/content.flagged" },
+        async ({ event, step }) => {
+          const { contentId, userId, content, reason } = event.data;
+
+          // Step 1: Deep analysis with LLM
+          const analysis = await step.run("analyze-content", async () => {
+            const response = await openai.chat.completions.create({
+              model: "gpt-4o",
+              messages: [
+                {
+                  role: "system",
+                  content: `You are a content safety analyst. Analyze this content and determine:
+                    1. Is this actually harmful or a false positive?
+                    2. What category of concern (if any)?
+                    3. Recommended action: allow, block, escalate
+
+                    Be thorough but fair. Consider context.`,
+                },
+                {
+                  role: "user",
+                  content: `Content flagged for: ${reason}\n\nContent:\n${content}`,
+                },
+              ],
+            });
+
+            return JSON.parse(response.choices[0].message.content ?? "{}");
+          });
+
+          // Step 2: Take action based on analysis
+          await step.run("take-action", async () => {
+            if (analysis.action === "allow") {
+              // False positive - restore content, adjust user score
+              await db.content.update({
+                where: { id: contentId },
+                data: { status: "approved", reviewedAt: new Date() },
+              });
+
+              // Improve user trust
+              await db.user.update({
+                where: { id: userId },
+                data: { trustScore: { increment: 0.01 } },
+              });
+            } else if (analysis.action === "block") {
+              // Confirmed violation
+              await db.content.update({
+                where: { id: contentId },
+                data: { status: "blocked", reviewedAt: new Date() },
+              });
+
+              // Decrease user trust
+              await db.user.update({
+                where: { id: userId },
+                data: { trustScore: { decrement: 0.1 } },
+              });
+
+              // Check if user should be restricted
+              const user = await db.user.findUnique({ where: { id: userId } });
+              if (user && user.trustScore < 0.3) {
+                await step.sendEvent("user/restrict", {
+                  name: "user/restrict",
+                  data: { userId, reason: "low_trust_score" },
+                });
+              }
+            } else {
+              // Escalate to human review
+              await db.content.update({
+                where: { id: contentId },
+                data: { status: "pending_human_review" },
+              });
+
+              await step.sendEvent("slack/alert", {
+                name: "slack/alert",
+                data: {
+                  channel: "#safety-reviews",
+                  message: `Content needs human review: ${contentId}`,
+                  analysis,
+                },
+              });
+            }
+          });
+
+          return { status: "reviewed", action: analysis.action };
+        }
+      );
+
+      // Periodic safety report
+      export const dailySafetyReport = inngest.createFunction(
+        { id: "daily-safety-report" },
+        { cron: "0 9 * * *" }, // 9 AM daily
+        async ({ step }) => {
+          const report = await step.run("generate-report", async () => {
+            const yesterday = new Date(Date.now() - 86400000);
+
+            const stats = await db.safetyLog.groupBy({
+              by: ["action", "reason"],
+              where: { createdAt: { gte: yesterday } },
+              _count: true,
+            });
+
+            const topViolators = await db.safetyLog.groupBy({
+              by: ["userId"],
+              where: { action: "block", createdAt: { gte: yesterday } },
+              _count: true,
+              orderBy: { _count: { userId: "desc" } },
+              take: 10,
+            });
+
+            return {
+              date: yesterday.toISOString().split("T")[0],
+              totalChecks: stats.reduce((sum, s) => sum + s._count, 0),
+              blocks: stats.filter((s) => s.action === "block").reduce((sum, s) => sum + s._count, 0),
+              byReason: stats,
+              topViolators,
+            };
+          });
+
+          await step.run("send-report", async () => {
+            await sendSlackMessage({
+              channel: "#safety-daily",
+              blocks: formatSafetyReport(report),
+            });
+          });
+
+          return report;
+        }
+      );
+
+  trpc_safety_middleware:
+    description: "tRPC middleware for safety checks"
+    pattern: |
+      // server/trpc/safety.ts
+      import { TRPCError } from "@trpc/server";
+      import { middleware } from "./trpc";
+      import OpenAI from "openai";
+
+      const openai = new OpenAI();
+
+      export const safetyMiddleware = middleware(async ({ ctx, next, rawInput }) => {
+        // Only check mutations with user content
+        if (typeof rawInput !== "object" || rawInput === null) {
+          return next();
+        }
+
+        const input = rawInput as Record<string, unknown>;
+        const contentFields = ["message", "prompt", "content", "text"];
+        const userContent = contentFields
+          .map((f) => input[f])
+          .filter((v) => typeof v === "string")
+          .join(" ");
+
+        if (!userContent) {
+          return next();
+        }
+
+        // Run safety check
+        try {
+          const moderation = await openai.moderations.create({
+            input: userContent,
+          });
+
+          if (moderation.results[0].flagged) {
+            // Log for audit
+            await ctx.db.safetyLog.create({
+              data: {
+                userId: ctx.session?.user.id,
+                action: "block",
+                reason: "moderation_flagged",
+                categories: Object.entries(moderation.results[0].categories)
+                  .filter(([_, v]) => v)
+                  .map(([k]) => k)
+                  .join(","),
+              },
+            });
+
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "I can't help with that request.",
+            });
+          }
+        } catch (error) {
+          if (error instanceof TRPCError) throw error;
+
+          // Fail closed on safety check errors
+          console.error("Safety check failed:", error);
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Unable to process request",
+          });
+        }
+
+        return next();
+      });
+
+      // Apply to chat procedures
+      export const safeChatProcedure = protectedProcedure.use(safetyMiddleware);
+
+  langfuse_safety_traces:
+    description: "Trace safety decisions with Langfuse"
+    pattern: |
+      // lib/safety-tracer.ts
+      import { Langfuse } from "langfuse";
+      import OpenAI from "openai";
+
+      const langfuse = new Langfuse({
+        publicKey: process.env.LANGFUSE_PUBLIC_KEY!,
+        secretKey: process.env.LANGFUSE_SECRET_KEY!,
+      });
+
+      const openai = new OpenAI();
+
+      interface SafetyTraceResult {
+        allowed: boolean;
+        trace: ReturnType<typeof langfuse.trace>;
+        latencyMs: number;
+      }
+
+      export async function tracedSafetyCheck(
+        input: string,
+        userId: string
+      ): Promise<SafetyTraceResult> {
+        const trace = langfuse.trace({
+          name: "safety-check",
+          userId,
+          metadata: { inputLength: input.length },
+        });
+
+        const startTime = Date.now();
+
+        try {
+          // Span 1: Moderation API
+          const moderationSpan = trace.span({ name: "moderation-api" });
+          const moderation = await openai.moderations.create({ input });
+          moderationSpan.end({
+            output: {
+              flagged: moderation.results[0].flagged,
+              categories: moderation.results[0].categories,
+            },
+          });
+
+          if (moderation.results[0].flagged) {
+            trace.update({
+              level: "WARNING",
+              output: { allowed: false, reason: "moderation_flagged" },
+            });
+            return {
+              allowed: false,
+              trace,
+              latencyMs: Date.now() - startTime,
+            };
+          }
+
+          // Span 2: Injection detection
+          const injectionSpan = trace.span({ name: "injection-detection" });
+          const injectionResult = await detectPromptInjection(input);
+          injectionSpan.end({
+            output: {
+              isInjection: injectionResult.isInjection,
+              confidence: injectionResult.confidence,
+            },
+          });
+
+          if (injectionResult.isInjection) {
+            trace.update({
+              level: "WARNING",
+              output: { allowed: false, reason: "injection_detected" },
+            });
+            return {
+              allowed: false,
+              trace,
+              latencyMs: Date.now() - startTime,
+            };
+          }
+
+          // All checks passed
+          trace.update({
+            level: "DEFAULT",
+            output: { allowed: true },
+          });
+
+          return {
+            allowed: true,
+            trace,
+            latencyMs: Date.now() - startTime,
+          };
+        } catch (error) {
+          trace.update({
+            level: "ERROR",
+            statusMessage: error instanceof Error ? error.message : "Unknown error",
+            output: { allowed: false, reason: "safety_error" },
+          });
+
+          // Fail closed
+          return {
+            allowed: false,
+            trace,
+            latencyMs: Date.now() - startTime,
+          };
+        } finally {
+          await langfuse.flushAsync();
+        }
+      }
+
+  prometheus_safety_metrics:
+    description: "Prometheus metrics for safety monitoring"
+    pattern: |
+      // lib/safety-metrics.ts
+      import { Counter, Histogram, Gauge } from "prom-client";
+
+      // Safety check metrics
+      export const safetyCheckTotal = new Counter({
+        name: "safety_checks_total",
+        help: "Total number of safety checks",
+        labelNames: ["result", "reason"],
+      });
+
+      export const safetyCheckLatency = new Histogram({
+        name: "safety_check_latency_seconds",
+        help: "Safety check latency in seconds",
+        labelNames: ["layer"],
+        buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5],
+      });
+
+      export const activeViolations = new Gauge({
+        name: "active_violations",
+        help: "Current number of users with active violations",
+      });
+
+      export const falsePositiveRate = new Gauge({
+        name: "safety_false_positive_rate",
+        help: "Estimated false positive rate based on appeals",
+      });
+
+      // Instrument safety check
+      export async function instrumentedSafetyCheck(
+        input: string,
+        userId: string
+      ): Promise<{ allowed: boolean; reason?: string }> {
+        const endTimer = safetyCheckLatency.startTimer({ layer: "full" });
+
+        try {
+          // Moderation layer
+          const modEnd = safetyCheckLatency.startTimer({ layer: "moderation" });
+          const moderation = await openai.moderations.create({ input });
+          modEnd();
+
+          if (moderation.results[0].flagged) {
+            safetyCheckTotal.inc({ result: "blocked", reason: "moderation" });
+            return { allowed: false, reason: "moderation" };
+          }
+
+          // Injection layer
+          const injEnd = safetyCheckLatency.startTimer({ layer: "injection" });
+          const injection = await detectPromptInjection(input);
+          injEnd();
+
+          if (injection.isInjection) {
+            safetyCheckTotal.inc({ result: "blocked", reason: "injection" });
+            return { allowed: false, reason: "injection" };
+          }
+
+          safetyCheckTotal.inc({ result: "allowed", reason: "none" });
+          return { allowed: true };
+        } finally {
+          endTimer();
+        }
+      }
+
+      // Grafana dashboard queries:
+      // Block rate: rate(safety_checks_total{result="blocked"}[5m])
+      // Latency P99: histogram_quantile(0.99, rate(safety_check_latency_seconds_bucket[5m]))
+      // By reason: sum by (reason) (rate(safety_checks_total{result="blocked"}[1h]))
+
+  slack_safety_alerts:
+    description: "Slack alerts for safety events"
+    pattern: |
+      // lib/safety-alerts.ts
+      import { WebClient } from "@slack/web-api";
+
+      const slack = new WebClient(process.env.SLACK_TOKEN);
+
+      interface SafetyAlert {
+        type: "high_volume_blocks" | "new_attack_pattern" | "user_escalation";
+        severity: "low" | "medium" | "high" | "critical";
+        data: Record<string, unknown>;
+      }
+
+      export async function sendSafetyAlert(alert: SafetyAlert): Promise<void> {
+        const channel = getChannelForSeverity(alert.severity);
+        const emoji = getEmojiForType(alert.type);
+
+        const blocks = [
+          {
+            type: "header",
+            text: {
+              type: "plain_text",
+              text: `${emoji} Safety Alert: ${formatAlertType(alert.type)}`,
+            },
+          },
+          {
+            type: "section",
+            fields: [
+              { type: "mrkdwn", text: `*Severity:* ${alert.severity}` },
+              { type: "mrkdwn", text: `*Time:* ${new Date().toISOString()}` },
+            ],
+          },
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: formatAlertData(alert.data),
+            },
+          },
+        ];
+
+        await slack.chat.postMessage({
+          channel,
+          blocks,
+          text: `Safety Alert: ${alert.type}`,
+        });
+      }
+
+      function getChannelForSeverity(severity: string): string {
+        switch (severity) {
+          case "critical":
+            return "#security-oncall";
+          case "high":
+            return "#safety-alerts";
+          default:
+            return "#safety-logs";
+        }
+      }
+
+      // Example usage in safety check
+      async function checkWithAlerts(input: string, userId: string) {
+        const result = await runSafetyPipeline(input, userId);
+
+        if (!result.allowed) {
+          // Check for patterns that need alerting
+          const userBlocks = await getRecentBlockCount(userId, 3600000); // 1 hour
+
+          if (userBlocks >= 10) {
+            await sendSafetyAlert({
+              type: "user_escalation",
+              severity: "high",
+              data: { userId, blocksInHour: userBlocks },
+            });
+          }
+        }
+
+        return result;
+      }
