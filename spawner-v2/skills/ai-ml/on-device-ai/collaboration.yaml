@@ -1,0 +1,696 @@
+# Collaboration - On-Device AI
+# Integration patterns with other skills
+
+version: 1.0.0
+skill_id: on-device-ai
+
+prerequisites:
+  required:
+    - skill: frontend
+      reason: "Browser-based inference requires frontend setup"
+
+  recommended:
+    - skill: react-patterns
+      reason: "React hooks for model management"
+    - skill: performance-optimization
+      reason: "Optimizing inference and loading"
+
+delegates_to:
+  - skill: llm-integration
+    when: "Need cloud fallback for unsupported devices"
+    handoff: "Use cloud API when local inference not available"
+
+  - skill: semantic-search
+    when: "Building local RAG with embeddings"
+    handoff: "Use Transformers.js embeddings for vector search"
+
+receives_from:
+  - skill: frontend
+    when: "Adding AI capabilities to frontend"
+    input: "React/Vue/Svelte component context"
+
+  - skill: progressive-web-app
+    when: "Building offline-capable AI app"
+    input: "Service worker and caching setup"
+
+integration_patterns:
+  react_hooks_pattern:
+    description: "Complete React hooks for on-device AI"
+    pattern: |
+      // hooks/use-local-ai.ts
+      import { useState, useEffect, useCallback, useRef } from "react";
+      import { pipeline } from "@huggingface/transformers";
+
+      interface AIConfig {
+        modelId: string;
+        task: "text-generation" | "feature-extraction" | "sentiment-analysis";
+        device?: "webgpu" | "wasm";
+        dtype?: "fp32" | "fp16" | "q8" | "q4";
+      }
+
+      interface AIState {
+        ready: boolean;
+        loading: boolean;
+        progress: number;
+        error: Error | null;
+        deviceInfo: {
+          backend: string;
+          webgpuAvailable: boolean;
+        } | null;
+      }
+
+      export function useLocalAI(config: AIConfig) {
+        const modelRef = useRef<any>(null);
+        const [state, setState] = useState<AIState>({
+          ready: false,
+          loading: false,
+          progress: 0,
+          error: null,
+          deviceInfo: null,
+        });
+
+        useEffect(() => {
+          let cancelled = false;
+
+          async function initialize() {
+            setState((s) => ({ ...s, loading: true, error: null }));
+
+            try {
+              // Check WebGPU
+              let webgpuAvailable = false;
+              if ("gpu" in navigator) {
+                try {
+                  const adapter = await navigator.gpu.requestAdapter();
+                  webgpuAvailable = !!adapter;
+                } catch {}
+              }
+
+              const device = config.device ?? (webgpuAvailable ? "webgpu" : "wasm");
+              const dtype = config.dtype ?? (webgpuAvailable ? "q4" : "q8");
+
+              const model = await pipeline(config.task, config.modelId, {
+                device,
+                dtype,
+                progress_callback: (p) => {
+                  if (!cancelled) {
+                    setState((s) => ({ ...s, progress: p.progress }));
+                  }
+                },
+              });
+
+              if (!cancelled) {
+                modelRef.current = model;
+                setState({
+                  ready: true,
+                  loading: false,
+                  progress: 1,
+                  error: null,
+                  deviceInfo: {
+                    backend: device,
+                    webgpuAvailable,
+                  },
+                });
+              }
+            } catch (error) {
+              if (!cancelled) {
+                setState((s) => ({
+                  ...s,
+                  loading: false,
+                  error: error instanceof Error ? error : new Error(String(error)),
+                }));
+              }
+            }
+          }
+
+          initialize();
+
+          return () => {
+            cancelled = true;
+            if (modelRef.current?.dispose) {
+              modelRef.current.dispose();
+            }
+          };
+        }, [config.modelId, config.task, config.device, config.dtype]);
+
+        const run = useCallback(async (input: string, options?: Record<string, unknown>) => {
+          if (!modelRef.current) {
+            throw new Error("Model not initialized");
+          }
+          return modelRef.current(input, options);
+        }, []);
+
+        return { ...state, run };
+      }
+
+      // Specialized hooks
+      export function useLocalChat(modelId = "Xenova/Phi-3-mini-4k-instruct") {
+        const ai = useLocalAI({ modelId, task: "text-generation" });
+
+        const chat = useCallback(
+          async (messages: Array<{ role: string; content: string }>) => {
+            // Format messages for the model
+            const prompt = messages
+              .map((m) => `${m.role}: ${m.content}`)
+              .join("\n") + "\nassistant:";
+
+            const result = await ai.run(prompt, {
+              max_new_tokens: 256,
+              temperature: 0.7,
+              do_sample: true,
+            });
+
+            return result[0].generated_text.split("assistant:").pop()?.trim() ?? "";
+          },
+          [ai.run]
+        );
+
+        return { ...ai, chat };
+      }
+
+      export function useLocalEmbeddings(modelId = "Xenova/all-MiniLM-L6-v2") {
+        const ai = useLocalAI({ modelId, task: "feature-extraction", dtype: "fp32" });
+
+        const embed = useCallback(
+          async (texts: string | string[]) => {
+            const input = Array.isArray(texts) ? texts : [texts];
+            const results: Float32Array[] = [];
+
+            for (const text of input) {
+              const output = await ai.run(text, { pooling: "mean", normalize: true });
+              results.push(output.data);
+            }
+
+            return results;
+          },
+          [ai.run]
+        );
+
+        return { ...ai, embed };
+      }
+
+  next_hybrid_pattern:
+    description: "Next.js with cloud fallback"
+    pattern: |
+      // lib/hybrid-ai.ts
+      "use client";
+
+      import { useLocalChat } from "@/hooks/use-local-ai";
+      import { useState, useCallback } from "react";
+
+      interface HybridAIOptions {
+        preferLocal?: boolean;
+        localModelId?: string;
+        cloudEndpoint?: string;
+      }
+
+      export function useHybridAI(options: HybridAIOptions = {}) {
+        const {
+          preferLocal = true,
+          localModelId = "Xenova/Phi-3-mini-4k-instruct",
+          cloudEndpoint = "/api/chat",
+        } = options;
+
+        const local = useLocalChat(localModelId);
+        const [mode, setMode] = useState<"local" | "cloud">(preferLocal ? "local" : "cloud");
+        const [cloudLoading, setCloudLoading] = useState(false);
+
+        const chat = useCallback(
+          async (messages: Array<{ role: string; content: string }>) => {
+            // Try local if available and preferred
+            if (mode === "local" && local.ready) {
+              try {
+                return await local.chat(messages);
+              } catch (error) {
+                console.warn("Local inference failed, falling back to cloud:", error);
+                setMode("cloud");
+              }
+            }
+
+            // Cloud fallback
+            setCloudLoading(true);
+            try {
+              const response = await fetch(cloudEndpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ messages }),
+              });
+
+              if (!response.ok) throw new Error("Cloud request failed");
+
+              const data = await response.json();
+              return data.content;
+            } finally {
+              setCloudLoading(false);
+            }
+          },
+          [mode, local.ready, local.chat, cloudEndpoint]
+        );
+
+        return {
+          chat,
+          mode,
+          setMode,
+          localReady: local.ready,
+          localLoading: local.loading,
+          localProgress: local.progress,
+          cloudLoading,
+          switchToLocal: () => setMode("local"),
+          switchToCloud: () => setMode("cloud"),
+        };
+      }
+
+      // Component
+      export function AIChat() {
+        const ai = useHybridAI();
+        const [messages, setMessages] = useState<Array<{ role: string; content: string }>>([]);
+        const [input, setInput] = useState("");
+        const [generating, setGenerating] = useState(false);
+
+        const handleSubmit = async () => {
+          if (!input.trim()) return;
+
+          const newMessages = [...messages, { role: "user", content: input }];
+          setMessages(newMessages);
+          setInput("");
+          setGenerating(true);
+
+          try {
+            const response = await ai.chat(newMessages);
+            setMessages([...newMessages, { role: "assistant", content: response }]);
+          } finally {
+            setGenerating(false);
+          }
+        };
+
+        return (
+          <div>
+            {/* Mode indicator */}
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={ai.switchToLocal}
+                disabled={!ai.localReady}
+                className={ai.mode === "local" ? "active" : ""}
+              >
+                Local AI {ai.localLoading && `(${(ai.localProgress * 100).toFixed(0)}%)`}
+              </button>
+              <button
+                onClick={ai.switchToCloud}
+                className={ai.mode === "cloud" ? "active" : ""}
+              >
+                Cloud AI
+              </button>
+            </div>
+
+            {/* Messages */}
+            <div className="messages">
+              {messages.map((m, i) => (
+                <div key={i} className={m.role}>
+                  {m.content}
+                </div>
+              ))}
+            </div>
+
+            {/* Input */}
+            <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Type a message..."
+                disabled={generating}
+              />
+              <button type="submit" disabled={generating}>
+                Send
+              </button>
+            </form>
+          </div>
+        );
+      }
+
+  webllm_streaming_pattern:
+    description: "WebLLM with streaming responses"
+    pattern: |
+      // components/StreamingChat.tsx
+      "use client";
+
+      import * as webllm from "@mlc-ai/web-llm";
+      import { useState, useEffect, useCallback, useRef } from "react";
+
+      interface Message {
+        role: "system" | "user" | "assistant";
+        content: string;
+      }
+
+      export function StreamingChat() {
+        const engineRef = useRef<webllm.MLCEngine | null>(null);
+        const [loading, setLoading] = useState(true);
+        const [progress, setProgress] = useState(0);
+        const [messages, setMessages] = useState<Message[]>([]);
+        const [input, setInput] = useState("");
+        const [streaming, setStreaming] = useState(false);
+        const [streamContent, setStreamContent] = useState("");
+
+        useEffect(() => {
+          let cancelled = false;
+
+          async function init() {
+            try {
+              const engine = await webllm.CreateMLCEngine(
+                "Llama-3.2-1B-Instruct-q4f16_1-MLC",
+                {
+                  initProgressCallback: (report) => {
+                    if (!cancelled) setProgress(report.progress);
+                  },
+                }
+              );
+
+              if (!cancelled) {
+                engineRef.current = engine;
+                setLoading(false);
+              }
+            } catch (error) {
+              console.error("Failed to initialize:", error);
+              if (!cancelled) setLoading(false);
+            }
+          }
+
+          init();
+
+          return () => {
+            cancelled = true;
+            engineRef.current?.unload();
+          };
+        }, []);
+
+        const handleSubmit = useCallback(async () => {
+          if (!input.trim() || !engineRef.current || streaming) return;
+
+          const userMessage: Message = { role: "user", content: input };
+          const newMessages = [...messages, userMessage];
+          setMessages(newMessages);
+          setInput("");
+          setStreaming(true);
+          setStreamContent("");
+
+          try {
+            const stream = await engineRef.current.chat.completions.create({
+              messages: newMessages,
+              temperature: 0.7,
+              max_tokens: 512,
+              stream: true,
+            });
+
+            let fullResponse = "";
+
+            for await (const chunk of stream) {
+              const delta = chunk.choices[0]?.delta?.content ?? "";
+              fullResponse += delta;
+              setStreamContent(fullResponse);
+            }
+
+            setMessages([
+              ...newMessages,
+              { role: "assistant", content: fullResponse },
+            ]);
+          } catch (error) {
+            console.error("Generation error:", error);
+          } finally {
+            setStreaming(false);
+            setStreamContent("");
+          }
+        }, [input, messages, streaming]);
+
+        if (loading) {
+          return (
+            <div className="loading">
+              <p>Loading AI model...</p>
+              <progress value={progress} max={1} />
+              <p>{(progress * 100).toFixed(0)}%</p>
+            </div>
+          );
+        }
+
+        return (
+          <div className="chat">
+            <div className="messages">
+              {messages.map((m, i) => (
+                <div key={i} className={`message ${m.role}`}>
+                  <strong>{m.role}:</strong> {m.content}
+                </div>
+              ))}
+              {streaming && (
+                <div className="message assistant streaming">
+                  <strong>assistant:</strong> {streamContent}
+                  <span className="cursor">|</span>
+                </div>
+              )}
+            </div>
+
+            <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                disabled={streaming}
+                placeholder="Type your message..."
+              />
+              <button type="submit" disabled={streaming || !input.trim()}>
+                {streaming ? "Generating..." : "Send"}
+              </button>
+            </form>
+          </div>
+        );
+      }
+
+  service_worker_cache:
+    description: "Service worker for offline model support"
+    pattern: |
+      // public/sw.js
+      const MODEL_CACHE = "ai-models-v1";
+      const MODEL_HOSTS = [
+        "huggingface.co",
+        "cdn.huggingface.co",
+        "cdn-lfs.huggingface.co",
+      ];
+
+      self.addEventListener("install", (event) => {
+        self.skipWaiting();
+      });
+
+      self.addEventListener("activate", (event) => {
+        event.waitUntil(clients.claim());
+      });
+
+      self.addEventListener("fetch", (event) => {
+        const url = new URL(event.request.url);
+
+        // Only cache model files
+        if (!MODEL_HOSTS.some((host) => url.host.includes(host))) {
+          return;
+        }
+
+        // Cache-first strategy for models
+        event.respondWith(
+          caches.match(event.request).then((cached) => {
+            if (cached) {
+              return cached;
+            }
+
+            return fetch(event.request).then((response) => {
+              // Only cache successful responses
+              if (!response.ok) {
+                return response;
+              }
+
+              // Clone and cache
+              const clone = response.clone();
+              caches.open(MODEL_CACHE).then((cache) => {
+                cache.put(event.request, clone);
+              });
+
+              return response;
+            });
+          })
+        );
+      });
+
+      // lib/register-sw.ts
+      export async function registerModelCacheSW(): Promise<boolean> {
+        if (!("serviceWorker" in navigator)) {
+          return false;
+        }
+
+        try {
+          const registration = await navigator.serviceWorker.register("/sw.js");
+          console.log("Model cache SW registered:", registration.scope);
+          return true;
+        } catch (error) {
+          console.warn("SW registration failed:", error);
+          return false;
+        }
+      }
+
+      // Check offline status
+      export function useOfflineStatus() {
+        const [online, setOnline] = useState(navigator.onLine);
+
+        useEffect(() => {
+          const handleOnline = () => setOnline(true);
+          const handleOffline = () => setOnline(false);
+
+          window.addEventListener("online", handleOnline);
+          window.addEventListener("offline", handleOffline);
+
+          return () => {
+            window.removeEventListener("online", handleOnline);
+            window.removeEventListener("offline", handleOffline);
+          };
+        }, []);
+
+        return online;
+      }
+
+  worker_inference_pattern:
+    description: "Web Worker for non-blocking inference"
+    pattern: |
+      // workers/ai-worker.ts
+      import { pipeline } from "@huggingface/transformers";
+
+      interface WorkerMessage {
+        type: "init" | "generate" | "embed";
+        id: string;
+        data: Record<string, unknown>;
+      }
+
+      let generator: Awaited<ReturnType<typeof pipeline>> | null = null;
+      let embedder: Awaited<ReturnType<typeof pipeline>> | null = null;
+
+      self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
+        const { type, id, data } = event.data;
+
+        try {
+          switch (type) {
+            case "init": {
+              const { task, modelId, options } = data as any;
+
+              if (task === "text-generation") {
+                generator = await pipeline(task, modelId, {
+                  ...options,
+                  progress_callback: (p: any) => {
+                    self.postMessage({ type: "progress", id, progress: p.progress });
+                  },
+                });
+              } else if (task === "feature-extraction") {
+                embedder = await pipeline(task, modelId, options);
+              }
+
+              self.postMessage({ type: "ready", id });
+              break;
+            }
+
+            case "generate": {
+              if (!generator) throw new Error("Generator not initialized");
+
+              const result = await generator(data.prompt as string, data.options);
+              self.postMessage({
+                type: "result",
+                id,
+                text: result[0].generated_text,
+              });
+              break;
+            }
+
+            case "embed": {
+              if (!embedder) throw new Error("Embedder not initialized");
+
+              const result = await embedder(data.text as string, {
+                pooling: "mean",
+                normalize: true,
+              });
+              self.postMessage({
+                type: "embedding",
+                id,
+                data: result.data,
+              });
+              break;
+            }
+          }
+        } catch (error) {
+          self.postMessage({
+            type: "error",
+            id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      };
+
+      // lib/ai-worker-client.ts
+      export class AIWorkerClient {
+        private worker: Worker;
+        private callbacks = new Map<string, {
+          resolve: (value: any) => void;
+          reject: (error: Error) => void;
+          onProgress?: (progress: number) => void;
+        }>();
+        private idCounter = 0;
+
+        constructor() {
+          this.worker = new Worker(
+            new URL("../workers/ai-worker.ts", import.meta.url),
+            { type: "module" }
+          );
+
+          this.worker.onmessage = (event) => {
+            const { type, id, ...data } = event.data;
+            const callback = this.callbacks.get(id);
+
+            if (type === "progress" && callback?.onProgress) {
+              callback.onProgress(data.progress);
+              return;
+            }
+
+            if (callback) {
+              if (type === "error") {
+                callback.reject(new Error(data.error));
+              } else {
+                callback.resolve(data);
+              }
+              this.callbacks.delete(id);
+            }
+          };
+        }
+
+        private call<T>(
+          type: string,
+          data: Record<string, unknown>,
+          onProgress?: (progress: number) => void
+        ): Promise<T> {
+          const id = String(this.idCounter++);
+
+          return new Promise((resolve, reject) => {
+            this.callbacks.set(id, { resolve, reject, onProgress });
+            this.worker.postMessage({ type, id, data });
+          });
+        }
+
+        async init(
+          task: string,
+          modelId: string,
+          options?: Record<string, unknown>,
+          onProgress?: (progress: number) => void
+        ): Promise<void> {
+          await this.call("init", { task, modelId, options }, onProgress);
+        }
+
+        async generate(prompt: string, options?: Record<string, unknown>): Promise<string> {
+          const result = await this.call<{ text: string }>("generate", { prompt, options });
+          return result.text;
+        }
+
+        async embed(text: string): Promise<Float32Array> {
+          const result = await this.call<{ data: Float32Array }>("embed", { text });
+          return result.data;
+        }
+
+        terminate(): void {
+          this.worker.terminate();
+        }
+      }
