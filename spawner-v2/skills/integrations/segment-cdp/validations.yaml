@@ -1,0 +1,291 @@
+# Validations - Segment CDP
+# Quality checks for customer data platform implementations
+
+version: 1.0.0
+skill_id: segment-cdp
+
+validations:
+  # Event Naming Checks
+  - id: dynamic-event-name
+    name: Dynamic Event Name
+    severity: error
+    description: Event names should be static, not include dynamic values
+    pattern: |
+      analytics\.track\(`[^`]*\$\{
+    message: "Dynamic event name detected. Use static event names with dynamic properties."
+    autofix: false
+
+  - id: inconsistent-event-casing
+    name: Inconsistent Event Name Casing
+    severity: warning
+    description: Event names should follow consistent casing convention
+    pattern: |
+      analytics\.track\(['"][a-z].*[A-Z]
+    message: "Mixed casing in event name. Use consistent convention (e.g., Title Case)."
+    autofix: false
+
+  # Identity Checks
+  - id: track-without-identify
+    name: Track Without Prior Identify
+    severity: warning
+    description: Users should be identified before tracking critical events
+    pattern: |
+      analytics\.track.*Order|Purchase|Subscribe
+    anti_pattern: |
+      analytics\.identify
+    message: "Revenue/conversion event without identify. Ensure user is identified."
+    autofix: false
+
+  - id: missing-reset-on-logout
+    name: Missing Analytics Reset on Logout
+    severity: warning
+    description: Analytics should be reset when user logs out
+    pattern: |
+      (signOut|logout|handleLogout)
+    anti_pattern: |
+      analytics\.reset
+    message: "Logout without analytics.reset(). Anonymous ID will persist to next user."
+    autofix: false
+
+  # Security Checks
+  - id: hardcoded-write-key
+    name: Hardcoded Segment Write Key
+    severity: error
+    description: Write key should use environment variables
+    pattern: |
+      writeKey\s*[:=]\s*['"][a-zA-Z0-9]{20,}['"]
+    message: "Hardcoded Segment write key. Use environment variables."
+    autofix: false
+
+  - id: pii-without-controls
+    name: PII Sent to All Destinations
+    severity: warning
+    description: PII should have destination controls
+    pattern: |
+      analytics\.(track|identify).*email|phone|ssn|address
+    anti_pattern: |
+      integrations
+    message: "PII in tracking without destination controls. Consider limiting destinations."
+    autofix: false
+
+  # Data Quality Checks
+  - id: missing-timestamp
+    name: Event Without Proper Timestamp
+    severity: info
+    description: Explicit timestamps help with historical data
+    pattern: |
+      serverTrack.*\{[^}]*\}
+    anti_pattern: |
+      timestamp
+    message: "Server track without explicit timestamp. Consider adding timestamp."
+    autofix: false
+
+  - id: large-property-values
+    name: Potentially Large Property Values
+    severity: warning
+    description: Properties over 32KB will be rejected
+    pattern: |
+      analytics\.track.*innerHTML|innerText|JSON\.stringify
+    message: "Potentially large property value. Segment has 32KB per event limit."
+    autofix: false
+
+  # Consent Checks
+  - id: tracking-before-consent
+    name: Tracking Before Consent Check
+    severity: error
+    description: GDPR requires consent before tracking
+    pattern: |
+      analytics\.load.*analytics\.(page|track)
+    anti_pattern: |
+      consent|wrapper|hasConsent
+    message: "Tracking without consent check. Implement consent management for GDPR."
+    autofix: false
+
+code_smells:
+  - id: redundant-page-calls
+    name: Multiple Page Calls per Route
+    description: Only one page call needed per route
+    pattern: |
+      analytics\.page\(\)[\s\S]*analytics\.page\(\)
+    suggestion: "Multiple page() calls detected. Typically only need one per route."
+
+  - id: sync-track-before-navigation
+    name: Track Before Navigation Without Await
+    description: Events may be lost on navigation
+    pattern: |
+      analytics\.track\([^)]+\);?\s*(window\.location|router\.push)
+    suggestion: "Track without await before navigation. Event may not send."
+
+  - id: missing-error-handling
+    name: Track Call Without Error Handling
+    description: Network errors can cause tracking to fail silently
+    pattern: |
+      analytics\.track\([^)]+\);?$
+    suggestion: "Consider handling track errors for critical events."
+
+  - id: excessive-properties
+    name: Too Many Properties in Single Event
+    description: Keep events focused with essential properties
+    pattern: |
+      analytics\.track\([^)]+,\s*\{([^}]*,){10,}
+    suggestion: "Event has many properties. Consider if all are necessary."
+
+best_practices:
+  - id: use-typed-events
+    name: Define TypeScript Types for Events
+    check: |
+      Events use TypeScript interfaces for type safety.
+    recommendation: |
+      // Define event types
+      interface TrackingEvents {
+        'User Signed Up': {
+          signup_method: 'email' | 'google' | 'github';
+          referral_code?: string;
+        };
+        'Order Completed': {
+          order_id: string;
+          total: number;
+          products: ProductInfo[];
+        };
+      }
+
+      // Type-safe track function
+      function trackEvent<K extends keyof TrackingEvents>(
+        event: K,
+        properties: TrackingEvents[K]
+      ) {
+        analytics.track(event, properties);
+      }
+
+  - id: implement-tracking-plan
+    name: Create and Enforce Tracking Plan
+    check: |
+      Tracking plan exists and Protocols is enabled in Segment.
+    recommendation: |
+      // 1. Define tracking plan in Segment UI
+      // 2. Enable Protocols for your sources
+      // 3. Create TypeScript types matching your plan
+
+      // Local validation matching tracking plan
+      const trackingPlan = {
+        'Order Completed': {
+          required: ['order_id', 'total'],
+          properties: {
+            order_id: { type: 'string' },
+            total: { type: 'number' },
+            currency: { type: 'string', default: 'USD' },
+          },
+        },
+      };
+
+      function validateEvent(event: string, props: object): boolean {
+        const schema = trackingPlan[event];
+        if (!schema) return false;
+
+        for (const req of schema.required) {
+          if (!(req in props)) return false;
+        }
+        return true;
+      }
+
+  - id: server-side-revenue
+    name: Track Revenue Events Server-Side
+    check: |
+      Revenue/payment events originate from server, not client.
+    recommendation: |
+      // Don't trust client-side revenue
+      // Track from payment webhook
+      export async function POST(req: Request) {
+        const event = await stripeWebhook(req);
+
+        if (event.type === 'checkout.session.completed') {
+          const session = event.data.object;
+
+          // Server-side tracking - trusted source
+          serverTrack(
+            session.client_reference_id,
+            'Order Completed',
+            {
+              order_id: session.id,
+              total: session.amount_total / 100,
+              currency: session.currency,
+            }
+          );
+        }
+      }
+
+  - id: consent-before-tracking
+    name: Implement Consent Management
+    check: |
+      Analytics only loads after user consent for GDPR.
+    recommendation: |
+      // Conditional loading based on consent
+      import { AnalyticsBrowser } from '@segment/analytics-next';
+
+      let analytics: AnalyticsBrowser | null = null;
+
+      export function initAnalytics() {
+        if (!hasUserConsent()) {
+          console.log('No consent, skipping analytics');
+          return;
+        }
+
+        analytics = AnalyticsBrowser.load({
+          writeKey: process.env.NEXT_PUBLIC_SEGMENT_KEY!,
+        });
+      }
+
+      export function track(event: string, properties?: object) {
+        if (!analytics) {
+          console.log('Analytics not initialized');
+          return;
+        }
+        analytics.track(event, properties);
+      }
+
+      // Or use Segment's consent wrapper
+      import { createWrapper } from '@segment/analytics-consent-wrapper-onetrust';
+      const wrapper = createWrapper({ integrationCategoryMappings });
+      analytics.load('KEY', { wrapper });
+
+  - id: reset-on-logout
+    name: Reset Analytics on User Logout
+    check: |
+      Analytics.reset() called when user logs out.
+    recommendation: |
+      async function handleLogout() {
+        // 1. Track logout event while we still know user
+        await analytics.track('User Logged Out');
+
+        // 2. Reset analytics state
+        analytics.reset();
+
+        // 3. Clear auth session
+        await signOut();
+
+        // 4. Redirect
+        router.push('/');
+      }
+
+testing_checklist:
+  events:
+    - "Event names are static (no dynamic values)"
+    - "Properties match tracking plan schema"
+    - "Required properties are always present"
+    - "Revenue events tracked server-side"
+
+  identity:
+    - "Identify called on login/signup"
+    - "Reset called on logout"
+    - "Anonymous to identified merge works"
+    - "Group called for B2B companies"
+
+  consent:
+    - "No tracking before consent"
+    - "Consent preference persisted"
+    - "Analytics disabled on consent withdrawal"
+
+  destinations:
+    - "Events reach all expected destinations"
+    - "PII limited to appropriate destinations"
+    - "No events in Debugger from blocked sources"
