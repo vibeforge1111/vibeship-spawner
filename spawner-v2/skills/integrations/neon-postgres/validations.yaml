@@ -1,0 +1,305 @@
+# Validations - Neon Serverless Postgres
+# Quality checks for Neon database implementations
+
+version: 1.0.0
+skill_id: neon-postgres
+
+validations:
+  # Connection Security
+  - id: direct-url-exposed
+    name: Direct Database URL in Client Code
+    severity: error
+    description: Direct database URLs should never be exposed to client
+    pattern: |
+      (NEXT_PUBLIC|REACT_APP|VITE).*DIRECT.*URL
+    message: "Direct URL exposed to client. Only pooled URLs for server-side use."
+    autofix: false
+
+  - id: hardcoded-connection-string
+    name: Hardcoded Database Connection String
+    severity: error
+    description: Connection strings should use environment variables
+    pattern: |
+      postgres://[^$\{]+@.*neon\.tech
+    message: "Hardcoded connection string. Use environment variables."
+    autofix: false
+
+  - id: missing-ssl-mode
+    name: Missing SSL Mode in Connection String
+    severity: warning
+    description: Neon requires SSL connections
+    pattern: |
+      DATABASE_URL.*neon\.tech(?!.*sslmode)
+    message: "Missing sslmode=require. Add to connection string."
+    autofix: false
+
+  # Prisma Configuration
+  - id: prisma-missing-direct-url
+    name: Prisma Missing directUrl for Migrations
+    severity: error
+    description: Prisma needs directUrl for migrations through PgBouncer
+    pattern: |
+      datasource.*postgresql.*url.*pooler(?!.*directUrl)
+    message: "Using pooled URL without directUrl. Migrations will fail."
+    autofix: false
+
+  - id: prisma-pooled-direct-url
+    name: Prisma directUrl Points to Pooler
+    severity: error
+    description: directUrl should be non-pooled connection
+    pattern: |
+      directUrl.*pooler
+    message: "directUrl points to pooler. Use non-pooled endpoint for migrations."
+    autofix: false
+
+  # Connection Pool Settings
+  - id: high-pool-size-serverless
+    name: High Pool Size in Serverless Function
+    severity: warning
+    description: High pool sizes exhaust connections with many function instances
+    pattern: |
+      max:\s*[2-9][0-9]|max:\s*1[0-9][0-9]
+    message: "Pool size too high for serverless. Use max: 5-10."
+    autofix: false
+
+  - id: new-client-per-request
+    name: Creating New Client Per Request
+    severity: warning
+    description: Creating new clients per request wastes connections
+    pattern: |
+      new Client\(.*\).*await.*connect\(\).*end\(\)
+    message: "Creating client per request. Use connection pool or neon() driver."
+    autofix: false
+
+  # Branch Management
+  - id: branch-without-cleanup
+    name: Branch Creation Without Cleanup Strategy
+    severity: warning
+    description: Branches should have cleanup automation
+    pattern: |
+      branches create(?!.*delete)
+    message: "Creating branch without cleanup. Add delete-branch-action to PR close."
+    autofix: false
+
+  - id: production-scale-to-zero
+    name: Scale-to-Zero Enabled on Production
+    severity: warning
+    description: Scale-to-zero adds latency in production
+    pattern: |
+      production.*suspend.*5.*minutes|main.*scale.*zero
+    message: "Scale-to-zero on production. Disable for low-latency."
+    autofix: false
+
+  # Driver Usage
+  - id: http-driver-transaction
+    name: HTTP Driver Used for Transactions
+    severity: error
+    description: neon() HTTP driver doesn't support transactions
+    pattern: |
+      neon\(.*\).*BEGIN|neon\(.*\).*COMMIT|neon\(.*\).*transaction
+    message: "HTTP driver with transaction. Use Pool from @neondatabase/serverless."
+    autofix: false
+
+  - id: pg-driver-in-edge
+    name: pg Driver in Edge Runtime
+    severity: warning
+    description: TCP connections don't work in all edge environments
+    pattern: |
+      import.*from ['"]pg['"].*edge|runtime.*edge.*pg
+    message: "pg driver in edge runtime. Use @neondatabase/serverless instead."
+    autofix: false
+
+code_smells:
+  - id: missing-retry-logic
+    name: No Retry Logic for Cold Starts
+    description: Cold starts can cause connection timeouts
+    pattern: |
+      prisma\.\w+\.\w+\((?!.*retry)
+    suggestion: "Consider retry logic for cold start connection errors (P1001, P1002)."
+
+  - id: sync-migrations-branches
+    name: Branch Created Before Migration
+    description: Branches don't inherit migrations run after creation
+    pattern: |
+      branches create.*migrate
+    suggestion: "Run migrations after branch creation, or create branch after migration merged."
+
+  - id: missing-connection-timeout
+    name: Pool Without Connection Timeout
+    description: Connection timeout helps handle cold starts
+    pattern: |
+      new Pool\(\{(?!.*connectionTimeoutMillis)
+    suggestion: "Add connectionTimeoutMillis to handle cold start delays."
+
+  - id: large-pool-idle-timeout
+    name: Long Idle Timeout in Serverless
+    description: Long idle timeout wastes connections in serverless
+    pattern: |
+      idleTimeoutMillis:\s*(6|7|8|9)[0-9]{4}
+    suggestion: "High idle timeout in serverless. Consider 30000ms or less."
+
+best_practices:
+  - id: dual-connection-urls
+    name: Use Dual Connection URLs
+    check: |
+      Both pooled and direct URLs configured for Prisma/Drizzle.
+    recommendation: |
+      # .env
+      DATABASE_URL="postgres://user:pass@ep-xxx-pooler.neon.tech/db?sslmode=require"
+      DIRECT_URL="postgres://user:pass@ep-xxx.neon.tech/db?sslmode=require"
+
+      // prisma/schema.prisma
+      datasource db {
+        provider  = "postgresql"
+        url       = env("DATABASE_URL")      // Pooled for queries
+        directUrl = env("DIRECT_URL")        // Direct for migrations
+      }
+
+      // drizzle.config.ts
+      export default defineConfig({
+        dbCredentials: {
+          url: process.env.DIRECT_URL!,      // Direct for migrations
+        },
+      });
+
+  - id: serverless-http-driver
+    name: Use HTTP Driver for Simple Queries
+    check: |
+      Single queries use neon() HTTP driver for best latency.
+    recommendation: |
+      import { neon } from '@neondatabase/serverless';
+      import { drizzle } from 'drizzle-orm/neon-http';
+
+      const sql = neon(process.env.DATABASE_URL!);
+      export const db = drizzle(sql, { schema });
+
+      // Simple queries - fastest option
+      export async function GET() {
+        const users = await db.select().from(users);
+        return Response.json(users);
+      }
+
+  - id: websocket-for-transactions
+    name: Use WebSocket Driver for Transactions
+    check: |
+      Transactions use Pool from @neondatabase/serverless.
+    recommendation: |
+      import { Pool } from '@neondatabase/serverless';
+      import { drizzle } from 'drizzle-orm/neon-serverless';
+
+      const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+      const db = drizzle(pool, { schema });
+
+      // Transactions work correctly
+      await db.transaction(async (tx) => {
+        await tx.insert(orders).values({ ... });
+        await tx.update(inventory).set({ ... });
+      });
+
+  - id: branch-per-preview
+    name: Create Branch Per Preview Deployment
+    check: |
+      Preview environments use isolated database branches.
+    recommendation: |
+      // .github/workflows/preview.yml
+      - uses: neondatabase/create-branch-action@v5
+        id: branch
+        with:
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
+          branch_name: preview/pr-${{ github.event.pull_request.number }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+
+      - name: Run migrations
+        env:
+          DATABASE_URL: ${{ steps.branch.outputs.db_url_with_pooler }}
+          DIRECT_URL: ${{ steps.branch.outputs.db_url }}
+        run: npx prisma migrate deploy
+
+      // Cleanup on PR close
+      - uses: neondatabase/delete-branch-action@v3
+        with:
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
+          branch: preview/pr-${{ github.event.pull_request.number }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+
+  - id: production-no-scale-to-zero
+    name: Disable Scale-to-Zero in Production
+    check: |
+      Production branch has scale-to-zero disabled and minimum compute set.
+    recommendation: |
+      // Neon Console Configuration
+      // Project Settings > Compute > Production branch
+
+      // Settings:
+      // - Suspend compute after inactivity: DISABLED
+      // - Minimum compute size: 0.5 CU or higher
+      // - Autoscaling: 0.5 CU - 4 CU (adjust to traffic)
+
+      // Add retry logic as backup
+      async function queryWithRetry<T>(query: () => Promise<T>): Promise<T> {
+        for (let i = 0; i < 3; i++) {
+          try {
+            return await query();
+          } catch (error: any) {
+            if (error.code === 'P1001' || error.code === 'P1002') {
+              await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+              continue;
+            }
+            throw error;
+          }
+        }
+        throw new Error('Max retries exceeded');
+      }
+
+  - id: small-pool-serverless
+    name: Keep Pool Size Small in Serverless
+    check: |
+      Connection pool max size is 5-10 for serverless functions.
+    recommendation: |
+      // Each serverless function instance has its own pool
+      // 100 instances × 50 connections = 5000 connections!
+
+      const pool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        max: 5,  // Small pool per instance
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 10000,
+      });
+
+      // Better: Use HTTP driver for single queries
+      import { neon } from '@neondatabase/serverless';
+      const sql = neon(process.env.DATABASE_URL!);
+
+      // No pool needed for simple queries
+      const users = await sql`SELECT * FROM users WHERE id = ${id}`;
+
+testing_checklist:
+  connection:
+    - "Pooled URL works for application queries"
+    - "Direct URL works for migrations"
+    - "SSL connection required and working"
+    - "Connection timeout handles cold starts"
+
+  branching:
+    - "Branch creation automated for PRs"
+    - "Branch deletion on PR close"
+    - "Migrations run on new branches"
+    - "Branch inherits data from parent"
+
+  performance:
+    - "Production scale-to-zero disabled"
+    - "Cold start retry logic implemented"
+    - "Connection pool size appropriate"
+    - "HTTP driver used where possible"
+
+  migrations:
+    - "Prisma directUrl configured"
+    - "Migrations use direct connection"
+    - "Schema changes deploy correctly"
+    - "Rollback tested"
+
+  drivers:
+    - "HTTP driver for single queries"
+    - "WebSocket driver for transactions"
+    - "Edge runtime compatible"
+    - "Error handling for connection issues"

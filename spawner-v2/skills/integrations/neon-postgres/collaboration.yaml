@@ -1,0 +1,636 @@
+# Collaboration - Neon Serverless Postgres
+# How this skill works with other skills
+
+version: 1.0.0
+skill_id: neon-postgres
+
+prerequisites:
+  required: []
+
+  recommended:
+    - skill: backend
+      reason: "API route and server-side patterns"
+      what_to_know:
+        - "Route handlers"
+        - "Server Actions"
+        - "Error handling"
+
+    - skill: prisma-expert
+      reason: "ORM patterns and migrations"
+      what_to_know:
+        - "Schema design"
+        - "Query patterns"
+        - "Connection management"
+
+    - skill: drizzle-orm
+      reason: "Alternative ORM with serverless focus"
+      what_to_know:
+        - "Schema definition"
+        - "Query builder"
+        - "Migration strategies"
+
+delegation_triggers:
+  - trigger: "user needs authentication"
+    delegate_to: clerk-auth
+    context: "User table with clerkId column"
+
+  - trigger: "user needs caching"
+    delegate_to: redis-specialist
+    context: "Query caching, session storage"
+
+  - trigger: "user needs search"
+    delegate_to: algolia-search
+    context: "Full-text search beyond Postgres capabilities"
+
+  - trigger: "user needs analytics"
+    delegate_to: segment-cdp
+    context: "Track database events, user actions"
+
+  - trigger: "user needs deployment"
+    delegate_to: vercel-deployment
+    context: "Environment variables, preview databases"
+
+receives_context_from:
+  - skill: backend
+    receives:
+      - "API patterns"
+      - "Error handling"
+      - "Request lifecycle"
+
+  - skill: frontend
+    receives:
+      - "Data requirements"
+      - "Loading states"
+      - "Error UI patterns"
+
+  - skill: devops
+    receives:
+      - "CI/CD pipelines"
+      - "Environment management"
+      - "Secret handling"
+
+provides_context_to:
+  - skill: clerk-auth
+    provides:
+      - "User table schema"
+      - "Upsert patterns for webhooks"
+      - "Query patterns with userId"
+
+  - skill: stripe-integration
+    provides:
+      - "Customer ID storage"
+      - "Subscription tracking"
+      - "Transaction records"
+
+  - skill: algolia-search
+    provides:
+      - "Data source for indexing"
+      - "Record structure"
+      - "Update triggers"
+
+escalation_paths:
+  - situation: "Complex query optimization"
+    escalate_to: postgres-wizard
+    context: "Index design, query plans"
+
+  - situation: "Large-scale data modeling"
+    escalate_to: data-architect
+    context: "Schema design, normalization"
+
+  - situation: "Real-time subscriptions"
+    escalate_to: realtime-specialist
+    context: "LISTEN/NOTIFY, WebSockets"
+
+  - situation: "Data compliance"
+    escalate_to: security-specialist
+    context: "GDPR, data retention"
+
+workflow_integration:
+  typical_sequence:
+    1:
+      step: "Set up Neon project and connection"
+      skills: [neon-postgres]
+      output: "Database URLs, project created"
+
+    2:
+      step: "Configure Prisma or Drizzle"
+      skills: [neon-postgres, prisma-expert]
+      output: "ORM configured with dual URLs"
+
+    3:
+      step: "Design and create schema"
+      skills: [neon-postgres, prisma-expert]
+      output: "Initial migration run"
+
+    4:
+      step: "Set up branching workflow"
+      skills: [neon-postgres]
+      output: "Preview branches automated"
+
+    5:
+      step: "Add authentication layer"
+      skills: [neon-postgres, clerk-auth]
+      output: "User table synced"
+
+    6:
+      step: "Configure production settings"
+      skills: [neon-postgres]
+      output: "Scale-to-zero disabled, retry logic"
+
+    7:
+      step: "Deploy to Vercel"
+      skills: [neon-postgres, vercel-deployment]
+      output: "Preview environments working"
+
+  decision_points:
+    - question: "Prisma or Drizzle ORM?"
+      guidance: |
+        Use Prisma if:
+        - You want schema-first development
+        - You need Prisma Studio for data browsing
+        - Team is familiar with Prisma
+        - Complex relations and nested queries
+
+        Use Drizzle if:
+        - You prefer TypeScript-first schemas
+        - You need minimal bundle size (edge)
+        - You want SQL-like query builder
+        - Performance is critical
+
+        Both work great with Neon. Drizzle has
+        slight edge for serverless bundle size.
+
+    - question: "HTTP or WebSocket driver?"
+      guidance: |
+        Use HTTP driver (neon()):
+        - Single queries (most common)
+        - Fastest cold start
+        - Edge/serverless environments
+        - Simple reads and writes
+
+        Use WebSocket driver (Pool):
+        - Transactions required
+        - Multiple related queries
+        - Session state needed
+        - Prepared statements
+
+        Many apps use both - HTTP for reads,
+        WebSocket for transaction writes.
+
+    - question: "Enable scale-to-zero?"
+      guidance: |
+        Development/Staging: YES
+        - Cost savings when not in use
+        - Cold starts acceptable
+        - Lower traffic expectations
+
+        Production: NO
+        - Disable scale-to-zero
+        - Set minimum compute (0.5+ CU)
+        - Enable autoscaling for spikes
+        - Add retry logic as backup
+
+collaboration_patterns:
+  with_prisma:
+    when: "Using Prisma ORM with Neon"
+    approach: |
+      Configure dual connection URLs:
+
+      ```prisma
+      // prisma/schema.prisma
+      datasource db {
+        provider  = "postgresql"
+        url       = env("DATABASE_URL")      // Pooled
+        directUrl = env("DIRECT_URL")        // Direct
+      }
+
+      generator client {
+        provider = "prisma-client-js"
+      }
+      ```
+
+      ```env
+      # .env
+      # Pooled connection for application queries
+      DATABASE_URL="postgres://user:pass@ep-xxx-pooler.neon.tech/db?sslmode=require"
+
+      # Direct connection for migrations
+      DIRECT_URL="postgres://user:pass@ep-xxx.neon.tech/db?sslmode=require"
+      ```
+
+      ```typescript
+      // lib/prisma.ts
+      import { PrismaClient } from '@prisma/client';
+
+      const globalForPrisma = globalThis as unknown as {
+        prisma: PrismaClient | undefined;
+      };
+
+      export const prisma = globalForPrisma.prisma ?? new PrismaClient({
+        log: process.env.NODE_ENV === 'development'
+          ? ['query', 'error', 'warn']
+          : ['error'],
+      });
+
+      if (process.env.NODE_ENV !== 'production') {
+        globalForPrisma.prisma = prisma;
+      }
+      ```
+
+  with_drizzle:
+    when: "Using Drizzle ORM with Neon serverless"
+    approach: |
+      Choose driver based on use case:
+
+      ```typescript
+      // lib/db/http.ts - Single queries (fastest)
+      import { neon } from '@neondatabase/serverless';
+      import { drizzle } from 'drizzle-orm/neon-http';
+      import * as schema from './schema';
+
+      const sql = neon(process.env.DATABASE_URL!);
+      export const db = drizzle(sql, { schema });
+
+      // Usage
+      export async function getUsers() {
+        return db.select().from(schema.users);
+      }
+      ```
+
+      ```typescript
+      // lib/db/pool.ts - Transactions
+      import { Pool } from '@neondatabase/serverless';
+      import { drizzle } from 'drizzle-orm/neon-serverless';
+      import * as schema from './schema';
+
+      const pool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+      });
+      export const dbPool = drizzle(pool, { schema });
+
+      // Usage with transactions
+      export async function createOrder(items: Item[]) {
+        return dbPool.transaction(async (tx) => {
+          const order = await tx.insert(schema.orders).values({ ... }).returning();
+          await tx.insert(schema.orderItems).values(
+            items.map(i => ({ orderId: order[0].id, ...i }))
+          );
+          return order[0];
+        });
+      }
+      ```
+
+      ```typescript
+      // drizzle.config.ts - Uses DIRECT_URL for migrations
+      import { defineConfig } from 'drizzle-kit';
+
+      export default defineConfig({
+        schema: './lib/db/schema.ts',
+        out: './drizzle',
+        dialect: 'postgresql',
+        dbCredentials: {
+          url: process.env.DIRECT_URL!,  // Direct, not pooled!
+        },
+      });
+      ```
+
+  with_vercel:
+    when: "Deploying to Vercel with preview environments"
+    approach: |
+      Enable Neon-Vercel integration:
+
+      ```typescript
+      // vercel.json
+      {
+        "buildCommand": "prisma generate && prisma migrate deploy && next build",
+        "framework": "nextjs"
+      }
+      ```
+
+      ```env
+      # Vercel injects these automatically with integration:
+      # DATABASE_URL - Pooled, per-preview branch
+      # DATABASE_URL_UNPOOLED - Direct, for migrations
+
+      # Prisma schema uses Vercel variables
+      # prisma/schema.prisma
+      datasource db {
+        provider  = "postgresql"
+        url       = env("DATABASE_URL")
+        directUrl = env("DATABASE_URL_UNPOOLED")  // Vercel naming
+      }
+      ```
+
+      Integration options:
+      1. **Vercel-Managed**: Storage tab in Vercel, billing in Vercel
+      2. **Neon-Managed**: Install from Neon dashboard, more control
+
+      Both support:
+      - Branch per preview deployment
+      - Auto-delete on deployment delete
+      - Environment variable injection
+
+  with_github_actions:
+    when: "CI/CD with database branches"
+    approach: |
+      Create and cleanup branches in GitHub Actions:
+
+      ```yaml
+      # .github/workflows/preview.yml
+      name: Preview Environment
+      on:
+        pull_request:
+          types: [opened, synchronize]
+
+      jobs:
+        create-branch:
+          runs-on: ubuntu-latest
+          steps:
+            - uses: actions/checkout@v4
+
+            - uses: neondatabase/create-branch-action@v5
+              id: branch
+              with:
+                project_id: ${{ secrets.NEON_PROJECT_ID }}
+                branch_name: preview/pr-${{ github.event.pull_request.number }}
+                api_key: ${{ secrets.NEON_API_KEY }}
+                username: ${{ secrets.NEON_ROLE_NAME }}
+
+            - name: Setup Node
+              uses: actions/setup-node@v4
+              with:
+                node-version: '20'
+
+            - name: Install dependencies
+              run: npm ci
+
+            - name: Run migrations
+              env:
+                DATABASE_URL: ${{ steps.branch.outputs.db_url_with_pooler }}
+                DIRECT_URL: ${{ steps.branch.outputs.db_url }}
+              run: npx prisma migrate deploy
+
+            - name: Run tests
+              env:
+                DATABASE_URL: ${{ steps.branch.outputs.db_url_with_pooler }}
+              run: npm test
+
+            - name: Deploy preview
+              env:
+                DATABASE_URL: ${{ steps.branch.outputs.db_url_with_pooler }}
+              run: vercel deploy --prebuilt
+      ```
+
+      ```yaml
+      # .github/workflows/cleanup.yml
+      name: Cleanup Preview
+      on:
+        pull_request:
+          types: [closed]
+
+      jobs:
+        delete-branch:
+          runs-on: ubuntu-latest
+          steps:
+            - uses: neondatabase/delete-branch-action@v3
+              with:
+                project_id: ${{ secrets.NEON_PROJECT_ID }}
+                branch: preview/pr-${{ github.event.pull_request.number }}
+                api_key: ${{ secrets.NEON_API_KEY }}
+      ```
+
+  with_clerk:
+    when: "Syncing Clerk users to Neon database"
+    approach: |
+      User model with Clerk webhook sync:
+
+      ```prisma
+      // prisma/schema.prisma
+      model User {
+        id          String   @id @default(cuid())
+        clerkId     String   @unique
+        email       String   @unique
+        firstName   String?
+        lastName    String?
+        imageUrl    String?
+        createdAt   DateTime @default(now())
+        updatedAt   DateTime @updatedAt
+
+        // User's data
+        projects    Project[]
+
+        @@index([clerkId])
+        @@index([email])
+      }
+      ```
+
+      ```typescript
+      // app/api/webhooks/clerk/route.ts
+      import { Webhook } from 'svix';
+      import { prisma } from '@/lib/prisma';
+
+      export async function POST(req: Request) {
+        const body = await req.text();
+        const headers = {
+          'svix-id': req.headers.get('svix-id')!,
+          'svix-timestamp': req.headers.get('svix-timestamp')!,
+          'svix-signature': req.headers.get('svix-signature')!,
+        };
+
+        const wh = new Webhook(process.env.CLERK_WEBHOOK_SECRET!);
+        const evt = wh.verify(body, headers) as any;
+
+        const { id, email_addresses, first_name, last_name, image_url } = evt.data;
+
+        if (evt.type === 'user.created' || evt.type === 'user.updated') {
+          await prisma.user.upsert({
+            where: { clerkId: id },
+            create: {
+              clerkId: id,
+              email: email_addresses[0]?.email_address,
+              firstName: first_name,
+              lastName: last_name,
+              imageUrl: image_url,
+            },
+            update: {
+              email: email_addresses[0]?.email_address,
+              firstName: first_name,
+              lastName: last_name,
+              imageUrl: image_url,
+            },
+          });
+        }
+
+        if (evt.type === 'user.deleted') {
+          await prisma.user.deleteMany({
+            where: { clerkId: id },
+          });
+        }
+
+        return Response.json({ received: true });
+      }
+      ```
+
+  with_retry_logic:
+    when: "Handling cold starts in production"
+    approach: |
+      Add retry wrapper for cold start resilience:
+
+      ```typescript
+      // lib/db/retry.ts
+      import { prisma } from './prisma';
+
+      const MAX_RETRIES = 3;
+      const RETRY_DELAYS = [1000, 2000, 4000]; // Exponential backoff
+
+      export async function queryWithRetry<T>(
+        query: () => Promise<T>
+      ): Promise<T> {
+        let lastError: Error | undefined;
+
+        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+          try {
+            return await query();
+          } catch (error: any) {
+            lastError = error;
+
+            // Connection errors indicate cold start
+            const isConnectionError =
+              error.code === 'P1001' ||  // Can't reach server
+              error.code === 'P1002' ||  // Connection timed out
+              error.message?.includes('connect');
+
+            if (isConnectionError && attempt < MAX_RETRIES - 1) {
+              console.log(`Retry ${attempt + 1}/${MAX_RETRIES} after connection error`);
+              await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
+              continue;
+            }
+
+            throw error;
+          }
+        }
+
+        throw lastError;
+      }
+
+      // Usage
+      export async function getUsers() {
+        return queryWithRetry(() =>
+          prisma.user.findMany({
+            orderBy: { createdAt: 'desc' },
+          })
+        );
+      }
+
+      // With Drizzle
+      import { db } from './db';
+      import { users } from './schema';
+
+      export async function getUserById(id: string) {
+        return queryWithRetry(() =>
+          db.select().from(users).where(eq(users.id, id))
+        );
+      }
+      ```
+
+platform_integration:
+  vercel:
+    setup: |
+      # Environment variables (auto-injected with integration)
+      DATABASE_URL=postgres://...@ep-xxx-pooler.neon.tech/db
+      DATABASE_URL_UNPOOLED=postgres://...@ep-xxx.neon.tech/db
+
+      # Manual setup without integration
+      DATABASE_URL=postgres://...@ep-xxx-pooler.neon.tech/db?sslmode=require
+      DIRECT_URL=postgres://...@ep-xxx.neon.tech/db?sslmode=require
+
+  cloudflare:
+    setup: |
+      # wrangler.toml - secrets set via wrangler secret
+      # wrangler secret put DATABASE_URL
+
+      # Use Hyperdrive for connection pooling
+      [[hyperdrive]]
+      binding = "HYPERDRIVE"
+      id = "your-hyperdrive-id"
+
+  docker:
+    setup: |
+      # Dockerfile
+      # Secrets at runtime, not build time
+
+      # docker-compose.yml
+      environment:
+        - DATABASE_URL=${DATABASE_URL}
+        - DIRECT_URL=${DIRECT_URL}
+
+security_checklist:
+  - "Connection strings in environment variables only"
+  - "Pooled URL for application, direct for migrations"
+  - "SSL mode required on all connections"
+  - "Neon IP restrictions configured (if needed)"
+  - "Branch access limited to appropriate roles"
+  - "Production scale-to-zero disabled"
+  - "Connection pool size appropriate for serverless"
+  - "Retry logic for cold start handling"
+
+testing_patterns:
+  unit_tests: |
+    // Mock Prisma for testing
+    jest.mock('@/lib/prisma', () => ({
+      prisma: {
+        user: {
+          findMany: jest.fn(),
+          findUnique: jest.fn(),
+          create: jest.fn(),
+          update: jest.fn(),
+          upsert: jest.fn(),
+        },
+      },
+    }));
+
+    describe('User Repository', () => {
+      it('creates user with correct data', async () => {
+        const mockUser = { id: '1', email: 'test@example.com' };
+        (prisma.user.create as jest.Mock).mockResolvedValue(mockUser);
+
+        const result = await createUser({ email: 'test@example.com' });
+
+        expect(prisma.user.create).toHaveBeenCalledWith({
+          data: { email: 'test@example.com' },
+        });
+        expect(result).toEqual(mockUser);
+      });
+    });
+
+  integration_tests: |
+    // Use Neon branch for integration tests
+    // Create branch before tests, delete after
+
+    import { prisma } from '@/lib/prisma';
+
+    beforeAll(async () => {
+      // Migrations already run in CI
+      await prisma.$connect();
+    });
+
+    afterAll(async () => {
+      await prisma.$disconnect();
+    });
+
+    describe('Database Integration', () => {
+      it('creates and retrieves user', async () => {
+        const user = await prisma.user.create({
+          data: { email: 'integration@test.com' },
+        });
+
+        const found = await prisma.user.findUnique({
+          where: { id: user.id },
+        });
+
+        expect(found?.email).toBe('integration@test.com');
+
+        // Cleanup
+        await prisma.user.delete({ where: { id: user.id } });
+      });
+    });

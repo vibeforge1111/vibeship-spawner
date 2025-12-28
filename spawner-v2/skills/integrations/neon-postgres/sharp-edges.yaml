@@ -1,0 +1,487 @@
+# Sharp Edges - Neon Serverless Postgres
+# Serverless database gotchas and connection pitfalls
+
+version: 1.0.0
+skill_id: neon-postgres
+
+sharp_edges:
+  - id: cold-start-latency
+    title: Cold Start Latency After Scale-to-Zero
+    severity: high
+    description: |
+      Neon scales to zero after 5 minutes of inactivity by default.
+      Waking from idle adds 500ms to several seconds of latency.
+      First request after idle period will be slow.
+
+    wrong_way: |
+      // Production with scale-to-zero enabled
+      // Neon Console: Suspend after 5 minutes of inactivity ✓
+
+      // User requests after idle period
+      // First query: 800ms - 2000ms latency
+      // Subsequent queries: 10-50ms
+
+      // No retry logic for cold start timeouts
+      export async function GET() {
+        const users = await prisma.user.findMany();  // May timeout!
+        return Response.json(users);
+      }
+
+    right_way: |
+      // Production: Disable scale-to-zero
+      // Neon Console > Compute > Suspend compute: DISABLED
+      // Set minimum compute size: 0.5 CU or higher
+
+      // Add retry logic for cold starts
+      async function queryWithRetry<T>(
+        query: () => Promise<T>,
+        retries = 3
+      ): Promise<T> {
+        for (let i = 0; i < retries; i++) {
+          try {
+            return await query();
+          } catch (error: any) {
+            // Connection errors indicate cold start
+            if (
+              error.code === 'P1001' ||
+              error.code === 'P1002' ||
+              error.message?.includes('connect')
+            ) {
+              await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+              continue;
+            }
+            throw error;
+          }
+        }
+        throw new Error('Max retries exceeded');
+      }
+
+      // Use SSL direct negotiation (PostgreSQL 17+)
+      // Saves ~50ms on connection
+      DATABASE_URL="postgres://user:pass@host/db?sslnegotiation=direct"
+
+    detection_patterns:
+      - "scale.*zero.*production"
+      - "suspend.*5.*minutes"
+
+    references:
+      - "https://neon.com/docs/connect/connection-latency"
+      - "https://neon.com/blog/using-neons-auto-suspend-with-long-running-applications"
+
+  - id: pooled-connection-migrations
+    title: Using Pooled Connection for Migrations
+    severity: high
+    description: |
+      Prisma migrations require direct connections, not pooled.
+      PgBouncer doesn't support DDL operations properly.
+      Migrations through pooler will fail or behave unexpectedly.
+
+    wrong_way: |
+      // Using same pooled URL for everything
+      # .env
+      DATABASE_URL="postgres://user:pass@ep-xxx-pooler.neon.tech/db"
+
+      // prisma/schema.prisma
+      datasource db {
+        provider = "postgresql"
+        url      = env("DATABASE_URL")  // Pooled - bad for migrations!
+      }
+
+      // Migrations fail or hang
+      npx prisma migrate dev  // ERROR!
+
+    right_way: |
+      // Separate pooled and direct connections
+      # .env
+      DATABASE_URL="postgres://user:pass@ep-xxx-pooler.neon.tech/db"
+      DIRECT_URL="postgres://user:pass@ep-xxx.neon.tech/db"
+
+      // prisma/schema.prisma
+      datasource db {
+        provider  = "postgresql"
+        url       = env("DATABASE_URL")   // Pooled for queries
+        directUrl = env("DIRECT_URL")     // Direct for migrations
+      }
+
+      // Migrations use DIRECT_URL automatically
+      npx prisma migrate dev  // Works!
+
+      // For Drizzle, use direct URL for migrations
+      // drizzle.config.ts
+      export default defineConfig({
+        dbCredentials: {
+          url: process.env.DIRECT_URL!,  // Direct, not pooled
+        },
+      });
+
+    detection_patterns:
+      - "migrate.*pooler"
+      - "directUrl.*pooler"
+
+    references:
+      - "https://neon.com/docs/guides/prisma"
+
+  - id: connection-pool-exhaustion
+    title: Connection Pool Exhaustion in Serverless
+    severity: high
+    description: |
+      Each serverless function instance creates its own connection pool.
+      With many concurrent functions, you can exhaust Neon's connection
+      limits despite PgBouncer's 10K pooler limit.
+
+    wrong_way: |
+      // High pool size per function instance
+      const pool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        max: 50,  // Each function instance gets 50 connections!
+      });
+
+      // 100 concurrent functions × 50 connections = 5000 connections
+      // Plus other services = connection limit exceeded
+
+      // Or creating new client per request
+      export async function GET() {
+        const client = new Client(process.env.DATABASE_URL);
+        await client.connect();
+        const result = await client.query('SELECT * FROM users');
+        await client.end();  // Creates/destroys connection each time
+        return Response.json(result.rows);
+      }
+
+    right_way: |
+      // Use Neon serverless HTTP driver (no pool needed)
+      import { neon } from '@neondatabase/serverless';
+
+      const sql = neon(process.env.DATABASE_URL!);
+
+      export async function GET() {
+        const users = await sql`SELECT * FROM users`;
+        return Response.json(users);
+      }
+
+      // If using pool, keep it small
+      const pool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        max: 5,  // Small pool per instance
+        idleTimeoutMillis: 30000,
+      });
+
+      // For Prisma, connection management is automatic
+      // but use pooled endpoint
+      DATABASE_URL="postgres://...@ep-xxx-pooler.neon.tech/db"
+
+      // Monitor connections
+      SELECT count(*) FROM pg_stat_activity;
+
+    detection_patterns:
+      - "max:\\s*[2-9][0-9]"
+      - "new Client.*connect.*end"
+
+    references:
+      - "https://neon.com/docs/connect/connection-pooling"
+
+  - id: pgbouncer-limitations
+    title: PgBouncer Feature Limitations
+    severity: medium
+    description: |
+      Neon's pooler uses PgBouncer in transaction mode, which doesn't
+      support some Postgres features: prepared statements, advisory
+      locks, LISTEN/NOTIFY, and session variables.
+
+    wrong_way: |
+      // Using prepared statements through pooler
+      const stmt = await client.query({
+        name: 'get-user',
+        text: 'SELECT * FROM users WHERE id = $1',
+        values: [userId],
+      });  // May fail or behave unexpectedly
+
+      // Using LISTEN/NOTIFY through pooler
+      client.query('LISTEN new_orders');  // Won't work!
+      client.on('notification', handleNotification);
+
+      // Session variables through pooler
+      await client.query("SET search_path TO 'my_schema'");
+      // Next query might use different connection!
+
+    right_way: |
+      // Use direct connection for advanced features
+      const directPool = new Pool({
+        connectionString: process.env.DIRECT_URL,  // No -pooler
+      });
+
+      // For prepared statements with Prisma
+      // Prisma handles this automatically with directUrl
+
+      // For LISTEN/NOTIFY, use direct connection
+      const notifyClient = new Client(process.env.DIRECT_URL);
+      await notifyClient.connect();
+      await notifyClient.query('LISTEN new_orders');
+      notifyClient.on('notification', handleNotification);
+
+      // For session state, use WebSocket driver
+      import { Pool } from '@neondatabase/serverless';
+      const wsPool = new Pool({ connectionString: process.env.DATABASE_URL });
+      // Maintains session across queries in transaction
+
+    detection_patterns:
+      - "LISTEN.*pooler"
+      - "SET.*search_path.*pooler"
+      - "query.*name.*pooler"
+
+    references:
+      - "https://neon.com/docs/connect/connection-pooling"
+
+  - id: branch-storage-accumulation
+    title: Branch Storage Accumulation
+    severity: medium
+    description: |
+      Each branch accumulates its own write data (copy-on-write).
+      Old branches with many writes consume storage.
+      Branches not cleaned up increase costs.
+
+    wrong_way: |
+      // Creating branches without cleanup strategy
+      neon branches create preview/pr-123
+      neon branches create preview/pr-124
+      neon branches create preview/pr-125
+      // ...months later, hundreds of stale branches
+
+      // Each branch with test data:
+      // - Insert 10K test records
+      // - Run integration tests
+      // - Never delete branch
+      // Storage: accumulated across all branches
+
+    right_way: |
+      // Automatic cleanup on PR close
+      // .github/workflows/cleanup.yml
+      on:
+        pull_request:
+          types: [closed]
+
+      jobs:
+        cleanup:
+          runs-on: ubuntu-latest
+          steps:
+            - uses: neondatabase/delete-branch-action@v3
+              with:
+                project_id: ${{ secrets.NEON_PROJECT_ID }}
+                branch: preview/pr-${{ github.event.pull_request.number }}
+                api_key: ${{ secrets.NEON_API_KEY }}
+
+      // Or use Vercel integration with auto-cleanup
+      // Vercel-Managed: Auto-deletes when deployment deleted
+      // Neon-Managed: Option to delete when Git branch deleted
+
+      // List and clean stale branches
+      neon branches list --format json | jq '.[] | select(.updated_at < "2024-01-01")'
+
+      // Delete old branches in bulk
+      neon branches list --format json | \
+        jq -r '.[] | select(.name | startswith("preview/")) | .id' | \
+        xargs -I {} neon branches delete {}
+
+    detection_patterns:
+      - "branches create(?!.*delete)"
+
+    references:
+      - "https://neon.com/docs/guides/branching"
+
+  - id: reserved-connections
+    title: Reserved Connections Reduce Available Pool
+    severity: low
+    description: |
+      Neon reserves 7 connections for the superuser account.
+      Actual available connections = max_connections - 7.
+      Small compute sizes have limited connections.
+
+    wrong_way: |
+      // Assuming full connection count available
+      // 0.25 CU: max_connections = 112
+      // Trying to use all 112...
+
+      const pool = new Pool({
+        max: 112,  // Wrong! Only 105 available
+      });
+
+      // Or not accounting for reserved in capacity planning
+      // "We have 112 connections, so 100 function instances
+      //  with 1 connection each should work"
+      // Reality: Only 105 available
+
+    right_way: |
+      // Account for reserved connections
+      // Available = max_connections - 7
+
+      // Compute size limits:
+      // 0.25 CU: 112 - 7 = 105 available
+      // 0.5 CU:  225 - 7 = 218 available
+      // 1 CU:    450 - 7 = 443 available
+      // 2 CU:    901 - 7 = 894 available
+
+      // Check actual limits
+      SELECT setting::int - 7 as available_connections
+      FROM pg_settings
+      WHERE name = 'max_connections';
+
+      // Size compute based on actual needs
+      // Dev: 0.25 CU (105 connections)
+      // Staging: 0.5 CU (218 connections)
+      // Production: 1+ CU (443+ connections)
+
+    detection_patterns:
+      - "max.*112"
+
+    references:
+      - "https://neon.com/docs/connect/connection-pooling"
+
+  - id: http-driver-no-transactions
+    title: HTTP Driver Doesn't Support Transactions
+    severity: medium
+    description: |
+      Neon's HTTP driver (neon-http) is fastest for single queries
+      but doesn't support multi-statement transactions.
+      Use WebSocket driver for transactions.
+
+    wrong_way: |
+      import { neon } from '@neondatabase/serverless';
+
+      const sql = neon(process.env.DATABASE_URL!);
+
+      // Trying transaction with HTTP driver
+      await sql`BEGIN`;
+      await sql`INSERT INTO orders VALUES (...)`;
+      await sql`UPDATE inventory SET ...`;
+      await sql`COMMIT`;  // Each query is separate request!
+      // Not a real transaction - no isolation!
+
+    right_way: |
+      // Use WebSocket driver for transactions
+      import { Pool } from '@neondatabase/serverless';
+      import { drizzle } from 'drizzle-orm/neon-serverless';
+
+      const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+      const db = drizzle(pool);
+
+      // Real transaction
+      await db.transaction(async (tx) => {
+        await tx.insert(orders).values({ ... });
+        await tx.update(inventory).set({ ... });
+      });
+
+      // Or with raw SQL
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('INSERT INTO orders VALUES (...)');
+        await client.query('UPDATE inventory SET ...');
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+
+      // Use HTTP for simple reads, WebSocket for writes
+      import { neon } from '@neondatabase/serverless';
+      const sql = neon(process.env.DATABASE_URL!);
+
+      // Good: Single query reads
+      const users = await sql`SELECT * FROM users WHERE id = ${id}`;
+
+    detection_patterns:
+      - "neon\\(.*BEGIN"
+      - "neon\\(.*COMMIT"
+
+    references:
+      - "https://orm.drizzle.team/docs/connect-neon"
+
+  - id: branch-parent-deletion
+    title: Deleting Parent Branch Affects Children
+    severity: high
+    description: |
+      Branches inherit from their parent. Deleting a parent branch
+      while children exist can cause data loss or orphaned branches.
+
+    wrong_way: |
+      // Branch hierarchy:
+      // main (production)
+      //   └── staging
+      //         └── feature-x
+
+      // Deleting staging while feature-x exists
+      neon branches delete staging  // feature-x now orphaned!
+
+      // Or deleting main with children
+      neon branches delete main  // All children affected!
+
+    right_way: |
+      // Delete children before parent
+      neon branches delete feature-x
+      neon branches delete staging
+      // Now safe to delete staging
+
+      // Or reset branch to new parent
+      neon branches reset feature-x --parent main
+
+      // Use flat branch structure for previews
+      // main (production)
+      //   ├── preview/pr-1 (from main)
+      //   ├── preview/pr-2 (from main)
+      //   └── preview/pr-3 (from main)
+
+      // Check branch hierarchy before deletion
+      neon branches list --format json | jq '.[] | {name, parent_id}'
+
+    detection_patterns:
+      - "delete.*parent.*branch"
+
+    references:
+      - "https://neon.com/docs/guides/branching"
+
+  - id: migration-branch-sync
+    title: Schema Drift Between Branches
+    severity: medium
+    description: |
+      Branches created before migrations won't have new schema.
+      Running migrations on main doesn't affect existing branches.
+      Must run migrations on each branch separately.
+
+    wrong_way: |
+      // Create feature branch
+      neon branches create feature-x --parent main
+
+      // Later, add migration to main
+      npx prisma migrate dev --name add_posts_table
+
+      // feature-x doesn't have posts table!
+      // Queries fail on feature-x
+
+    right_way: |
+      // Run migrations as part of branch workflow
+      // Create branch, then migrate
+
+      // In CI/CD:
+      - name: Create branch
+        uses: neondatabase/create-branch-action@v5
+        id: branch
+
+      - name: Run migrations
+        env:
+          DATABASE_URL: ${{ steps.branch.outputs.db_url }}
+        run: npx prisma migrate deploy
+
+      // Or create branch AFTER migration merged
+      // main has migration → create branch from main
+
+      // For existing branches, update from main
+      neon branches reset feature-x --parent main
+      # Then run migrations on feature-x
+
+    detection_patterns:
+      - "branches create.*migrate"
+
+    references:
+      - "https://neon.com/docs/guides/drizzle-migrations"
