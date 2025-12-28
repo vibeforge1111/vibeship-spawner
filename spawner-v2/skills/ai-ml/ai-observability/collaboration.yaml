@@ -1,0 +1,585 @@
+# Collaboration - AI Observability
+# Integration patterns with other skills and services
+
+version: 1.0.0
+skill_id: ai-observability
+
+prerequisites:
+  required_knowledge:
+    - "LLM API usage (OpenAI, Anthropic)"
+    - "Distributed tracing concepts"
+    - "Time-series metrics and alerting"
+    - "Token economics and pricing"
+
+  environment_setup:
+    - step: "Choose observability platform"
+      options:
+        - provider: "Langfuse"
+          best_for: "Open-source, detailed tracing, self-host option"
+          setup: |
+            npm install langfuse
+            # Get keys from cloud.langfuse.com or self-host
+
+        - provider: "Helicone"
+          best_for: "Zero-code, automatic cost tracking, caching"
+          setup: |
+            # Just change base URL - no SDK needed
+            # Get API key from helicone.ai
+
+        - provider: "LangSmith"
+          best_for: "LangChain/LangGraph users, deep integration"
+          setup: |
+            npm install langsmith
+            # Get API key from smith.langchain.com
+
+    - step: "Set up cost tracking database"
+      options:
+        - "PostgreSQL for detailed usage history"
+        - "Redis for real-time budget enforcement"
+        - "ClickHouse for analytics at scale"
+
+    - step: "Configure alerting"
+      options:
+        - "PagerDuty for on-call alerts"
+        - "Slack for team notifications"
+        - "Email for daily reports"
+
+delegation_triggers:
+  delegate_to_others:
+    - condition: "Need to evaluate RAG retrieval quality"
+      delegate_to: "semantic-search skill"
+      handoff: |
+        Retrieval evaluation requirements:
+        - Measure recall@k and MRR
+        - Track context relevance
+        - Compare embedding models
+        - A/B test retrieval strategies
+
+    - condition: "Need dashboard for metrics"
+      delegate_to: "frontend skill"
+      handoff: |
+        Dashboard requirements:
+        - Real-time cost tracker
+        - Latency percentile charts
+        - Quality score trends
+        - User usage breakdown
+        - Model comparison views
+
+    - condition: "Need to store metrics long-term"
+      delegate_to: "backend skill"
+      handoff: |
+        Storage requirements:
+        - Time-series for metrics
+        - Token usage per request
+        - Evaluation scores history
+        - Trace links and metadata
+
+    - condition: "Need background evaluation jobs"
+      delegate_to: "background-jobs skill"
+      handoff: |
+        Job requirements:
+        - Queue sampled evaluations
+        - Run RAGAS batch evaluations
+        - Generate daily/weekly reports
+        - Reconcile with provider usage
+
+  accept_from_others:
+    - from: "semantic-search skill"
+      when: "Need to monitor search quality"
+      expect: |
+        I'll receive:
+        - Search queries and results
+        - Relevance scores
+        - Latency measurements
+        I'll provide: Quality dashboards and alerts
+
+    - from: "ai-code-generation skill"
+      when: "Need to monitor generation quality"
+      expect: |
+        I'll receive:
+        - Generated code samples
+        - Test pass/fail rates
+        - Token usage per generation
+        I'll provide: Quality metrics and cost tracking
+
+    - from: "document-ai skill"
+      when: "Need to monitor extraction quality"
+      expect: |
+        I'll receive:
+        - Extraction results
+        - Confidence scores
+        - Processing times
+        I'll provide: Accuracy trends and cost analysis
+
+workflow_integration:
+  observability_setup_flow:
+    - step: 1
+      action: "Instrument LLM calls"
+      details: |
+        - Add Langfuse/Helicone wrapper
+        - Capture inputs, outputs, tokens
+        - Include userId and sessionId
+        - Sanitize PII before logging
+
+    - step: 2
+      action: "Set up cost tracking"
+      details: |
+        - Configure model pricing table
+        - Implement per-request cost calculation
+        - Set up Redis for real-time budgets
+        - Create user budget limits
+
+    - step: 3
+      action: "Configure evaluation pipeline"
+      details: |
+        - Set sample rate (5-10%)
+        - Queue samples for batch evaluation
+        - Run RAGAS metrics
+        - Store results for trending
+
+    - step: 4
+      action: "Set up alerting"
+      details: |
+        - Alert on cost spikes
+        - Alert on quality degradation
+        - Alert on error rate increase
+        - Daily summary reports
+
+  decision_points:
+    - decision: "Observability platform"
+      options:
+        - name: "Langfuse"
+          when: "Want open-source, self-host, detailed tracing"
+          pros: "Full control, comprehensive features, MIT license"
+          cons: "Requires SDK integration"
+
+        - name: "Helicone"
+          when: "Want minimal setup, automatic features"
+          pros: "URL change only, caching built-in, rate limiting"
+          cons: "Adds proxy latency"
+
+        - name: "LangSmith"
+          when: "Using LangChain/LangGraph"
+          pros: "Deepest LangChain integration"
+          cons: "Closed source, limited self-host"
+
+    - decision: "Evaluation approach"
+      options:
+        - name: "LLM-as-judge (RAGAS)"
+          when: "Need semantic evaluation, no ground truth"
+          cost: "$0.01-0.05 per evaluation"
+
+        - name: "Embedding similarity"
+          when: "Have reference answers, cheaper"
+          cost: "$0.0001 per evaluation"
+
+        - name: "Human evaluation"
+          when: "High-stakes, need validation"
+          cost: "$0.10-1.00 per evaluation"
+
+collaboration_patterns:
+  with_nextjs:
+    pattern: "API middleware for observability"
+    implementation: |
+      // middleware.ts
+      import { NextRequest, NextResponse } from "next/server";
+      import { Langfuse } from "langfuse";
+
+      const langfuse = new Langfuse({
+        publicKey: process.env.LANGFUSE_PUBLIC_KEY!,
+        secretKey: process.env.LANGFUSE_SECRET_KEY!,
+      });
+
+      export async function middleware(req: NextRequest) {
+        // Add trace ID to request
+        const traceId = crypto.randomUUID();
+        const requestHeaders = new Headers(req.headers);
+        requestHeaders.set("x-trace-id", traceId);
+
+        const response = NextResponse.next({
+          request: { headers: requestHeaders },
+        });
+
+        // Add trace ID to response
+        response.headers.set("x-trace-id", traceId);
+
+        return response;
+      }
+
+      export const config = {
+        matcher: "/api/:path*",
+      };
+
+      // app/api/chat/route.ts
+      import { NextRequest, NextResponse } from "next/server";
+
+      export async function POST(req: NextRequest) {
+        const traceId = req.headers.get("x-trace-id");
+        const { messages, userId } = await req.json();
+
+        const trace = langfuse.trace({
+          id: traceId,
+          name: "chat-api",
+          userId,
+        });
+
+        try {
+          const generation = trace.generation({
+            name: "openai-completion",
+            model: "gpt-4o",
+            input: messages,
+          });
+
+          const response = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages,
+          });
+
+          generation.end({
+            output: response.choices[0].message,
+            usage: {
+              promptTokens: response.usage?.prompt_tokens,
+              completionTokens: response.usage?.completion_tokens,
+            },
+          });
+
+          return NextResponse.json({
+            message: response.choices[0].message,
+            traceId,
+          });
+        } finally {
+          await langfuse.flushAsync();
+        }
+      }
+
+  with_inngest:
+    pattern: "Background evaluation jobs"
+    implementation: |
+      // lib/inngest/functions.ts
+      import { inngest } from "./client";
+      import { Langfuse } from "langfuse";
+
+      const langfuse = new Langfuse({
+        publicKey: process.env.LANGFUSE_PUBLIC_KEY!,
+        secretKey: process.env.LANGFUSE_SECRET_KEY!,
+      });
+
+      // Daily evaluation batch
+      export const dailyEvaluation = inngest.createFunction(
+        {
+          id: "daily-rag-evaluation",
+          retries: 2,
+        },
+        { cron: "0 3 * * *" }, // 3 AM daily
+        async ({ step }) => {
+          // Get sampled traces from yesterday
+          const traces = await step.run("fetch-traces", async () => {
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+
+            return await langfuse.fetchTraces({
+              fromTimestamp: yesterday,
+              tags: ["rag-chat"],
+              limit: 100, // Sample
+            });
+          });
+
+          // Evaluate each
+          const results = await step.run("evaluate-traces", async () => {
+            const evals = [];
+
+            for (const trace of traces.data) {
+              const scores = await evaluateRAGAS({
+                question: trace.input,
+                contexts: trace.metadata?.contexts || [],
+                answer: trace.output,
+              });
+
+              evals.push({ traceId: trace.id, scores });
+
+              // Rate limit
+              await new Promise((r) => setTimeout(r, 1000));
+            }
+
+            return evals;
+          });
+
+          // Calculate aggregates
+          const aggregate = step.run("aggregate-scores", () => ({
+            avgFaithfulness:
+              results.reduce((s, r) => s + r.scores.faithfulness, 0) / results.length,
+            avgRelevancy:
+              results.reduce((s, r) => s + r.scores.answerRelevancy, 0) / results.length,
+            avgPrecision:
+              results.reduce((s, r) => s + r.scores.contextPrecision, 0) / results.length,
+          }));
+
+          // Store results
+          await step.run("store-results", async () => {
+            await db.evalBatches.create({
+              data: {
+                date: new Date(),
+                traceCount: results.length,
+                aggregate,
+              },
+            });
+          });
+
+          // Alert if scores dropped
+          await step.run("check-alerts", async () => {
+            const previousBatch = await db.evalBatches.findFirst({
+              orderBy: { date: "desc" },
+              skip: 1,
+            });
+
+            if (previousBatch && aggregate.avgFaithfulness < previousBatch.aggregate.avgFaithfulness * 0.9) {
+              await sendSlackAlert(
+                `Faithfulness dropped 10%: ${aggregate.avgFaithfulness.toFixed(2)} vs ${previousBatch.aggregate.avgFaithfulness.toFixed(2)}`
+              );
+            }
+          });
+
+          return aggregate;
+        }
+      );
+
+      // Cost anomaly detection
+      export const costAnomalyCheck = inngest.createFunction(
+        {
+          id: "cost-anomaly-check",
+        },
+        { cron: "0 * * * *" }, // Hourly
+        async ({ step }) => {
+          const hourlySpend = await step.run("get-hourly-spend", async () => {
+            const hour = new Date();
+            hour.setHours(hour.getHours() - 1);
+
+            return await db.tokenUsage.aggregate({
+              where: { timestamp: { gte: hour } },
+              _sum: { cost: true },
+            });
+          });
+
+          const avgHourlyCost = await step.run("get-avg-hourly", async () => {
+            // Average of same hour over past week
+            return await db.hourlyStats.findFirst({
+              where: { hour: new Date().getHours() },
+            });
+          });
+
+          // Alert if 2x normal
+          if (hourlySpend._sum.cost > (avgHourlyCost?.avgCost || 10) * 2) {
+            await step.run("alert", async () => {
+              await sendPagerDuty({
+                severity: "warning",
+                summary: `Cost anomaly: $${hourlySpend._sum.cost.toFixed(2)} vs avg $${avgHourlyCost?.avgCost.toFixed(2)}`,
+              });
+            });
+          }
+        }
+      );
+
+  with_grafana:
+    pattern: "Prometheus metrics export"
+    implementation: |
+      // lib/metrics.ts
+      import { Registry, Counter, Histogram, Gauge } from "prom-client";
+
+      export const metricsRegistry = new Registry();
+
+      // LLM call metrics
+      export const llmCallsTotal = new Counter({
+        name: "llm_calls_total",
+        help: "Total LLM API calls",
+        labelNames: ["model", "status", "feature"],
+        registers: [metricsRegistry],
+      });
+
+      export const llmLatency = new Histogram({
+        name: "llm_latency_seconds",
+        help: "LLM response latency",
+        labelNames: ["model", "feature"],
+        buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
+        registers: [metricsRegistry],
+      });
+
+      export const llmTokens = new Counter({
+        name: "llm_tokens_total",
+        help: "Total tokens used",
+        labelNames: ["model", "type"], // type: input|output
+        registers: [metricsRegistry],
+      });
+
+      export const llmCost = new Counter({
+        name: "llm_cost_dollars",
+        help: "Total cost in dollars",
+        labelNames: ["model", "feature", "user_tier"],
+        registers: [metricsRegistry],
+      });
+
+      // Quality metrics
+      export const ragFaithfulness = new Gauge({
+        name: "rag_faithfulness_score",
+        help: "RAG faithfulness score (rolling average)",
+        registers: [metricsRegistry],
+      });
+
+      export const ragRelevancy = new Gauge({
+        name: "rag_relevancy_score",
+        help: "RAG answer relevancy score (rolling average)",
+        registers: [metricsRegistry],
+      });
+
+      // Cache metrics
+      export const cacheHits = new Counter({
+        name: "prompt_cache_hits_total",
+        help: "Prompt cache hits",
+        labelNames: ["model"],
+        registers: [metricsRegistry],
+      });
+
+      export const cacheSavings = new Counter({
+        name: "prompt_cache_savings_tokens",
+        help: "Tokens saved by caching",
+        labelNames: ["model"],
+        registers: [metricsRegistry],
+      });
+
+      // app/api/metrics/route.ts
+      import { NextResponse } from "next/server";
+      import { metricsRegistry } from "@/lib/metrics";
+
+      export async function GET() {
+        const metrics = await metricsRegistry.metrics();
+        return new NextResponse(metrics, {
+          headers: { "Content-Type": metricsRegistry.contentType },
+        });
+      }
+
+  with_slack:
+    pattern: "Automated alerts and reports"
+    implementation: |
+      // lib/alerts.ts
+      interface SlackMessage {
+        channel: string;
+        text: string;
+        blocks?: SlackBlock[];
+      }
+
+      async function sendSlackMessage(message: SlackMessage): Promise<void> {
+        await fetch("https://slack.com/api/chat.postMessage", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
+          },
+          body: JSON.stringify(message),
+        });
+      }
+
+      // Cost alert
+      export async function alertCostSpike(data: {
+        userId: string;
+        currentSpend: number;
+        threshold: number;
+        period: string;
+      }): Promise<void> {
+        await sendSlackMessage({
+          channel: "#ai-alerts",
+          text: `Cost Alert: User ${data.userId} exceeded ${data.period} budget`,
+          blocks: [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `*Cost Spike Detected*\n\nUser: ${data.userId}\nSpend: $${data.currentSpend.toFixed(2)}\nThreshold: $${data.threshold.toFixed(2)}`,
+              },
+            },
+            {
+              type: "actions",
+              elements: [
+                {
+                  type: "button",
+                  text: { type: "plain_text", text: "View in Langfuse" },
+                  url: `https://cloud.langfuse.com/project/${process.env.LANGFUSE_PROJECT}/users/${data.userId}`,
+                },
+              ],
+            },
+          ],
+        });
+      }
+
+      // Daily report
+      export async function sendDailyReport(stats: DailyStats): Promise<void> {
+        await sendSlackMessage({
+          channel: "#ai-metrics",
+          text: "Daily AI Metrics Report",
+          blocks: [
+            {
+              type: "header",
+              text: { type: "plain_text", text: "📊 Daily AI Metrics" },
+            },
+            {
+              type: "section",
+              fields: [
+                { type: "mrkdwn", text: `*Total Requests*\n${stats.totalRequests.toLocaleString()}` },
+                { type: "mrkdwn", text: `*Total Cost*\n$${stats.totalCost.toFixed(2)}` },
+                { type: "mrkdwn", text: `*Avg Latency*\n${stats.avgLatencyMs}ms` },
+                { type: "mrkdwn", text: `*Error Rate*\n${(stats.errorRate * 100).toFixed(1)}%` },
+              ],
+            },
+            {
+              type: "section",
+              fields: [
+                { type: "mrkdwn", text: `*Faithfulness*\n${stats.avgFaithfulness.toFixed(2)}` },
+                { type: "mrkdwn", text: `*Relevancy*\n${stats.avgRelevancy.toFixed(2)}` },
+              ],
+            },
+          ],
+        });
+      }
+
+anti_patterns:
+  - name: "No observability"
+    why_bad: "Can't debug, optimize, or understand costs"
+    example_bad: |
+      const response = await openai.chat.completions.create(options);
+      return response;
+    example_good: |
+      const trace = langfuse.trace({ name: "chat", userId });
+      const generation = trace.generation({ name: "openai", model, input });
+      const response = await openai.chat.completions.create(options);
+      generation.end({ output: response, usage: response.usage });
+      await langfuse.flushAsync();
+      return response;
+
+  - name: "Sync cost tracking blocking requests"
+    why_bad: "Adds latency to user requests"
+    example_bad: |
+      const response = await llm.create(options);
+      await db.usage.create({ data: { cost, tokens } }); // Blocks response
+      return response;
+    example_good: |
+      const response = await llm.create(options);
+      trackUsage({ cost, tokens }).catch(console.error); // Fire and forget
+      return response;
+
+  - name: "100% evaluation"
+    why_bad: "Costs 3-5x more than actual LLM usage"
+    example_bad: |
+      const response = await ragChat(query);
+      const scores = await evaluateRAGAS({ query, response }); // Every request
+      return { response, scores };
+    example_good: |
+      const response = await ragChat(query);
+      if (Math.random() < 0.05) {
+        queueForEvaluation({ query, response }); // 5% sample, async
+      }
+      return { response };
+
+  - name: "Logging full PII"
+    why_bad: "Privacy violations, GDPR/HIPAA issues"
+    example_bad: |
+      trace.generation({ input: userMessage }); // May contain PII
+    example_good: |
+      trace.generation({ input: sanitizeForLogging(userMessage) });

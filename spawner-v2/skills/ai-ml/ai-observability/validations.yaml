@@ -1,0 +1,398 @@
+# Validations - AI Observability
+# Quality checks for LLM observability implementations
+
+version: 1.0.0
+skill_id: ai-observability
+
+validations:
+  # Tracing
+  - id: no-llm-tracing
+    name: LLM Calls Without Tracing
+    severity: warning
+    description: LLM calls should be traced for debugging and cost tracking
+    pattern: |
+      openai\.chat|anthropic\.messages(?!.*trace|langfuse|helicone)
+    message: "LLM call without tracing. Add Langfuse or Helicone for observability."
+    autofix: false
+
+  - id: langfuse-no-flush
+    name: Missing Langfuse Flush
+    severity: error
+    description: Langfuse requires flush in serverless environments
+    pattern: |
+      langfuse\.trace|langfuse\.generation(?!.*flush|shutdown)
+    message: "Langfuse traces may be lost. Call flushAsync() before function returns."
+    autofix: false
+
+  - id: no-trace-user-id
+    name: Trace Without User ID
+    severity: info
+    description: Traces should include userId for user-level analytics
+    pattern: |
+      trace\(\{(?!.*userId)
+    message: "Add userId to traces for user-level cost and quality analytics."
+    autofix: false
+
+  # Cost Tracking
+  - id: no-cost-calculation
+    name: Missing Cost Calculation
+    severity: warning
+    description: Token usage should be converted to cost
+    pattern: |
+      usage\..*tokens(?!.*cost|price|calculate)
+    message: "Track token costs, not just counts. Convert to dollars for budgeting."
+    autofix: false
+
+  - id: no-budget-check
+    name: LLM Call Without Budget Check
+    severity: warning
+    description: Check user budget before expensive LLM calls
+    pattern: |
+      create\(\{.*model.*gpt-4|claude(?!.*budget|quota|limit)
+    message: "Consider checking user budget before expensive LLM calls."
+    autofix: false
+
+  - id: hardcoded-pricing
+    name: Hardcoded Token Pricing
+    severity: info
+    description: Token prices change; use configurable pricing
+    pattern: |
+      input.*0\.\d+.*output.*0\.\d+
+    message: "Token prices are hardcoded. Use config for easier updates."
+    autofix: false
+
+  # Prompt Caching
+  - id: cache-small-prompt
+    name: Caching Small Prompt
+    severity: warning
+    description: Prompts under 1024 tokens don't benefit from caching
+    pattern: |
+      cache_control.*ephemeral(?!.*>.*1024|large|system)
+    message: "Prompt caching requires 1024+ tokens. Small prompts waste cache writes."
+    autofix: false
+
+  - id: no-cache-stats
+    name: No Cache Hit Tracking
+    severity: info
+    description: Track cache hit rate to verify caching value
+    pattern: |
+      cache_control(?!.*cache.*read|hit|stats)
+    message: "Track cache hit rate to verify caching is cost-effective."
+    autofix: false
+
+  # Evaluation
+  - id: eval-on-hot-path
+    name: Evaluation on Hot Path
+    severity: warning
+    description: RAG evaluation should be sampled, not on every request
+    pattern: |
+      app\.(?:get|post).*evaluateRAGAS(?!.*sample|random)
+    message: "Running evals on every request is expensive. Sample 5-10% instead."
+    autofix: false
+
+  - id: same-model-eval
+    name: Same Model for Generation and Evaluation
+    severity: info
+    description: LLMs have self-preference bias
+    pattern: |
+      model.*(?:gpt-4o|claude).*evaluate.*model.*\\1
+    message: "Using same model for generation and evaluation may inflate scores."
+    autofix: false
+
+  # Error Handling
+  - id: no-trace-error-handling
+    name: No Error Handling in Traces
+    severity: warning
+    description: Capture errors in traces for debugging
+    pattern: |
+      try.*trace(?!.*catch.*level.*ERROR|statusMessage)
+    message: "Capture errors in traces with level: 'ERROR' for debugging."
+    autofix: false
+
+  - id: no-streaming-usage
+    name: Streaming Without Usage Tracking
+    severity: warning
+    description: Streaming responses need stream_options for usage
+    pattern: |
+      stream:\s*true(?!.*stream_options.*include_usage|usage)
+    message: "Add stream_options: { include_usage: true } to track streaming costs."
+    autofix: false
+
+  # Privacy
+  - id: pii-in-traces
+    name: Potential PII in Traces
+    severity: warning
+    description: User inputs may contain PII that shouldn't be logged
+    pattern: |
+      trace.*input.*(?:req\.body|userMessage|prompt)(?!.*sanitize|redact)
+    message: "Sanitize user input before tracing to remove PII."
+    autofix: false
+
+code_smells:
+  - id: sync-cost-tracking
+    name: Synchronous Cost Tracking
+    description: Cost tracking should be async to not block requests
+    pattern: |
+      await.*recordUsage.*await.*response
+    suggestion: "Fire-and-forget cost tracking or use background queue."
+
+  - id: average-only-metrics
+    name: Only Average Metrics
+    description: Averages hide outliers; track percentiles
+    pattern: |
+      avg.*latency|mean.*response(?!.*p95|p99|percentile)
+    suggestion: "Track P50, P95, P99 latency, not just average."
+
+  - id: no-model-in-metrics
+    name: Metrics Without Model Label
+    description: Different models have different characteristics
+    pattern: |
+      track.*latency(?!.*model)
+    suggestion: "Include model name in metrics for meaningful comparison."
+
+  - id: realtime-eval-all
+    name: Real-time Evaluation on All Requests
+    description: Expensive and unnecessary
+    pattern: |
+      evaluateRAGAS|evaluate.*faithful(?!.*sample|batch|schedule)
+    suggestion: "Sample 5-10% for evaluation, batch process off-peak."
+
+best_practices:
+  - id: comprehensive-tracing
+    name: Comprehensive LLM Tracing
+    check: |
+      All LLM calls are traced with spans and metadata.
+    recommendation: |
+      import { Langfuse } from "langfuse";
+
+      const langfuse = new Langfuse({
+        publicKey: process.env.LANGFUSE_PUBLIC_KEY!,
+        secretKey: process.env.LANGFUSE_SECRET_KEY!,
+        flushAt: 1, // Flush after each event in serverless
+      });
+
+      async function tracedLLMCall<T>(
+        name: string,
+        fn: (trace: Langfuse["trace"]) => Promise<T>,
+        options?: {
+          userId?: string;
+          sessionId?: string;
+          metadata?: Record<string, unknown>;
+        }
+      ): Promise<T> {
+        const trace = langfuse.trace({
+          name,
+          userId: options?.userId,
+          sessionId: options?.sessionId,
+          metadata: options?.metadata,
+        });
+
+        try {
+          return await fn(trace);
+        } catch (error) {
+          trace.update({
+            level: "ERROR",
+            statusMessage: error instanceof Error ? error.message : "Unknown error",
+          });
+          throw error;
+        } finally {
+          await langfuse.flushAsync();
+        }
+      }
+
+      // Usage
+      const result = await tracedLLMCall(
+        "chat-completion",
+        async (trace) => {
+          const generation = trace.generation({
+            name: "openai-call",
+            model: "gpt-4o",
+            input: messages,
+          });
+
+          const response = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages,
+          });
+
+          generation.end({
+            output: response.choices[0].message,
+            usage: {
+              promptTokens: response.usage?.prompt_tokens,
+              completionTokens: response.usage?.completion_tokens,
+            },
+          });
+
+          return response;
+        },
+        { userId: user.id }
+      );
+
+  - id: cost-budget-system
+    name: Cost Tracking and Budgets
+    check: |
+      Token costs are tracked per user with budget enforcement.
+    recommendation: |
+      interface CostTracker {
+        record(usage: TokenUsage): Promise<void>;
+        getUsage(userId: string, period: "day" | "month"): Promise<CostSummary>;
+        checkBudget(userId: string, estimatedCost: number): Promise<BudgetCheck>;
+      }
+
+      class RedisCostTracker implements CostTracker {
+        constructor(private redis: Redis, private db: PrismaClient) {}
+
+        async record(usage: TokenUsage): Promise<void> {
+          const cost = this.calculateCost(usage);
+
+          // Real-time tracking in Redis
+          const key = `cost:${usage.userId}:${this.getMonthKey()}`;
+          await this.redis.incrbyfloat(key, cost);
+          await this.redis.expire(key, 60 * 60 * 24 * 35); // 35 days
+
+          // Persist to DB async
+          setImmediate(async () => {
+            await this.db.tokenUsage.create({
+              data: { ...usage, cost, timestamp: new Date() },
+            });
+          });
+        }
+
+        async checkBudget(userId: string, estimatedCost: number): Promise<BudgetCheck> {
+          const used = await this.getMonthlyUsed(userId);
+          const limit = await this.getUserLimit(userId);
+
+          if (used + estimatedCost > limit) {
+            return {
+              allowed: false,
+              used,
+              limit,
+              remaining: Math.max(0, limit - used),
+              reason: `Monthly budget exceeded ($${used.toFixed(2)} of $${limit})`,
+            };
+          }
+
+          return { allowed: true, used, limit, remaining: limit - used };
+        }
+
+        private calculateCost(usage: TokenUsage): number {
+          const pricing = MODEL_PRICING[usage.model] || { input: 5, output: 15 };
+          return (
+            (usage.inputTokens / 1_000_000) * pricing.input +
+            (usage.outputTokens / 1_000_000) * pricing.output
+          );
+        }
+      }
+
+  - id: sampled-evaluation
+    name: Sampled RAG Evaluation
+    check: |
+      Evaluations are sampled and run asynchronously.
+    recommendation: |
+      // Sample and queue evaluations
+      async function maybeQueueEvaluation(sample: RAGSample): Promise<void> {
+        // Sample 5% of production traffic
+        if (Math.random() > 0.05) return;
+
+        await evalQueue.push({
+          sample,
+          timestamp: Date.now(),
+          priority: sample.confidence < 0.7 ? "high" : "normal",
+        });
+      }
+
+      // Process evaluation queue (run via cron)
+      async function processEvalQueue(): Promise<EvalBatchResult> {
+        const batch = await evalQueue.pop(50); // Get 50 items
+        const results: EvalResult[] = [];
+
+        for (const item of batch) {
+          try {
+            const scores = await evaluateRAGAS(item.sample);
+            results.push({ id: item.id, scores, status: "success" });
+
+            // Alert on low scores
+            if (scores.faithfulness < 0.6) {
+              await alertTeam("Low faithfulness detected", { sample: item.sample, scores });
+            }
+          } catch (error) {
+            results.push({ id: item.id, status: "error", error: String(error) });
+          }
+
+          // Rate limit
+          await sleep(1000);
+        }
+
+        // Aggregate and store
+        const aggregate = calculateAggregate(results);
+        await db.evalBatches.create({ data: { results, aggregate, timestamp: new Date() } });
+
+        return { processed: results.length, aggregate };
+      }
+
+  - id: pii-sanitization
+    name: PII Sanitization in Traces
+    check: |
+      User inputs are sanitized before tracing.
+    recommendation: |
+      const PII_PATTERNS: Array<{ regex: RegExp; replacement: string }> = [
+        { regex: /\b[\w.+-]+@[\w.-]+\.\w{2,}\b/gi, replacement: "[EMAIL]" },
+        { regex: /\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b/g, replacement: "[PHONE]" },
+        { regex: /\b\d{3}-\d{2}-\d{4}\b/g, replacement: "[SSN]" },
+        { regex: /\b(?:\d{4}[-\s]?){3}\d{4}\b/g, replacement: "[CARD]" },
+        { regex: /(?:password|pwd|secret|token|key)\s*[:=]\s*["']?[^\s"']+/gi, replacement: "[CREDENTIAL]" },
+        { regex: /\b\d{5}(-\d{4})?\b/g, replacement: "[ZIPCODE]" },
+      ];
+
+      export function sanitizeForLogging(text: string): string {
+        let result = text;
+        for (const { regex, replacement } of PII_PATTERNS) {
+          result = result.replace(regex, replacement);
+        }
+        return result;
+      }
+
+      // Wrap tracing with auto-sanitization
+      function createSanitizedTrace(langfuse: Langfuse) {
+        return (options: TraceOptions) => {
+          return langfuse.trace({
+            ...options,
+            input: options.input ? sanitizeForLogging(String(options.input)) : undefined,
+            metadata: options.metadata ? sanitizeObject(options.metadata) : undefined,
+          });
+        };
+      }
+
+testing_checklist:
+  tracing:
+    - "All LLM calls are traced"
+    - "Traces include userId and sessionId"
+    - "Errors are captured with stack traces"
+    - "Flush called in serverless environments"
+    - "PII sanitized before tracing"
+
+  cost_tracking:
+    - "Token costs calculated per request"
+    - "Costs aggregated per user"
+    - "Budget checks before expensive calls"
+    - "Alerts on unusual spending"
+    - "Daily/weekly cost reports"
+
+  evaluation:
+    - "RAG evals sampled (not 100%)"
+    - "Evals run asynchronously"
+    - "Different model for evaluation"
+    - "Aggregate scores tracked over time"
+    - "Alerts on quality degradation"
+
+  caching:
+    - "Cache only prompts >1024 tokens"
+    - "Cache hit rate tracked"
+    - "Break-even analysis performed"
+    - "TTL appropriate for traffic pattern"
+
+  monitoring:
+    - "Percentile latencies (P50, P95, P99)"
+    - "Error rates by model"
+    - "Cost per feature/endpoint"
+    - "Quality scores over time"
