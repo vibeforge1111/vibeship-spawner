@@ -1,0 +1,356 @@
+# Validations - Salesforce Development
+# Quality checks for Apex, LWC, and API implementations
+
+version: 1.0.0
+skill_id: salesforce-development
+
+validations:
+  # Governor Limit Violations
+  - id: soql-in-loop
+    name: SOQL Query Inside Loop
+    severity: error
+    description: SOQL in loops causes governor limit exceptions with bulk data
+    pattern: |
+      (for|while|do)\s*\([^)]*\)\s*\{[^}]*\[SELECT
+    message: "SOQL query inside loop. Query once outside the loop and use a Map."
+    autofix: false
+
+  - id: dml-in-loop
+    name: DML Operation Inside Loop
+    severity: error
+    description: DML in loops hits 150 statement limit
+    pattern: |
+      (for|while)\s*\([^)]*\)\s*\{[^}]*(insert|update|delete|upsert)\s+\w+;
+    message: "DML operation inside loop. Collect records and perform single DML outside loop."
+    autofix: false
+
+  - id: callout-in-trigger
+    name: HTTP Callout in Trigger
+    severity: error
+    description: Synchronous triggers cannot make callouts
+    pattern: |
+      trigger\s+\w+.*\{[^}]*(Http|HttpRequest|WebServiceCallout)
+    message: "Callout in trigger. Use @future(callout=true) or Queueable with Database.AllowsCallouts."
+    autofix: false
+
+  # Security Checks
+  - id: soql-injection
+    name: Potential SOQL Injection
+    severity: error
+    description: Dynamic SOQL with string concatenation is vulnerable
+    pattern: |
+      Database\.query\s*\([^)]*\+
+    anti_pattern: |
+      escapeSingleQuotes
+    message: "Dynamic SOQL with concatenation. Use bind variables or String.escapeSingleQuotes()."
+    autofix: false
+
+  - id: missing-security-enforced
+    name: Missing WITH SECURITY_ENFORCED
+    severity: warning
+    description: SOQL should enforce FLS/CRUD permissions
+    pattern: |
+      \[SELECT[^]]+FROM\s+\w+(?!.*WITH\s+SECURITY_ENFORCED)[^]]*\]
+    message: "SOQL without security enforcement. Add WITH SECURITY_ENFORCED."
+    autofix: false
+
+  - id: hardcoded-id
+    name: Hardcoded Salesforce ID
+    severity: warning
+    description: Record IDs differ between orgs
+    pattern: |
+      ['"]0[0-9a-zA-Z]{14,17}['"]
+    message: "Hardcoded Salesforce ID. Query by DeveloperName or ExternalId instead."
+    autofix: false
+
+  - id: hardcoded-credentials
+    name: Hardcoded Credentials
+    severity: error
+    description: Credentials must use Named Credentials or Custom Metadata
+    pattern: |
+      (password|secret|apikey|api_key)\s*[:=]\s*['"][^'"]+['"]
+    message: "Hardcoded credentials. Use Named Credentials or Custom Metadata."
+    autofix: false
+
+  # LWC Checks
+  - id: lwc-direct-dom
+    name: Direct DOM Manipulation in LWC
+    severity: warning
+    description: LWC uses shadow DOM, direct manipulation breaks encapsulation
+    pattern: |
+      document\.(getElementById|querySelector|getElementsBy)
+    message: "Direct DOM access in LWC. Use this.template.querySelector() or data binding."
+    autofix: false
+
+  - id: lwc-missing-track
+    name: Reactive Property Without @track
+    severity: info
+    description: Complex object properties need @track for reactivity
+    pattern: |
+      this\.(\w+)\s*=\s*\{[^}]+\}(?!.*@track\s+\1)
+    message: "Object assignment may need @track for reactivity (post-Spring '20 objects are auto-tracked)."
+    autofix: false
+
+  - id: lwc-wire-without-refresh
+    name: Wire Without Refresh After DML
+    severity: warning
+    description: Cached wire data becomes stale after updates
+    pattern: |
+      @wire.*\n.*await\s+\w+\(.*\)(?!.*refreshApex)
+    message: "DML after @wire without refreshApex. Data may be stale."
+    autofix: false
+
+  # Trigger Checks
+  - id: logic-in-trigger
+    name: Business Logic in Trigger Body
+    severity: warning
+    description: Triggers should delegate to handler classes
+    pattern: |
+      trigger\s+\w+\s+on\s+\w+\s*\([^)]+\)\s*\{[\s\S]{200,}
+    message: "Complex logic in trigger body. Use Trigger Handler pattern."
+    autofix: false
+
+  - id: missing-recursion-guard
+    name: Missing Recursion Prevention
+    severity: warning
+    description: Triggers updating same object can recurse infinitely
+    pattern: |
+      trigger\s+(\w+)\s+on\s+(\w+).*after\s+(update|insert)[\s\S]*update\s+
+    anti_pattern: |
+      (hasExecuted|recursion|static.*Boolean)
+    message: "Trigger may recurse. Add static recursion guard."
+    autofix: false
+
+  # Async Processing Checks
+  - id: future-with-sObject
+    name: Future Method with sObject Parameter
+    severity: error
+    description: Future methods cannot accept sObject parameters
+    pattern: |
+      @future[^{]*\([^)]*\b(Account|Contact|Lead|Opportunity|\w+__c)\b
+    message: "Future methods cannot accept sObjects. Pass IDs and re-query."
+    autofix: false
+
+  - id: queueable-chain-limit
+    name: Multiple Queueable Jobs Chained
+    severity: warning
+    description: Only 1 child job allowed when chaining from Queueable
+    pattern: |
+      execute\s*\([^)]*QueueableContext[^)]*\)[\s\S]*enqueueJob[\s\S]*enqueueJob
+    message: "Multiple enqueueJob calls in Queueable. Only 1 child job allowed when chaining."
+    autofix: false
+
+code_smells:
+  - id: large-test-method
+    name: Test Method Too Large
+    description: Test methods should be focused and readable
+    pattern: |
+      @isTest\s+static\s+void\s+\w+\s*\(\s*\)\s*\{[\s\S]{1000,}\}
+    suggestion: "Test method is very long. Split into focused test methods."
+
+  - id: system-debug-production
+    name: System.debug in Production Code
+    description: Debug statements impact performance
+    pattern: |
+      System\.debug\(
+    suggestion: "System.debug in code. Remove or use logging framework for production."
+
+  - id: missing-test-bulk
+    name: Test Without Bulk Records
+    description: Tests should verify bulkification with 200+ records
+    pattern: |
+      @isTest[\s\S]*insert\s+new\s+\w+\(
+    anti_pattern: |
+      (200|for\s*\(\s*Integer)
+    suggestion: "Test may not verify bulkification. Add test with 200 records."
+
+  - id: select-star
+    name: SELECT * Equivalent
+    description: Query all fields wastes resources
+    pattern: |
+      \[SELECT\s+Id\s*,[\s\w,]+FROM
+    suggestion: "Querying many fields. Only select fields you need."
+
+  - id: deprecated-aura
+    name: Using Aura Instead of LWC
+    description: LWC is the modern standard
+    pattern: |
+      <aura:component|force:recordData|aura:handler
+    suggestion: "Using Aura components. Consider migrating to LWC."
+
+best_practices:
+  - id: use-trigger-handler
+    name: Implement Trigger Handler Pattern
+    check: |
+      All triggers delegate to handler classes for testability.
+    recommendation: |
+      // Trigger
+      trigger AccountTrigger on Account (before insert, after insert, ...) {
+        new AccountTriggerHandler().run();
+      }
+
+      // Handler base class
+      public virtual class TriggerHandler {
+        public void run() {
+          switch on Trigger.operationType {
+            when BEFORE_INSERT { beforeInsert(); }
+            when AFTER_INSERT { afterInsert(); }
+            // ...
+          }
+        }
+        protected virtual void beforeInsert() {}
+        protected virtual void afterInsert() {}
+        // ...
+      }
+
+      // Concrete handler
+      public class AccountTriggerHandler extends TriggerHandler {
+        protected override void afterInsert() {
+          // Implementation
+        }
+      }
+
+  - id: use-maps-for-queries
+    name: Use Maps for Related Record Access
+    check: |
+      Related records accessed via Map instead of queries in loops.
+    recommendation: |
+      // Collect IDs
+      Set<Id> accountIds = new Set<Id>();
+      for (Contact c : contacts) {
+        accountIds.add(c.AccountId);
+      }
+
+      // Single query, store in Map
+      Map<Id, Account> accountMap = new Map<Id, Account>([
+        SELECT Id, Name, Industry
+        FROM Account
+        WHERE Id IN :accountIds
+      ]);
+
+      // Access via Map
+      for (Contact c : contacts) {
+        Account acc = accountMap.get(c.AccountId);
+        if (acc != null) {
+          // Process...
+        }
+      }
+
+  - id: implement-with-sharing
+    name: Use 'with sharing' by Default
+    check: |
+      Classes use 'with sharing' to enforce record-level security.
+    recommendation: |
+      // Default: enforce sharing rules
+      public with sharing class AccountService {
+        public List<Account> getAccounts() {
+          return [SELECT Id, Name FROM Account];
+        }
+      }
+
+      // Only when intentionally bypassing
+      public without sharing class SystemIntegrationService {
+        // Document why sharing is bypassed
+        // e.g., integration user needs full access
+      }
+
+  - id: use-custom-metadata
+    name: Use Custom Metadata for Configuration
+    check: |
+      Configuration values use Custom Metadata instead of Custom Settings or hardcoding.
+    recommendation: |
+      // Define Custom Metadata Type: Integration_Config__mdt
+      // Fields: Endpoint__c, Timeout__c, Retry_Count__c
+
+      // Access in Apex (no SOQL count)
+      public class IntegrationConfig {
+        private static Integration_Config__mdt config;
+
+        public static Integration_Config__mdt getConfig(String name) {
+          if (config == null) {
+            config = Integration_Config__mdt.getInstance(name);
+          }
+          return config;
+        }
+
+        public static String getEndpoint() {
+          return getConfig('Default').Endpoint__c;
+        }
+      }
+
+  - id: test-with-bulk-data
+    name: Test with 200 Records
+    check: |
+      Unit tests verify bulkification by testing with 200+ records.
+    recommendation: |
+      @isTest
+      private class AccountTriggerTest {
+
+        @isTest
+        static void testBulkInsert() {
+          // Create 200 records to test governor limits
+          List<Account> accounts = new List<Account>();
+          for (Integer i = 0; i < 200; i++) {
+            accounts.add(new Account(Name = 'Test Account ' + i));
+          }
+
+          Test.startTest();
+          insert accounts;  // Should not hit limits
+          Test.stopTest();
+
+          // Verify all processed
+          System.assertEquals(200, [SELECT COUNT() FROM Account]);
+        }
+      }
+
+  - id: use-named-credentials
+    name: Use Named Credentials for Callouts
+    check: |
+      External callouts use Named Credentials for secure credential management.
+    recommendation: |
+      // Setup: Create Named Credential in Setup > Named Credentials
+      // Name: ExternalAPI
+      // URL: https://api.example.com
+      // Authentication: OAuth 2.0 or Basic
+
+      // In Apex
+      HttpRequest req = new HttpRequest();
+      req.setEndpoint('callout:ExternalAPI/resource');  // Named Credential
+      req.setMethod('POST');
+      req.setHeader('Content-Type', 'application/json');
+      req.setBody(JSON.serialize(data));
+
+      Http http = new Http();
+      HttpResponse res = http.send(req);
+
+testing_checklist:
+  apex:
+    - "All triggers have 75%+ code coverage"
+    - "Bulk tests use 200 records"
+    - "Tests use Test.startTest()/stopTest() for async"
+    - "No hardcoded IDs in tests"
+    - "Test both positive and negative cases"
+
+  lwc:
+    - "Jest tests for all components"
+    - "@wire decorators have error handling"
+    - "Components handle loading states"
+    - "Accessibility: ARIA labels, keyboard nav"
+
+  integration:
+    - "Named Credentials for auth"
+    - "Retry logic for transient failures"
+    - "Error logging for debugging"
+    - "Rate limit handling"
+
+  security:
+    - "WITH SECURITY_ENFORCED on queries"
+    - "CRUD/FLS checks on dynamic operations"
+    - "No SOQL injection vulnerabilities"
+    - "No hardcoded credentials"
+
+  deployment:
+    - "All tests pass in target org"
+    - "No validation errors"
+    - "API versions consistent"
+    - "Dependencies deployed first"

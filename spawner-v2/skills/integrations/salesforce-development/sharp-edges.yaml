@@ -1,0 +1,589 @@
+# Sharp Edges - Salesforce Development
+# Governor limits, LWC gotchas, and platform quirks
+
+version: 1.0.0
+skill_id: salesforce-development
+
+sharp_edges:
+  - id: governor-limits-bulk
+    title: Governor Limits Apply Per Transaction, Not Per Record
+    severity: critical
+    description: |
+      Salesforce governor limits apply to the entire transaction, not individual
+      records. A trigger processing 200 records shares the same limits as
+      processing 1 record:
+
+      - 100 SOQL queries (sync) / 200 (async)
+      - 150 DML statements
+      - 10,000 DML rows
+      - 50,000 query rows
+      - 6 MB heap (sync) / 12 MB (async)
+      - 10,000 ms CPU time (sync) / 60,000 ms (async)
+      - 100 callouts
+
+    wrong_way: |
+      // Hits 100 SOQL limit at 100 records
+      trigger AccountTrigger on Account (after insert) {
+        for (Account acc : Trigger.new) {
+          // Query inside loop!
+          List<Contact> contacts = [
+            SELECT Id FROM Contact WHERE AccountId = :acc.Id
+          ];
+
+          // DML inside loop!
+          for (Contact c : contacts) {
+            c.Status__c = 'Active';
+            update c;  // 150 DML limit
+          }
+        }
+      }
+
+    right_way: |
+      trigger AccountTrigger on Account (after insert) {
+        // Collect all IDs first
+        Set<Id> accountIds = new Set<Id>();
+        for (Account acc : Trigger.new) {
+          accountIds.add(acc.Id);
+        }
+
+        // Single query outside loop
+        List<Contact> allContacts = [
+          SELECT Id, AccountId, Status__c
+          FROM Contact
+          WHERE AccountId IN :accountIds
+        ];
+
+        // Bulk update
+        for (Contact c : allContacts) {
+          c.Status__c = 'Active';
+        }
+
+        // Single DML
+        if (!allContacts.isEmpty()) {
+          update allContacts;
+        }
+      }
+
+    detection_patterns:
+      - "for.*\\[SELECT"
+      - "for.*update\\s+\\w+;"
+      - "for.*insert\\s+\\w+;"
+      - "while.*\\[SELECT"
+
+    references:
+      - "https://developer.salesforce.com/docs/atlas.en-us.apexcode.meta/apexcode/apex_gov_limits.htm"
+
+  - id: lwc-wire-caching
+    title: "@wire Results Are Cached and May Be Stale"
+    severity: high
+    description: |
+      @wire decorators cache results based on parameter values. After DML
+      operations, the cache isn't automatically invalidated. You must manually
+      refresh or use imperative calls for fresh data.
+
+    wrong_way: |
+      // LWC component
+      import { LightningElement, wire, api } from 'lwc';
+      import getAccount from '@salesforce/apex/AccountController.getAccount';
+
+      export default class AccountView extends LightningElement {
+        @api recordId;
+
+        @wire(getAccount, { accountId: '$recordId' })
+        account;
+
+        async handleUpdate() {
+          // Update account via Apex
+          await updateAccount({ accountId: this.recordId, name: 'New Name' });
+
+          // BUG: @wire still shows old cached data!
+          // User sees stale data until they refresh the page
+        }
+      }
+
+    right_way: |
+      import { LightningElement, wire, api } from 'lwc';
+      import { refreshApex } from '@salesforce/apex';
+      import getAccount from '@salesforce/apex/AccountController.getAccount';
+      import updateAccount from '@salesforce/apex/AccountController.updateAccount';
+
+      export default class AccountView extends LightningElement {
+        @api recordId;
+        wiredAccountResult;  // Store wire result for refresh
+
+        @wire(getAccount, { accountId: '$recordId' })
+        wiredAccount(result) {
+          this.wiredAccountResult = result;  // Store for refresh
+          if (result.data) {
+            this.account = result.data;
+          } else if (result.error) {
+            this.error = result.error;
+          }
+        }
+
+        async handleUpdate() {
+          try {
+            await updateAccount({ accountId: this.recordId, name: 'New Name' });
+
+            // Refresh the wire cache
+            await refreshApex(this.wiredAccountResult);
+
+          } catch (error) {
+            console.error('Update failed:', error);
+          }
+        }
+      }
+
+    detection_patterns:
+      - "@wire.*\\n.*async.*await(?!.*refreshApex)"
+      - "updateRecord.*\\n(?!.*refreshApex)"
+
+    references:
+      - "https://developer.salesforce.com/docs/platform/lwc/guide/apex-result-caching.html"
+
+  - id: lwc-case-sensitivity
+    title: "LWC Properties Are Case-Sensitive"
+    severity: medium
+    description: |
+      JavaScript is case-sensitive. 'message' and 'MESSAGE' are different
+      properties. HTML attributes are converted to camelCase in JavaScript.
+      This causes silent bugs when cases don't match.
+
+    wrong_way: |
+      // parent.html
+      <c-child account-name={accountName}></c-child>
+
+      // child.js
+      export default class Child extends LightningElement {
+        @api accountname;  // WRONG: lowercase, doesn't match 'accountName'
+      }
+
+      // Also wrong in templates
+      <template>
+        <p>{AccountName}</p>  <!-- WRONG: capital A -->
+      </template>
+
+    right_way: |
+      // parent.html - kebab-case in HTML
+      <c-child account-name={accountName}></c-child>
+
+      // child.js - camelCase in JavaScript
+      export default class Child extends LightningElement {
+        @api accountName;  // Matches HTML kebab-case conversion
+      }
+
+      // Template - must match JS property exactly
+      <template>
+        <p>{accountName}</p>  <!-- Matches JS property -->
+      </template>
+
+    detection_patterns:
+      - "@api\\s+[A-Z]"  # API property starting with uppercase
+
+    references:
+      - "https://developer.salesforce.com/docs/platform/lwc/guide/create-components-html-attributes.html"
+
+  - id: apex-null-pointer
+    title: "Null Pointer Exceptions in Apex Collections"
+    severity: high
+    description: |
+      Apex throws NullPointerException when accessing properties on null
+      objects or iterating null collections. SOQL returns null for empty
+      results in some contexts, not empty lists.
+
+    wrong_way: |
+      // Potential NPE if query returns null
+      Account acc = [SELECT Id, Name FROM Account WHERE Id = :recordId];
+      String name = acc.Name;  // NPE if no record found!
+
+      // NPE when iterating potentially null list
+      List<Contact> contacts = getContacts();
+      for (Contact c : contacts) {  // NPE if contacts is null!
+        // ...
+      }
+
+      // NPE when accessing child relationship
+      Account acc = [SELECT Id, (SELECT Id FROM Contacts) FROM Account WHERE Id = :id];
+      for (Contact c : acc.Contacts) {  // NPE if acc is null!
+        // ...
+      }
+
+    right_way: |
+      // Safe query with null check
+      List<Account> accounts = [SELECT Id, Name FROM Account WHERE Id = :recordId LIMIT 1];
+      if (!accounts.isEmpty()) {
+        Account acc = accounts[0];
+        String name = acc.Name;
+      }
+
+      // Safe iteration
+      List<Contact> contacts = getContacts();
+      if (contacts != null && !contacts.isEmpty()) {
+        for (Contact c : contacts) {
+          // ...
+        }
+      }
+
+      // Or use safe navigation operator (Winter '21+)
+      String name = account?.Name;
+      Integer contactCount = account?.Contacts?.size();
+
+      // Null-coalescing pattern
+      List<Contact> contacts = getContacts() ?? new List<Contact>();
+      for (Contact c : contacts) {
+        // Safe even if getContacts() returned null
+      }
+
+    detection_patterns:
+      - "\\[SELECT.*=\\s*:.*\\]\\s*;"  # Single record query without LIMIT check
+      - "for\\s*\\([^:]+:\\s*\\w+\\)"  # for loop without null check
+
+    references:
+      - "https://developer.salesforce.com/docs/atlas.en-us.apexcode.meta/apexcode/langCon_apex_exceptions.htm"
+
+  - id: trigger-recursion
+    title: "Trigger Recursion Causes Infinite Loops"
+    severity: critical
+    description: |
+      Triggers that update the same object or related objects can cause
+      infinite loops. A trigger updating Account can re-fire the same
+      trigger. This hits governor limits or causes maximum trigger depth error.
+
+    wrong_way: |
+      trigger AccountTrigger on Account (after update) {
+        List<Account> toUpdate = new List<Account>();
+
+        for (Account acc : Trigger.new) {
+          // This will re-trigger AccountTrigger!
+          acc.Description = 'Updated at ' + System.now();
+          toUpdate.add(acc);
+        }
+
+        update toUpdate;  // Infinite loop!
+      }
+
+    right_way: |
+      // Use static variable to prevent recursion
+      public class TriggerRecursionGuard {
+        private static Set<String> executedContexts = new Set<String>();
+
+        public static Boolean hasExecuted(String context) {
+          return executedContexts.contains(context);
+        }
+
+        public static void setExecuted(String context) {
+          executedContexts.add(context);
+        }
+
+        public static void reset() {
+          executedContexts.clear();
+        }
+      }
+
+      // In trigger handler
+      public class AccountTriggerHandler {
+        private static final String CONTEXT = 'AccountTriggerHandler.afterUpdate';
+
+        public void afterUpdate() {
+          if (TriggerRecursionGuard.hasExecuted(CONTEXT)) {
+            return;  // Already ran in this transaction
+          }
+          TriggerRecursionGuard.setExecuted(CONTEXT);
+
+          // Now safe to update
+          List<Account> toUpdate = new List<Account>();
+          for (Account acc : Trigger.new) {
+            acc.Description = 'Updated at ' + System.now();
+            toUpdate.add(acc);
+          }
+          update toUpdate;
+        }
+      }
+
+    detection_patterns:
+      - "trigger.*after\\s+(update|insert).*update\\s+"
+      - "trigger.*before\\s+update.*\\[SELECT.*FROM\\s+\\w+\\s+WHERE.*=.*Trigger"
+
+    references:
+      - "https://developer.salesforce.com/docs/atlas.en-us.apexcode.meta/apexcode/apex_triggers_bestpract.htm"
+
+  - id: callout-from-trigger
+    title: "Cannot Make Callouts from Synchronous Triggers"
+    severity: high
+    description: |
+      Apex triggers run synchronously and cannot make HTTP callouts directly.
+      This throws CalloutException. Must use @future(callout=true) or
+      Queueable with Database.AllowsCallouts.
+
+    wrong_way: |
+      trigger AccountTrigger on Account (after insert) {
+        for (Account acc : Trigger.new) {
+          // FAILS: System.CalloutException
+          Http http = new Http();
+          HttpRequest req = new HttpRequest();
+          req.setEndpoint('https://api.example.com/notify');
+          req.setMethod('POST');
+          HttpResponse res = http.send(req);  // Exception!
+        }
+      }
+
+    right_way: |
+      // Option 1: @future method
+      public class AccountCalloutService {
+        @future(callout=true)
+        public static void notifyExternalSystem(Set<Id> accountIds) {
+          List<Account> accounts = [SELECT Id, Name FROM Account WHERE Id IN :accountIds];
+
+          for (Account acc : accounts) {
+            Http http = new Http();
+            HttpRequest req = new HttpRequest();
+            req.setEndpoint('callout:ExternalAPI/notify');
+            req.setMethod('POST');
+            req.setBody(JSON.serialize(new Map<String, String>{
+              'accountId' => acc.Id,
+              'name' => acc.Name
+            }));
+
+            HttpResponse res = http.send(req);
+          }
+        }
+      }
+
+      // Option 2: Queueable (preferred - more flexible)
+      public class AccountNotificationQueueable implements Queueable, Database.AllowsCallouts {
+        private Set<Id> accountIds;
+
+        public AccountNotificationQueueable(Set<Id> accountIds) {
+          this.accountIds = accountIds;
+        }
+
+        public void execute(QueueableContext context) {
+          // Callouts are allowed here
+          List<Account> accounts = [SELECT Id, Name FROM Account WHERE Id IN :accountIds];
+          // Make HTTP calls...
+        }
+      }
+
+      // In trigger handler
+      System.enqueueJob(new AccountNotificationQueueable(accountIds));
+
+    detection_patterns:
+      - "trigger.*Http\\(\\)"
+      - "trigger.*HttpRequest"
+      - "trigger.*\\.send\\("
+
+    references:
+      - "https://developer.salesforce.com/docs/atlas.en-us.apexcode.meta/apexcode/apex_callouts_wsdl2apex.htm"
+
+  - id: mixed-dml-operations
+    title: "Cannot Mix Setup and Non-Setup DML"
+    severity: high
+    description: |
+      Salesforce prevents mixing DML on setup objects (User, Group, Permission)
+      with non-setup objects (Account, Contact) in the same transaction.
+      This throws MIXED_DML_OPERATION exception.
+
+    wrong_way: |
+      // Fails with MIXED_DML_OPERATION
+      public void createAccountWithUser() {
+        Account acc = new Account(Name = 'Test');
+        insert acc;  // Non-setup DML
+
+        User u = new User(
+          // ... user fields
+        );
+        insert u;  // Setup DML - FAILS!
+      }
+
+    right_way: |
+      // Option 1: Use @future for setup DML
+      public void createAccountWithUser() {
+        Account acc = new Account(Name = 'Test');
+        insert acc;
+
+        // Defer user creation to future context
+        createUserAsync(acc.Id);
+      }
+
+      @future
+      private static void createUserAsync(Id accountId) {
+        User u = new User(
+          // ... user fields
+        );
+        insert u;
+      }
+
+      // Option 2: System.runAs in tests
+      @isTest
+      private static void testMixedDml() {
+        // Create user first in separate context
+        User testUser = new User(/* fields */);
+        insert testUser;
+
+        // Then run as that user for non-setup DML
+        System.runAs(testUser) {
+          Account acc = new Account(Name = 'Test');
+          insert acc;
+
+          // Assertions...
+        }
+      }
+
+    detection_patterns:
+      - "insert.*Account.*insert.*User"
+      - "insert.*User.*insert.*Account"
+      - "update.*User.*update.*\\w+(?!User)"
+
+    references:
+      - "https://developer.salesforce.com/docs/atlas.en-us.apexcode.meta/apexcode/apex_dml_non_mix_sobjects.htm"
+
+  - id: soql-injection
+    title: "Dynamic SOQL Is Vulnerable to Injection"
+    severity: critical
+    description: |
+      Building SOQL strings with user input allows injection attacks.
+      Attackers can modify queries to access unauthorized data or bypass
+      security. Always use bind variables or String.escapeSingleQuotes().
+
+    wrong_way: |
+      // VULNERABLE: User input directly in query
+      public List<Account> searchAccounts(String searchTerm) {
+        String query = 'SELECT Id, Name FROM Account WHERE Name LIKE \'%'
+          + searchTerm + '%\'';
+        return Database.query(query);
+        // Input: "test' OR Name != '"
+        // Results in: WHERE Name LIKE '%test' OR Name != '%'
+        // Returns ALL accounts!
+      }
+
+    right_way: |
+      // Option 1: Bind variables (preferred)
+      public List<Account> searchAccounts(String searchTerm) {
+        String likePattern = '%' + searchTerm + '%';
+        return [
+          SELECT Id, Name
+          FROM Account
+          WHERE Name LIKE :likePattern
+          WITH SECURITY_ENFORCED
+        ];
+      }
+
+      // Option 2: Escape quotes for truly dynamic queries
+      public List<Account> dynamicSearch(String objectName, String fieldName, String value) {
+        // Whitelist allowed objects and fields
+        Set<String> allowedObjects = new Set<String>{'Account', 'Contact'};
+        if (!allowedObjects.contains(objectName)) {
+          throw new AuraHandledException('Invalid object');
+        }
+
+        // Escape user input
+        String safeValue = String.escapeSingleQuotes(value);
+
+        String query = 'SELECT Id, Name FROM ' + objectName +
+          ' WHERE ' + fieldName + ' = \'' + safeValue + '\'';
+
+        return Database.query(query);
+      }
+
+    detection_patterns:
+      - "Database\\.query.*\\+"
+      - "'SELECT.*'\\s*\\+\\s*\\w+"
+      - "\\+\\s*'.*WHERE"
+
+    references:
+      - "https://developer.salesforce.com/docs/atlas.en-us.apexcode.meta/apexcode/apex_dynamic_soql.htm"
+
+  - id: scratch-org-expiry
+    title: "Scratch Orgs Expire and Lose All Data"
+    severity: medium
+    description: |
+      Scratch orgs are temporary (7-30 days) and all data is lost when they
+      expire. Never use scratch orgs for long-term development or as the
+      single source of truth. Always store source in version control.
+
+    wrong_way: |
+      # Developer makes changes directly in scratch org UI
+      # Forgets to pull changes for 2 weeks
+      # Scratch org expires
+      # All work is lost!
+
+      # Or: storing important data only in scratch org
+      sf data import tree --plan data/important-config.json --target-org scratch
+
+      # Org expires -> configuration lost
+
+    right_way: |
+      # 1. Always use source control as truth
+      git checkout -b feature/my-feature
+
+      # 2. Create scratch org from source
+      sf org create scratch --definition-file config/project-scratch-def.json --alias feature-org
+
+      # 3. Push YOUR source (not pull from org)
+      sf project deploy start --target-org feature-org
+
+      # 4. After UI changes, IMMEDIATELY pull
+      sf project retrieve start --target-org feature-org
+
+      # 5. Commit to git
+      git add .
+      git commit -m "feat: add custom field"
+
+      # 6. Export data as JSON for reproducibility
+      sf data export tree --query "SELECT Id, Name FROM Custom_Setting__c" --output-dir data/
+
+      # 7. Don't rely on scratch org lasting
+      # Create new one anytime from source
+
+    detection_patterns:
+      - "--duration-days 30"  # Max duration, risky
+
+    references:
+      - "https://developer.salesforce.com/docs/atlas.en-us.sfdx_dev.meta/sfdx_dev/sfdx_dev_scratch_orgs.htm"
+
+  - id: api-version-mismatch
+    title: "API Version Mismatches Cause Silent Failures"
+    severity: medium
+    description: |
+      Salesforce components (Apex, LWC, flows) have API versions. Mixing
+      old and new versions can cause features to not work or behave
+      differently. Each seasonal release may change behavior.
+
+    wrong_way: |
+      // MyClass.cls-meta.xml - Old API version
+      <?xml version="1.0" encoding="UTF-8"?>
+      <ApexClass xmlns="http://soap.sforce.com/2006/04/metadata">
+        <apiVersion>48.0</apiVersion>  <!-- 3+ years old -->
+        <status>Active</status>
+      </ApexClass>
+
+      // Using features from newer API version - may not work!
+      // Safe navigation operator: account?.Name (requires v50.0+)
+      // null-coalescing: list ?? new List<>() (requires v53.0+)
+
+    right_way: |
+      // Use consistent, recent API versions
+      // sfdx-project.json
+      {
+        "sourceApiVersion": "59.0"  // Keep updated
+      }
+
+      // Update all metadata files to match
+      <?xml version="1.0" encoding="UTF-8"?>
+      <ApexClass xmlns="http://soap.sforce.com/2006/04/metadata">
+        <apiVersion>59.0</apiVersion>
+        <status>Active</status>
+      </ApexClass>
+
+      # Bulk update API versions
+      find force-app -name "*-meta.xml" -exec sed -i 's/<apiVersion>.*</<apiVersion>59.0</g' {} \;
+
+      # Or use SFDX plugin
+      sfdx force:source:api-version:update --apiversion 59.0
+
+    detection_patterns:
+      - "<apiVersion>4[0-9]"  # Very old versions
+      - "<apiVersion>50"  # Older versions
+
+    references:
+      - "https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/api_rest_versions.htm"
