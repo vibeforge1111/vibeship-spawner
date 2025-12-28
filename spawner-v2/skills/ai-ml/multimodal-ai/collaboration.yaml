@@ -1,0 +1,585 @@
+# Collaboration - Multimodal AI
+# Integration patterns with other skills
+
+version: 1.0.0
+skill_id: multimodal-ai
+
+prerequisites:
+  required:
+    - skill: llm-integration
+      reason: "Multimodal builds on LLM API foundations"
+
+  recommended:
+    - skill: ai-observability
+      reason: "Track multimodal costs (images are expensive)"
+    - skill: file-upload
+      reason: "Handle image/audio uploads"
+
+delegates_to:
+  - skill: document-ai
+    when: "Processing structured documents"
+    handoff: "Use document-ai for forms, invoices, tables"
+
+  - skill: ai-observability
+    when: "Tracking multimodal costs"
+    handoff: "Log image tokens and audio processing costs"
+
+receives_from:
+  - skill: llm-integration
+    when: "Adding vision/audio to chat"
+    input: "Chat context and user messages"
+
+  - skill: rag-architect
+    when: "Multimodal RAG with images"
+    input: "Retrieved image context"
+
+integration_patterns:
+  nextjs_image_upload:
+    description: "Next.js image upload and analysis"
+    pattern: |
+      // app/api/analyze-image/route.ts
+      import { NextRequest, NextResponse } from "next/server";
+      import OpenAI from "openai";
+      import { put } from "@vercel/blob";
+
+      const openai = new OpenAI();
+
+      export async function POST(req: NextRequest) {
+        const formData = await req.formData();
+        const file = formData.get("image") as File;
+        const prompt = formData.get("prompt") as string;
+
+        if (!file) {
+          return NextResponse.json({ error: "No image provided" }, { status: 400 });
+        }
+
+        // Validate image
+        const validTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+        if (!validTypes.includes(file.type)) {
+          return NextResponse.json({ error: "Invalid image type" }, { status: 400 });
+        }
+
+        // Upload to blob storage
+        const blob = await put(`uploads/${Date.now()}_${file.name}`, file, {
+          access: "public",
+        });
+
+        // Analyze with vision API
+        const response = await openai.chat.completions.create({
+          model: "gpt-4o",
+          max_tokens: 1024,
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: prompt || "Describe this image" },
+                {
+                  type: "image_url",
+                  image_url: { url: blob.url, detail: "auto" },
+                },
+              ],
+            },
+          ],
+        });
+
+        return NextResponse.json({
+          analysis: response.choices[0].message.content,
+          imageUrl: blob.url,
+          usage: {
+            promptTokens: response.usage?.prompt_tokens,
+            completionTokens: response.usage?.completion_tokens,
+          },
+        });
+      }
+
+      // app/components/ImageAnalyzer.tsx
+      "use client";
+
+      import { useState, useCallback } from "react";
+
+      export function ImageAnalyzer() {
+        const [image, setImage] = useState<File | null>(null);
+        const [preview, setPreview] = useState<string | null>(null);
+        const [analysis, setAnalysis] = useState<string | null>(null);
+        const [loading, setLoading] = useState(false);
+
+        const handleDrop = useCallback((e: React.DragEvent) => {
+          e.preventDefault();
+          const file = e.dataTransfer.files[0];
+          if (file?.type.startsWith("image/")) {
+            setImage(file);
+            setPreview(URL.createObjectURL(file));
+          }
+        }, []);
+
+        const analyze = async () => {
+          if (!image) return;
+
+          setLoading(true);
+          const formData = new FormData();
+          formData.append("image", image);
+          formData.append("prompt", "Analyze this image in detail");
+
+          try {
+            const res = await fetch("/api/analyze-image", {
+              method: "POST",
+              body: formData,
+            });
+
+            const data = await res.json();
+            setAnalysis(data.analysis);
+          } finally {
+            setLoading(false);
+          }
+        };
+
+        return (
+          <div
+            onDrop={handleDrop}
+            onDragOver={(e) => e.preventDefault()}
+            className="border-2 border-dashed p-8"
+          >
+            {preview ? (
+              <img src={preview} alt="Preview" className="max-w-md" />
+            ) : (
+              <p>Drop an image here</p>
+            )}
+
+            {image && (
+              <button onClick={analyze} disabled={loading}>
+                {loading ? "Analyzing..." : "Analyze"}
+              </button>
+            )}
+
+            {analysis && <p className="mt-4">{analysis}</p>}
+          </div>
+        );
+      }
+
+  voice_transcription_api:
+    description: "Audio transcription with streaming"
+    pattern: |
+      // app/api/transcribe/route.ts
+      import { NextRequest, NextResponse } from "next/server";
+      import OpenAI from "openai";
+      import { writeFile, unlink } from "fs/promises";
+      import { tmpdir } from "os";
+      import path from "path";
+
+      const openai = new OpenAI();
+
+      export async function POST(req: NextRequest) {
+        const formData = await req.formData();
+        const audio = formData.get("audio") as File;
+        const language = formData.get("language") as string | null;
+
+        if (!audio) {
+          return NextResponse.json({ error: "No audio provided" }, { status: 400 });
+        }
+
+        // Validate
+        const validTypes = ["audio/mp3", "audio/wav", "audio/webm", "audio/m4a"];
+        if (!validTypes.some((t) => audio.type.includes(t.split("/")[1]))) {
+          return NextResponse.json({ error: "Invalid audio format" }, { status: 400 });
+        }
+
+        // Save temp file
+        const tempPath = path.join(tmpdir(), `audio_${Date.now()}.${audio.type.split("/")[1]}`);
+        const buffer = Buffer.from(await audio.arrayBuffer());
+        await writeFile(tempPath, buffer);
+
+        try {
+          const transcription = await openai.audio.transcriptions.create({
+            file: require("fs").createReadStream(tempPath),
+            model: "whisper-1",
+            language: language ?? undefined,
+            response_format: "verbose_json",
+          });
+
+          return NextResponse.json({
+            text: transcription.text,
+            language: transcription.language,
+            duration: transcription.duration,
+            segments: transcription.segments?.map((s) => ({
+              start: s.start,
+              end: s.end,
+              text: s.text,
+            })),
+          });
+        } finally {
+          await unlink(tempPath).catch(() => {});
+        }
+      }
+
+      // Browser recording component
+      // app/components/VoiceRecorder.tsx
+      "use client";
+
+      import { useState, useRef, useCallback } from "react";
+
+      export function VoiceRecorder() {
+        const [recording, setRecording] = useState(false);
+        const [transcription, setTranscription] = useState<string | null>(null);
+        const mediaRecorder = useRef<MediaRecorder | null>(null);
+        const chunks = useRef<Blob[]>([]);
+
+        const startRecording = useCallback(async () => {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaRecorder.current = new MediaRecorder(stream, {
+            mimeType: "audio/webm",
+          });
+
+          chunks.current = [];
+
+          mediaRecorder.current.ondataavailable = (e) => {
+            chunks.current.push(e.data);
+          };
+
+          mediaRecorder.current.onstop = async () => {
+            const blob = new Blob(chunks.current, { type: "audio/webm" });
+            const formData = new FormData();
+            formData.append("audio", blob, "recording.webm");
+
+            const res = await fetch("/api/transcribe", {
+              method: "POST",
+              body: formData,
+            });
+
+            const data = await res.json();
+            setTranscription(data.text);
+
+            // Stop tracks
+            stream.getTracks().forEach((t) => t.stop());
+          };
+
+          mediaRecorder.current.start();
+          setRecording(true);
+        }, []);
+
+        const stopRecording = useCallback(() => {
+          mediaRecorder.current?.stop();
+          setRecording(false);
+        }, []);
+
+        return (
+          <div>
+            <button onClick={recording ? stopRecording : startRecording}>
+              {recording ? "Stop" : "Start Recording"}
+            </button>
+
+            {transcription && <p>{transcription}</p>}
+          </div>
+        );
+      }
+
+  multimodal_chat:
+    description: "Chat with image and audio support"
+    pattern: |
+      // lib/multimodal-chat.ts
+      import OpenAI from "openai";
+
+      const openai = new OpenAI();
+
+      interface ChatMessage {
+        role: "user" | "assistant" | "system";
+        content: string | Array<{
+          type: "text" | "image_url";
+          text?: string;
+          image_url?: { url: string; detail?: "low" | "high" };
+        }>;
+      }
+
+      interface ChatOptions {
+        stream?: boolean;
+        onToken?: (token: string) => void;
+      }
+
+      export async function multimodalChat(
+        messages: ChatMessage[],
+        options?: ChatOptions
+      ): Promise<string> {
+        if (options?.stream && options?.onToken) {
+          const stream = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: messages as any,
+            stream: true,
+          });
+
+          let response = "";
+          for await (const chunk of stream) {
+            const content = chunk.choices[0]?.delta?.content ?? "";
+            response += content;
+            options.onToken(content);
+          }
+
+          return response;
+        }
+
+        const result = await openai.chat.completions.create({
+          model: "gpt-4o",
+          messages: messages as any,
+        });
+
+        return result.choices[0].message.content ?? "";
+      }
+
+      // React hook
+      export function useMultimodalChat() {
+        const [messages, setMessages] = useState<ChatMessage[]>([]);
+        const [loading, setLoading] = useState(false);
+
+        const sendMessage = useCallback(async (
+          text: string,
+          attachments?: { type: "image" | "audio"; url: string }[]
+        ) => {
+          const content: ChatMessage["content"] = [];
+
+          // Add text
+          content.push({ type: "text", text });
+
+          // Add images
+          for (const att of attachments ?? []) {
+            if (att.type === "image") {
+              content.push({
+                type: "image_url",
+                image_url: { url: att.url, detail: "auto" },
+              });
+            }
+            // Audio would need transcription first
+          }
+
+          const userMessage: ChatMessage = { role: "user", content };
+          setMessages((prev) => [...prev, userMessage]);
+          setLoading(true);
+
+          try {
+            let response = "";
+            await multimodalChat([...messages, userMessage], {
+              stream: true,
+              onToken: (token) => {
+                response += token;
+                setMessages((prev) => {
+                  const newMessages = [...prev];
+                  const lastIdx = newMessages.length - 1;
+                  if (newMessages[lastIdx]?.role === "assistant") {
+                    newMessages[lastIdx] = { role: "assistant", content: response };
+                  } else {
+                    newMessages.push({ role: "assistant", content: response });
+                  }
+                  return newMessages;
+                });
+              },
+            });
+          } finally {
+            setLoading(false);
+          }
+        }, [messages]);
+
+        return { messages, loading, sendMessage };
+      }
+
+  langfuse_multimodal_tracing:
+    description: "Trace multimodal operations with Langfuse"
+    pattern: |
+      // lib/traced-multimodal.ts
+      import { Langfuse } from "langfuse";
+      import OpenAI from "openai";
+
+      const langfuse = new Langfuse({
+        publicKey: process.env.LANGFUSE_PUBLIC_KEY!,
+        secretKey: process.env.LANGFUSE_SECRET_KEY!,
+      });
+
+      const openai = new OpenAI();
+
+      interface TracedResult {
+        content: string;
+        trace: ReturnType<typeof langfuse.trace>;
+        costs: {
+          textTokens: number;
+          imageTokens: number;
+          estimatedCost: number;
+        };
+      }
+
+      export async function tracedVisionAnalysis(
+        imageUrl: string,
+        prompt: string,
+        options?: { detail?: "low" | "high"; userId?: string }
+      ): Promise<TracedResult> {
+        const trace = langfuse.trace({
+          name: "vision-analysis",
+          userId: options?.userId,
+          metadata: {
+            imageUrl: imageUrl.slice(0, 100),
+            detail: options?.detail ?? "auto",
+          },
+        });
+
+        // Estimate image tokens
+        const imageTokens = options?.detail === "low" ? 85 : 765; // Approximate
+
+        const generation = trace.generation({
+          name: "gpt-4o-vision",
+          model: "gpt-4o",
+          input: { prompt, hasImage: true },
+        });
+
+        try {
+          const response = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: [
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: prompt },
+                  {
+                    type: "image_url",
+                    image_url: { url: imageUrl, detail: options?.detail ?? "auto" },
+                  },
+                ],
+              },
+            ],
+          });
+
+          const usage = response.usage;
+          const content = response.choices[0].message.content ?? "";
+
+          generation.end({
+            output: content.slice(0, 500),
+            usage: {
+              input: usage?.prompt_tokens,
+              output: usage?.completion_tokens,
+            },
+          });
+
+          // Estimate cost (GPT-4o pricing)
+          const inputCost = ((usage?.prompt_tokens ?? 0) / 1_000_000) * 2.5;
+          const outputCost = ((usage?.completion_tokens ?? 0) / 1_000_000) * 10;
+
+          trace.update({
+            output: {
+              contentLength: content.length,
+              estimatedCost: inputCost + outputCost,
+            },
+          });
+
+          return {
+            content,
+            trace,
+            costs: {
+              textTokens: usage?.prompt_tokens ?? 0,
+              imageTokens,
+              estimatedCost: inputCost + outputCost,
+            },
+          };
+        } catch (error) {
+          trace.update({
+            level: "ERROR",
+            statusMessage: error instanceof Error ? error.message : "Unknown error",
+          });
+          throw error;
+        } finally {
+          await langfuse.flushAsync();
+        }
+      }
+
+  inngest_async_processing:
+    description: "Background multimodal processing with Inngest"
+    pattern: |
+      // inngest/multimodal-jobs.ts
+      import { inngest } from "./client";
+      import OpenAI from "openai";
+      import { db } from "@/lib/db";
+
+      const openai = new OpenAI();
+
+      // Process uploaded images in background
+      export const processUploadedImage = inngest.createFunction(
+        { id: "process-uploaded-image" },
+        { event: "image/uploaded" },
+        async ({ event, step }) => {
+          const { imageId, imageUrl, userId } = event.data;
+
+          // Step 1: Generate description
+          const description = await step.run("generate-description", async () => {
+            const response = await openai.chat.completions.create({
+              model: "gpt-4o",
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    { type: "text", text: "Describe this image in 2-3 sentences." },
+                    { type: "image_url", image_url: { url: imageUrl, detail: "low" } },
+                  ],
+                },
+              ],
+            });
+
+            return response.choices[0].message.content;
+          });
+
+          // Step 2: Extract text (OCR)
+          const extractedText = await step.run("extract-text", async () => {
+            const response = await openai.chat.completions.create({
+              model: "gpt-4o",
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    { type: "text", text: "Extract all text from this image. If no text, return empty string." },
+                    { type: "image_url", image_url: { url: imageUrl, detail: "high" } },
+                  ],
+                },
+              ],
+            });
+
+            return response.choices[0].message.content;
+          });
+
+          // Step 3: Generate tags
+          const tags = await step.run("generate-tags", async () => {
+            const response = await openai.chat.completions.create({
+              model: "gpt-4o",
+              response_format: { type: "json_object" },
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    { type: "text", text: "Generate 5-10 tags for this image. Output as JSON: { tags: string[] }" },
+                    { type: "image_url", image_url: { url: imageUrl, detail: "low" } },
+                  ],
+                },
+              ],
+            });
+
+            const result = JSON.parse(response.choices[0].message.content ?? "{}");
+            return result.tags ?? [];
+          });
+
+          // Step 4: Update database
+          await step.run("update-database", async () => {
+            await db.image.update({
+              where: { id: imageId },
+              data: {
+                description,
+                extractedText,
+                tags,
+                processedAt: new Date(),
+              },
+            });
+          });
+
+          // Step 5: Notify user
+          await step.sendEvent("notify-user", {
+            name: "notification/send",
+            data: {
+              userId,
+              type: "image_processed",
+              imageId,
+            },
+          });
+
+          return { description, extractedText, tags };
+        }
+      );

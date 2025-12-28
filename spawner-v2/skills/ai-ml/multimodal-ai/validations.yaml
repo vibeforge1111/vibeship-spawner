@@ -1,0 +1,339 @@
+# Validations - Multimodal AI
+# Quality checks for multimodal implementations
+
+version: 1.0.0
+skill_id: multimodal-ai
+
+validations:
+  # Image Processing
+  - id: no-image-format-check
+    name: No Image Format Validation
+    severity: error
+    description: Validate image format before sending to API
+    pattern: |
+      image_url.*url(?!.*format.*check|valid|jpg|png|webp)
+    message: "Validate image format (JPEG, PNG, WebP, GIF) before API call."
+    autofix: false
+
+  - id: no-token-estimation
+    name: No Image Token Estimation
+    severity: warning
+    description: Estimate image tokens for cost management
+    pattern: |
+      image_url.*detail.*high(?!.*token|estimate|cost)
+    message: "Estimate image tokens before sending high-detail images."
+    autofix: false
+
+  - id: high-detail-unnecessary
+    name: High Detail for Simple Tasks
+    severity: info
+    description: Low detail often sufficient for descriptions
+    pattern: |
+      detail.*high.*describe|summarize.*detail.*high
+    message: "Consider 'low' detail for simple descriptions to save tokens."
+    autofix: false
+
+  # Audio Processing
+  - id: no-audio-format-check
+    name: No Audio Format Validation
+    severity: error
+    description: Check audio format before transcription
+    pattern: |
+      transcriptions\.create(?!.*format|check|mp3|wav)
+    message: "Validate audio format before sending to Whisper."
+    autofix: false
+
+  - id: no-audio-normalization
+    name: No Audio Preprocessing
+    severity: warning
+    description: Normalize audio for better transcription
+    pattern: |
+      transcriptions\.create(?!.*normalize|process|ffmpeg)
+    message: "Consider normalizing audio for better transcription quality."
+    autofix: false
+
+  - id: large-audio-file
+    name: Large Audio File
+    severity: warning
+    description: Audio files over 25MB need splitting
+    pattern: |
+      transcriptions\.create(?!.*size.*check|split|chunk)
+    message: "Check audio file size (max 25MB) and split if needed."
+    autofix: false
+
+  # Context Management
+  - id: no-context-tracking
+    name: No Multimodal Context Tracking
+    severity: warning
+    description: Track token usage across modalities
+    pattern: |
+      image_url.*image_url(?!.*context|token.*track)
+    message: "Track cumulative token usage when using multiple images."
+    autofix: false
+
+  - id: images-fill-context
+    name: Too Many Images in Context
+    severity: error
+    description: Multiple high-res images can fill context
+    pattern: |
+      images\.map.*image_url(?!.*limit|max|budget)
+    message: "Limit number of images to prevent context overflow."
+    autofix: false
+
+  # Error Handling
+  - id: no-vision-error-handling
+    name: No Vision Error Handling
+    severity: error
+    description: Handle vision API errors gracefully
+    pattern: |
+      image_url(?!.*catch|try|error)
+    message: "Handle vision API errors (invalid images, rate limits)."
+    autofix: false
+
+  - id: no-transcription-fallback
+    name: No Transcription Fallback
+    severity: warning
+    description: Have fallback for transcription failures
+    pattern: |
+      transcriptions\.create(?!.*catch|fallback|retry)
+    message: "Add fallback handling for transcription failures."
+    autofix: false
+
+  # Performance
+  - id: sequential-multimodal
+    name: Sequential Multimodal Processing
+    severity: info
+    description: Process modalities in parallel when possible
+    pattern: |
+      await.*image.*await.*audio(?!.*Promise\.all|parallel)
+    message: "Process images and audio in parallel to reduce latency."
+    autofix: false
+
+  - id: no-image-caching
+    name: No Image Description Caching
+    severity: info
+    description: Cache repeated image analyses
+    pattern: |
+      image_url.*same.*image(?!.*cache|memo)
+    message: "Cache image descriptions to avoid reprocessing."
+    autofix: false
+
+code_smells:
+  - id: screenshot-instead-of-text
+    name: Screenshot Instead of Text
+    description: Using screenshots when text is available
+    pattern: |
+      screenshot.*text|capture.*send.*vision
+    suggestion: "If text content is available, use text instead of screenshots."
+
+  - id: unoptimized-images
+    name: Sending Unoptimized Images
+    description: Large images waste tokens
+    pattern: |
+      image_url(?!.*resize|optimize|compress)
+    suggestion: "Resize/compress images before sending to reduce token usage."
+
+  - id: hardcoded-detail-level
+    name: Hardcoded Detail Level
+    description: Detail level should be task-dependent
+    pattern: |
+      detail.*"high"(?!.*task|dynamic)
+    suggestion: "Choose detail level based on task (low for descriptions, high for OCR)."
+
+  - id: blocking-multimodal
+    name: Blocking Multimodal Processing
+    description: Heavy processing should be async
+    pattern: |
+      await.*vision.*await.*transcription(?!.*background)
+    suggestion: "Consider background processing for heavy multimodal operations."
+
+best_practices:
+  - id: token-aware-vision
+    name: Token-Aware Vision Pipeline
+    check: |
+      Image token usage is estimated and managed.
+    recommendation: |
+      interface TokenBudget {
+        text: number;
+        images: number;
+        total: number;
+        max: number;
+      }
+
+      function createTokenTracker(maxTokens: number = 128000) {
+        const budget: TokenBudget = {
+          text: 0,
+          images: 0,
+          total: 0,
+          max: maxTokens - 4096, // Reserve for output
+        };
+
+        return {
+          addText(tokens: number) {
+            budget.text += tokens;
+            budget.total = budget.text + budget.images;
+            return budget.total <= budget.max;
+          },
+
+          addImage(width: number, height: number, detail: "low" | "high") {
+            const tokens = detail === "low" ? 85 :
+              85 + 170 * Math.ceil(width / 512) * Math.ceil(height / 512);
+            budget.images += tokens;
+            budget.total = budget.text + budget.images;
+            return budget.total <= budget.max;
+          },
+
+          getRemaining() {
+            return budget.max - budget.total;
+          },
+
+          getBudget() {
+            return { ...budget };
+          },
+        };
+      }
+
+  - id: robust-transcription
+    name: Robust Audio Transcription
+    check: |
+      Audio is validated and preprocessed before transcription.
+    recommendation: |
+      import { createReadStream } from "fs";
+      import { stat } from "fs/promises";
+
+      interface TranscriptionResult {
+        text: string;
+        confidence: number;
+        warnings: string[];
+      }
+
+      async function robustTranscribe(
+        audioPath: string
+      ): Promise<TranscriptionResult> {
+        const warnings: string[] = [];
+
+        // Validate file
+        const stats = await stat(audioPath);
+        if (stats.size > 25 * 1024 * 1024) {
+          throw new Error("File too large (max 25MB)");
+        }
+
+        // Check format
+        const ext = audioPath.split(".").pop()?.toLowerCase();
+        const supported = ["mp3", "mp4", "mpeg", "mpga", "m4a", "wav", "webm"];
+
+        if (!supported.includes(ext ?? "")) {
+          warnings.push(`Format ${ext} may not be supported`);
+        }
+
+        try {
+          const result = await openai.audio.transcriptions.create({
+            file: createReadStream(audioPath),
+            model: "whisper-1",
+            response_format: "verbose_json",
+          });
+
+          return {
+            text: result.text,
+            confidence: result.segments?.reduce((sum, s) => sum + (s.no_speech_prob ?? 0), 0) /
+              (result.segments?.length ?? 1) < 0.5 ? 0.8 : 0.5,
+            warnings,
+          };
+        } catch (error) {
+          throw new Error(`Transcription failed: ${error}`);
+        }
+      }
+
+  - id: optimized-multimodal
+    name: Optimized Multimodal Pipeline
+    check: |
+      Multimodal inputs are processed efficiently.
+    recommendation: |
+      interface ProcessingResult {
+        text: string;
+        modalities: string[];
+        processingTime: number;
+        tokenUsage: { input: number; output: number };
+      }
+
+      async function optimizedMultimodalProcess(
+        inputs: Array<{
+          type: "text" | "image" | "audio";
+          content: string | Buffer;
+        }>,
+        instruction: string
+      ): Promise<ProcessingResult> {
+        const start = Date.now();
+        const modalities: string[] = [];
+
+        // Parallel preprocessing
+        const preprocessed = await Promise.all(
+          inputs.map(async (input) => {
+            modalities.push(input.type);
+
+            switch (input.type) {
+              case "text":
+                return { type: "text", text: input.content as string };
+
+              case "image":
+                // Optimize image
+                const optimized = await optimizeImage(input.content as string);
+                return {
+                  type: "image_url",
+                  image_url: { url: optimized, detail: "auto" },
+                };
+
+              case "audio":
+                // Transcribe audio
+                const text = await transcribeAudio(input.content as Buffer);
+                return { type: "text", text: `[Audio transcript]: ${text}` };
+            }
+          })
+        );
+
+        // Add instruction
+        preprocessed.push({ type: "text", text: instruction });
+
+        // Single API call
+        const response = await openai.chat.completions.create({
+          model: "gpt-4o",
+          messages: [{ role: "user", content: preprocessed as any }],
+        });
+
+        return {
+          text: response.choices[0].message.content ?? "",
+          modalities,
+          processingTime: Date.now() - start,
+          tokenUsage: {
+            input: response.usage?.prompt_tokens ?? 0,
+            output: response.usage?.completion_tokens ?? 0,
+          },
+        };
+      }
+
+testing_checklist:
+  image_processing:
+    - "Image formats validated before API call"
+    - "Token estimation implemented for images"
+    - "Detail level chosen based on task"
+    - "Large images resized appropriately"
+    - "Multiple images tracked for context"
+
+  audio_processing:
+    - "Audio format checked and converted if needed"
+    - "File size validated (max 25MB)"
+    - "Audio normalized for quality"
+    - "Transcription errors handled"
+    - "Long audio split into chunks"
+
+  unified_pipeline:
+    - "Modalities processed in parallel where possible"
+    - "Context budget tracked across modalities"
+    - "Appropriate model selected for task"
+    - "Errors handled per modality"
+
+  performance:
+    - "Image descriptions cached"
+    - "Latency optimized with streaming"
+    - "Token usage monitored and reported"
+    - "Cost estimates provided to users"

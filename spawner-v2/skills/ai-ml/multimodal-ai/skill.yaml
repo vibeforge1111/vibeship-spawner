@@ -1,0 +1,742 @@
+# Multimodal AI
+# Working with text, images, audio, and video in AI systems
+
+version: 1.0.0
+skill_id: multimodal-ai
+name: Multimodal AI
+category: ai-ml
+difficulty: advanced
+
+description: |
+  Patterns for building multimodal AI applications that combine text, images,
+  audio, and video. Covers vision APIs, audio transcription, and unified pipelines.
+
+triggers:
+  - "multimodal AI"
+  - "vision API"
+  - "image understanding"
+  - "GPT-4V"
+  - "Claude vision"
+  - "audio transcription"
+  - "Whisper"
+  - "document extraction"
+  - "image to text"
+
+technologies:
+  - OpenAI GPT-4o
+  - Claude Vision
+  - Whisper
+  - Gemini
+  - Google Cloud Vision
+
+patterns:
+  openai_vision:
+    description: "Process images with GPT-4o vision"
+    when: "Need to analyze, describe, or extract from images"
+    implementation: |
+      import OpenAI from "openai";
+      import { readFile } from "fs/promises";
+      import path from "path";
+
+      const openai = new OpenAI();
+
+      interface VisionOptions {
+        detail?: "low" | "high" | "auto";
+        maxTokens?: number;
+      }
+
+      // Process single image from URL
+      async function analyzeImageUrl(
+        imageUrl: string,
+        prompt: string,
+        options?: VisionOptions
+      ): Promise<string> {
+        const response = await openai.chat.completions.create({
+          model: "gpt-4o",
+          max_tokens: options?.maxTokens ?? 1024,
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: prompt },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: imageUrl,
+                    detail: options?.detail ?? "auto",
+                  },
+                },
+              ],
+            },
+          ],
+        });
+
+        return response.choices[0].message.content ?? "";
+      }
+
+      // Process image from file (base64)
+      async function analyzeImageFile(
+        filePath: string,
+        prompt: string,
+        options?: VisionOptions
+      ): Promise<string> {
+        const buffer = await readFile(filePath);
+        const base64 = buffer.toString("base64");
+        const ext = path.extname(filePath).toLowerCase();
+
+        const mimeType = {
+          ".jpg": "image/jpeg",
+          ".jpeg": "image/jpeg",
+          ".png": "image/png",
+          ".gif": "image/gif",
+          ".webp": "image/webp",
+        }[ext] ?? "image/jpeg";
+
+        const response = await openai.chat.completions.create({
+          model: "gpt-4o",
+          max_tokens: options?.maxTokens ?? 1024,
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: prompt },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: `data:${mimeType};base64,${base64}`,
+                    detail: options?.detail ?? "auto",
+                  },
+                },
+              ],
+            },
+          ],
+        });
+
+        return response.choices[0].message.content ?? "";
+      }
+
+      // Compare multiple images
+      async function compareImages(
+        images: string[],
+        prompt: string
+      ): Promise<string> {
+        const imageContent = images.map((url) => ({
+          type: "image_url" as const,
+          image_url: { url, detail: "high" as const },
+        }));
+
+        const response = await openai.chat.completions.create({
+          model: "gpt-4o",
+          max_tokens: 2048,
+          messages: [
+            {
+              role: "user",
+              content: [{ type: "text", text: prompt }, ...imageContent],
+            },
+          ],
+        });
+
+        return response.choices[0].message.content ?? "";
+      }
+
+      // Structured extraction from images
+      interface ExtractedData<T> {
+        data: T;
+        confidence: number;
+      }
+
+      async function extractStructuredData<T>(
+        imageUrl: string,
+        schema: string,
+        example?: T
+      ): Promise<ExtractedData<T>> {
+        const prompt = `Extract structured data from this image.
+
+        Output JSON matching this schema:
+        ${schema}
+
+        ${example ? `Example output:\n${JSON.stringify(example, null, 2)}` : ""}
+
+        Respond ONLY with valid JSON. Include a "confidence" field (0-1).`;
+
+        const response = await openai.chat.completions.create({
+          model: "gpt-4o",
+          max_tokens: 2048,
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: prompt },
+                { type: "image_url", image_url: { url: imageUrl, detail: "high" } },
+              ],
+            },
+          ],
+        });
+
+        const result = JSON.parse(response.choices[0].message.content ?? "{}");
+        return result as ExtractedData<T>;
+      }
+
+  claude_vision:
+    description: "Process images with Claude"
+    when: "Need document extraction or long-context vision"
+    implementation: |
+      import Anthropic from "@anthropic-ai/sdk";
+      import { readFile } from "fs/promises";
+
+      const anthropic = new Anthropic();
+
+      interface ClaudeVisionOptions {
+        maxTokens?: number;
+        thinking?: boolean;
+      }
+
+      // Process image with Claude
+      async function analyzeWithClaude(
+        imageSource: string | Buffer,
+        prompt: string,
+        options?: ClaudeVisionOptions
+      ): Promise<string> {
+        let imageData: Anthropic.ImageBlockParam;
+
+        if (Buffer.isBuffer(imageSource)) {
+          imageData = {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: "image/png",
+              data: imageSource.toString("base64"),
+            },
+          };
+        } else if (imageSource.startsWith("data:")) {
+          // Base64 data URL
+          const [header, data] = imageSource.split(",");
+          const mediaType = header.match(/data:(.+);base64/)?.[1] ?? "image/png";
+          imageData = {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: mediaType as "image/png",
+              data,
+            },
+          };
+        } else {
+          // URL
+          imageData = {
+            type: "image",
+            source: {
+              type: "url",
+              url: imageSource,
+            },
+          };
+        }
+
+        const response = await anthropic.messages.create({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: options?.maxTokens ?? 2048,
+          messages: [
+            {
+              role: "user",
+              content: [imageData, { type: "text", text: prompt }],
+            },
+          ],
+        });
+
+        const textBlock = response.content.find((b) => b.type === "text");
+        return textBlock?.type === "text" ? textBlock.text : "";
+      }
+
+      // Document extraction with Claude (superior for tables/forms)
+      interface DocumentField {
+        name: string;
+        value: string;
+        confidence: number;
+        location?: string;
+      }
+
+      async function extractDocument(
+        imageUrl: string,
+        fieldNames: string[]
+      ): Promise<DocumentField[]> {
+        const prompt = `Extract the following fields from this document image:
+        ${fieldNames.map((f) => `- ${f}`).join("\n")}
+
+        For each field, provide:
+        - name: The field name
+        - value: The extracted value (exact text from document)
+        - confidence: Your confidence (0-1)
+        - location: Where on the document (e.g., "top-left", "table row 3")
+
+        Output as JSON array. If a field is not found, set value to null.`;
+
+        const response = await analyzeWithClaude(imageUrl, prompt);
+
+        try {
+          // Extract JSON from response
+          const jsonMatch = response.match(/\[[\s\S]*\]/);
+          return jsonMatch ? JSON.parse(jsonMatch[0]) : [];
+        } catch {
+          return [];
+        }
+      }
+
+      // Multi-page document processing
+      async function processMultiPageDocument(
+        pages: string[],
+        task: string
+      ): Promise<string> {
+        const imageContent = pages.map((url) => ({
+          type: "image" as const,
+          source: { type: "url" as const, url },
+        }));
+
+        const response = await anthropic.messages.create({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 4096,
+          messages: [
+            {
+              role: "user",
+              content: [
+                ...imageContent,
+                {
+                  type: "text",
+                  text: `These are pages of a document. ${task}`,
+                },
+              ],
+            },
+          ],
+        });
+
+        const textBlock = response.content.find((b) => b.type === "text");
+        return textBlock?.type === "text" ? textBlock.text : "";
+      }
+
+  audio_transcription:
+    description: "Transcribe audio with Whisper"
+    when: "Converting speech to text"
+    implementation: |
+      import OpenAI from "openai";
+      import { createReadStream } from "fs";
+      import { writeFile } from "fs/promises";
+
+      const openai = new OpenAI();
+
+      interface TranscriptionOptions {
+        language?: string;
+        prompt?: string;
+        responseFormat?: "json" | "text" | "srt" | "vtt" | "verbose_json";
+        temperature?: number;
+      }
+
+      interface TranscriptionResult {
+        text: string;
+        segments?: Array<{
+          start: number;
+          end: number;
+          text: string;
+        }>;
+        language?: string;
+        duration?: number;
+      }
+
+      // Basic transcription
+      async function transcribeAudio(
+        audioPath: string,
+        options?: TranscriptionOptions
+      ): Promise<TranscriptionResult> {
+        const response = await openai.audio.transcriptions.create({
+          file: createReadStream(audioPath),
+          model: "whisper-1",
+          language: options?.language,
+          prompt: options?.prompt,
+          response_format: options?.responseFormat ?? "verbose_json",
+          temperature: options?.temperature ?? 0,
+        });
+
+        if (typeof response === "string") {
+          return { text: response };
+        }
+
+        return {
+          text: response.text,
+          segments: response.segments?.map((s) => ({
+            start: s.start,
+            end: s.end,
+            text: s.text,
+          })),
+          language: response.language,
+          duration: response.duration,
+        };
+      }
+
+      // Transcribe with speaker diarization (using external service or prompt)
+      async function transcribeWithSpeakers(
+        audioPath: string
+      ): Promise<Array<{ speaker: string; start: number; end: number; text: string }>> {
+        // Step 1: Basic transcription with timestamps
+        const transcription = await transcribeAudio(audioPath, {
+          responseFormat: "verbose_json",
+        });
+
+        // Step 2: Use GPT to identify speakers
+        const segments = transcription.segments ?? [];
+        const fullText = segments.map((s) => `[${s.start.toFixed(1)}s] ${s.text}`).join("\n");
+
+        const response = await openai.chat.completions.create({
+          model: "gpt-4o",
+          messages: [
+            {
+              role: "system",
+              content: `Analyze this transcript and identify different speakers.
+              Output JSON array with: speaker, start, end, text.
+              Assign speakers as "Speaker 1", "Speaker 2", etc.`,
+            },
+            { role: "user", content: fullText },
+          ],
+          response_format: { type: "json_object" },
+        });
+
+        const result = JSON.parse(response.choices[0].message.content ?? "{}");
+        return result.segments ?? [];
+      }
+
+      // Real-time transcription with streaming
+      // Note: OpenAI Whisper doesn't support streaming, but you can chunk
+      async function* streamTranscription(
+        audioChunks: AsyncIterable<Buffer>,
+        chunkDurationSec: number = 5
+      ): AsyncGenerator<TranscriptionResult> {
+        let buffer = Buffer.alloc(0);
+        const sampleRate = 16000; // Assuming 16kHz mono
+        const bytesPerChunk = sampleRate * 2 * chunkDurationSec; // 16-bit audio
+
+        for await (const chunk of audioChunks) {
+          buffer = Buffer.concat([buffer, chunk]);
+
+          while (buffer.length >= bytesPerChunk) {
+            const audioChunk = buffer.slice(0, bytesPerChunk);
+            buffer = buffer.slice(bytesPerChunk);
+
+            // Save temp file (Whisper requires file input)
+            const tempPath = `/tmp/chunk_${Date.now()}.wav`;
+            await writeFile(tempPath, createWavFile(audioChunk, sampleRate));
+
+            const result = await transcribeAudio(tempPath);
+            yield result;
+          }
+        }
+
+        // Process remaining buffer
+        if (buffer.length > 0) {
+          const tempPath = `/tmp/chunk_final_${Date.now()}.wav`;
+          await writeFile(tempPath, createWavFile(buffer, 16000));
+          yield await transcribeAudio(tempPath);
+        }
+      }
+
+      function createWavFile(pcmData: Buffer, sampleRate: number): Buffer {
+        // WAV header creation (simplified)
+        const header = Buffer.alloc(44);
+        // ... WAV header bytes
+        return Buffer.concat([header, pcmData]);
+      }
+
+  unified_multimodal:
+    description: "Unified pipeline for multiple modalities"
+    when: "Processing mixed input types"
+    implementation: |
+      import OpenAI from "openai";
+      import Anthropic from "@anthropic-ai/sdk";
+
+      const openai = new OpenAI();
+      const anthropic = new Anthropic();
+
+      type InputModality = "text" | "image" | "audio" | "video";
+
+      interface MultimodalInput {
+        type: InputModality;
+        content: string | Buffer;
+        metadata?: Record<string, unknown>;
+      }
+
+      interface MultimodalOutput {
+        text: string;
+        modalities: InputModality[];
+        tokenUsage: {
+          input: number;
+          output: number;
+        };
+        processingTime: number;
+      }
+
+      class UnifiedMultimodalPipeline {
+        private model: "gpt-4o" | "claude";
+
+        constructor(model: "gpt-4o" | "claude" = "gpt-4o") {
+          this.model = model;
+        }
+
+        async process(
+          inputs: MultimodalInput[],
+          instruction: string
+        ): Promise<MultimodalOutput> {
+          const startTime = Date.now();
+          const modalities = inputs.map((i) => i.type);
+
+          // Preprocess audio to text (neither GPT-4o nor Claude accept audio directly in chat)
+          const processedInputs = await Promise.all(
+            inputs.map(async (input) => {
+              if (input.type === "audio") {
+                const transcription = await this.transcribeAudio(input.content as Buffer);
+                return {
+                  type: "text" as const,
+                  content: `[Transcribed audio]: ${transcription}`,
+                  metadata: { originalType: "audio" },
+                };
+              }
+              return input;
+            })
+          );
+
+          // Build content array
+          const content = processedInputs.map((input) => {
+            if (input.type === "text") {
+              return { type: "text" as const, text: input.content as string };
+            }
+            if (input.type === "image") {
+              const imageData =
+                typeof input.content === "string"
+                  ? input.content
+                  : `data:image/png;base64,${(input.content as Buffer).toString("base64")}`;
+
+              return {
+                type: "image_url" as const,
+                image_url: { url: imageData, detail: "high" as const },
+              };
+            }
+            throw new Error(`Unsupported type: ${input.type}`);
+          });
+
+          // Add instruction
+          content.push({ type: "text" as const, text: instruction });
+
+          // Call appropriate API
+          let response: string;
+          let usage = { input: 0, output: 0 };
+
+          if (this.model === "gpt-4o") {
+            const result = await openai.chat.completions.create({
+              model: "gpt-4o",
+              messages: [{ role: "user", content }],
+              max_tokens: 2048,
+            });
+
+            response = result.choices[0].message.content ?? "";
+            usage = {
+              input: result.usage?.prompt_tokens ?? 0,
+              output: result.usage?.completion_tokens ?? 0,
+            };
+          } else {
+            // Convert to Claude format
+            const claudeContent = content.map((c) => {
+              if (c.type === "text") return c;
+              if (c.type === "image_url") {
+                return {
+                  type: "image" as const,
+                  source: { type: "url" as const, url: c.image_url.url },
+                };
+              }
+              return c;
+            });
+
+            const result = await anthropic.messages.create({
+              model: "claude-sonnet-4-20250514",
+              messages: [{ role: "user", content: claudeContent }],
+              max_tokens: 2048,
+            });
+
+            const textBlock = result.content.find((b) => b.type === "text");
+            response = textBlock?.type === "text" ? textBlock.text : "";
+            usage = {
+              input: result.usage.input_tokens,
+              output: result.usage.output_tokens,
+            };
+          }
+
+          return {
+            text: response,
+            modalities,
+            tokenUsage: usage,
+            processingTime: Date.now() - startTime,
+          };
+        }
+
+        private async transcribeAudio(audio: Buffer): Promise<string> {
+          // Save to temp file
+          const tempPath = `/tmp/audio_${Date.now()}.mp3`;
+          await require("fs/promises").writeFile(tempPath, audio);
+
+          const result = await openai.audio.transcriptions.create({
+            file: require("fs").createReadStream(tempPath),
+            model: "whisper-1",
+          });
+
+          return result.text;
+        }
+      }
+
+  image_token_optimization:
+    description: "Optimize image token usage"
+    when: "Managing costs with vision APIs"
+    implementation: |
+      import OpenAI from "openai";
+      import sharp from "sharp";
+
+      const openai = new OpenAI();
+
+      interface ImageOptimization {
+        originalSize: { width: number; height: number };
+        optimizedSize: { width: number; height: number };
+        estimatedTokens: number;
+        detailLevel: "low" | "high";
+      }
+
+      // GPT-4o token estimation for images
+      // Low detail: 85 tokens fixed
+      // High detail: 85 + 170 * ceil(width/512) * ceil(height/512)
+      function estimateImageTokens(
+        width: number,
+        height: number,
+        detail: "low" | "high"
+      ): number {
+        if (detail === "low") {
+          return 85;
+        }
+
+        // Scale down if larger than 2048 on any side
+        const maxDim = 2048;
+        if (width > maxDim || height > maxDim) {
+          const scale = maxDim / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+
+        // Scale to fit in 768px on shortest side
+        const shortSide = Math.min(width, height);
+        if (shortSide > 768) {
+          const scale = 768 / shortSide;
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+
+        // Calculate tiles
+        const tilesX = Math.ceil(width / 512);
+        const tilesY = Math.ceil(height / 512);
+
+        return 85 + 170 * tilesX * tilesY;
+      }
+
+      // Optimize image for minimal tokens while preserving quality
+      async function optimizeImageForVision(
+        imagePath: string,
+        task: "ocr" | "describe" | "compare" | "analyze"
+      ): Promise<{ buffer: Buffer; optimization: ImageOptimization }> {
+        const image = sharp(imagePath);
+        const metadata = await image.metadata();
+        const originalWidth = metadata.width ?? 0;
+        const originalHeight = metadata.height ?? 0;
+
+        // Choose detail level based on task
+        let detail: "low" | "high" = "high";
+        let targetSize = { width: originalWidth, height: originalHeight };
+
+        switch (task) {
+          case "describe":
+            // Low detail sufficient for general descriptions
+            detail = "low";
+            targetSize = { width: 512, height: 512 };
+            break;
+
+          case "ocr":
+            // High detail needed for text extraction
+            detail = "high";
+            // Keep original size up to 2048
+            break;
+
+          case "compare":
+            // Medium - resize to 1024 max
+            detail = "high";
+            if (originalWidth > 1024 || originalHeight > 1024) {
+              const scale = 1024 / Math.max(originalWidth, originalHeight);
+              targetSize = {
+                width: Math.round(originalWidth * scale),
+                height: Math.round(originalHeight * scale),
+              };
+            }
+            break;
+
+          case "analyze":
+            // High detail, but optimize size
+            detail = "high";
+            // Scale to 768 on shortest side
+            const shortSide = Math.min(originalWidth, originalHeight);
+            if (shortSide > 768) {
+              const scale = 768 / shortSide;
+              targetSize = {
+                width: Math.round(originalWidth * scale),
+                height: Math.round(originalHeight * scale),
+              };
+            }
+            break;
+        }
+
+        // Resize and compress
+        const buffer = await image
+          .resize(targetSize.width, targetSize.height, { fit: "inside" })
+          .jpeg({ quality: 85 })
+          .toBuffer();
+
+        const estimatedTokens = estimateImageTokens(targetSize.width, targetSize.height, detail);
+
+        return {
+          buffer,
+          optimization: {
+            originalSize: { width: originalWidth, height: originalHeight },
+            optimizedSize: targetSize,
+            estimatedTokens,
+            detailLevel: detail,
+          },
+        };
+      }
+
+anti_patterns:
+  - pattern: "Sending high-res images for simple tasks"
+    problem: "Wastes tokens and money"
+    solution: "Use 'low' detail for descriptions, 'high' for OCR"
+
+  - pattern: "Sequential multimodal processing"
+    problem: "Slow - processes image, then audio, then text"
+    solution: "Process modalities in parallel where possible"
+
+  - pattern: "Not validating image format"
+    problem: "API errors on unsupported formats"
+    solution: "Convert to supported formats (JPEG, PNG, WebP, GIF)"
+
+  - pattern: "Ignoring token costs for images"
+    problem: "Vision costs 10-100x more than text"
+    solution: "Estimate and optimize image tokens before sending"
+
+  - pattern: "Using vision for text-only tasks"
+    problem: "Unnecessary complexity and cost"
+    solution: "If text is available, prefer text over screenshots"
+
+handoffs:
+  - skill: document-ai
+    when: "Processing structured documents"
+
+  - skill: ai-observability
+    when: "Tracking multimodal costs"
+
+  - skill: llm-integration
+    when: "Building chat with multimodal support"

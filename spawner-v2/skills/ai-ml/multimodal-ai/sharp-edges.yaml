@@ -1,0 +1,671 @@
+# Sharp Edges - Multimodal AI
+# Gotchas that cause failures, high costs, or poor quality
+
+version: 1.0.0
+skill_id: multimodal-ai
+
+sharp_edges:
+  - id: image-token-explosion
+    summary: "Images consume 10-100x more tokens than expected"
+    severity: high
+    situation: "Sending high-resolution images to vision APIs"
+    why: |
+      Image token costs are often underestimated:
+      - GPT-4o high detail: 85 + 170 * tiles (up to ~1500 tokens)
+      - Claude: Similar scaling
+      - A 4K image can cost more than 5000 tokens
+
+      Sending screenshots of text instead of text = 100x cost.
+
+    detection_pattern: |
+      image_url.*detail.*high(?!.*estimate|token|cost)
+
+    solution: |
+      Estimate and optimize before sending:
+
+      ```typescript
+      // Token estimation for GPT-4o
+      function estimateImageTokens(
+        width: number,
+        height: number,
+        detail: "low" | "high"
+      ): number {
+        if (detail === "low") return 85;
+
+        // Scale down logic (matches OpenAI's internal)
+        let w = width, h = height;
+
+        // Cap at 2048
+        if (w > 2048 || h > 2048) {
+          const scale = 2048 / Math.max(w, h);
+          w = Math.round(w * scale);
+          h = Math.round(h * scale);
+        }
+
+        // Scale shortest side to 768
+        const shortSide = Math.min(w, h);
+        if (shortSide > 768) {
+          const scale = 768 / shortSide;
+          w = Math.round(w * scale);
+          h = Math.round(h * scale);
+        }
+
+        const tilesX = Math.ceil(w / 512);
+        const tilesY = Math.ceil(h / 512);
+
+        return 85 + 170 * tilesX * tilesY;
+      }
+
+      // Cost-aware image processing
+      async function processWithBudget(
+        images: Array<{ url: string; width: number; height: number }>,
+        maxTokenBudget: number
+      ): Promise<void> {
+        let totalTokens = 0;
+        const processed: string[] = [];
+
+        for (const img of images) {
+          const tokens = estimateImageTokens(img.width, img.height, "high");
+
+          if (totalTokens + tokens > maxTokenBudget) {
+            // Try with low detail
+            const lowTokens = estimateImageTokens(img.width, img.height, "low");
+            if (totalTokens + lowTokens <= maxTokenBudget) {
+              processed.push(`${img.url}?detail=low`);
+              totalTokens += lowTokens;
+            } else {
+              console.warn(`Skipping image: would exceed budget`);
+            }
+          } else {
+            processed.push(img.url);
+            totalTokens += tokens;
+          }
+        }
+
+        console.log(`Processing ${processed.length} images, ~${totalTokens} tokens`);
+      }
+      ```
+
+  - id: audio-format-failure
+    summary: "Audio transcription fails on unsupported formats"
+    severity: medium
+    situation: "Sending arbitrary audio to Whisper"
+    why: |
+      Whisper supports: mp3, mp4, mpeg, mpga, m4a, wav, webm
+      NOT supported: ogg (sometimes), raw PCM, many codec variants
+
+      Format errors are cryptic and waste API calls.
+
+    detection_pattern: |
+      transcriptions\.create(?!.*format.*check|convert)
+
+    solution: |
+      Validate and convert before sending:
+
+      ```typescript
+      import { exec } from "child_process";
+      import { promisify } from "util";
+      import { unlink } from "fs/promises";
+      import path from "path";
+
+      const execAsync = promisify(exec);
+
+      const SUPPORTED_FORMATS = ["mp3", "mp4", "mpeg", "mpga", "m4a", "wav", "webm"];
+      const MAX_SIZE_MB = 25;
+
+      interface AudioValidation {
+        valid: boolean;
+        needsConversion: boolean;
+        error?: string;
+        convertedPath?: string;
+      }
+
+      async function validateAudioForWhisper(
+        filePath: string
+      ): Promise<AudioValidation> {
+        const ext = path.extname(filePath).toLowerCase().slice(1);
+        const stats = await require("fs/promises").stat(filePath);
+        const sizeMB = stats.size / (1024 * 1024);
+
+        // Check size
+        if (sizeMB > MAX_SIZE_MB) {
+          return {
+            valid: false,
+            needsConversion: false,
+            error: `File too large: ${sizeMB.toFixed(1)}MB (max ${MAX_SIZE_MB}MB)`,
+          };
+        }
+
+        // Check format
+        if (!SUPPORTED_FORMATS.includes(ext)) {
+          return {
+            valid: false,
+            needsConversion: true,
+            error: `Unsupported format: ${ext}`,
+          };
+        }
+
+        return { valid: true, needsConversion: false };
+      }
+
+      async function convertToSupportedFormat(
+        inputPath: string,
+        outputFormat: "mp3" | "wav" = "mp3"
+      ): Promise<string> {
+        const outputPath = inputPath.replace(/\.[^.]+$/, `.${outputFormat}`);
+
+        // Use ffmpeg for conversion
+        await execAsync(
+          `ffmpeg -i "${inputPath}" -ar 16000 -ac 1 "${outputPath}" -y`
+        );
+
+        return outputPath;
+      }
+
+      // Safe transcription with auto-conversion
+      async function safeTranscribe(filePath: string): Promise<string> {
+        const validation = await validateAudioForWhisper(filePath);
+
+        let pathToTranscribe = filePath;
+
+        if (!validation.valid) {
+          if (validation.needsConversion) {
+            pathToTranscribe = await convertToSupportedFormat(filePath);
+          } else {
+            throw new Error(validation.error);
+          }
+        }
+
+        try {
+          const result = await openai.audio.transcriptions.create({
+            file: createReadStream(pathToTranscribe),
+            model: "whisper-1",
+          });
+          return result.text;
+        } finally {
+          // Cleanup converted file
+          if (pathToTranscribe !== filePath) {
+            await unlink(pathToTranscribe).catch(() => {});
+          }
+        }
+      }
+      ```
+
+  - id: context-window-multimodal
+    summary: "Images fill context window, truncating text"
+    severity: high
+    situation: "Multiple images in conversation"
+    why: |
+      A few high-res images can consume most of the context:
+      - 4 high-res images: ~6000 tokens
+      - GPT-4o context: 128K but output limited
+      - Leaves little room for system prompt and history
+
+      Important context gets silently truncated.
+
+    detection_pattern: |
+      images.*push|multiple.*image(?!.*context.*check|token.*count)
+
+    solution: |
+      Track and manage multimodal context:
+
+      ```typescript
+      interface ContextBudget {
+        maxTokens: number;
+        textTokens: number;
+        imageTokens: number;
+        remaining: number;
+      }
+
+      class MultimodalContextManager {
+        private maxTokens: number;
+        private reservedForOutput: number;
+        private textTokens = 0;
+        private imageTokens = 0;
+
+        constructor(maxTokens: number = 128000, reservedForOutput: number = 4096) {
+          this.maxTokens = maxTokens;
+          this.reservedForOutput = reservedForOutput;
+        }
+
+        addText(tokens: number): boolean {
+          if (this.getRemainingBudget() < tokens) return false;
+          this.textTokens += tokens;
+          return true;
+        }
+
+        addImage(width: number, height: number, detail: "low" | "high"): boolean {
+          const tokens = this.estimateImageTokens(width, height, detail);
+          if (this.getRemainingBudget() < tokens) return false;
+          this.imageTokens += tokens;
+          return true;
+        }
+
+        getRemainingBudget(): number {
+          return this.maxTokens - this.reservedForOutput - this.textTokens - this.imageTokens;
+        }
+
+        getBudgetSummary(): ContextBudget {
+          return {
+            maxTokens: this.maxTokens,
+            textTokens: this.textTokens,
+            imageTokens: this.imageTokens,
+            remaining: this.getRemainingBudget(),
+          };
+        }
+
+        // Strategy: Summarize old images as text
+        optimizeForMoreImages(neededTokens: number): string[] {
+          const suggestions: string[] = [];
+
+          if (this.imageTokens > neededTokens * 2) {
+            suggestions.push("Consider summarizing older images as text descriptions");
+          }
+
+          if (this.textTokens > 10000) {
+            suggestions.push("Consider summarizing conversation history");
+          }
+
+          return suggestions;
+        }
+
+        private estimateImageTokens(w: number, h: number, detail: "low" | "high"): number {
+          if (detail === "low") return 85;
+          const tilesX = Math.ceil(Math.min(w, 2048) / 512);
+          const tilesY = Math.ceil(Math.min(h, 2048) / 512);
+          return 85 + 170 * tilesX * tilesY;
+        }
+      }
+      ```
+
+  - id: ocr-vision-quality
+    summary: "Vision OCR misses or hallucinates text"
+    severity: medium
+    situation: "Extracting text from images"
+    why: |
+      Vision models aren't perfect for OCR:
+      - Small text often missed
+      - Handwriting accuracy varies
+      - Can hallucinate plausible text
+      - Numbers particularly error-prone
+
+      For critical documents, verify with specialized OCR.
+
+    detection_pattern: |
+      extract.*text|read.*image|ocr(?!.*verify|validate|tesseract)
+
+    solution: |
+      Validate critical extractions:
+
+      ```typescript
+      import Tesseract from "tesseract.js";
+
+      interface OCRResult {
+        visionText: string;
+        tesseractText: string;
+        confidence: number;
+        discrepancies: string[];
+      }
+
+      async function verifiedOCR(imagePath: string): Promise<OCRResult> {
+        // Vision API extraction
+        const visionResult = await openai.chat.completions.create({
+          model: "gpt-4o",
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: "Extract ALL text from this image. Be precise." },
+                { type: "image_url", image_url: { url: imagePath, detail: "high" } },
+              ],
+            },
+          ],
+        });
+        const visionText = visionResult.choices[0].message.content ?? "";
+
+        // Tesseract verification
+        const tesseractResult = await Tesseract.recognize(imagePath, "eng");
+        const tesseractText = tesseractResult.data.text;
+
+        // Compare
+        const discrepancies = findDiscrepancies(visionText, tesseractText);
+        const confidence = calculateSimilarity(visionText, tesseractText);
+
+        return {
+          visionText,
+          tesseractText,
+          confidence,
+          discrepancies,
+        };
+      }
+
+      function findDiscrepancies(a: string, b: string): string[] {
+        const discrepancies: string[] = [];
+
+        // Extract numbers and compare
+        const numbersA = a.match(/\d+\.?\d*/g) ?? [];
+        const numbersB = b.match(/\d+\.?\d*/g) ?? [];
+
+        if (numbersA.length !== numbersB.length) {
+          discrepancies.push(`Different number count: ${numbersA.length} vs ${numbersB.length}`);
+        }
+
+        // More comparison logic...
+        return discrepancies;
+      }
+
+      function calculateSimilarity(a: string, b: string): number {
+        // Levenshtein-based similarity
+        const distance = levenshtein(a.toLowerCase(), b.toLowerCase());
+        const maxLength = Math.max(a.length, b.length);
+        return maxLength > 0 ? 1 - distance / maxLength : 1;
+      }
+      ```
+
+  - id: audio-normalization
+    summary: "Poor transcription from unnormalized audio"
+    severity: medium
+    situation: "Transcribing user-recorded audio"
+    why: |
+      Whisper quality depends on audio quality:
+      - Clipping (too loud) causes gibberish
+      - Too quiet causes missed words
+      - Background noise increases hallucinations
+      - Varying volume confuses the model
+
+    detection_pattern: |
+      transcriptions\.create(?!.*normalize|process|ffmpeg)
+
+    solution: |
+      Preprocess audio for better results:
+
+      ```typescript
+      import { exec } from "child_process";
+      import { promisify } from "util";
+
+      const execAsync = promisify(exec);
+
+      async function normalizeAudioForTranscription(
+        inputPath: string,
+        outputPath: string
+      ): Promise<void> {
+        // ffmpeg normalization pipeline:
+        // 1. Normalize volume (loudnorm)
+        // 2. Remove silence
+        // 3. Convert to optimal format
+        // 4. Resample to 16kHz (Whisper's native)
+
+        const command = `ffmpeg -i "${inputPath}" \
+          -af "loudnorm=I=-16:TP=-1.5:LRA=11,silenceremove=1:0:-50dB" \
+          -ar 16000 \
+          -ac 1 \
+          "${outputPath}" -y`;
+
+        await execAsync(command);
+      }
+
+      // Detect audio quality issues
+      async function analyzeAudioQuality(
+        filePath: string
+      ): Promise<{
+        peakLevel: number;
+        silenceRatio: number;
+        issues: string[];
+      }> {
+        // Use ffmpeg to analyze
+        const { stdout } = await execAsync(
+          `ffmpeg -i "${filePath}" -af "volumedetect" -f null - 2>&1`
+        );
+
+        const peakMatch = stdout.match(/max_volume: ([-\d.]+) dB/);
+        const peak = peakMatch ? parseFloat(peakMatch[1]) : 0;
+
+        const issues: string[] = [];
+
+        if (peak > -1) {
+          issues.push("Audio is clipping (too loud)");
+        }
+        if (peak < -20) {
+          issues.push("Audio is too quiet");
+        }
+
+        return {
+          peakLevel: peak,
+          silenceRatio: 0, // Would need separate analysis
+          issues,
+        };
+      }
+      ```
+
+  - id: multimodal-latency
+    summary: "Vision requests 5-10x slower than text"
+    severity: medium
+    situation: "Real-time multimodal applications"
+    why: |
+      Vision processing adds significant latency:
+      - Image encoding/decoding
+      - Vision model inference
+      - Larger payload transfer
+
+      A text request at 500ms becomes 3-5 seconds with images.
+
+    detection_pattern: |
+      image_url.*real.*time|streaming.*image
+
+    solution: |
+      Optimize for perceived speed:
+
+      ```typescript
+      import OpenAI from "openai";
+
+      const openai = new OpenAI();
+
+      // Parallel processing for multiple images
+      async function processImagesParallel(
+        images: string[],
+        prompt: string
+      ): Promise<string[]> {
+        // Process all images simultaneously
+        const promises = images.map((image) =>
+          openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: [
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: prompt },
+                  { type: "image_url", image_url: { url: image, detail: "low" } },
+                ],
+              },
+            ],
+          })
+        );
+
+        const results = await Promise.all(promises);
+        return results.map((r) => r.choices[0].message.content ?? "");
+      }
+
+      // Stream text while processing images in background
+      async function streamWithImages(
+        textContent: string,
+        images: string[],
+        onChunk: (chunk: string) => void
+      ): Promise<void> {
+        // Start image processing
+        const imagePromise = processImagesParallel(images, "Describe briefly");
+
+        // Stream initial text response
+        const textStream = await openai.chat.completions.create({
+          model: "gpt-4o",
+          messages: [{ role: "user", content: textContent }],
+          stream: true,
+        });
+
+        for await (const chunk of textStream) {
+          const content = chunk.choices[0]?.delta?.content ?? "";
+          onChunk(content);
+        }
+
+        // Wait for image results and stream
+        const imageResults = await imagePromise;
+        onChunk("\n\n[Image Analysis]\n");
+        for (const result of imageResults) {
+          onChunk(result + "\n");
+        }
+      }
+
+      // Cache image descriptions to avoid reprocessing
+      const imageCache = new Map<string, string>();
+
+      async function getCachedImageDescription(imageUrl: string): Promise<string> {
+        const hash = hashUrl(imageUrl);
+
+        if (imageCache.has(hash)) {
+          return imageCache.get(hash)!;
+        }
+
+        const result = await openai.chat.completions.create({
+          model: "gpt-4o",
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: "Describe this image briefly for context." },
+                { type: "image_url", image_url: { url: imageUrl, detail: "low" } },
+              ],
+            },
+          ],
+        });
+
+        const description = result.choices[0].message.content ?? "";
+        imageCache.set(hash, description);
+
+        return description;
+      }
+      ```
+
+  - id: video-not-supported
+    summary: "Direct video input not supported by most APIs"
+    severity: medium
+    situation: "Trying to send video to vision API"
+    why: |
+      Most vision APIs don't accept video directly:
+      - GPT-4o: Images only
+      - Claude: Images only
+      - Gemini: Supports video (limited)
+
+      You need to extract frames or use specialized services.
+
+    detection_pattern: |
+      video.*image_url|mp4.*vision
+
+    solution: |
+      Extract frames from video:
+
+      ```typescript
+      import { exec } from "child_process";
+      import { promisify } from "util";
+      import { readdir, unlink } from "fs/promises";
+      import path from "path";
+
+      const execAsync = promisify(exec);
+
+      interface VideoFrames {
+        paths: string[];
+        fps: number;
+        duration: number;
+        cleanup: () => Promise<void>;
+      }
+
+      async function extractVideoFrames(
+        videoPath: string,
+        options?: {
+          fps?: number; // Frames per second to extract
+          maxFrames?: number;
+          outputDir?: string;
+        }
+      ): Promise<VideoFrames> {
+        const fps = options?.fps ?? 1; // 1 frame per second by default
+        const maxFrames = options?.maxFrames ?? 10;
+        const outputDir = options?.outputDir ?? `/tmp/frames_${Date.now()}`;
+
+        // Create output directory
+        await execAsync(`mkdir -p "${outputDir}"`);
+
+        // Get video duration
+        const { stdout: durationStr } = await execAsync(
+          `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${videoPath}"`
+        );
+        const duration = parseFloat(durationStr.trim());
+
+        // Calculate actual FPS to not exceed maxFrames
+        const totalFrames = Math.min(Math.ceil(duration * fps), maxFrames);
+        const actualFps = totalFrames / duration;
+
+        // Extract frames
+        await execAsync(
+          `ffmpeg -i "${videoPath}" -vf "fps=${actualFps}" -frames:v ${maxFrames} "${outputDir}/frame_%04d.jpg" -y`
+        );
+
+        // Get extracted frame paths
+        const files = await readdir(outputDir);
+        const paths = files
+          .filter((f) => f.endsWith(".jpg"))
+          .sort()
+          .map((f) => path.join(outputDir, f));
+
+        return {
+          paths,
+          fps: actualFps,
+          duration,
+          cleanup: async () => {
+            for (const p of paths) {
+              await unlink(p).catch(() => {});
+            }
+            await execAsync(`rmdir "${outputDir}"`).catch(() => {});
+          },
+        };
+      }
+
+      // Analyze video using frames
+      async function analyzeVideo(
+        videoPath: string,
+        prompt: string
+      ): Promise<string> {
+        const frames = await extractVideoFrames(videoPath, {
+          fps: 0.5, // Every 2 seconds
+          maxFrames: 8,
+        });
+
+        try {
+          // Analyze with vision API
+          const imageContent = frames.paths.map((p) => ({
+            type: "image_url" as const,
+            image_url: {
+              url: `file://${p}`,
+              detail: "low" as const,
+            },
+          }));
+
+          const response = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: `These are frames from a ${frames.duration.toFixed(1)}s video. ${prompt}`,
+                  },
+                  ...imageContent,
+                ],
+              },
+            ],
+          });
+
+          return response.choices[0].message.content ?? "";
+        } finally {
+          await frames.cleanup();
+        }
+      }
+      ```
