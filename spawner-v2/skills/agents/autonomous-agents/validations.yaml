@@ -1,0 +1,372 @@
+# Validations - Autonomous Agents
+# Quality checks for autonomous AI implementations
+
+version: 1.0.0
+skill_id: autonomous-agents
+
+validations:
+  # Guardrails Checks
+  - id: no-step-limit
+    name: Agent Loop Without Step Limit
+    severity: error
+    description: Autonomous agents must have maximum step limits
+    pattern: |
+      (while\s+True|for\s+.*\s+in\s+range\s*\(\s*\d{4,})|agent\.(run|invoke|execute)(?!.*max)
+    anti_pattern: |
+      (max_steps|max_iterations|step_limit|iteration_limit)
+    message: "Agent loop without step limit. Add max_steps to prevent infinite loops."
+    autofix: false
+
+  - id: no-cost-limit
+    name: No Cost Tracking or Limits
+    severity: error
+    description: Agents should track and limit API costs
+    pattern: |
+      (openai|anthropic|ChatOpenAI|ChatAnthropic)
+    anti_pattern: |
+      (cost|budget|max_tokens|token_limit|spending)
+    message: "Agent uses LLM without cost tracking. Add cost limits to prevent runaway spending."
+    autofix: false
+
+  - id: no-timeout
+    name: Agent Without Timeout
+    severity: warning
+    description: Long-running agents need timeouts
+    pattern: |
+      agent\.(run|invoke|execute|stream)
+    anti_pattern: |
+      (timeout|deadline|max_time|time_limit)
+    message: "Agent invocation without timeout. Add timeout to prevent hung tasks."
+    autofix: false
+
+  # State Management Checks
+  - id: memory-saver-in-production
+    name: MemorySaver Used in Production
+    severity: error
+    description: MemorySaver is for development only
+    pattern: |
+      MemorySaver\(\)
+    anti_pattern: |
+      (development|dev|test|local)
+    message: "MemorySaver is not persistent. Use PostgresSaver or SqliteSaver for production."
+    autofix: false
+
+  - id: no-checkpointing
+    name: Long-Running Agent Without Checkpointing
+    severity: warning
+    description: Agents that run multiple steps need checkpointing
+    pattern: |
+      (StateGraph|create_react_agent|AgentExecutor)
+    anti_pattern: |
+      (checkpointer|checkpoint|PostgresSaver|SqliteSaver)
+    message: "Multi-step agent without checkpointing. Add checkpointer for durability."
+    autofix: false
+
+  - id: missing-thread-id
+    name: Agent Without Thread ID
+    severity: warning
+    description: Checkpointed agents need unique thread IDs
+    pattern: |
+      agent\.(invoke|run)\s*\(
+    anti_pattern: |
+      thread_id|session_id|conversation_id
+    message: "Agent invocation without thread_id. State won't persist correctly."
+    autofix: false
+
+  # Output Validation Checks
+  - id: trusting-agent-output
+    name: Using Agent Output Without Validation
+    severity: warning
+    description: Agent outputs should be validated before use
+    pattern: |
+      result\s*=\s*agent\.(invoke|run).*\n.*(?!validate|check|verify)
+    message: "Agent output used without validation. Validate before acting on results."
+    autofix: false
+
+  - id: no-structured-output
+    name: Agent Without Structured Output
+    severity: info
+    description: Structured outputs are more reliable
+    pattern: |
+      (create_react_agent|AgentExecutor|StateGraph)
+    anti_pattern: |
+      (BaseModel|TypedDict|dataclass|schema|structured)
+    message: "Consider using structured outputs (Pydantic) for more reliable parsing."
+    autofix: false
+
+  # Error Handling Checks
+  - id: no-error-recovery
+    name: Agent Without Error Recovery
+    severity: warning
+    description: Agents should handle and recover from errors
+    pattern: |
+      agent\.(invoke|run|execute)
+    anti_pattern: |
+      (try|catch|except|on_error|error_handler|fallback)
+    message: "Agent call without error handling. Add try/catch or error handler."
+    autofix: false
+
+  - id: no-rollback-capability
+    name: Destructive Actions Without Rollback
+    severity: warning
+    description: Actions that modify state should be reversible
+    pattern: |
+      (delete|remove|update|write|send|transfer)
+    anti_pattern: |
+      (rollback|undo|revert|checkpoint|backup)
+    message: "Destructive action without rollback capability. Save state before modification."
+    autofix: false
+
+  # Human-in-the-Loop Checks
+  - id: no-human-review
+    name: Critical Actions Without Human Review
+    severity: warning
+    description: Important actions should have human approval
+    pattern: |
+      (send_email|transfer|delete|publish|deploy)
+    anti_pattern: |
+      (approve|confirm|review|human|manual|interrupt)
+    message: "Critical action without human review. Add approval step for safety."
+    autofix: false
+
+  # Observability Checks
+  - id: no-logging
+    name: Agent Without Logging
+    severity: warning
+    description: Agent actions should be logged for debugging
+    pattern: |
+      (create_react_agent|AgentExecutor|StateGraph)
+    anti_pattern: |
+      (logger|logging|log\.|structlog|trace|LangSmith)
+    message: "Agent without logging. Add structured logging for observability."
+    autofix: false
+
+code_smells:
+  - id: unbounded-context
+    name: Growing Context Without Trimming
+    description: Context should be managed to prevent exhaustion
+    pattern: |
+      messages\.(append|extend).*(?!trim|compact|summarize)
+    suggestion: "Add context management: trim old messages, summarize history"
+
+  - id: synchronous-agent
+    name: Blocking Agent in Async Context
+    description: Agents should be async in async applications
+    pattern: |
+      def\s+\w+\(.*\).*agent\.invoke
+    suggestion: "Use async agent methods in async contexts"
+
+  - id: hardcoded-model
+    name: Hardcoded Model Name
+    description: Model should be configurable
+    pattern: |
+      model\s*=\s*["']gpt-4
+    suggestion: "Make model configurable via environment or config"
+
+  - id: no-retry-logic
+    name: External Calls Without Retry
+    description: API calls should have retry logic
+    pattern: |
+      await\s+\w+\.(call|get|post)(?!.*retry)
+    suggestion: "Add retry logic with exponential backoff"
+
+best_practices:
+  - id: use-langgraph-1.0
+    name: Use LangGraph 1.0 for Production
+    check: |
+      LangGraph 1.0 (Oct 2025) provides production-ready features.
+    recommendation: |
+      from langgraph.graph import StateGraph
+      from langgraph.checkpoint.postgres import PostgresSaver
+
+      # Production-ready agent with:
+      # - Durable execution (survives restarts)
+      # - Human-in-the-loop (interrupt_before/after)
+      # - Time-travel debugging (state history)
+
+      checkpointer = PostgresSaver.from_conn_string(DATABASE_URL)
+      agent = graph.compile(checkpointer=checkpointer)
+
+  - id: implement-guardrails
+    name: Implement Multi-Layer Guardrails
+    check: |
+      Production agents need safety at multiple levels.
+    recommendation: |
+      class GuardedAgent:
+          def __init__(self, config):
+              self.max_steps = config.max_steps or 10
+              self.max_cost = config.max_cost or 1.0
+              self.allowed_actions = config.allowed_actions
+              self.require_approval = config.require_approval
+
+          async def execute(self, action):
+              # 1. Check action is allowed
+              if action.name not in self.allowed_actions:
+                  raise ActionNotAllowed(action.name)
+
+              # 2. Check if approval needed
+              if action.name in self.require_approval:
+                  await self.get_human_approval(action)
+
+              # 3. Estimate and check cost
+              if self.would_exceed_budget(action):
+                  raise CostLimitExceeded()
+
+              # 4. Execute with checkpoint
+              checkpoint = await self.save_state()
+              try:
+                  return await self._execute(action)
+              except:
+                  await self.rollback_to(checkpoint)
+                  raise
+
+  - id: validate-all-outputs
+    name: Validate Agent Outputs
+    check: |
+      Never trust agent outputs - validate before acting.
+    recommendation: |
+      from pydantic import BaseModel, validator
+
+      class AgentOutput(BaseModel):
+          action: str
+          reasoning: str
+          evidence: list[str]  # Must cite sources
+
+          @validator('evidence')
+          def must_have_evidence(cls, v):
+              if not v:
+                  raise ValueError("Must provide evidence for claims")
+              return v
+
+      # Validate output
+      try:
+          output = AgentOutput.model_validate(agent_result)
+      except ValidationError as e:
+          handle_invalid_output(e)
+
+  - id: implement-observability
+    name: Add Comprehensive Observability
+    check: |
+      You can't debug what you can't see.
+    recommendation: |
+      import structlog
+      from langsmith import trace
+
+      logger = structlog.get_logger()
+
+      class ObservableAgent:
+          @trace  # LangSmith tracing
+          async def step(self, state):
+              with logger.bind(
+                  step_number=state.step,
+                  task_id=state.task_id
+              ):
+                  logger.info("step_started")
+
+                  thought = await self.think(state)
+                  logger.info("thought", content=thought[:100])
+
+                  action = await self.act(state, thought)
+                  logger.info("action", name=action.name)
+
+                  result = await self.observe(action)
+                  logger.info("observation", result=result[:100])
+
+                  return result
+
+  - id: design-for-failure
+    name: Design for Graceful Failure
+    check: |
+      Agents will fail - make failure safe.
+    recommendation: |
+      class FailsafeAgent:
+          async def execute(self, task):
+              try:
+                  return await self._execute_with_retries(task)
+              except MaxRetriesExceeded:
+                  return await self.escalate_to_human(task)
+              except CostLimitExceeded:
+                  return await self.partial_result_with_explanation(task)
+              except Exception as e:
+                  await self.log_failure(task, e)
+                  await self.rollback_any_changes()
+                  return await self.graceful_degradation(task)
+
+          async def graceful_degradation(self, task):
+              # Fall back to simpler behavior
+              return {
+                  "status": "partial",
+                  "message": "Could not complete fully. Here's what I found...",
+                  "partial_results": self.collected_results,
+                  "next_steps": "Human review needed for remaining items"
+              }
+
+reliability_benchmarks:
+  success_rates:
+    excellent: ">95% on scoped tasks"
+    good: ">85% on scoped tasks"
+    acceptable: ">70% on scoped tasks"
+    poor: "<70% (reconsider approach)"
+
+  cost_per_task:
+    excellent: "<$0.10 average"
+    good: "<$0.50 average"
+    acceptable: "<$2.00 average"
+    poor: ">$5.00 average"
+
+  step_counts:
+    simple_task: "3-5 steps"
+    medium_task: "5-10 steps"
+    complex_task: "10-20 steps"
+    warning: ">20 steps indicates scope creep"
+
+testing_recommendations:
+  - id: test-at-scale
+    name: Test with 1000+ Cases
+    check: |
+      Demos prove nothing about reliability.
+    approach: |
+      Run at least 1000 test cases:
+      - Happy path (40%)
+      - Edge cases (30%)
+      - Adversarial inputs (20%)
+      - Error conditions (10%)
+
+      Measure:
+      - Success rate by task type
+      - P50, P95, P99 latency
+      - Cost distribution
+      - Failure modes
+
+  - id: test-failure-modes
+    name: Deliberately Trigger Failures
+    check: |
+      You need to know how the agent fails.
+    approach: |
+      Inject failures:
+      - API timeouts
+      - Rate limits
+      - Invalid tool outputs
+      - Ambiguous inputs
+      - Contradictory goals
+
+      Verify:
+      - Agent fails gracefully
+      - No data corruption
+      - Human escalation works
+      - Rollback succeeds
+
+  - id: test-cost-bounds
+    name: Verify Cost Limits Work
+    check: |
+      Cost limits must actually stop execution.
+    approach: |
+      Create tasks designed to be expensive:
+      - Long conversations
+      - Many tool calls
+      - Large context
+
+      Verify:
+      - Cost limit triggers before exceeded
+      - Partial results returned
+      - No orphaned state
