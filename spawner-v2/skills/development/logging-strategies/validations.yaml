@@ -1,0 +1,225 @@
+# Logging Strategies Validations
+# Automated checks to catch logging anti-patterns and issues
+
+validations:
+  - id: log-console-production
+    name: Console.log in Production Code
+    severity: warning
+    type: regex
+    pattern:
+      - 'console\\.log\\('
+      - 'console\\.debug\\('
+      - 'console\\.info\\('
+      - 'console\\.warn\\('
+      - 'console\\.error\\('
+    message: "console.log detected. Use structured logger instead for production code."
+    fix_action: "Replace with structured logger (pino, winston): logger.info({ data }, 'message')"
+    applies_to:
+      - "src/**/*.ts"
+      - "src/**/*.js"
+      - "lib/**/*.ts"
+      - "lib/**/*.js"
+    excludes:
+      - "**/*.test.*"
+      - "**/*.spec.*"
+      - "**/scripts/**"
+
+  - id: log-sensitive-data
+    name: Potential Sensitive Data in Log
+    severity: error
+    type: regex
+    pattern:
+      - 'logger\\.[a-z]+.*password'
+      - 'logger\\.[a-z]+.*token'
+      - 'logger\\.[a-z]+.*secret'
+      - 'logger\\.[a-z]+.*apiKey'
+      - 'logger\\.[a-z]+.*authorization'
+      - 'console\\.log.*password'
+      - 'console\\.log.*token'
+    message: "Potentially logging sensitive data. Ensure proper redaction."
+    fix_action: "Configure logger redaction or remove sensitive field from log"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: log-req-body-full
+    name: Logging Full Request Body
+    severity: warning
+    type: regex
+    pattern:
+      - 'logger\\.[a-z]+.*req\\.body[^.]'
+      - 'logger\\.[a-z]+.*request\\.body[^.]'
+      - 'console\\.log.*req\\.body'
+      - 'JSON\\.stringify.*req\\.body'
+    message: "Logging full request body may expose sensitive data."
+    fix_action: "Log specific safe fields only or configure redaction"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: log-string-concatenation
+    name: Unstructured String Log
+    severity: info
+    type: regex
+    pattern:
+      - 'logger\\.[a-z]+\\(`[^`]*\\$\\{'
+      - 'logger\\.[a-z]+\\([\'"][^{]+[\'"]\\s*\\)'
+      - 'console\\.log\\(`[^`]*\\$\\{'
+    message: "String concatenation in log. Use structured logging for searchability."
+    fix_action: "Replace with: logger.info({ field: value }, 'message')"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: log-no-error-stack
+    name: Error Logged Without Stack Trace
+    severity: warning
+    type: regex
+    pattern:
+      - 'logger\\.error\\([^)]*\\.message[^)]*\\)'
+      - 'logger\\.error\\([\'"][^\'\"]+[\'"]\\)'
+      - 'catch.*logger\\.error.*(?!.*stack)'
+    message: "Error logged without stack trace. Include full error object."
+    fix_action: "Log complete error: logger.error({ err: error }, 'message')"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: log-sync-file-write
+    name: Synchronous Log File Write
+    severity: warning
+    type: regex
+    pattern:
+      - 'fs\\.appendFileSync.*log'
+      - 'fs\\.writeFileSync.*log'
+      - 'writeFileSync.*\\.log'
+    message: "Synchronous file write blocks event loop. Use async logging."
+    fix_action: "Use pino with async destination or log aggregation service"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: log-no-level-check
+    name: Expensive Operation Without Level Check
+    severity: info
+    type: regex
+    pattern:
+      - 'logger\\.debug.*JSON\\.stringify'
+      - 'logger\\.trace.*JSON\\.stringify'
+      - 'logger\\.debug.*\\bawait\\b'
+    message: "Expensive operation in debug log runs even when disabled."
+    fix_action: "Check level first: if (logger.isLevelEnabled('debug')) { ... }"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: log-missing-correlation
+    name: Request Handler Without Correlation ID
+    severity: info
+    type: regex
+    pattern:
+      - 'app\\.(get|post|put|delete).*logger\\.[a-z]+(?!.*correlationId|requestId|traceId)'
+    message: "Request handler logs without correlation ID. Hard to trace requests."
+    fix_action: "Add correlation ID middleware and include in all logs"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: log-error-as-info
+    name: Error Logged at INFO Level
+    severity: warning
+    type: regex
+    pattern:
+      - 'logger\\.info.*error'
+      - 'logger\\.info.*Error'
+      - 'logger\\.info.*exception'
+      - 'logger\\.info.*failed'
+    message: "Error condition logged at INFO level. Use appropriate level."
+    fix_action: "Use logger.error() or logger.warn() for error conditions"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: log-404-as-error
+    name: 404 Logged as Error
+    severity: info
+    type: regex
+    pattern:
+      - 'logger\\.error.*not found'
+      - 'logger\\.error.*404'
+      - 'logger\\.error.*NotFound'
+    message: "404 Not Found logged as error. This is normal operation, use info or warn."
+    fix_action: "Use logger.info() for expected conditions like 404s"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: log-catch-swallow
+    name: Caught Error Not Logged
+    severity: warning
+    type: regex
+    pattern:
+      - 'catch\\s*\\([^)]+\\)\\s*\\{\\s*\\}'
+      - 'catch\\s*\\([^)]+\\)\\s*\\{\\s*//[^}]*\\}'
+      - 'catch\\s*\\{\\s*\\}'
+    message: "Exception caught but not logged. Silent failures are hard to debug."
+    fix_action: "Log the error before handling or rethrowing"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: log-debug-default
+    name: Debug Level as Default
+    severity: warning
+    type: regex
+    pattern:
+      - "level.*\\|\\|.*['\"]debug['\"]"
+      - "LOG_LEVEL.*\\|\\|.*debug"
+      - "level:\\s*['\"]debug['\"]"
+    message: "Debug level as default. Should default to 'info' for production."
+    fix_action: "Default to 'info': process.env.LOG_LEVEL || 'info'"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.json"
+
+  - id: log-no-timestamp
+    name: Logger Without Timestamp
+    severity: info
+    type: regex
+    pattern:
+      - 'createLogger\\(\\{(?![^}]*timestamp)'
+      - "winston\\.format\\.(?!.*timestamp)"
+    message: "Logger may be missing timestamp. Essential for debugging."
+    fix_action: "Add timestamp to logger format"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: log-headers-full
+    name: Logging Full Request Headers
+    severity: warning
+    type: regex
+    pattern:
+      - 'logger\\.[a-z]+.*req\\.headers[^.]'
+      - 'logger\\.[a-z]+.*request\\.headers[^.]'
+      - 'JSON\\.stringify.*headers'
+    message: "Logging full headers may expose authorization tokens and cookies."
+    fix_action: "Log specific safe headers only or configure redaction"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: log-throw-after-log
+    name: Log Then Throw Pattern
+    severity: info
+    type: regex
+    pattern:
+      - 'logger\\.error.*\\n\\s*throw'
+      - 'console\\.error.*\\n\\s*throw'
+    message: "Logging then throwing may cause duplicate log entries in error handler."
+    fix_action: "Either log at throw site OR in error handler, not both"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+

@@ -1,0 +1,500 @@
+# Logging Strategies Sharp Edges
+# Real production gotchas that cause debugging nightmares and security incidents
+
+sharp_edges:
+  - id: log-secrets-exposed
+    summary: Sensitive data logged and exposed in log aggregation systems
+    severity: critical
+    situation: Logging request/response bodies or error objects without sanitization
+    why: |
+      Developer adds helpful logging: `logger.info({ request: req.body }, 'Processing')`.
+      req.body contains password. Password in logs. Logs ship to DataDog, Splunk, ELK.
+      50 engineers have access. Logs retained 30 days. Compliance violation.
+      One incident report later: "We need to rotate all affected credentials."
+    solution: |
+      // WRONG: Log entire objects
+      logger.info({ request: req.body }, 'Processing request');
+      logger.error({ error: err }, 'Operation failed');  // err.config may have auth tokens
+
+      // WRONG: Log after "sanitizing" with spread
+      const { password, ...safe } = req.body;
+      logger.info({ request: safe }, 'Processing');  // creditCard, ssn still there!
+
+      // RIGHT: Use logger-level redaction
+      import pino from 'pino';
+
+      const logger = pino({
+        redact: {
+          paths: [
+            'password', '*.password', 'req.body.password',
+            'token', '*.token', 'authorization',
+            'creditCard', 'ssn', 'apiKey', 'secret',
+            'req.headers.authorization',
+            'req.headers.cookie',
+          ],
+          censor: '[REDACTED]',
+        },
+      });
+
+      // RIGHT: Allowlist instead of blocklist
+      function safeLogRequest(req) {
+        return {
+          method: req.method,
+          path: req.path,
+          query: req.query,
+          userId: req.user?.id,
+          // Only include known-safe fields
+        };
+      }
+
+      logger.info({ request: safeLogRequest(req) }, 'Processing');
+
+      // RIGHT: Audit your log output
+      // In development, review actual log output for sensitive data
+      // grep -i 'password\|token\|secret' logs/*.json
+    symptoms:
+      - req.body or req.headers in logs
+      - Full error objects logged
+      - API responses with tokens logged
+      - PII visible in log search
+    detection_pattern: 'logger\\..*req\\.body|logger\\..*headers|JSON\\.stringify.*req'
+
+  - id: no-correlation-nightmare
+    summary: Cannot trace request across services - debugging takes hours
+    severity: high
+    situation: Multiple microservices without correlation/request IDs
+    why: |
+      User reports: "My order failed." You have 12 microservices. Each has logs.
+      What happened? When? Which services? Search by time: 10,000 results.
+      Search by userId: not indexed. Search by orderId: different field names.
+      3 hours later, you've correlated 4 log lines manually. Still missing 2.
+    solution: |
+      // WRONG: No request tracing
+      // Service A logs: {"msg": "Order created", "orderId": 123}
+      // Service B logs: {"msg": "Payment processed", "order_id": "123"}
+      // Service C logs: {"message": "Shipped", "orderNumber": 123}
+      // Good luck correlating these
+
+      // RIGHT: Correlation ID everywhere
+      import { AsyncLocalStorage } from 'async_hooks';
+      import { v4 as uuidv4 } from 'uuid';
+
+      const correlationStore = new AsyncLocalStorage<{ id: string }>();
+
+      // Middleware - extract or create correlation ID
+      export function correlationMiddleware(req, res, next) {
+        const correlationId = req.headers['x-correlation-id'] || uuidv4();
+
+        correlationStore.run({ id: correlationId }, () => {
+          res.setHeader('x-correlation-id', correlationId);
+          next();
+        });
+      }
+
+      // Logger wrapper - auto-include correlation ID
+      export function log(level, data, message) {
+        const correlationId = correlationStore.getStore()?.id || 'no-correlation';
+        baseLogger[level]({ ...data, correlationId }, message);
+      }
+
+      // When calling other services
+      async function callPaymentService(data) {
+        return fetch(PAYMENT_URL, {
+          headers: {
+            'x-correlation-id': correlationStore.getStore()?.id,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify(data),
+        });
+      }
+
+      // Now all logs for one request have same correlationId
+      // {"correlationId": "abc-123", "service": "order", "msg": "Order created"}
+      // {"correlationId": "abc-123", "service": "payment", "msg": "Payment processed"}
+      // {"correlationId": "abc-123", "service": "shipping", "msg": "Shipped"}
+    symptoms:
+      - Cannot trace request across services
+      - Debugging takes hours
+      - Manual log correlation
+      - Different ID field names per service
+    detection_pattern: 'logger\\.(?!.*correlationId|requestId|traceId)'
+
+  - id: log-level-abuse
+    summary: All logs at INFO or ERROR level - cannot filter useful from noise
+    severity: medium
+    situation: Developers using logger.info for everything or logger.error for non-errors
+    why: |
+      New developer: "I'll log everything as info, more visibility!"
+      Production: 100GB of "info" logs per day. Alert fatigue from non-critical "errors".
+      Real error happens. Lost in noise. Or: error alerts firing for "user not found"
+      (not an error, just a 404). Team ignores alerts. Real outage missed.
+    solution: |
+      // WRONG: Everything is info
+      logger.info('Starting server');
+      logger.info({ user }, 'User logged in');
+      logger.info({ query }, 'Database query');
+      logger.info('Cache miss');
+      logger.info({ error }, 'User not found');  // Not an error!
+
+      // WRONG: Non-errors as errors
+      logger.error('User not found');  // 404 is not an error
+      logger.error('Invalid input');   // 400 is not an error
+      logger.error('Rate limited');    // 429 is not an error
+
+      // RIGHT: Log levels with meaning
+      // ERROR - Needs human attention, may page on-call
+      logger.error({ err, userId, orderId }, 'Payment processing failed');
+
+      // WARN - Unexpected but handled, investigate if frequent
+      logger.warn({ userId, attempts: 3 }, 'Login failed - account locked');
+      logger.warn({ retries: 2 }, 'Database connection retry');
+
+      // INFO - Business events, request lifecycle
+      logger.info({ userId, orderId }, 'Order placed');
+      logger.info({ method, path, duration }, 'Request completed');
+
+      // DEBUG - Development/troubleshooting, off in production
+      logger.debug({ query, params }, 'Executing database query');
+      logger.debug({ cacheKey, hit: true }, 'Cache lookup');
+
+      // Configuration by environment
+      const LOG_LEVEL = process.env.NODE_ENV === 'production' ? 'info' : 'debug';
+
+      // Dynamic level change for troubleshooting
+      // PUT /admin/log-level { level: 'debug' }
+      app.put('/admin/log-level', requireAdmin, (req, res) => {
+        logger.level = req.body.level;
+        res.json({ level: logger.level });
+      });
+    symptoms:
+      - Alert fatigue from log-based alerts
+      - Cannot filter important logs
+      - Debug logs in production by default
+      - 404s logged as errors
+    detection_pattern: 'logger\\.error.*not found|logger\\.error.*invalid|logger\\.info.*error'
+
+  - id: sync-logging-perf
+    summary: Synchronous logging blocks event loop and kills performance
+    severity: high
+    situation: Using console.log or synchronous file writes in hot paths
+    why: |
+      Developer adds logging to debug issue. Leaves it in. Deployed to production.
+      100 requests/second, each with 5 log lines. 500 synchronous writes/second.
+      Event loop blocked. Latency spikes. Throughput drops. "Works on my machine" -
+      your machine had 10 requests/minute, not 100/second.
+    solution: |
+      // WRONG: console.log in production
+      app.use((req, res, next) => {
+        console.log(`${req.method} ${req.path}`);  // Synchronous!
+        next();
+      });
+
+      // WRONG: Synchronous file writes
+      import fs from 'fs';
+      fs.appendFileSync('app.log', message + '\n');
+
+      // WRONG: Expensive operations in log calls
+      logger.debug({ data: JSON.stringify(hugeObject) }, 'Processing');
+      // JSON.stringify runs even if debug level is disabled!
+
+      // RIGHT: Async logging with pino
+      import pino from 'pino';
+
+      const logger = pino(
+        { level: 'info' },
+        pino.destination({
+          sync: false,  // Non-blocking writes
+          minLength: 4096,  // Buffer before flushing
+        })
+      );
+
+      // RIGHT: Check level before expensive operations
+      if (logger.isLevelEnabled('debug')) {
+        logger.debug({ data: processExpensiveData() }, 'Debug info');
+      }
+
+      // RIGHT: Use child loggers for repeated context
+      // Create once per request, not per log call
+      const requestLogger = logger.child({
+        requestId: req.id,
+        userId: req.user?.id,
+      });
+      // Now each log automatically has context
+
+      // RIGHT: Sample high-volume logs
+      let counter = 0;
+      function sampleLog(data, message) {
+        counter++;
+        if (counter % 100 === 0) {  // Log 1 in 100
+          logger.info({ ...data, sampled: true }, message);
+        }
+      }
+    symptoms:
+      - Latency spikes in production
+      - CPU usage from logging
+      - console.log in production code
+      - fs.appendFileSync usage
+    detection_pattern: 'console\\.log|fs\\.appendFileSync|writeFileSync.*log'
+
+  - id: missing-error-context
+    summary: Error logs without context make debugging impossible
+    severity: medium
+    situation: Logging error message but not stack trace or context
+    why: |
+      Log says: "Error: Connection refused". Where? When? What operation?
+      Which database? What was the request? What user? Stack trace? Gone.
+      Catch block had it all, log statement threw it away. Back to
+      reading code and guessing.
+    solution: |
+      // WRONG: Message only
+      try {
+        await db.query(sql);
+      } catch (err) {
+        logger.error('Database error');  // Useless
+        logger.error(err.message);  // Slightly less useless
+      }
+
+      // WRONG: Losing stack trace
+      catch (err) {
+        throw new Error('Operation failed');  // Original stack gone!
+      }
+
+      // RIGHT: Full context
+      try {
+        await db.query(sql, params);
+      } catch (err) {
+        logger.error({
+          error: {
+            name: err.name,
+            message: err.message,
+            stack: err.stack,
+            code: err.code,  // e.g., 'ECONNREFUSED'
+          },
+          operation: 'database_query',
+          sql: sql.substring(0, 100),  // First 100 chars
+          userId: req.user?.id,
+          requestId: req.id,
+        }, 'Database query failed');
+        throw err;  // Re-throw with original stack
+      }
+
+      // RIGHT: Error cause chain (Node 16.9+)
+      catch (err) {
+        throw new Error('Failed to fetch user', { cause: err });
+        // Original error preserved in cause
+      }
+
+      // RIGHT: Custom error with context
+      class DatabaseError extends Error {
+        constructor(message, originalError, context) {
+          super(message);
+          this.name = 'DatabaseError';
+          this.originalError = originalError;
+          this.context = context;
+          this.stack = originalError.stack;  // Preserve original stack
+        }
+      }
+
+      // RIGHT: Error handler logs everything
+      app.use((err, req, res, next) => {
+        logger.error({
+          error: {
+            name: err.name,
+            message: err.message,
+            stack: err.stack,
+            ...(err.context && { context: err.context }),
+            ...(err.cause && { cause: err.cause.message }),
+          },
+          request: {
+            method: req.method,
+            path: req.path,
+            userId: req.user?.id,
+            requestId: req.id,
+          },
+        }, `${err.name}: ${err.message}`);
+
+        res.status(err.statusCode || 500).json({ error: 'Internal error' });
+      });
+    symptoms:
+      - "Error occurred" logs without details
+      - Missing stack traces
+      - Cannot reproduce errors from logs
+      - Multiple errors, unknown which is root cause
+    detection_pattern: 'logger\\.error\\([\'"]|catch.*logger\\.error.*message'
+
+  - id: log-rotation-disk-full
+    summary: Logs fill up disk, crash application or host
+    severity: high
+    situation: No log rotation or retention policy
+    why: |
+      Application logs to file. No rotation configured. Logs grow. And grow.
+      100GB later, disk full. Application can't write. Crashes. Or: container
+      out of disk, pod evicted, cascading failure. Kubernetes thinks node is
+      unhealthy. Weekend incident.
+    solution: |
+      // WRONG: Log to file without rotation
+      const logger = pino(pino.destination('app.log'));
+      // File grows forever
+
+      // RIGHT: Use log rotation
+      import { multistream } from 'pino';
+      import { createWriteStream } from 'rotating-file-stream';
+
+      const rotatingStream = createWriteStream('app.log', {
+        size: '100M',      // Rotate at 100MB
+        interval: '1d',    // Also rotate daily
+        maxFiles: 7,       // Keep 7 files
+        compress: 'gzip',  // Compress old logs
+      });
+
+      const logger = pino(rotatingStream);
+
+      // RIGHT: For containers, log to stdout
+      // Let container runtime handle log management
+      const logger = pino();  // Defaults to stdout
+
+      // Docker/Kubernetes log driver handles rotation:
+      // docker run --log-opt max-size=100m --log-opt max-file=5 ...
+
+      // RIGHT: Log to external service
+      // Logs leave the host immediately
+      import pino from 'pino';
+
+      const transport = pino.transport({
+        target: '@axiomhq/pino',
+        options: {
+          dataset: 'my-app',
+          token: process.env.AXIOM_TOKEN,
+        },
+      });
+
+      const logger = pino(transport);
+
+      // RIGHT: Set retention in log aggregation
+      // DataDog, Splunk, CloudWatch, etc. have retention policies
+      // 7 days for debug, 30 days for info, 90 days for error
+    symptoms:
+      - Disk full alerts
+      - Log files in GB
+      - No log rotation configured
+      - Application crash from disk pressure
+    detection_pattern: 'destination\\([\'"][^\'\"]+\\.log|writeFileSync.*log'
+
+  - id: unstructured-logs
+    summary: String logs that cannot be searched, filtered, or parsed
+    severity: medium
+    situation: Using string concatenation or template literals for logs
+    why: |
+      Log says: "User 123 created order 456 at 2024-01-15".
+      Find all logs for user 123? Regex across terabytes.
+      Find orders over $100? Parse every log string.
+      Aggregate by operation? More regex. Structured logging? One field query.
+    solution: |
+      // WRONG: String concatenation
+      logger.info(`User ${userId} created order ${orderId} for $${amount}`);
+      // Result: "User 123 created order 456 for $100"
+      // Try searching for orders > $50... good luck
+
+      // WRONG: Template literal
+      console.log(`[${new Date().toISOString()}] ${level}: ${message}`);
+      // Non-standard format, manual parsing needed
+
+      // RIGHT: Structured JSON logging
+      logger.info({
+        event: 'order_created',
+        userId: 123,
+        orderId: 456,
+        amount: 100,
+        currency: 'USD',
+      }, 'User created order');
+
+      // Result: {"level":"info","time":1705312800,"event":"order_created","userId":123,"orderId":456,"amount":100,"currency":"USD","msg":"User created order"}
+
+      // Now you can:
+      // - Filter: event:order_created AND amount:>50
+      // - Aggregate: COUNT BY userId WHERE event:order_created
+      // - Alert: amount:>10000
+
+      // RIGHT: Consistent field names across services
+      const LOG_FIELDS = {
+        USER_ID: 'userId',      // Not user_id, uid, userID
+        ORDER_ID: 'orderId',    // Not order_id, oid, orderID
+        AMOUNT: 'amount',       // Not value, total, price
+        DURATION: 'duration',   // Not time, elapsed, ms
+      };
+
+      // RIGHT: Use event types for categorization
+      logger.info({ event: 'user.login', userId }, 'User logged in');
+      logger.info({ event: 'order.created', orderId }, 'Order created');
+      logger.info({ event: 'payment.failed', orderId, error }, 'Payment failed');
+    symptoms:
+      - Regex needed to search logs
+      - Manual parsing of log lines
+      - Inconsistent field names
+      - Cannot aggregate or filter
+    detection_pattern: 'logger\\.[a-z]+\\(`|logger\\.[a-z]+\\([\'"][^{]'
+
+  - id: excessive-debug-production
+    summary: Debug logging enabled in production floods logs and impacts performance
+    severity: medium
+    situation: Debug level enabled or left on accidentally in production
+    why: |
+      Developer enables debug logging to troubleshoot issue. Fixes issue.
+      Forgets to disable debug. Deploys. 1000x more log volume. Log costs
+      spike. Disk fills faster. Important errors buried in debug noise.
+      Team sees $10k log bill at end of month.
+    solution: |
+      // WRONG: Debug always enabled
+      const logger = pino({ level: 'debug' });
+
+      // WRONG: Defaulting to debug
+      const level = process.env.LOG_LEVEL || 'debug';
+
+      // RIGHT: Default to info, require explicit debug
+      const level = process.env.LOG_LEVEL || 'info';
+
+      // RIGHT: Different levels per environment
+      const LOG_LEVELS = {
+        development: 'debug',
+        test: 'warn',
+        production: 'info',
+      };
+      const level = LOG_LEVELS[process.env.NODE_ENV] || 'info';
+
+      // RIGHT: Dynamic level change without restart
+      import pino from 'pino';
+
+      let logger = pino({ level: 'info' });
+
+      // Admin endpoint to change level
+      app.put('/admin/log-level', requireAdmin, (req, res) => {
+        if (!['debug', 'info', 'warn', 'error'].includes(req.body.level)) {
+          return res.status(400).json({ error: 'Invalid level' });
+        }
+        logger.level = req.body.level;
+        logger.info({ newLevel: req.body.level }, 'Log level changed');
+        res.json({ level: logger.level });
+      });
+
+      // Auto-reset to info after N minutes
+      let debugTimeout;
+      app.put('/admin/log-level', requireAdmin, (req, res) => {
+        logger.level = req.body.level;
+
+        if (req.body.level === 'debug') {
+          clearTimeout(debugTimeout);
+          debugTimeout = setTimeout(() => {
+            logger.level = 'info';
+            logger.info('Debug mode auto-disabled after 10 minutes');
+          }, 10 * 60 * 1000);
+        }
+
+        res.json({ level: logger.level });
+      });
+    symptoms:
+      - Massive log volume in production
+      - High log aggregation costs
+      - Debug logs in production environment
+      - LOG_LEVEL=debug in prod config
+    detection_pattern: 'level.*debug|LOG_LEVEL.*\\|\\|.*debug'
+
