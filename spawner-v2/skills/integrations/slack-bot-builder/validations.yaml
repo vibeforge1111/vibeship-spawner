@@ -1,0 +1,349 @@
+# Validations - Slack Bot Builder
+# Quality checks for Slack bot implementations
+
+version: 1.0.0
+skill_id: slack-bot-builder
+
+validations:
+  # Security Checks
+  - id: hardcoded-token
+    name: Hardcoded Slack Token
+    severity: error
+    description: Slack tokens must never be hardcoded
+    pattern: |
+      (xoxb-[0-9]+-[0-9A-Za-z]+|xoxp-[0-9]+-[0-9]+-[0-9A-Za-z]+|xapp-[0-9]+-[A-Za-z0-9]+)
+    message: "Hardcoded Slack token detected. Use environment variables."
+    autofix: false
+
+  - id: signing-secret-in-code
+    name: Signing Secret in Source Code
+    severity: error
+    description: Signing secrets should be in environment variables
+    pattern: |
+      signing_secret\s*=\s*["'][a-f0-9]{32}["']
+    message: "Hardcoded signing secret. Use os.environ['SLACK_SIGNING_SECRET']."
+    autofix: false
+
+  - id: no-signature-verification
+    name: Webhook Without Signature Verification
+    severity: error
+    description: Slack webhooks must verify X-Slack-Signature
+    pattern: |
+      @app\.route.*slack|/slack/events|/slack/commands
+    anti_pattern: |
+      (verify.*signature|X-Slack-Signature|signing_secret|SlackRequestHandler)
+    message: "Webhook without signature verification. Use Bolt or verify manually."
+    autofix: false
+
+  - id: token-in-frontend
+    name: Slack Token in Client-Side Code
+    severity: error
+    description: Never expose Slack tokens to browsers
+    pattern: |
+      (window\.|document\.|localStorage\.|export\s+const).*SLACK.*(TOKEN|SECRET)
+    message: "Slack credentials exposed client-side. Only use server-side."
+    autofix: false
+
+  # Acknowledgment Checks
+  - id: slow-before-ack
+    name: Slow Operation Before Acknowledgment
+    severity: warning
+    description: ack() must be called before slow operations
+    pattern: |
+      @app\.(command|action|shortcut|view).*\n.*(?:requests\.|httpx\.|aiohttp\.|fetch\(|client\.)
+    anti_pattern: |
+      ack\(\).*\n.*(?:requests\.|httpx\.)
+    message: "Slow operation before ack(). Call ack() first, then process."
+    autofix: false
+
+  - id: missing-ack
+    name: Missing Acknowledgment Call
+    severity: warning
+    description: Interactive handlers must call ack()
+    pattern: |
+      @app\.(command|action|shortcut|view)\([^)]+\)\s*\ndef\s+\w+\([^)]*\):
+    anti_pattern: |
+      ack\(
+    message: "Handler missing ack() call. Must acknowledge within 3 seconds."
+    autofix: false
+
+  # OAuth Checks
+  - id: no-state-validation
+    name: OAuth Without State Validation
+    severity: error
+    description: OAuth callback must validate state parameter
+    pattern: |
+      oauth.*callback|/slack/oauth
+    anti_pattern: |
+      (state|StateStore|verify.*state)
+    message: "OAuth without state validation. Vulnerable to CSRF attacks."
+    autofix: false
+
+  - id: token-not-encrypted
+    name: Token Storage Without Encryption
+    severity: warning
+    description: Tokens should be encrypted at rest
+    pattern: |
+      (INSERT|UPDATE).*token.*VALUES
+    anti_pattern: |
+      (encrypt|cipher|fernet|aes)
+    message: "Token stored without encryption. Encrypt tokens at rest."
+    autofix: false
+
+  # Scope Checks
+  - id: over-scoped-request
+    name: Requesting Admin Scopes
+    severity: warning
+    description: Avoid admin scopes unless absolutely necessary
+    pattern: |
+      scopes.*admin\.|admin\.\w+.*scope
+    message: "Requesting admin scope. Use minimal required scopes."
+    autofix: false
+
+  - id: unused-scope
+    name: Potentially Unused Scope
+    severity: info
+    description: Check if all requested scopes are used
+    pattern: |
+      users:read\.email
+    anti_pattern: |
+      (email|profile\.email)
+    message: "Requesting users:read.email but may not use email. Verify necessity."
+    autofix: false
+
+  # Block Kit Checks
+  - id: unvalidated-blocks
+    name: Blocks Not Validated Before Sending
+    severity: info
+    description: Validate Block Kit JSON before sending
+    pattern: |
+      chat_postMessage\(.*blocks=
+    anti_pattern: |
+      (validate.*blocks|BlockKit|check.*blocks)
+    message: "Consider validating blocks before sending to catch limit errors."
+    autofix: false
+
+  - id: long-text-block
+    name: Potentially Long Text Block
+    severity: info
+    description: Text blocks limited to 3000 characters
+    pattern: |
+      "type":\s*"section".*"text":\s*\{.*"text":\s*[^}]{200,}
+    message: "Long text in section block. Limit is 3000 characters."
+    autofix: false
+
+  # Rate Limiting
+  - id: no-rate-limit-handling
+    name: No Rate Limit Handling
+    severity: warning
+    description: Handle Slack API rate limits with exponential backoff
+    pattern: |
+      (chat_postMessage|conversations\.|files\.upload)
+    anti_pattern: |
+      (rate.*limit|Retry-After|backoff|sleep.*429)
+    message: "No rate limit handling. Implement exponential backoff."
+    autofix: false
+
+  # Socket Mode
+  - id: socket-mode-production
+    name: Socket Mode in Production Config
+    severity: warning
+    description: Socket Mode not recommended for production
+    pattern: |
+      SocketModeHandler.*start\(\)
+    anti_pattern: |
+      (development|dev|test|ENVIRONMENT)
+    message: "Socket Mode in production. Use HTTP webhooks for reliability."
+    autofix: false
+
+code_smells:
+  - id: sync-api-calls
+    name: Synchronous Slack API Calls
+    description: Use async clients for better performance
+    pattern: |
+      from slack_sdk import WebClient
+    suggestion: "Consider AsyncWebClient for async frameworks"
+
+  - id: no-error-handling
+    name: API Call Without Error Handling
+    description: Handle SlackApiError for robust bots
+    pattern: |
+      client\.(chat_postMessage|conversations_|users_)
+    suggestion: "Wrap in try/except for SlackApiError"
+
+  - id: logging-tokens
+    name: Logging Slack Tokens
+    description: Never log tokens - security risk
+    pattern: |
+      (log|print|logger).*xox[abp]-
+    suggestion: "Remove token from logs, log team_id instead"
+
+  - id: hardcoded-channel
+    name: Hardcoded Channel ID
+    description: Channel IDs should come from config or lookup
+    pattern: |
+      channel\s*=\s*["']C[A-Z0-9]{8,}["']
+    suggestion: "Use environment variable or lookup by name"
+
+best_practices:
+  - id: use-bolt-framework
+    name: Use Bolt Framework
+    check: |
+      Bolt handles ack(), signature verification, and OAuth automatically.
+    recommendation: |
+      from slack_bolt import App
+      from slack_bolt.adapter.socket_mode import SocketModeHandler
+
+      app = App(
+          token=os.environ["SLACK_BOT_TOKEN"],
+          signing_secret=os.environ["SLACK_SIGNING_SECRET"]
+      )
+
+      @app.command("/hello")
+      def handle_hello(ack, command, respond):
+          ack()  # Bolt reminds you to ack
+          respond(f"Hello, {command['user_name']}!")
+
+      # Development: Socket Mode
+      if __name__ == "__main__":
+          handler = SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
+          handler.start()
+
+  - id: environment-variables
+    name: Use Environment Variables
+    check: |
+      All credentials must come from environment or secrets manager.
+    recommendation: |
+      # Required environment variables
+      SLACK_BOT_TOKEN=xoxb-...
+      SLACK_SIGNING_SECRET=...
+      SLACK_APP_TOKEN=xapp-... (for Socket Mode)
+      SLACK_CLIENT_ID=... (for OAuth)
+      SLACK_CLIENT_SECRET=... (for OAuth)
+
+      # In code
+      import os
+      from slack_bolt import App
+
+      app = App(
+          token=os.environ["SLACK_BOT_TOKEN"],
+          signing_secret=os.environ["SLACK_SIGNING_SECRET"]
+      )
+
+  - id: background-processing
+    name: Process Slow Operations in Background
+    check: |
+      Never block the main thread for slow operations.
+    recommendation: |
+      import threading
+      from slack_bolt import App
+
+      app = App(...)
+
+      @app.command("/slow-task")
+      def handle_slow(ack, command, respond):
+          # Acknowledge immediately
+          ack("Processing...")
+
+          # Process in background
+          def do_work():
+              result = slow_api_call(command["text"])
+              respond(f"Done: {result}")
+
+          threading.Thread(target=do_work).start()
+
+      # Or use Bolt's lazy listeners
+      @app.command("/slow-task")
+      def handle(ack):
+          ack()
+
+      @handle.lazy
+      def process(command, respond):
+          result = slow_api_call(command["text"])
+          respond(f"Done: {result}")
+
+  - id: proper-error-handling
+    name: Handle API Errors Properly
+    check: |
+      Catch and handle SlackApiError for graceful failures.
+    recommendation: |
+      from slack_sdk.errors import SlackApiError
+
+      def send_message(channel: str, text: str):
+          try:
+              result = client.chat_postMessage(
+                  channel=channel,
+                  text=text
+              )
+              return {"success": True, "ts": result["ts"]}
+          except SlackApiError as e:
+              error = e.response["error"]
+
+              if error == "channel_not_found":
+                  return {"success": False, "error": "Channel doesn't exist"}
+              elif error == "not_in_channel":
+                  # Try to join first
+                  client.conversations_join(channel=channel)
+                  return send_message(channel, text)  # Retry
+              elif error == "rate_limited":
+                  retry_after = int(e.response.headers.get("Retry-After", 30))
+                  time.sleep(retry_after)
+                  return send_message(channel, text)  # Retry
+              else:
+                  return {"success": False, "error": error}
+
+  - id: minimal-scopes
+    name: Request Minimal OAuth Scopes
+    check: |
+      Only request scopes your bot actually uses.
+    recommendation: |
+      # Notification bot (posts messages)
+      SCOPES = ["chat:write"]
+
+      # Slash command bot
+      SCOPES = ["commands", "chat:write"]
+
+      # Mention-response bot
+      SCOPES = ["app_mentions:read", "chat:write"]
+
+      # Full-featured bot
+      SCOPES = [
+          "chat:write",       # Post messages
+          "commands",         # Slash commands
+          "app_mentions:read", # @mentions
+          "channels:read",    # List channels (if needed)
+          "users:read",       # User info (if needed)
+      ]
+
+      # AVOID unless needed:
+      # - admin.* (almost never needed)
+      # - users:read.email (only if you use email)
+      # - channels:history (only if reading messages)
+
+testing_checklist:
+  development:
+    - "Socket Mode works for local development"
+    - "Slash commands respond within 3 seconds"
+    - "Modals open and submit correctly"
+    - "Interactive components update properly"
+    - "Event subscriptions receive events"
+
+  security:
+    - "No tokens in source code"
+    - "Webhook signatures verified (Bolt or manual)"
+    - "OAuth state parameter validated"
+    - "Tokens encrypted in database"
+    - "Minimal scopes requested"
+
+  production:
+    - "Using HTTP webhooks (not Socket Mode)"
+    - "Rate limit handling with backoff"
+    - "Error handling for all API calls"
+    - "Background processing for slow tasks"
+    - "Block Kit validated before sending"
+
+  compliance:
+    - "User data handling follows Slack TOS"
+    - "Bot only accesses channels it's invited to"
+    - "User consent for data storage"
+    - "Clear privacy policy if storing data"
