@@ -1,0 +1,476 @@
+# Validations - Semantic Search
+# Quality checks for semantic search implementations
+
+version: 1.0.0
+skill_id: semantic-search
+
+validations:
+  # Embedding Configuration
+  - id: hardcoded-embedding-model
+    name: Hardcoded Embedding Model
+    severity: warning
+    description: Embedding model should be configurable
+    pattern: |
+      model:\s*["']text-embedding-(?:3-small|ada-002)["'](?!.*config|env|EMBED)
+    message: "Hardcoded embedding model. Use config/env for easier migration."
+    autofix: false
+
+  - id: missing-dimensions-param
+    name: Missing Dimensions Parameter
+    severity: info
+    description: text-embedding-3 models support dimension reduction
+    pattern: |
+      text-embedding-3.*(?!.*dimensions)
+    message: "Consider using dimensions parameter to reduce vector size and costs."
+    autofix: false
+
+  - id: no-model-version-tracking
+    name: Missing Model Version in Metadata
+    severity: warning
+    description: Track embedding model version for migrations
+    pattern: |
+      metadata.*(?!.*embeddingModel|model_version|embedding_version)
+    message: "Store embedding model version in metadata for future migrations."
+    autofix: false
+
+  # Vector Search Quality
+  - id: no-reranking
+    name: Missing Reranking Stage
+    severity: info
+    description: Consider reranking for precision-critical applications
+    pattern: |
+      vector.*search.*return(?!.*rerank|second.*stage)
+    message: "Consider adding Cohere/Jina reranking for better precision."
+    autofix: false
+
+  - id: no-hybrid-search
+    name: Vector-Only Search
+    severity: warning
+    description: Hybrid search handles exact matches better
+    pattern: |
+      embed.*query.*results(?!.*keyword|bm25|hybrid|full.*text)
+    message: "Pure vector search misses exact matches. Consider hybrid search."
+    autofix: false
+
+  - id: no-metadata-filter
+    name: No Metadata Filtering
+    severity: info
+    description: Filtering before search improves relevance
+    pattern: |
+      query.*topK(?!.*filter|where|must)
+    message: "Consider adding metadata filters to narrow search scope."
+    autofix: false
+
+  # Chunking Quality
+  - id: fixed-size-chunking
+    name: Fixed-Size Chunking Without Overlap
+    severity: warning
+    description: Fixed chunks break semantic context
+    pattern: |
+      slice\(\d+,\s*\d+\)|substring\(\d+,\s*\d+\)|split.*join.*slice
+    message: "Fixed-size chunking breaks sentences. Use semantic chunking."
+    autofix: false
+
+  - id: no-chunk-overlap
+    name: No Chunk Overlap
+    severity: warning
+    description: Overlapping chunks preserve context
+    pattern: |
+      chunk.*size(?!.*overlap)
+    message: "Add chunk overlap (10-20%) to preserve context at boundaries."
+    autofix: false
+
+  - id: tiny-chunks
+    name: Very Small Chunk Size
+    severity: warning
+    description: Chunks under 100 tokens lose context
+    pattern: |
+      chunk.*size.*[<:].*(?:[1-9]|[1-9]\d)(?!\d)
+    message: "Chunks under 100 tokens may lack sufficient context."
+    autofix: false
+
+  # Cost Management
+  - id: no-batch-embedding
+    name: Sequential Embedding Calls
+    severity: warning
+    description: Batch embeddings to reduce API calls
+    pattern: |
+      for.*await.*embed\(|\.map\(.*embed\)
+    message: "Use batch embedding API to reduce calls and costs."
+    autofix: false
+
+  - id: no-embedding-cache
+    name: No Query Embedding Cache
+    severity: info
+    description: Cache query embeddings for repeated searches
+    pattern: |
+      async.*search.*embed.*query(?!.*cache)
+    message: "Consider caching query embeddings for common searches."
+    autofix: false
+
+  - id: no-change-detection
+    name: Full Reindex Without Change Detection
+    severity: warning
+    description: Only re-embed changed documents
+    pattern: |
+      reindex.*all|embed.*all.*documents(?!.*hash|changed|diff)
+    message: "Use content hashing to avoid re-embedding unchanged docs."
+    autofix: false
+
+  # Error Handling
+  - id: no-rate-limit-handling
+    name: No Rate Limit Handling
+    severity: warning
+    description: Embedding APIs have rate limits
+    pattern: |
+      embed\((?!.*retry|limit|queue)
+    message: "Add rate limiting and retry logic for embedding calls."
+    autofix: false
+
+  - id: no-empty-result-handling
+    name: No Empty Result Handling
+    severity: warning
+    description: Handle empty search results gracefully
+    pattern: |
+      results\[0\](?!.*\?|length|if)
+    message: "Handle case when search returns no results."
+    autofix: false
+
+  - id: no-dimension-validation
+    name: No Dimension Validation
+    severity: error
+    description: Validate vector dimensions match index
+    pattern: |
+      upsert.*vector(?!.*length.*===|dimensions|validate)
+    message: "Validate embedding dimensions match index configuration."
+    autofix: false
+
+  # Security
+  - id: exposed-api-key
+    name: API Key in Code
+    severity: error
+    description: Vector DB API keys should be in environment
+    pattern: |
+      apiKey:\s*["'][a-zA-Z0-9_-]{20,}["']
+    message: "API key in code. Use environment variables."
+    autofix: false
+
+  - id: no-input-validation
+    name: No Query Input Validation
+    severity: warning
+    description: Validate and sanitize search queries
+    pattern: |
+      search\(.*req\.(?:query|body)(?!.*validate|sanitize|z\.)
+    message: "Validate and sanitize user search queries."
+    autofix: false
+
+code_smells:
+  - id: embedding-in-request
+    name: Embedding in Hot Path
+    description: Embedding adds 100-300ms latency
+    pattern: |
+      app\.(?:get|post).*await.*embed.*res\.json
+    suggestion: "Consider pre-embedding or caching for frequent queries."
+
+  - id: large-topk
+    name: Very Large TopK
+    description: Retrieving many results increases latency and cost
+    pattern: |
+      topK.*(?:100|[1-9]\d\d\d)
+    suggestion: "Large topK increases latency. Use pagination or reranking instead."
+
+  - id: sync-batch-indexing
+    name: Synchronous Batch Indexing
+    description: Large batches should be processed asynchronously
+    pattern: |
+      app\.post.*for.*embed.*upsert
+    suggestion: "Queue large indexing jobs for background processing."
+
+  - id: no-index-stats
+    name: No Index Health Monitoring
+    description: Monitor index size and query latency
+    pattern: |
+      vector.*query(?!.*stats|metrics|monitor)
+    suggestion: "Track index size, query latency, and recall metrics."
+
+best_practices:
+  - id: centralized-embedding
+    name: Centralized Embedding Configuration
+    check: |
+      Embedding model and dimensions are centralized.
+    recommendation: |
+      // lib/embedding.ts
+      const EMBEDDING_CONFIG = {
+        model: process.env.EMBEDDING_MODEL || "text-embedding-3-small",
+        dimensions: parseInt(process.env.EMBEDDING_DIMENSIONS || "1536"),
+        provider: "openai",
+      } as const;
+
+      export type EmbeddingConfig = typeof EMBEDDING_CONFIG;
+
+      export async function embed(
+        text: string | string[],
+        config: EmbeddingConfig = EMBEDDING_CONFIG
+      ): Promise<number[][]> {
+        const inputs = Array.isArray(text) ? text : [text];
+
+        const response = await openai.embeddings.create({
+          model: config.model,
+          input: inputs,
+          dimensions: config.dimensions,
+        });
+
+        return response.data.map((d) => d.embedding);
+      }
+
+      // Re-export config for validation
+      export { EMBEDDING_CONFIG };
+
+  - id: retrieval-pipeline
+    name: Complete Retrieval Pipeline
+    check: |
+      Search includes retrieval, optional reranking, and response formatting.
+    recommendation: |
+      interface RetrievalResult {
+        documents: Array<{
+          id: string;
+          content: string;
+          score: number;
+          metadata: Record<string, unknown>;
+        }>;
+        timing: {
+          embeddingMs: number;
+          retrievalMs: number;
+          rerankingMs?: number;
+        };
+      }
+
+      async function retrieve(
+        query: string,
+        options?: {
+          topK?: number;
+          rerank?: boolean;
+          filter?: Record<string, unknown>;
+        }
+      ): Promise<RetrievalResult> {
+        const { topK = 10, rerank = false, filter } = options || {};
+        const timing: RetrievalResult["timing"] = {
+          embeddingMs: 0,
+          retrievalMs: 0,
+        };
+
+        // 1. Embed query
+        const embedStart = Date.now();
+        const queryVector = await embed(query);
+        timing.embeddingMs = Date.now() - embedStart;
+
+        // 2. Vector retrieval
+        const retrieveStart = Date.now();
+        const results = await vectorIndex.query({
+          vector: queryVector[0],
+          topK: rerank ? topK * 3 : topK, // Get more if reranking
+          filter,
+          includeMetadata: true,
+        });
+        timing.retrievalMs = Date.now() - retrieveStart;
+
+        let documents = results.matches?.map((m) => ({
+          id: m.id as string,
+          content: m.metadata?.content as string,
+          score: m.score || 0,
+          metadata: m.metadata || {},
+        })) || [];
+
+        // 3. Optional reranking
+        if (rerank && documents.length > 0) {
+          const rerankStart = Date.now();
+          const reranked = await cohereRerank(query, documents, { topN: topK });
+          documents = reranked;
+          timing.rerankingMs = Date.now() - rerankStart;
+        }
+
+        return { documents, timing };
+      }
+
+  - id: incremental-indexing
+    name: Incremental Indexing with Change Detection
+    check: |
+      Only changed documents are re-embedded.
+    recommendation: |
+      import { createHash } from "crypto";
+
+      interface DocumentVersion {
+        id: string;
+        contentHash: string;
+        embeddedAt: Date;
+        modelVersion: string;
+      }
+
+      class IncrementalIndexer {
+        private versionStore: Map<string, DocumentVersion>;
+
+        constructor(versionStore: Map<string, DocumentVersion>) {
+          this.versionStore = versionStore;
+        }
+
+        private hash(content: string): string {
+          return createHash("sha256").update(content).digest("hex").slice(0, 16);
+        }
+
+        async index(
+          documents: Array<{ id: string; content: string; metadata?: Record<string, unknown> }>
+        ): Promise<{ indexed: number; skipped: number; deleted: number }> {
+          const currentIds = new Set(documents.map((d) => d.id));
+          const toIndex: typeof documents = [];
+          const toDelete: string[] = [];
+
+          // Find changed documents
+          for (const doc of documents) {
+            const hash = this.hash(doc.content);
+            const existing = this.versionStore.get(doc.id);
+
+            if (!existing || existing.contentHash !== hash) {
+              toIndex.push(doc);
+            }
+          }
+
+          // Find deleted documents
+          for (const [id] of this.versionStore) {
+            if (!currentIds.has(id)) {
+              toDelete.push(id);
+            }
+          }
+
+          // Index changed
+          if (toIndex.length > 0) {
+            const embeddings = await embed(toIndex.map((d) => d.content));
+
+            await vectorIndex.upsert(
+              toIndex.map((doc, i) => ({
+                id: doc.id,
+                vector: embeddings[i],
+                metadata: {
+                  content: doc.content,
+                  ...doc.metadata,
+                },
+              }))
+            );
+
+            // Update version store
+            for (const doc of toIndex) {
+              this.versionStore.set(doc.id, {
+                id: doc.id,
+                contentHash: this.hash(doc.content),
+                embeddedAt: new Date(),
+                modelVersion: EMBEDDING_CONFIG.model,
+              });
+            }
+          }
+
+          // Delete removed
+          if (toDelete.length > 0) {
+            await vectorIndex.deleteMany(toDelete);
+            toDelete.forEach((id) => this.versionStore.delete(id));
+          }
+
+          return {
+            indexed: toIndex.length,
+            skipped: documents.length - toIndex.length,
+            deleted: toDelete.length,
+          };
+        }
+      }
+
+  - id: observability
+    name: Search Observability
+    check: |
+      Track search quality metrics.
+    recommendation: |
+      interface SearchMetrics {
+        query: string;
+        resultCount: number;
+        topScore: number;
+        latencyMs: number;
+        rerankingUsed: boolean;
+        feedback?: "relevant" | "not_relevant";
+      }
+
+      async function searchWithMetrics(
+        query: string,
+        options?: Record<string, unknown>
+      ): Promise<{ results: Document[]; metrics: SearchMetrics }> {
+        const start = Date.now();
+
+        const { documents, timing } = await retrieve(query, {
+          ...options,
+          rerank: true,
+        });
+
+        const metrics: SearchMetrics = {
+          query,
+          resultCount: documents.length,
+          topScore: documents[0]?.score || 0,
+          latencyMs: Date.now() - start,
+          rerankingUsed: !!timing.rerankingMs,
+        };
+
+        // Log for analysis
+        console.log("search_metrics", metrics);
+
+        // Track in analytics
+        await analytics.track("search", {
+          ...metrics,
+          embeddingMs: timing.embeddingMs,
+          retrievalMs: timing.retrievalMs,
+          rerankingMs: timing.rerankingMs,
+        });
+
+        return { results: documents, metrics };
+      }
+
+      // Collect feedback
+      async function recordFeedback(
+        searchId: string,
+        documentId: string,
+        relevant: boolean
+      ) {
+        await analytics.track("search_feedback", {
+          searchId,
+          documentId,
+          relevant,
+        });
+
+        // Use for retrieval quality metrics
+        // Calculate MRR, Recall@K over time
+      }
+
+testing_checklist:
+  embedding_quality:
+    - "Embedding model version tracked in metadata"
+    - "Dimensions match across indexing and querying"
+    - "Batch embedding for efficiency"
+    - "Rate limiting handled"
+
+  search_quality:
+    - "Hybrid search for exact + semantic matches"
+    - "Reranking for precision-critical paths"
+    - "Empty results handled gracefully"
+    - "Metadata filtering available"
+
+  chunking_quality:
+    - "Semantic boundaries preserved"
+    - "Overlap for context continuity"
+    - "Tables and code kept intact"
+    - "Headers preserved as context"
+
+  cost_efficiency:
+    - "Change detection for incremental indexing"
+    - "Query embedding caching"
+    - "Appropriate topK values"
+    - "Batch operations where possible"
+
+  monitoring:
+    - "Search latency tracked"
+    - "Result relevance feedback collected"
+    - "Index size monitored"
+    - "Embedding costs tracked"

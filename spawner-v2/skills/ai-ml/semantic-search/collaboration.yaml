@@ -1,0 +1,639 @@
+# Collaboration - Semantic Search
+# Integration patterns with other skills and services
+
+version: 1.0.0
+skill_id: semantic-search
+
+prerequisites:
+  required_knowledge:
+    - "Vector similarity and embeddings basics"
+    - "RAG (Retrieval Augmented Generation) concepts"
+    - "Database indexing and query optimization"
+    - "API design for search endpoints"
+
+  environment_setup:
+    - step: "Choose vector database"
+      options:
+        - provider: "Upstash Vector"
+          best_for: "Serverless, Vercel, edge deployments"
+          setup: |
+            npm install @upstash/vector
+            # Get REST URL and token from Upstash console
+
+        - provider: "Pinecone"
+          best_for: "Enterprise scale, managed service"
+          setup: |
+            npm install @pinecone-database/pinecone
+            # Get API key from Pinecone console
+
+        - provider: "Qdrant"
+          best_for: "Self-hosted, complex filtering, hybrid search"
+          setup: |
+            npm install @qdrant/js-client-rest
+            # Run Qdrant: docker run -p 6333:6333 qdrant/qdrant
+
+        - provider: "Weaviate"
+          best_for: "GraphQL, multimodal, knowledge graphs"
+          setup: |
+            npm install weaviate-ts-client
+            # Run Weaviate or use Weaviate Cloud
+
+    - step: "Choose embedding provider"
+      options:
+        - provider: "OpenAI"
+          model: "text-embedding-3-small"
+          cost: "$0.02/1M tokens"
+          setup: |
+            npm install openai
+            # Set OPENAI_API_KEY
+
+        - provider: "Voyage AI"
+          model: "voyage-3-lite"
+          cost: "$0.02/1M tokens (better quality)"
+          setup: |
+            # Set VOYAGE_API_KEY
+            # Use fetch API
+
+        - provider: "Cohere"
+          model: "embed-english-v3.0"
+          cost: "Free tier available"
+          setup: |
+            npm install cohere-ai
+            # Set COHERE_API_KEY
+
+    - step: "Optional: Add reranking"
+      options:
+        - provider: "Cohere Rerank"
+          setup: "npm install cohere-ai"
+        - provider: "Jina Reranker"
+          setup: "Use Jina API"
+        - provider: "Cross-encoder (local)"
+          setup: "npm install @xenova/transformers"
+
+delegation_triggers:
+  delegate_to_others:
+    - condition: "Need to parse documents before indexing"
+      delegate_to: "document-ai skill"
+      handoff: |
+        Document parsing requirements:
+        - Extract text from PDFs/images
+        - Preserve structure (headings, tables)
+        - Handle multimodal content
+        - Return chunks with metadata
+
+    - condition: "Need search UI components"
+      delegate_to: "frontend skill"
+      handoff: |
+        Search UI requirements:
+        - Search input with debouncing
+        - Results list with highlighting
+        - Faceted filtering UI
+        - Infinite scroll or pagination
+        - Loading and empty states
+
+    - condition: "Need to store search history and analytics"
+      delegate_to: "backend skill"
+      handoff: |
+        Analytics storage requirements:
+        - Log search queries and results
+        - Track click-through rates
+        - Store user feedback on relevance
+        - Calculate search quality metrics
+
+    - condition: "Need background indexing jobs"
+      delegate_to: "background-jobs skill"
+      handoff: |
+        Indexing job requirements:
+        - Queue documents for async indexing
+        - Handle large batch imports
+        - Retry on embedding failures
+        - Progress tracking per batch
+
+    - condition: "Need to monitor search quality"
+      delegate_to: "ai-observability skill"
+      handoff: |
+        Monitoring requirements:
+        - Track search latency percentiles
+        - Monitor embedding API costs
+        - Alert on quality degradation
+        - Dashboard for search metrics
+
+  accept_from_others:
+    - from: "document-ai skill"
+      when: "Have extracted text to index"
+      expect: |
+        I'll receive:
+        - Document chunks with text
+        - Metadata (source, page, section)
+        - Document ID for linking
+        I'll provide: Indexed vectors with search API
+
+    - from: "frontend skill"
+      when: "User performs search"
+      expect: |
+        I'll receive:
+        - Search query string
+        - Optional filters (category, date)
+        - Pagination parameters
+        I'll provide: Ranked results with metadata
+
+    - from: "ai-personalization skill"
+      when: "Need personalized search"
+      expect: |
+        I'll receive:
+        - User embedding or preferences
+        - Query for personalization
+        I'll provide: Results weighted by user similarity
+
+workflow_integration:
+  rag_pipeline_flow:
+    - step: 1
+      action: "Index documents"
+      details: |
+        - Chunk documents semantically
+        - Generate embeddings in batches
+        - Upsert to vector database
+        - Store metadata for filtering
+
+    - step: 2
+      action: "Process search query"
+      details: |
+        - Validate and sanitize input
+        - Generate query embedding
+        - Apply metadata filters
+        - Retrieve top-K candidates
+
+    - step: 3
+      action: "Rerank results (optional)"
+      details: |
+        - Send candidates to reranker
+        - Reorder by relevance score
+        - Return top-N final results
+
+    - step: 4
+      action: "Format for LLM"
+      details: |
+        - Reorder for attention patterns
+        - Include source citations
+        - Truncate to context window
+        - Add to LLM prompt
+
+  decision_points:
+    - decision: "Vector DB selection"
+      options:
+        - name: "Upstash Vector"
+          when: "Serverless, Vercel, <10M vectors"
+          pros: "Zero ops, pay-per-use, edge compatible"
+          cons: "Limited filtering, no hybrid search"
+
+        - name: "Pinecone"
+          when: "Enterprise, >100M vectors, SLA required"
+          pros: "Managed, scales infinitely, multi-region"
+          cons: "Cost at scale, vendor lock-in"
+
+        - name: "Qdrant"
+          when: "Complex filters, hybrid search, self-hosted option"
+          pros: "Powerful filtering, OSS, hybrid search built-in"
+          cons: "Ops overhead if self-hosted"
+
+    - decision: "Embedding model"
+      options:
+        - name: "text-embedding-3-small"
+          when: "General use, reliable, good cost/quality"
+          dimensions: "1536"
+          cost: "$0.02/1M tokens"
+
+        - name: "voyage-3-lite"
+          when: "Best retrieval quality, similar cost"
+          dimensions: "1024"
+          cost: "$0.02/1M tokens"
+
+        - name: "Local (Sentence Transformers)"
+          when: "Privacy, no API costs, latency sensitive"
+          dimensions: "384-1024"
+          cost: "Compute only"
+
+collaboration_patterns:
+  with_nextjs:
+    pattern: "Search API route with streaming"
+    implementation: |
+      // app/api/search/route.ts
+      import { NextRequest, NextResponse } from "next/server";
+      import { Index } from "@upstash/vector";
+      import OpenAI from "openai";
+      import { z } from "zod";
+
+      const vectorIndex = new Index();
+      const openai = new OpenAI();
+
+      const SearchSchema = z.object({
+        query: z.string().min(1).max(500),
+        topK: z.number().min(1).max(50).default(10),
+        filter: z.record(z.unknown()).optional(),
+      });
+
+      export async function POST(req: NextRequest) {
+        const body = await req.json();
+        const input = SearchSchema.parse(body);
+
+        // Generate embedding
+        const embedResponse = await openai.embeddings.create({
+          model: "text-embedding-3-small",
+          input: input.query,
+        });
+        const queryVector = embedResponse.data[0].embedding;
+
+        // Search
+        const results = await vectorIndex.query({
+          vector: queryVector,
+          topK: input.topK,
+          filter: input.filter,
+          includeMetadata: true,
+        });
+
+        return NextResponse.json({
+          results: results.map((r) => ({
+            id: r.id,
+            score: r.score,
+            content: r.metadata?.content,
+            metadata: r.metadata,
+          })),
+        });
+      }
+
+  with_rag_chat:
+    pattern: "RAG-powered chat with citations"
+    implementation: |
+      // lib/rag-chat.ts
+      import Anthropic from "@anthropic-ai/sdk";
+
+      const anthropic = new Anthropic();
+
+      interface ChatMessage {
+        role: "user" | "assistant";
+        content: string;
+      }
+
+      interface RAGResponse {
+        answer: string;
+        sources: Array<{ id: string; content: string; score: number }>;
+      }
+
+      async function ragChat(
+        query: string,
+        history: ChatMessage[],
+        indexName?: string
+      ): Promise<RAGResponse> {
+        // 1. Retrieve relevant context
+        const searchResults = await search(query, { topK: 5 });
+
+        if (searchResults.length === 0) {
+          return {
+            answer: "I couldn't find relevant information to answer your question.",
+            sources: [],
+          };
+        }
+
+        // 2. Build context
+        const context = searchResults
+          .map((r, i) => `[${i + 1}] ${r.content}`)
+          .join("\n\n");
+
+        // 3. Generate answer with citations
+        const systemPrompt = `You are a helpful assistant. Answer questions based on the provided context.
+        Always cite sources using [1], [2], etc. when using information from the context.
+        If the context doesn't contain relevant information, say so.`;
+
+        const messages = [
+          ...history.map((m) => ({
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          })),
+          {
+            role: "user" as const,
+            content: `Context:\n${context}\n\nQuestion: ${query}`,
+          },
+        ];
+
+        const response = await anthropic.messages.create({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1024,
+          system: systemPrompt,
+          messages,
+        });
+
+        const answer =
+          response.content[0].type === "text" ? response.content[0].text : "";
+
+        return {
+          answer,
+          sources: searchResults.map((r) => ({
+            id: r.id,
+            content: r.content.slice(0, 200) + "...",
+            score: r.score,
+          })),
+        };
+      }
+
+  with_inngest:
+    pattern: "Background document indexing"
+    implementation: |
+      // lib/inngest/functions.ts
+      import { inngest } from "./client";
+      import { Index } from "@upstash/vector";
+      import OpenAI from "openai";
+
+      const vectorIndex = new Index();
+      const openai = new OpenAI();
+
+      export const indexDocuments = inngest.createFunction(
+        {
+          id: "index-documents",
+          retries: 3,
+          concurrency: { limit: 5 },
+        },
+        { event: "documents/index" },
+        async ({ event, step }) => {
+          const { documents, namespace } = event.data;
+
+          // Batch process documents
+          const batchSize = 100;
+          const results = { indexed: 0, failed: 0 };
+
+          for (let i = 0; i < documents.length; i += batchSize) {
+            const batch = documents.slice(i, i + batchSize);
+
+            await step.run(`embed-batch-${i}`, async () => {
+              try {
+                // Generate embeddings
+                const response = await openai.embeddings.create({
+                  model: "text-embedding-3-small",
+                  input: batch.map((d: any) => d.content),
+                });
+
+                // Upsert to vector DB
+                await vectorIndex.upsert(
+                  batch.map((doc: any, idx: number) => ({
+                    id: doc.id,
+                    vector: response.data[idx].embedding,
+                    metadata: {
+                      content: doc.content.slice(0, 1000),
+                      ...doc.metadata,
+                    },
+                  })),
+                  { namespace }
+                );
+
+                results.indexed += batch.length;
+              } catch (error) {
+                results.failed += batch.length;
+                throw error; // Trigger retry
+              }
+            });
+          }
+
+          return results;
+        }
+      );
+
+      // Incremental sync
+      export const syncDocuments = inngest.createFunction(
+        {
+          id: "sync-documents",
+          retries: 2,
+        },
+        { cron: "0 * * * *" }, // Every hour
+        async ({ step }) => {
+          // Get documents modified since last sync
+          const lastSync = await step.run("get-last-sync", async () => {
+            return await db.syncState.findFirst({
+              where: { type: "document-index" },
+            });
+          });
+
+          const modifiedDocs = await step.run("get-modified", async () => {
+            return await db.documents.findMany({
+              where: { updatedAt: { gt: lastSync?.timestamp || new Date(0) } },
+            });
+          });
+
+          if (modifiedDocs.length > 0) {
+            // Trigger indexing
+            await step.sendEvent("trigger-index", {
+              name: "documents/index",
+              data: { documents: modifiedDocs },
+            });
+          }
+
+          // Update sync state
+          await step.run("update-sync", async () => {
+            await db.syncState.upsert({
+              where: { type: "document-index" },
+              update: { timestamp: new Date() },
+              create: { type: "document-index", timestamp: new Date() },
+            });
+          });
+
+          return { synced: modifiedDocs.length };
+        }
+      );
+
+  with_react_query:
+    pattern: "Search with React Query"
+    implementation: |
+      // hooks/useSearch.ts
+      import { useQuery, useMutation } from "@tanstack/react-query";
+      import { useDebounce } from "./useDebounce";
+
+      interface SearchResult {
+        id: string;
+        content: string;
+        score: number;
+        metadata: Record<string, unknown>;
+      }
+
+      interface SearchResponse {
+        results: SearchResult[];
+        query: string;
+      }
+
+      async function performSearch(
+        query: string,
+        filters?: Record<string, unknown>
+      ): Promise<SearchResponse> {
+        const response = await fetch("/api/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, filter: filters }),
+        });
+
+        if (!response.ok) {
+          throw new Error("Search failed");
+        }
+
+        const data = await response.json();
+        return { results: data.results, query };
+      }
+
+      export function useSearch(
+        query: string,
+        options?: {
+          filters?: Record<string, unknown>;
+          debounceMs?: number;
+          enabled?: boolean;
+        }
+      ) {
+        const { filters, debounceMs = 300, enabled = true } = options || {};
+        const debouncedQuery = useDebounce(query, debounceMs);
+
+        return useQuery({
+          queryKey: ["search", debouncedQuery, filters],
+          queryFn: () => performSearch(debouncedQuery, filters),
+          enabled: enabled && debouncedQuery.length >= 2,
+          staleTime: 1000 * 60 * 5, // Cache for 5 minutes
+          placeholderData: (previousData) => previousData, // Keep previous results while loading
+        });
+      }
+
+      // Search suggestions
+      export function useSearchSuggestions(query: string) {
+        const debouncedQuery = useDebounce(query, 150);
+
+        return useQuery({
+          queryKey: ["suggestions", debouncedQuery],
+          queryFn: async () => {
+            const response = await fetch(
+              `/api/suggestions?q=${encodeURIComponent(debouncedQuery)}`
+            );
+            return response.json();
+          },
+          enabled: debouncedQuery.length >= 1,
+          staleTime: 1000 * 60 * 10,
+        });
+      }
+
+  with_llamaindex:
+    pattern: "LlamaIndex TypeScript RAG"
+    implementation: |
+      // lib/llamaindex-rag.ts
+      import {
+        Document,
+        VectorStoreIndex,
+        SentenceSplitter,
+        Settings,
+        OpenAIEmbedding,
+        Anthropic,
+      } from "llamaindex";
+
+      // Configure LlamaIndex
+      Settings.embedModel = new OpenAIEmbedding({
+        model: "text-embedding-3-small",
+      });
+
+      Settings.llm = new Anthropic({
+        model: "claude-sonnet-4-20250514",
+      });
+
+      // Create index from documents
+      async function createIndex(
+        documents: Array<{ text: string; metadata: Record<string, unknown> }>
+      ) {
+        const docs = documents.map(
+          (d) =>
+            new Document({
+              text: d.text,
+              metadata: d.metadata,
+            })
+        );
+
+        // Use semantic chunking
+        const splitter = new SentenceSplitter({
+          chunkSize: 512,
+          chunkOverlap: 50,
+        });
+
+        const index = await VectorStoreIndex.fromDocuments(docs, {
+          transformations: [splitter],
+        });
+
+        return index;
+      }
+
+      // Query with chat engine
+      async function queryWithHistory(
+        index: VectorStoreIndex,
+        query: string,
+        history: Array<{ role: "user" | "assistant"; content: string }>
+      ) {
+        const chatEngine = index.asChatEngine({
+          similarityTopK: 3,
+        });
+
+        // Add history
+        for (const msg of history) {
+          chatEngine.chatHistory.addMessage({
+            role: msg.role,
+            content: msg.content,
+          });
+        }
+
+        const response = await chatEngine.chat({ message: query });
+
+        return {
+          answer: response.response,
+          sources: response.sourceNodes?.map((n) => ({
+            text: n.node.text,
+            score: n.score,
+          })),
+        };
+      }
+
+anti_patterns:
+  - name: "No query validation"
+    why_bad: "SQL injection via metadata filters, DoS via long queries"
+    example_bad: |
+      const results = await search(req.body.query, req.body.filter);
+    example_good: |
+      const input = SearchSchema.parse(req.body);
+      const results = await search(input.query, input.filter);
+
+  - name: "Embedding in request handler"
+    why_bad: "Adds 100-300ms latency to every search"
+    example_bad: |
+      app.get("/search", async (req, res) => {
+        const embedding = await embed(req.query.q);
+        const results = await search(embedding);
+        res.json(results);
+      });
+    example_good: |
+      // Pre-embed common queries, cache embeddings
+      app.get("/search", async (req, res) => {
+        const embedding = await getCachedEmbedding(req.query.q);
+        const results = await search(embedding);
+        res.json(results);
+      });
+
+  - name: "No pagination on results"
+    why_bad: "Large result sets slow down response, waste bandwidth"
+    example_bad: |
+      return results; // Returns all matches
+    example_good: |
+      return {
+        results: results.slice(offset, offset + limit),
+        total: results.length,
+        hasMore: offset + limit < results.length,
+      };
+
+  - name: "Ignoring search analytics"
+    why_bad: "Can't improve what you don't measure"
+    example_bad: |
+      const results = await search(query);
+      return results;
+    example_good: |
+      const results = await search(query);
+      await analytics.track("search", {
+        query,
+        resultCount: results.length,
+        topScore: results[0]?.score,
+      });
+      return results;
