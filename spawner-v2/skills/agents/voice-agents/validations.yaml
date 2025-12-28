@@ -1,0 +1,316 @@
+# Validations - Voice Agents
+# Quality checks for voice AI implementations
+
+version: 1.0.0
+skill_id: voice-agents
+
+validations:
+  # Latency Checks
+  - id: no-latency-tracking
+    name: Missing Latency Measurement
+    severity: error
+    description: Voice agents must track latency at each stage
+    pattern: |
+      (deepgram|whisper|elevenlabs|realtime)
+    anti_pattern: |
+      (timestamp|latency|duration|timing|metrics)
+    message: "Voice pipeline without latency tracking. Add timestamps at each stage to measure performance."
+    autofix: false
+
+  - id: no-streaming-stt
+    name: Using Batch STT Instead of Streaming
+    severity: warning
+    description: Streaming STT reduces latency significantly
+    pattern: |
+      (transcribe|createTranscription).*audio.*file|whisper.*transcribe
+    anti_pattern: |
+      stream|live|realtime
+    message: "Using batch transcription. Consider streaming for lower latency in voice agents."
+    autofix: false
+
+  - id: no-streaming-tts
+    name: TTS Without Streaming Output
+    severity: warning
+    description: Streaming TTS reduces time to first audio
+    pattern: |
+      textToSpeech|speech\.create|generateSpeech
+    anti_pattern: |
+      stream|chunk|buffer
+    message: "TTS without streaming. Stream audio to reduce time to first audio."
+    autofix: false
+
+  # Turn-Taking Checks
+  - id: fixed-vad-threshold
+    name: Hardcoded VAD Silence Threshold
+    severity: warning
+    description: Fixed silence thresholds don't adapt to conversation
+    pattern: |
+      silence_duration.*=.*\d+|timeout.*=.*\d+.*ms
+    message: "Fixed silence threshold. Consider semantic VAD or adaptive thresholds for better turn-taking."
+    autofix: false
+
+  - id: no-barge-in
+    name: Missing Barge-In Handling
+    severity: warning
+    description: Voice agents should stop when user interrupts
+    pattern: |
+      (vad|speech_start)
+    anti_pattern: |
+      (stop|abort|interrupt|barge|cancel.*playing)
+    message: "VAD without barge-in handling. Stop TTS when user starts speaking."
+    autofix: false
+
+  # Response Format Checks
+  - id: no-voice-prompt-constraints
+    name: Voice Prompt Without Length Constraints
+    severity: warning
+    description: Voice prompts should constrain response length
+    pattern: |
+      (system|prompt).*voice|voice.*(system|prompt)
+    anti_pattern: |
+      (concise|short|brief|under.*words|max.*words)
+    message: "Voice prompt without length constraints. Add 'Keep responses under 30 words' to system prompt."
+    autofix: false
+
+  - id: markdown-in-tts
+    name: Markdown Formatting Sent to TTS
+    severity: warning
+    description: Markdown will be read literally by TTS
+    pattern: |
+      textToSpeech|speech\.create
+    anti_pattern: |
+      (replace|sanitize|clean|strip).*markdown
+    message: "Check for markdown in TTS input. Strip formatting before sending to TTS."
+    autofix: false
+
+  # Error Handling
+  - id: no-stt-error-handling
+    name: STT Without Error Handling
+    severity: warning
+    description: STT can fail or return low confidence
+    pattern: |
+      (transcript|transcription)
+    anti_pattern: |
+      (confidence|error|try|catch|fallback)
+    message: "STT without error handling. Check confidence scores and handle failures."
+    autofix: false
+
+  - id: no-reconnection-logic
+    name: WebSocket Without Reconnection
+    severity: warning
+    description: Realtime APIs need reconnection handling
+    pattern: |
+      (WebSocket|realtime|RealtimeClient)
+    anti_pattern: |
+      (reconnect|retry|onclose|onerror)
+    message: "Realtime connection without reconnection logic. Handle disconnects gracefully."
+    autofix: false
+
+  # Audio Quality
+  - id: no-noise-handling
+    name: Missing Noise Handling
+    severity: info
+    description: Real-world audio includes background noise
+    pattern: |
+      (vad|transcription|stt)
+    anti_pattern: |
+      (noise|ambient|threshold|filter)
+    message: "Consider adding noise handling for real-world audio quality."
+    autofix: false
+
+  - id: no-echo-cancellation
+    name: Missing Echo Cancellation
+    severity: info
+    description: Agent's voice may be captured by user's mic
+    pattern: |
+      (tts.*stt|stt.*tts|voice.*agent)
+    anti_pattern: |
+      (echo|aec|cancell)
+    message: "Consider echo cancellation to prevent agent voice from triggering STT."
+    autofix: false
+
+code_smells:
+  - id: blocking-audio-processing
+    name: Synchronous Audio Processing
+    description: Audio should be processed asynchronously
+    pattern: |
+      await.*transcribe.*await.*generate.*await.*play
+    suggestion: "Pipeline audio processing: stream STT → stream LLM → stream TTS"
+
+  - id: large-audio-buffers
+    name: Large Audio Buffers Before Processing
+    description: Buffering too much audio adds latency
+    pattern: |
+      buffer.*complete|wait.*audio.*ready
+    suggestion: "Process audio in small chunks as they arrive"
+
+  - id: no-conversation-context
+    name: Missing Conversation History
+    description: Voice agents should maintain context
+    pattern: |
+      chat\.completions\.create
+    suggestion: "Maintain conversation history across turns for coherent dialogue"
+
+best_practices:
+  - id: measure-e2e-latency
+    name: Measure End-to-End Latency
+    check: |
+      Track time from user stops speaking to agent starts responding.
+    recommendation: |
+      Log timestamps at each stage:
+
+      const metrics = {
+        vadEnd: null,
+        sttComplete: null,
+        llmFirstToken: null,
+        ttsFirstAudio: null,
+      };
+
+      vad.on('speech_end', () => {
+        metrics.vadEnd = Date.now();
+      });
+
+      // ... log at each stage
+
+      const e2eLatency = metrics.ttsFirstAudio - metrics.vadEnd;
+      logMetric('e2e_latency', e2eLatency);
+
+  - id: use-semantic-vad
+    name: Use Semantic VAD When Available
+    check: |
+      Semantic VAD understands conversation better than silence detection.
+    recommendation: |
+      // OpenAI Realtime
+      client.updateSession({
+        turn_detection: {
+          type: 'semantic_vad',
+        },
+      });
+
+      // Or use Pipecat SmartTurn
+      const pipeline = new Pipeline({
+        vad: new SileroVAD(),
+        turnDetection: new SmartTurn(),
+      });
+
+  - id: stream-all-components
+    name: Stream All Pipeline Components
+    check: |
+      Streaming reduces latency at every stage.
+    recommendation: |
+      // Stream STT
+      const stt = deepgram.transcription.live({ interim_results: true });
+
+      // Stream LLM
+      const llm = await openai.chat.completions.create({ stream: true });
+
+      // Stream TTS
+      const tts = await elevenlabs.textToSpeech.stream({ ... });
+
+      // Pipe them together
+      stt.on('transcript', async (text) => {
+        if (!text.is_final) return;
+        const llmStream = await generateResponse(text);
+        await streamToTTS(llmStream);
+      });
+
+  - id: confirm-critical-info
+    name: Confirm Names, Numbers, and Actions
+    check: |
+      STT errors on critical info can cause problems.
+    recommendation: |
+      // After detecting name/number
+      if (containsCriticalInfo(transcript)) {
+        const confirmation = extractCriticalInfo(transcript);
+        response = `I heard ${confirmation}. Is that correct?`;
+      }
+
+      // Before actions
+      if (isAction(intent)) {
+        response = `I'll ${describeAction}. Should I proceed?`;
+      }
+
+  - id: graceful-degradation
+    name: Graceful Degradation on Errors
+    check: |
+      Voice agents should handle failures gracefully.
+    recommendation: |
+      const errorResponses = {
+        sttFailed: "I didn't catch that. Could you repeat?",
+        llmFailed: "I'm having trouble thinking. Give me a moment.",
+        ttsFailed: null, // Fall back to text
+        lowConfidence: "I'm not sure I understood. You said [X]?",
+      };
+
+      // Always offer human fallback for complex issues
+      if (errorCount > 2) {
+        response = "I'm having trouble. Would you like to speak with a person?";
+      }
+
+performance_benchmarks:
+  latency_targets:
+    excellent: "<500ms end-to-end"
+    good: "<800ms end-to-end"
+    acceptable: "<1200ms end-to-end"
+    poor: ">1500ms end-to-end"
+
+  component_targets:
+    vad: "<100ms"
+    stt_ttft: "<200ms"
+    llm_ttft: "<300ms"
+    tts_ttfa: "<150ms"
+    jitter: "<100ms std dev"
+
+  quality_targets:
+    stt_accuracy: ">90% on clean audio"
+    turn_detection: ">95% accuracy"
+    barge_in_response: "<200ms"
+    interruption_handling: ">98% proper handling"
+
+testing_recommendations:
+  - id: test-with-phone-audio
+    name: Test with Telephony Audio
+    check: |
+      Phone calls use different codecs and quality.
+    approach: |
+      - Record test audio through actual phone
+      - Test with G.711 codec (8kHz)
+      - Include background noise samples
+      - Test with various accents
+
+  - id: test-turn-taking
+    name: Test Turn-Taking Scenarios
+    check: |
+      Turn detection is critical for natural conversation.
+    approach: |
+      Test cases:
+      - Quick "yes/no" responses (should respond fast)
+      - Long pauses mid-sentence (should wait)
+      - Filler words "um, well" (should wait)
+      - Interruptions (should stop immediately)
+      - Back-channel "uh-huh" (should not interrupt)
+
+  - id: test-latency-distribution
+    name: Test Latency Distribution
+    check: |
+      P95 latency matters as much as P50.
+    approach: |
+      Run 1000+ test conversations.
+      Measure:
+      - P50 (median) latency
+      - P95 latency
+      - P99 latency
+      - Jitter (standard deviation)
+      Target: P95 < 1.5x P50
+
+  - id: test-error-recovery
+    name: Test Error Recovery
+    check: |
+      Voice agents should recover gracefully from errors.
+    approach: |
+      Inject failures:
+      - STT returns empty
+      - LLM times out
+      - TTS fails
+      - Connection drops
+      Verify graceful recovery and user-friendly messages.
