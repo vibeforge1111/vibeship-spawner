@@ -1,0 +1,176 @@
+# Infrastructure as Code Validations
+# Automated checks to catch IaC mistakes before they reach production
+
+validations:
+  - id: iac-local-backend
+    name: Local Backend Configuration
+    severity: error
+    type: regex
+    pattern:
+      - 'backend\\s+"local"'
+      - 'backend\\s*\\{\\s*\\}'
+    message: "Local backend detected. Use remote backend with locking for team environments."
+    fix_action: "Configure S3+DynamoDB, GCS, Azure Blob, or Terraform Cloud backend"
+    applies_to:
+      - "*.tf"
+      - "backend.tf"
+
+  - id: iac-no-provider-version
+    name: Provider Without Version Constraint
+    severity: warning
+    type: regex
+    pattern:
+      - 'required_providers\\s*\\{[^}]*source\\s*=[^}]*(?!version)[^}]*\\}'
+    message: "Provider without version constraint can cause unexpected changes."
+    fix_action: "Add version = \"~> X.0\" to pin major version"
+    applies_to:
+      - "*.tf"
+      - "versions.tf"
+      - "providers.tf"
+
+  - id: iac-hardcoded-secret
+    name: Hardcoded Secret in Terraform
+    severity: error
+    type: regex
+    pattern:
+      - 'password\\s*=\\s*"[^"$]+'
+      - 'api_key\\s*=\\s*"[^"$]+'
+      - 'secret\\s*=\\s*"[^"$]+'
+      - 'token\\s*=\\s*"[^"$]+'
+      - 'AWS_SECRET_ACCESS_KEY\\s*=\\s*"'
+    message: "Hardcoded secret detected. Secrets end up in state file unencrypted."
+    fix_action: "Use data sources to fetch from AWS Secrets Manager, Vault, or similar"
+    applies_to:
+      - "*.tf"
+      - "*.tfvars"
+
+  - id: iac-wildcard-iam
+    name: Wildcard IAM Permissions
+    severity: error
+    type: regex
+    pattern:
+      - '"Action"\\s*:\\s*"\\*"'
+      - '"Action"\\s*:\\s*\\[\\s*"\\*"\\s*\\]'
+      - '"Resource"\\s*:\\s*"\\*"'
+      - 'AdministratorAccess'
+      - 'PowerUserAccess'
+    message: "Overly broad IAM permissions detected. Follow least privilege principle."
+    fix_action: "Scope actions and resources to only what's needed"
+    applies_to:
+      - "*.tf"
+      - "*.json"
+
+  - id: iac-no-encryption
+    name: Storage Without Encryption
+    severity: warning
+    type: regex
+    pattern:
+      - 'aws_s3_bucket\\s*"[^"]*"\\s*\\{(?![^}]*server_side_encryption)'
+      - 'aws_ebs_volume\\s*"[^"]*"\\s*\\{(?![^}]*encrypted)'
+      - 'aws_rds_instance\\s*"[^"]*"\\s*\\{(?![^}]*storage_encrypted)'
+    message: "Storage resource without encryption enabled."
+    fix_action: "Add encryption configuration to S3, EBS, or RDS resources"
+    applies_to:
+      - "*.tf"
+
+  - id: iac-public-access
+    name: Public Access Enabled
+    severity: error
+    type: regex
+    pattern:
+      - 'publicly_accessible\\s*=\\s*true'
+      - 'cidr_blocks\\s*=\\s*\\[\\s*"0\\.0\\.0\\.0/0"\\s*\\]'
+      - 'block_public_acls\\s*=\\s*false'
+      - 'block_public_policy\\s*=\\s*false'
+    message: "Resource configured with public access. Review if intentional."
+    fix_action: "Remove public access or add explicit comment justifying it"
+    applies_to:
+      - "*.tf"
+
+  - id: iac-no-prevent-destroy
+    name: Stateful Resource Without Destroy Protection
+    severity: warning
+    type: regex
+    pattern:
+      - 'aws_rds_instance\\s*"[^"]*"\\s*\\{(?![^}]*prevent_destroy)'
+      - 'aws_db_instance\\s*"[^"]*"\\s*\\{(?![^}]*prevent_destroy)'
+      - 'aws_s3_bucket\\s*"[^"]*prod[^"]*"\\s*\\{(?![^}]*prevent_destroy)'
+    message: "Stateful resource without lifecycle.prevent_destroy protection."
+    fix_action: "Add lifecycle { prevent_destroy = true } and deletion_protection = true"
+    applies_to:
+      - "*.tf"
+
+  - id: iac-module-no-version
+    name: Module Without Version Pin
+    severity: warning
+    type: regex
+    pattern:
+      - 'module\\s*"[^"]*"\\s*\\{[^}]*source\\s*=\\s*"[^"?]*"(?![^}]*version)'
+      - 'source\\s*=\\s*"git::[^"]*(?!\\?ref=)'
+    message: "Module source without version pin can cause inconsistent behavior."
+    fix_action: "Add version constraint for registry modules or ?ref= for Git sources"
+    applies_to:
+      - "*.tf"
+
+  - id: iac-count-for-distinct
+    name: Count Used for Distinct Resources
+    severity: info
+    type: regex
+    pattern:
+      - 'count\\s*=\\s*length\\('
+    message: "count with length() can cause index shifting when items removed."
+    fix_action: "Consider using for_each with map/set for stable resource addresses"
+    applies_to:
+      - "*.tf"
+
+  - id: iac-auto-approve-prod
+    name: Auto-Approve in Production Pipeline
+    severity: error
+    type: regex
+    pattern:
+      - 'terraform\\s+apply\\s+-auto-approve'
+      - 'terraform\\s+destroy\\s+-auto-approve'
+    message: "Auto-approve bypasses plan review. Dangerous in production."
+    fix_action: "Use terraform plan -out=plan.tfplan then terraform apply plan.tfplan with review"
+    applies_to:
+      - "*.yml"
+      - "*.yaml"
+      - "*.sh"
+      - "Makefile"
+
+  - id: iac-no-state-encryption
+    name: Backend Without Encryption
+    severity: warning
+    type: regex
+    pattern:
+      - 'backend\\s+"s3"\\s*\\{(?![^}]*encrypt\\s*=\\s*true)'
+    message: "S3 backend without encryption. State file contains sensitive data."
+    fix_action: "Add encrypt = true and consider kms_key_id for additional security"
+    applies_to:
+      - "*.tf"
+      - "backend.tf"
+
+  - id: iac-no-dynamodb-lock
+    name: S3 Backend Without DynamoDB Locking
+    severity: warning
+    type: regex
+    pattern:
+      - 'backend\\s+"s3"\\s*\\{(?![^}]*dynamodb_table)'
+    message: "S3 backend without DynamoDB locking. Concurrent applies can corrupt state."
+    fix_action: "Add dynamodb_table for state locking"
+    applies_to:
+      - "*.tf"
+      - "backend.tf"
+
+  - id: iac-terraform-workspace-prod
+    name: Workspace Used for Production
+    severity: info
+    type: regex
+    pattern:
+      - 'terraform\\.workspace\\s*==\\s*"prod'
+      - 'workspace\\s+select\\s+prod'
+    message: "Workspaces for environment separation can be error-prone."
+    fix_action: "Consider directory-based environment separation for stronger isolation"
+    applies_to:
+      - "*.tf"
+      - "*.sh"
