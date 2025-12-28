@@ -1,0 +1,538 @@
+# Kubernetes Deployment Sharp Edges
+# Real production gotchas that cause outages, pager alerts, and 3am debugging sessions
+
+sharp_edges:
+  - id: crashloop-backoff-spiral
+    summary: CrashLoopBackOff looks like app crash but it's often environment/config issue
+    severity: critical
+    situation: Pod stuck in CrashLoopBackOff, logs show immediate exit or cryptic errors
+    why: |
+      Engineer sees CrashLoopBackOff, assumes application bug. Spends hours debugging code.
+      Reality: Container can't find config, missing environment variable, wrong command,
+      or readiness probe failing immediately. Kubernetes keeps restarting, backoff grows
+      exponentially (10s, 20s, 40s, 80s, up to 5 minutes). Service down for hours while
+      debugging wrong thing.
+    solution: |
+      # WRONG: Immediately check application logs only
+      kubectl logs pod-name
+      # Often shows nothing useful or container exited too fast
+
+      # RIGHT: Check pod events first
+      kubectl describe pod pod-name
+      # Look for: ImagePullBackOff, ConfigMap not found, Secret missing,
+      # Liveness/Readiness probe failed
+
+      # RIGHT: Check previous container logs
+      kubectl logs pod-name --previous
+      # Shows logs from crashed container
+
+      # RIGHT: Get into container to debug
+      kubectl run debug --rm -it --image=busybox -- sh
+      # Or use ephemeral containers (K8s 1.23+)
+      kubectl debug pod-name -it --image=busybox
+
+      # Common CrashLoopBackOff causes:
+      # 1. Missing ConfigMap/Secret - kubectl get configmap,secret
+      # 2. Wrong command - check containers[].command in spec
+      # 3. Health probe fails immediately - check probe paths and ports
+      # 4. OOMKilled - kubectl describe pod | grep OOMKilled
+      # 5. Permission denied - check securityContext and volume mounts
+    symptoms:
+      - Pod status shows CrashLoopBackOff
+      - Restart count increasing
+      - Container exits with code 1 or 137
+      - Events show "Back-off restarting failed container"
+    detection_pattern: 'CrashLoopBackOff|restartCount.*[5-9]|Back-off restarting'
+
+  - id: oomkilled-silent-cascade
+    summary: OOMKilled pod takes down other pods on same node via memory pressure
+    severity: critical
+    situation: One pod OOMKilled, then other pods on same node start failing
+    why: |
+      Pod without memory limits uses all available memory. Kubernetes OOMKills it.
+      But damage done - node is under memory pressure. Other pods on same node get
+      evicted or OOMKilled too. Cascading failure. Service degraded while scheduler
+      scrambles to reschedule pods across cluster. Could take down entire node if
+      kubelet gets starved.
+    solution: |
+      # WRONG: No memory limits (or only requests)
+      resources:
+        requests:
+          memory: "256Mi"
+        # No limit = can consume entire node memory
+
+      # RIGHT: Always set memory limits
+      resources:
+        requests:
+          memory: "256Mi"
+        limits:
+          memory: "512Mi"  # Container killed if exceeds
+
+      # RIGHT: Monitor memory usage before setting limits
+      kubectl top pod --all-namespaces
+      # Set limit at p99 usage + 20% buffer
+
+      # RIGHT: Use LimitRange for namespace defaults
+      apiVersion: v1
+      kind: LimitRange
+      metadata:
+        name: default-limits
+      spec:
+        limits:
+        - default:
+            memory: "512Mi"
+          defaultRequest:
+            memory: "256Mi"
+          type: Container
+
+      # RIGHT: Use PodDisruptionBudget to limit simultaneous evictions
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      spec:
+        minAvailable: 2
+        selector:
+          matchLabels:
+            app: api
+    symptoms:
+      - OOMKilled in pod status
+      - Exit code 137
+      - Multiple pods failing on same node
+      - Node shows MemoryPressure condition
+    detection_pattern: 'OOMKilled|Exit Code.*137|MemoryPressure'
+
+  - id: imagepullbackoff-registry-auth
+    summary: ImagePullBackOff after working fine - registry auth token expired
+    severity: high
+    situation: Deployment worked yesterday, today ImagePullBackOff on new pods
+    why: |
+      Private registry credentials stored in Secret. Token expires (12 hours for
+      GCR, varies for ECR, Docker Hub). Existing pods fine (already pulled). New
+      pods or rescheduled pods fail to pull. Scaling event triggers outage.
+      Rollback fails too because all pods need fresh pull.
+    solution: |
+      # WRONG: Manually created registry secret that expires
+      kubectl create secret docker-registry regcred \
+        --docker-server=gcr.io \
+        --docker-username=_json_key \
+        --docker-password="$(cat key.json)"
+      # This expires when key.json expires
+
+      # RIGHT: Use cloud provider's built-in auth (EKS, GKE, AKS)
+      # GKE: Workload Identity
+      # EKS: IAM roles for service accounts
+      # AKS: Azure AD pod identity
+
+      # RIGHT: If manual secret needed, automate rotation
+      # CronJob that refreshes secret before expiry
+      apiVersion: batch/v1
+      kind: CronJob
+      spec:
+        schedule: "0 */6 * * *"  # Every 6 hours
+        jobTemplate:
+          spec:
+            template:
+              spec:
+                containers:
+                - name: refresh
+                  image: bitnami/kubectl
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    # Refresh registry credential script
+
+      # RIGHT: Use imagePullSecrets in ServiceAccount
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: default
+      imagePullSecrets:
+      - name: regcred
+    symptoms:
+      - ImagePullBackOff status
+      - Events show "unauthorized" or "authentication required"
+      - Worked yesterday, fails today
+      - Only affects new pods
+    detection_pattern: 'ImagePullBackOff|unauthorized.*pull|authentication required'
+
+  - id: service-selector-mismatch
+    summary: Service selector doesn't match pod labels - traffic goes nowhere
+    severity: high
+    situation: Service exists, endpoints empty, no traffic reaching pods
+    why: |
+      Copy-paste error. Service selector says app: api-server, pods have app: api.
+      Service creates no endpoints. Load balancer health checks fail. All traffic
+      dropped. kubectl get svc shows EXTERNAL-IP but nothing works. No errors,
+      just silence. Debugging leads to "works on my machine" because port-forward
+      bypasses service.
+    solution: |
+      # WRONG: Mismatched labels
+      # deployment.yaml
+      metadata:
+        labels:
+          app: api-server
+      spec:
+        template:
+          metadata:
+            labels:
+              app: api  # Typo!
+
+      # service.yaml
+      spec:
+        selector:
+          app: api-server  # Doesn't match "api"
+
+      # RIGHT: Verify endpoints exist
+      kubectl get endpoints my-service
+      # Should show pod IPs. Empty = selector mismatch
+
+      # RIGHT: Check labels match exactly
+      kubectl get pods --show-labels
+      kubectl describe svc my-service | grep Selector
+
+      # RIGHT: Use consistent label scheme
+      labels:
+        app.kubernetes.io/name: api-server
+        app.kubernetes.io/instance: production
+        app.kubernetes.io/component: backend
+
+      # RIGHT: Validate with dry-run
+      kubectl apply -f . --dry-run=client
+      kubectl get endpoints -o yaml
+    symptoms:
+      - Service exists but endpoints empty
+      - External traffic gets no response
+      - port-forward works but Service doesn't
+      - Load balancer health checks failing
+    detection_pattern: 'Endpoints.*<none>|selector.*mismatch'
+
+  - id: configmap-not-reloading
+    summary: ConfigMap changed but pods still using old config - no auto-reload
+    severity: high
+    situation: Updated ConfigMap, pods don't pick up changes, service misbehaving
+    why: |
+      ConfigMaps are mounted at pod creation time. Updating ConfigMap doesn't
+      update running pods. Some apps read config once at startup. Hours of
+      debugging "why isn't the new config working" when old config is still
+      in memory. Rolling restart needed but nobody knows.
+    solution: |
+      # WRONG: Expect ConfigMap changes to auto-apply
+      kubectl edit configmap my-config
+      # Config changed, but pods still have old values
+
+      # RIGHT: Use Helm checksum annotation for auto-rollout
+      apiVersion: apps/v1
+      kind: Deployment
+      spec:
+        template:
+          metadata:
+            annotations:
+              checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+
+      # RIGHT: Use Reloader (stakater/reloader)
+      # Auto-restarts pods when ConfigMap changes
+      metadata:
+        annotations:
+          reloader.stakater.com/auto: "true"
+
+      # RIGHT: Manual rollout restart
+      kubectl rollout restart deployment/my-app
+
+      # RIGHT: Design app to watch for config changes
+      # Use fsnotify or similar to reload on file change
+
+      # RIGHT: Use environment variables (some apps re-read)
+      envFrom:
+      - configMapRef:
+          name: my-config
+    symptoms:
+      - ConfigMap shows new values
+      - Pods still using old config
+      - App behavior doesn't match expected config
+      - No pod restarts after ConfigMap update
+    detection_pattern: 'configMapRef|configmap.*mount'
+
+  - id: helm-release-state-desync
+    summary: Helm thinks release succeeded but resources don't match - state desync
+    severity: high
+    situation: helm upgrade succeeded, but resources are wrong, rollback doesn't fix
+    why: |
+      Helm stores release state in Secrets. If someone edits resources with kubectl
+      directly, Helm doesn't know. Next helm upgrade sees "no changes" or applies
+      partial changes. Rollback to previous Helm version, but resources stay in
+      kubectl-modified state. State is out of sync. helm history shows fiction.
+    solution: |
+      # WRONG: Mix helm and kubectl modifications
+      helm upgrade my-release ./chart
+      kubectl edit deployment my-release-api  # Now Helm doesn't know about this
+
+      # RIGHT: All changes through Helm
+      # Modify chart values, run helm upgrade
+
+      # RIGHT: If stuck, resync state
+      # Option 1: Import current state
+      helm get values my-release > current-values.yaml
+      # Fix values, then:
+      helm upgrade my-release ./chart -f current-values.yaml
+
+      # Option 2: Delete and reinstall (downtime!)
+      helm uninstall my-release
+      helm install my-release ./chart
+
+      # RIGHT: Use helm diff plugin before upgrades
+      helm plugin install https://github.com/databus23/helm-diff
+      helm diff upgrade my-release ./chart
+
+      # RIGHT: Set up GitOps (ArgoCD, Flux)
+      # Single source of truth, auto-syncs
+    symptoms:
+      - helm status shows deployed
+      - Actual resources don't match chart
+      - helm rollback doesn't fix
+      - Drift between expected and actual state
+    detection_pattern: 'helm.*upgrade|helm.*rollback|release.*state'
+
+  - id: resource-quota-silent-rejection
+    summary: ResourceQuota blocking pod creation but no obvious error
+    severity: medium
+    situation: Deployment scaled to 10, only 5 pods running, no error in deployment status
+    why: |
+      Namespace has ResourceQuota. Deployment tries to scale. Quota exceeded.
+      Scheduler can't create new pods. Deployment status shows 5/10 ready.
+      No error on deployment itself. Events show quota exceeded but buried.
+      Service degraded, team thinks "just slow scaling". Actually hard blocked.
+    solution: |
+      # Check for quota issues
+      kubectl describe resourcequota -n my-namespace
+      # Shows used/hard limits
+
+      kubectl get events --field-selector reason=FailedCreate
+      # Shows "exceeded quota" events
+
+      # RIGHT: Set appropriate quotas
+      apiVersion: v1
+      kind: ResourceQuota
+      metadata:
+        name: compute-quota
+      spec:
+        hard:
+          requests.cpu: "10"
+          requests.memory: 20Gi
+          limits.cpu: "20"
+          limits.memory: 40Gi
+          pods: "50"
+
+      # RIGHT: Monitor quota usage
+      kubectl get resourcequota -o yaml
+
+      # RIGHT: Size pods appropriately
+      # Smaller resource requests = more pods within quota
+
+      # RIGHT: Use LimitRange for defaults
+      # Prevents pods without limits from consuming all quota
+    symptoms:
+      - Deployment shows fewer ready pods than desired
+      - Events show "exceeded quota"
+      - New pods not being created
+      - kubectl describe shows ReplicaFailure
+    detection_pattern: 'ResourceQuota|exceeded quota|FailedCreate'
+
+  - id: pvc-wrong-access-mode
+    summary: PVC access mode wrong for pod scheduling - pods stuck Pending
+    severity: medium
+    situation: Pod stuck in Pending, needs volume, PVC bound but pod can't mount
+    why: |
+      PVC created with ReadWriteOnce (RWO). Works fine with one pod. Deploy second
+      replica on different node. Can't mount RWO volume from two nodes. Pod stuck
+      Pending. First pod fine, second pod never starts. Multi-replica deployment
+      silently degraded. "Why won't it scale?"
+    solution: |
+      # WRONG: RWO with multi-node pods
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      spec:
+        accessModes:
+          - ReadWriteOnce  # Only ONE node can mount
+        resources:
+          requests:
+            storage: 10Gi
+
+      # RIGHT: Use ReadWriteMany for multi-node
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      spec:
+        accessModes:
+          - ReadWriteMany  # Multiple nodes can mount
+        storageClassName: efs  # Must support RWX (EFS, NFS, etc.)
+
+      # RIGHT: Use StatefulSet for RWO per-pod volumes
+      apiVersion: apps/v1
+      kind: StatefulSet
+      spec:
+        volumeClaimTemplates:
+        - metadata:
+            name: data
+          spec:
+            accessModes: ["ReadWriteOnce"]
+            # Each pod gets its own PVC
+
+      # RIGHT: Check storage class capabilities
+      kubectl get storageclass -o yaml
+      # Look for volumeBindingMode and access modes supported
+
+      # Check why pod pending
+      kubectl describe pod stuck-pod
+      # Look for volume mount errors
+    symptoms:
+      - Pod stuck in Pending state
+      - Events mention "node(s) didn't match pod's node affinity"
+      - Second replica won't start
+      - Volume mount errors in events
+    detection_pattern: 'ReadWriteOnce|accessModes|PersistentVolumeClaim'
+
+  - id: ingress-class-conflict
+    summary: Multiple ingress controllers - wrong one handles your Ingress
+    severity: medium
+    situation: Ingress created but not working, logs show different controller
+    why: |
+      Cluster has nginx-ingress AND traefik (or AWS ALB controller). Ingress created
+      without specifying ingressClassName. Default controller picks it up. But you
+      wanted the other one. TLS termination wrong, routing wrong, annotations ignored.
+      Works in dev (one controller), breaks in prod (multiple controllers).
+    solution: |
+      # WRONG: No ingress class specified
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: my-ingress
+        # Which controller handles this? Depends on defaults!
+
+      # RIGHT: Always specify ingress class
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: my-ingress
+      spec:
+        ingressClassName: nginx  # Explicit controller
+
+      # Check available ingress classes
+      kubectl get ingressclass
+
+      # Check which controller owns an ingress
+      kubectl get ingress my-ingress -o yaml | grep ingressClassName
+
+      # Check controller logs
+      kubectl logs -n ingress-nginx deployment/ingress-nginx-controller
+
+      # RIGHT: Use controller-specific annotations correctly
+      # nginx-ingress uses: nginx.ingress.kubernetes.io/*
+      # traefik uses: traefik.ingress.kubernetes.io/*
+      # AWS ALB uses: alb.ingress.kubernetes.io/*
+    symptoms:
+      - Ingress created but no external access
+      - Wrong SSL certificate
+      - Annotations not taking effect
+      - Multiple 404s despite correct paths
+    detection_pattern: 'ingressClassName|ingress.*controller|Ingress.*class'
+
+  - id: init-container-blocking-forever
+    summary: Init container stuck - main containers never start
+    severity: medium
+    situation: Pod shows Init:0/2, main app containers never run
+    why: |
+      Init containers run sequentially before main containers. First init waits
+      for database. Database is down. Init container retries forever. Main app
+      never starts. Pod shows "Init:0/2" status. Team monitors main container,
+      doesn't see init container blocked. Hours of "why won't it start?"
+    solution: |
+      # WRONG: Init container that can block forever
+      initContainers:
+      - name: wait-for-db
+        image: busybox
+        command: ['sh', '-c', 'until nc -z db 5432; do sleep 1; done']
+        # Waits forever if db never comes up
+
+      # RIGHT: Add timeout to init container
+      initContainers:
+      - name: wait-for-db
+        image: busybox
+        command: ['sh', '-c', 'timeout 60 sh -c "until nc -z db 5432; do sleep 1; done"']
+        # Fails after 60 seconds instead of waiting forever
+
+      # RIGHT: Use readiness probes instead of init containers
+      containers:
+      - name: app
+        readinessProbe:
+          exec:
+            command: ["sh", "-c", "nc -z db 5432"]
+          initialDelaySeconds: 5
+          periodSeconds: 5
+
+      # Check init container status
+      kubectl describe pod my-pod
+      # Look for Init Containers section
+
+      kubectl logs my-pod -c wait-for-db
+      # Check init container logs
+
+      # RIGHT: Design for partial availability
+      # App starts, returns 503 until dependencies ready
+    symptoms:
+      - Pod shows "Init:0/2" or similar
+      - Main containers show 0/0 or "PodInitializing"
+      - describe shows init container waiting
+      - App never starts even though deployment succeeded
+    detection_pattern: 'initContainers|Init:|PodInitializing'
+
+  - id: liveness-probe-too-aggressive
+    summary: Liveness probe kills healthy pods under load
+    severity: high
+    situation: Pods getting killed during traffic spikes, app was healthy
+    why: |
+      Liveness probe set to 1 second timeout, 1 retry. App under load, response
+      takes 2 seconds. Probe fails. Kubernetes kills pod. Load redistributes
+      to remaining pods. They get slower. More probes fail. Cascading restarts.
+      App healthy but infrastructure keeps killing it.
+    solution: |
+      # WRONG: Aggressive liveness probe
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8080
+        initialDelaySeconds: 5
+        periodSeconds: 5
+        timeoutSeconds: 1    # Too short under load
+        failureThreshold: 1  # One failure = death
+
+      # RIGHT: Conservative liveness probe
+      livenessProbe:
+        httpGet:
+          path: /healthz  # Dedicated simple endpoint
+          port: 8080
+        initialDelaySeconds: 30    # Wait for app to fully start
+        periodSeconds: 10          # Check every 10s
+        timeoutSeconds: 5          # Allow slow responses under load
+        failureThreshold: 3        # 3 failures before kill
+
+      # RIGHT: Separate liveness from readiness
+      # Liveness: "Is the app fundamentally broken?" (restart if yes)
+      # Readiness: "Can it handle traffic right now?" (remove from LB if no)
+      livenessProbe:
+        httpGet:
+          path: /healthz  # Simple "am I alive" check
+          port: 8080
+      readinessProbe:
+        httpGet:
+          path: /ready    # Can include dependency checks
+          port: 8080
+
+      # RIGHT: Liveness probe should be CHEAP
+      # Don't check database, cache, or external services
+      # Just "is the process responsive?"
+    symptoms:
+      - Pods restart during traffic spikes
+      - "Liveness probe failed" in events
+      - Container restart count increases under load
+      - App was working, now getting killed
+    detection_pattern: 'livenessProbe|failureThreshold.*1|timeoutSeconds.*1'
+

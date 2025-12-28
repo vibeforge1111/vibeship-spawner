@@ -1,0 +1,290 @@
+id: kubernetes-deployment-collaboration
+skill: kubernetes-deployment
+version: 1.0.0
+
+# ============================================================================
+# RECEIVES FROM (Who delegates TO this skill)
+# ============================================================================
+receives_from:
+  - skill: backend
+    context: "Backend needs to deploy containerized application"
+    receives:
+      - "Container image and tag"
+      - "Port configuration"
+      - "Environment variables needed"
+      - "Resource requirements (CPU/memory)"
+    provides: "Production-ready Kubernetes manifests"
+
+  - skill: devops
+    context: "DevOps needs Kubernetes deployment configuration"
+    receives:
+      - "Deployment requirements"
+      - "Scaling parameters"
+      - "Service exposure needs"
+    provides: "Deployment, Service, Ingress, HPA manifests"
+
+  - skill: infrastructure-as-code
+    context: "Infrastructure provisioned, need workload deployment"
+    receives:
+      - "Cluster connection details"
+      - "Namespace configuration"
+      - "IAM roles for service accounts"
+    provides: "Kubernetes workload manifests"
+
+  - skill: docker-containerization
+    context: "Container image built, needs orchestration"
+    receives:
+      - "Container image URL"
+      - "Health check endpoints"
+      - "Volume mount requirements"
+    provides: "Pod spec and deployment strategy"
+
+# ============================================================================
+# DELEGATION TRIGGERS
+# ============================================================================
+delegation_triggers:
+  - trigger: "dockerfile|container image|docker build"
+    delegate_to: docker-containerization
+    pattern: sequential
+    context: "Need container image before Kubernetes deployment"
+    handoff_data:
+      - "Application code"
+      - "Runtime requirements"
+      - "Port and volume needs"
+    receive: "Container image ready for deployment"
+
+  - trigger: "terraform|infrastructure|cluster provision|eks|gke|aks"
+    delegate_to: infrastructure-as-code
+    pattern: sequential
+    context: "Need cluster before deploying workloads"
+    handoff_data:
+      - "Cloud provider"
+      - "Cluster size requirements"
+      - "Networking needs"
+    receive: "Kubernetes cluster endpoint"
+
+  - trigger: "monitoring|prometheus|grafana|alerting|observability"
+    delegate_to: observability-sre
+    pattern: parallel
+    context: "Deployment needs monitoring and alerting"
+    handoff_data:
+      - "Service endpoints"
+      - "Health check paths"
+      - "Critical metrics"
+      - "SLOs"
+    receive: "Monitoring dashboards and alerts"
+
+  - trigger: "ci/cd|pipeline|github actions|gitlab|deploy automation"
+    delegate_to: devops
+    pattern: parallel
+    context: "Deployment needs automated pipeline"
+    handoff_data:
+      - "Kubernetes manifests"
+      - "Deployment strategy"
+      - "Environment progression"
+    receive: "Automated deployment pipeline"
+
+  - trigger: "security scan|vulnerability|rbac|network policy|pod security"
+    delegate_to: cybersecurity
+    pattern: parallel
+    context: "Kubernetes configuration needs security review"
+    handoff_data:
+      - "Kubernetes manifests"
+      - "RBAC configuration"
+      - "Network policies"
+      - "Pod security context"
+    receive: "Security-hardened configuration"
+
+  - trigger: "helm chart|helm package|chart museum"
+    delegate_to: devops
+    pattern: parallel
+    context: "Package deployment as Helm chart"
+    handoff_data:
+      - "Kubernetes manifests"
+      - "Configurable values"
+      - "Dependencies"
+    receive: "Packaged Helm chart"
+
+# ============================================================================
+# FEEDBACK LOOPS
+# ============================================================================
+feedback_loops:
+  receives_feedback_from:
+    - skill: observability-sre
+      signal: "Pod health issues, OOMKilled, CrashLoopBackOff alerts"
+      action: "Adjust resource limits, fix health probes, investigate root cause"
+
+    - skill: devops
+      signal: "Deployment pipeline failures"
+      action: "Fix manifest errors, adjust deployment strategy"
+
+    - skill: cybersecurity
+      signal: "Security vulnerabilities in pod configuration"
+      action: "Update securityContext, network policies, RBAC"
+
+    - skill: infrastructure-as-code
+      signal: "Cluster resource constraints"
+      action: "Optimize resource requests/limits, adjust pod anti-affinity"
+
+  sends_feedback_to:
+    - skill: docker-containerization
+      signal: "Container compatibility issues in Kubernetes"
+      action: "Adjust container configuration (non-root, signals, health)"
+
+    - skill: backend
+      signal: "Application behavior issues in cluster"
+      action: "Update health endpoints, graceful shutdown handling"
+
+    - skill: observability-sre
+      signal: "New services deployed requiring monitoring"
+      action: "Add ServiceMonitor, update dashboards"
+
+# ============================================================================
+# CROSS-DOMAIN INSIGHTS
+# ============================================================================
+cross_domain_insights:
+  - domain: Site Reliability Engineering
+    insight: |
+      SREs understand that Kubernetes is an abstraction, not magic:
+      - Pods die. Design for it. ReplicaSets exist for a reason.
+      - Resources lie. Requests are promises, limits are hard stops.
+      - The scheduler is smart but not psychic. Node affinity matters.
+      - Cascading failures happen fast. Circuit breakers and PDBs save you.
+      Reliability in Kubernetes is designed, not assumed.
+    applies_when: "Designing production-grade deployments"
+
+  - domain: Platform Engineering
+    insight: |
+      Platform engineers know about developer experience:
+      - Good abstractions hide complexity without hiding control.
+      - Helm values should be intuitive, not 1:1 with K8s API.
+      - Defaults should be production-safe, not minimal.
+      - Breaking changes in charts break trust.
+      Kubernetes is infrastructure for developers, not an end in itself.
+    applies_when: "Building internal platforms on Kubernetes"
+
+  - domain: Security Engineering
+    insight: |
+      Security engineers see Kubernetes attack surface:
+      - Etcd is your database of secrets. Encrypt it.
+      - API server is the control plane. RBAC everything.
+      - Pod-to-pod networking is flat by default. Policy it.
+      - Container escapes are real. Non-root, read-only, no privileged.
+      Every pod is a potential attacker foothold.
+    applies_when: "Hardening Kubernetes deployments"
+
+  - domain: Distributed Systems
+    insight: |
+      Distributed systems engineers understand pod networks:
+      - DNS is not instant. Cache poisoning, propagation delays.
+      - Services are load balancers, not service discovery.
+      - Endpoint updates are eventual, not immediate.
+      - Pod IPs change. Never hardcode them.
+      Kubernetes networking is distributed systems networking.
+    applies_when: "Designing service-to-service communication"
+
+# ============================================================================
+# COMMON COMBINATIONS
+# ============================================================================
+common_combinations:
+  - name: Full Application Deployment
+    skills:
+      - docker-containerization
+      - kubernetes-deployment
+      - observability-sre
+    workflow: |
+      1. Containerize application (docker-containerization)
+      2. Create Kubernetes manifests (kubernetes-deployment)
+      3. Deploy with monitoring (observability-sre)
+      4. Iterate on resource tuning
+
+  - name: Production-Ready Service
+    skills:
+      - kubernetes-deployment
+      - cybersecurity
+      - observability-sre
+    workflow: |
+      1. Create deployment with security context (kubernetes-deployment)
+      2. Security review and hardening (cybersecurity)
+      3. Add monitoring and alerting (observability-sre)
+      4. Document runbooks
+
+  - name: GitOps Deployment Pipeline
+    skills:
+      - kubernetes-deployment
+      - devops
+      - infrastructure-as-code
+    workflow: |
+      1. Define infrastructure (infrastructure-as-code)
+      2. Create Kubernetes manifests (kubernetes-deployment)
+      3. Set up ArgoCD/Flux pipeline (devops)
+      4. Configure environment promotion
+
+  - name: Microservices Platform
+    skills:
+      - kubernetes-deployment
+      - backend
+      - observability-sre
+    workflow: |
+      1. Design service mesh (kubernetes-deployment)
+      2. Implement service endpoints (backend)
+      3. Add distributed tracing (observability-sre)
+      4. Configure network policies
+
+# ============================================================================
+# ECOSYSTEM
+# ============================================================================
+ecosystem:
+  primary_tools:
+    - "kubectl - Kubernetes CLI, the bread and butter"
+    - "Helm - Package manager for Kubernetes applications"
+    - "Kustomize - Template-free configuration customization"
+    - "ArgoCD/Flux - GitOps continuous delivery"
+    - "k9s - Terminal UI for Kubernetes"
+    - "Lens - Desktop IDE for Kubernetes"
+
+  alternatives:
+    - name: Helm
+      use_when: "Complex applications, need templating, team familiarity"
+      avoid_when: "Simple deployments, learning K8s, avoiding template complexity"
+
+    - name: Kustomize
+      use_when: "Built into kubectl, environment overlays, avoiding templating"
+      avoid_when: "Need complex logic, chart dependencies, existing Helm ecosystem"
+
+    - name: ArgoCD
+      use_when: "GitOps, self-hosted, feature-rich UI, multiple clusters"
+      avoid_when: "Simple CI/CD is enough, minimal learning curve preferred"
+
+    - name: Flux
+      use_when: "GitOps, lightweight, Kubernetes-native, CNCF project"
+      avoid_when: "Need rich UI, prefer declarative over controller-based"
+
+    - name: Skaffold
+      use_when: "Local development, fast iteration, multi-artifact builds"
+      avoid_when: "Production deployment, CI/CD pipelines, simple apps"
+
+  managed_kubernetes:
+    - name: EKS (AWS)
+      use_when: "AWS ecosystem, IAM integration, Fargate option"
+      considerations: "Control plane cost, addons management, networking"
+
+    - name: GKE (Google)
+      use_when: "Best-in-class managed K8s, Autopilot, tight GCP integration"
+      considerations: "Egress costs, GKE versions vs upstream"
+
+    - name: AKS (Azure)
+      use_when: "Azure ecosystem, AD integration, Windows containers"
+      considerations: "Networking modes, upgrade policies"
+
+    - name: DigitalOcean Kubernetes
+      use_when: "Simple managed K8s, cost-effective, quick start"
+      considerations: "Limited regions, fewer advanced features"
+
+  debugging_tools:
+    - "kubectl logs/describe/exec - Basic debugging"
+    - "kubectl debug - Ephemeral debug containers"
+    - "stern - Multi-pod log tailing"
+    - "kubectx/kubens - Context and namespace switching"
+    - "kubectl-neat - Clean up kubectl output"
+
