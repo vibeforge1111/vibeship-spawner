@@ -1,0 +1,350 @@
+# Testing Automation Validations
+# Automated checks to catch test code anti-patterns and quality issues
+
+validations:
+  - id: test-missing-await
+    name: Missing Await in Async Test
+    severity: error
+    type: regex
+    pattern:
+      - 'it\([^)]+,\s*\(\)\s*=>\s*{\s*(?!.*await|return)[^}]*\.(then|catch|resolves|rejects)'
+      - 'test\([^)]+,\s*\(\)\s*=>\s*{\s*(?!.*await|return)[^}]*\.(then|catch|resolves|rejects)'
+    message: "Async operation in non-async test function. Test may complete before assertion."
+    fix_action: "Add async keyword to test function and await the operation"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+      - "**/__tests__/**"
+
+  - id: test-hardcoded-timeout
+    name: Hardcoded Timeout in Test
+    severity: warning
+    type: regex
+    pattern:
+      - 'setTimeout.*\d{3,}'
+      - 'waitForTimeout\(\d+'
+      - 'sleep\(\d+'
+      - 'new Promise.*setTimeout.*\d+'
+      - 'await.*delay\(\d+'
+    message: "Hardcoded timeout may cause flaky tests. Use waitFor or fake timers instead."
+    fix_action: "Replace with waitFor(() => expect(...)) or jest.useFakeTimers()"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+      - "**/__tests__/**"
+
+  - id: test-shared-mutable-state
+    name: Shared Mutable State Between Tests
+    severity: warning
+    type: regex
+    pattern:
+      - '^let\s+\w+\s*[;=]\s*\n(?!.*beforeEach)'
+      - '^var\s+\w+\s*[;=]\s*\n(?!.*beforeEach)'
+    message: "Variable declared outside test may cause test order dependencies."
+    fix_action: "Initialize in beforeEach or within individual test"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+
+  - id: test-no-assertion
+    name: Test Without Assertion
+    severity: error
+    type: regex
+    pattern:
+      - 'it\([^)]+,\s*(?:async\s*)?\([^)]*\)\s*=>\s*{\s*[^}]*}\s*\);?\s*$(?![^}]*expect)'
+    message: "Test function has no expect() assertion. Test will pass without verifying anything."
+    fix_action: "Add expect() assertions to verify expected behavior"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+
+  - id: test-brittle-selector
+    name: Brittle E2E Selector
+    severity: warning
+    type: regex
+    pattern:
+      - 'nth-child\(\d+\)'
+      - ':first-child'
+      - ':last-child'
+      - '\.css-[a-z0-9]+'
+      - '\.MuiButton'
+      - '\.MuiInput'
+      - '\.ant-'
+      - '\.chakra-'
+      - '\[class\*='
+    message: "Brittle selector will break on UI changes. Use data-testid or role selectors."
+    fix_action: "Replace with [data-testid='...'] or getByRole/getByLabel"
+    applies_to:
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+      - "**/e2e/**"
+      - "**/cypress/**"
+      - "**/playwright/**"
+
+  - id: test-only-left
+    name: .only() Left in Test
+    severity: error
+    type: regex
+    pattern:
+      - 'describe\.only\('
+      - 'it\.only\('
+      - 'test\.only\('
+      - 'fdescribe\('
+      - 'fit\('
+    message: ".only() left in test file. Other tests in this file will be skipped."
+    fix_action: "Remove .only() before committing"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+
+  - id: test-skip-no-reason
+    name: Skipped Test Without Reason
+    severity: warning
+    type: regex
+    pattern:
+      - 'describe\.skip\([^,]+,(?![^)]*//)'
+      - 'it\.skip\([^,]+,(?![^)]*//)'
+      - 'test\.skip\([^,]+,(?![^)]*//)'
+      - 'xdescribe\([^,]+,(?![^)]*//)'
+      - 'xit\([^,]+,(?![^)]*//)'
+    message: "Test skipped without explanation. Add comment explaining why."
+    fix_action: "Add // TODO: comment explaining why test is skipped"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+
+  - id: test-mock-not-restored
+    name: Mock Not Restored After Test
+    severity: warning
+    type: regex
+    pattern:
+      - 'jest\.spyOn(?![\\s\\S]*?mockRestore)'
+      - 'jest\.mock(?![\\s\\S]*?(resetAllMocks|restoreAllMocks|clearAllMocks))'
+      - 'sinon\.stub(?![\\s\\S]*?restore)'
+    message: "Mock may not be restored. Can affect other tests."
+    fix_action: "Add afterEach(() => jest.restoreAllMocks()) or manually restore"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+
+  - id: test-console-log
+    name: Console.log in Test File
+    severity: info
+    type: regex
+    pattern:
+      - 'console\.log\('
+      - 'console\.debug\('
+      - 'console\.info\('
+    message: "Console statement in test file. Remove debugging artifacts."
+    fix_action: "Remove console statements before committing"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+
+  - id: test-hardcoded-data
+    name: Hardcoded Test Data
+    severity: info
+    type: regex
+    pattern:
+      - "email.*=.*['\"]test@example\\.com['\"]"
+      - "email.*=.*['\"]user@test\\.com['\"]"
+      - "password.*=.*['\"]password123['\"]"
+      - "password.*=.*['\"]test123['\"]"
+    message: "Hardcoded test data may cause conflicts. Use unique generated data."
+    fix_action: "Use faker.js or UUID for unique test data"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+
+  - id: test-expect-true-false
+    name: Weak Boolean Assertion
+    severity: warning
+    type: regex
+    pattern:
+      - 'expect\(true\)\.toBe\(true\)'
+      - 'expect\(false\)\.toBe\(false\)'
+      - 'expect\(.*\)\.toBe\(true\)$'
+      - 'expect\(.*\)\.toBe\(false\)$'
+    message: "Weak assertion. Use specific matcher for clearer failure messages."
+    fix_action: "Use toBeVisible(), toHaveLength(), toContain(), etc. instead"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+
+  - id: test-magic-number
+    name: Magic Numbers in Test
+    severity: info
+    type: regex
+    pattern:
+      - 'expect\([^)]+\)\.toBe\(\d{4,}\)'
+      - 'expect\([^)]+\)\.toEqual\(\d{4,}\)'
+      - 'toHaveLength\(\d{3,}\)'
+    message: "Magic number in assertion. Define as named constant for clarity."
+    fix_action: "Extract to const with descriptive name"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+
+  - id: test-implementation-detail
+    name: Testing Implementation Details
+    severity: warning
+    type: regex
+    pattern:
+      - '\.state\('
+      - '\.instance\(\)'
+      - 'wrapper\.vm\.'
+      - 'component\._'
+      - 'spyOn.*_[a-zA-Z]+'
+    message: "Testing private/internal implementation. Test will break on refactoring."
+    fix_action: "Test observable behavior instead of internal state"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+
+  - id: test-large-snapshot
+    name: Large Snapshot Test
+    severity: info
+    type: regex
+    pattern:
+      - 'toMatchSnapshot\(\)$'
+    message: "Full component snapshot may be too large to review meaningfully."
+    fix_action: "Use toMatchInlineSnapshot() for focused assertions or test behavior instead"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+
+  - id: test-empty-catch
+    name: Empty Catch in Test
+    severity: error
+    type: regex
+    pattern:
+      - 'catch\s*\([^)]*\)\s*{\s*}'
+      - 'catch\s*\([^)]*\)\s*{\s*//[^}]*}'
+    message: "Empty catch block swallows errors. Test may pass when it shouldn't."
+    fix_action: "Fail test on error or use toThrow() matcher"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+
+  - id: test-external-api-call
+    name: External API Call in Test
+    severity: warning
+    type: regex
+    pattern:
+      - 'fetch\s*\(\s*["\']https?://'
+      - 'axios\.[a-z]+\s*\(\s*["\']https?://'
+      - "http[s]?://api\\."
+      - "http[s]?://.*\\.com/"
+    message: "Test calls external API. May be flaky and slow."
+    fix_action: "Mock external calls with nock, msw, or jest.mock"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+
+  - id: test-no-cleanup
+    name: Database/Resource Not Cleaned Up
+    severity: warning
+    type: regex
+    pattern:
+      - 'beforeAll.*insert|create(?![\\s\\S]*?afterAll.*delete|truncate)'
+      - 'beforeEach.*insert|create(?![\\s\\S]*?afterEach.*delete|truncate)'
+    message: "Test creates data but may not clean up. Can cause test pollution."
+    fix_action: "Add afterEach cleanup or use transaction rollback"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+
+  - id: test-duplicate-name
+    name: Duplicate Test Name
+    severity: warning
+    type: regex
+    pattern:
+      - "(it|test)\\(['\"]([^'\"]+)['\"][\\s\\S]*?\\1\\(['\"]\\2['\"]"
+    message: "Duplicate test name makes failures ambiguous in reports."
+    fix_action: "Use unique, descriptive test names"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+
+  - id: test-todo-test
+    name: TODO Test Without Implementation
+    severity: info
+    type: regex
+    pattern:
+      - 'it\.todo\('
+      - 'test\.todo\('
+      - '// TODO.*test'
+      - '// FIXME.*test'
+    message: "Unimplemented test placeholder. Complete or remove."
+    fix_action: "Implement the test or create an issue to track it"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+
+  - id: test-flaky-date
+    name: Flaky Date/Time in Test
+    severity: warning
+    type: regex
+    pattern:
+      - 'new Date\(\)'
+      - 'Date\.now\(\)'
+      - 'moment\(\)'
+      - 'dayjs\(\)'
+    message: "Real current date/time causes flaky tests at midnight/year boundary."
+    fix_action: "Use jest.useFakeTimers() or mock the date"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+
+  - id: test-missing-error-case
+    name: Only Testing Happy Path
+    severity: info
+    type: regex
+    pattern:
+      - 'describe\([^)]+\)\s*{\s*(?:[^}]*it\([^)]+,)(?![^}]*(?:error|fail|invalid|throw|reject))[^}]*}'
+    message: "Test suite only tests success case. Consider error scenarios."
+    fix_action: "Add tests for error cases, edge cases, and invalid inputs"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/*.spec.js"
+
