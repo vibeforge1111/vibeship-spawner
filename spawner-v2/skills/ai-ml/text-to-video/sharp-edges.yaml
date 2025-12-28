@@ -1,0 +1,686 @@
+# Sharp Edges - Text-to-Video AI
+# Gotchas and pitfalls in AI video generation
+
+version: 1.0.0
+skill_id: text-to-video
+
+sharp_edges:
+  - id: temporal-consistency-drift
+    title: Character/Object Drift Across Frames
+    severity: high
+    description: |
+      AI video models struggle with temporal consistency.
+      Faces, hands, and objects can change or "drift" across frames.
+      The longer the video, the worse the drift.
+
+    wrong_way: |
+      # Generating long videos expecting perfect consistency
+      result = generate_video(
+          prompt="A woman walking for 30 seconds",
+          duration=30,  # Too long!
+      )
+      # Face changes, clothing shifts, hands morph
+
+      # No verification of output quality
+      return result  # May have severe artifacts
+
+    right_way: |
+      # Generate shorter clips and chain them
+      def generate_with_consistency(prompt: str, total_duration: int = 15):
+          """Generate longer videos with consistency checks."""
+
+          clips = []
+          clip_duration = 5  # Shorter clips have better consistency
+
+          for i in range(total_duration // clip_duration):
+              # Generate clip
+              if i == 0:
+                  clip = generate_video(prompt, duration=clip_duration)
+              else:
+                  # Use last frame as reference for next clip
+                  last_frame = extract_last_frame(clips[-1])
+                  clip = generate_from_image(
+                      image_url=last_frame,
+                      prompt=prompt,
+                      duration=clip_duration,
+                  )
+
+              clips.append(clip)
+
+          # Concatenate with crossfade
+          return concatenate_videos(clips, crossfade_ms=500)
+
+      # Use models with character consistency features
+      # Kling's "Elements" feature maintains character across scenes
+      result = generate_with_elements(
+          prompt="A woman walking through the city",
+          character_reference=["face1.jpg", "face2.jpg", "face3.jpg"],
+          duration=10,
+      )
+
+      # For critical content, generate multiple versions
+      candidates = [
+          generate_video(prompt, seed=i)
+          for i in range(3)
+      ]
+      # Select best based on quality metrics or human review
+
+    detection_patterns:
+      - "duration.*[2-9][0-9]"
+      - "duration.*1[0-9][0-9]"
+
+    references:
+      - "https://www.upuply.com/blog/what-are-the-limitations-of-current-ai-video-generation-models"
+      - "https://arxiv.org/html/2403.16407v1"
+
+  - id: slow-motion-artifacts
+    title: Unintended Slow Motion in Generated Videos
+    severity: medium
+    description: |
+      Videos often generate slower than intended.
+      Motion blur settings and guidance affect perceived speed.
+      Common with Wan and other diffusion models.
+
+    wrong_way: |
+      # Default settings often produce slow motion
+      result = generate_video(
+          prompt="A person running quickly through the park",
+          # Using defaults that produce slow motion
+      )
+      # Output: Person appears to run in slow motion
+
+      # Over-emphasizing quality over motion
+      result = generate_video(
+          prompt="Running person",
+          guidance_scale=15.0,  # Too high, limits motion
+          motion_blur=0.8,     # Too much blur
+      )
+
+    right_way: |
+      # Explicit speed descriptors in prompt
+      SPEED_KEYWORDS = {
+          "fast": "quickly, rapidly, fast motion, energetic, swift",
+          "normal": "natural pace, realistic timing, steady movement",
+          "slow": "slowly, gracefully, gentle motion, deliberate",
+      }
+
+      def generate_with_motion_control(
+          prompt: str,
+          speed: str = "normal",
+          motion_guidance: float = 1.0,  # 0.8-1.2 range
+      ):
+          """Generate with controlled motion speed."""
+
+          # Add speed keywords to prompt
+          speed_words = SPEED_KEYWORDS.get(speed, SPEED_KEYWORDS["normal"])
+          enhanced_prompt = f"{prompt}, {speed_words}"
+
+          return generate_video(
+              prompt=enhanced_prompt,
+              guidance_scale=6.0,      # Moderate guidance
+              motion_blur=0.2,          # Low motion blur
+              motion_guidance=motion_guidance,
+          )
+
+      # For fast action, use specific settings
+      result = generate_video(
+          prompt="An athlete sprinting, rapid leg movement, dynamic action",
+          num_inference_steps=20,  # Fewer steps, less smoothing
+          motion_blur=0.1,         # Minimal blur
+      )
+
+      # Post-process: speed up if needed
+      def adjust_video_speed(video_path: str, speed_factor: float = 1.5):
+          """Speed up video if motion is too slow."""
+          # Use ffmpeg to adjust speed
+          subprocess.run([
+              "ffmpeg", "-i", video_path,
+              "-filter:v", f"setpts={1/speed_factor}*PTS",
+              "-filter:a", f"atempo={speed_factor}",
+              "output.mp4"
+          ])
+
+    detection_patterns:
+      - "guidance_scale.*1[5-9]"
+      - "motion_blur.*0\\.[7-9]"
+
+    references:
+      - "https://apatero.com/blog/avoid-slow-motion-wan-22-video-generation-2025"
+
+  - id: generation-time-blocking
+    title: Blocking on Long Video Generation
+    severity: high
+    description: |
+      Video generation takes 30-150+ seconds.
+      Blocking synchronous calls freeze the application.
+      No timeout handling causes infinite waits.
+
+    wrong_way: |
+      # Synchronous blocking call
+      @app.post("/generate-video")
+      def generate_video(prompt: str):
+          result = replicate.run(  # Blocks for 2+ minutes!
+              "model/version",
+              input={"prompt": prompt}
+          )
+          return {"url": result}
+
+      # User's request times out, but generation continues
+      # No way to cancel or track progress
+
+    right_way: |
+      import asyncio
+      from fastapi import BackgroundTasks
+
+      # Return immediately, process in background
+      @app.post("/generate-video")
+      async def submit_generation(
+          prompt: str,
+          background_tasks: BackgroundTasks,
+      ):
+          job_id = str(uuid.uuid4())
+
+          # Start generation in background
+          background_tasks.add_task(
+              process_video_generation,
+              job_id,
+              prompt,
+          )
+
+          return {
+              "job_id": job_id,
+              "status_url": f"/api/video-status/{job_id}",
+          }
+
+      @app.get("/video-status/{job_id}")
+      async def get_status(job_id: str):
+          job = await get_job(job_id)
+          return {
+              "status": job.status,
+              "progress": job.progress,
+              "url": job.output_url,
+          }
+
+      # With proper timeout and cancellation
+      async def generate_with_timeout(
+          prompt: str,
+          timeout: int = 300,  # 5 minutes max
+      ):
+          client = replicate.Client()
+
+          prediction = client.predictions.create(
+              model="wavespeedai/wan-2.1-t2v-480p",
+              input={"prompt": prompt}
+          )
+
+          start = time.time()
+
+          while True:
+              prediction = client.predictions.get(prediction.id)
+
+              if prediction.status == "succeeded":
+                  return prediction.output
+
+              if prediction.status == "failed":
+                  raise Exception(f"Failed: {prediction.error}")
+
+              if time.time() - start > timeout:
+                  # Cancel the prediction
+                  client.predictions.cancel(prediction.id)
+                  raise TimeoutError("Generation timed out")
+
+              await asyncio.sleep(5)
+
+    detection_patterns:
+      - "replicate\\.run\\((?!.*await)"
+      - "generate_video(?!.*async)"
+
+    references:
+      - "https://replicate.com/docs/topics/predictions"
+
+  - id: cost-explosion
+    title: Video Generation Cost Explosion
+    severity: high
+    description: |
+      Video generation is expensive compared to images.
+      Costs range from $0.05-0.50+ per video.
+      Unbounded generation or retries cause cost spikes.
+
+    wrong_way: |
+      # No cost tracking or limits
+      async def generate_variations(prompt: str, count: int = 10):
+          results = []
+          for i in range(count):
+              result = await generate_video(prompt)  # $0.25 each!
+              results.append(result)
+          return results  # $2.50 for this call alone
+
+      # Retry without limits
+      async def generate_with_retry(prompt: str):
+          while True:  # Infinite retries!
+              try:
+                  return await generate_video(prompt)
+              except:
+                  continue  # Each retry costs money
+
+    right_way: |
+      from dataclasses import dataclass
+      from datetime import datetime, timedelta
+
+      @dataclass
+      class CostTracker:
+          daily_budget: float = 50.0
+          cost_per_video: float = 0.28  # Kling pricing
+          daily_spent: float = 0.0
+          last_reset: datetime = datetime.now()
+
+          def can_generate(self) -> bool:
+              self._reset_if_new_day()
+              return self.daily_spent + self.cost_per_video <= self.daily_budget
+
+          def record_generation(self, cost: float = None):
+              self._reset_if_new_day()
+              self.daily_spent += cost or self.cost_per_video
+
+          def _reset_if_new_day(self):
+              if datetime.now().date() > self.last_reset.date():
+                  self.daily_spent = 0.0
+                  self.last_reset = datetime.now()
+
+      # Model cost reference
+      MODEL_COSTS = {
+          "wan-2.1-t2v-480p": 0.05,  # ~5 sec video
+          "wan-2.1-t2v-720p": 0.12,
+          "kling-v2.1": 0.28,        # 5 sec video
+          "runway-gen3-turbo": 0.25, # 5 credits/sec @ $0.05/credit
+          "runway-gen3-alpha": 0.50, # 10 credits/sec
+      }
+
+      class BudgetedGenerator:
+          def __init__(self, daily_budget: float = 50.0):
+              self.tracker = CostTracker(daily_budget=daily_budget)
+
+          async def generate(
+              self,
+              prompt: str,
+              model: str = "wan-2.1-t2v-480p",
+              max_retries: int = 2,  # Limited retries
+          ):
+              cost = MODEL_COSTS.get(model, 0.10)
+
+              if not self.tracker.can_generate():
+                  raise Exception("Daily budget exceeded")
+
+              for attempt in range(max_retries + 1):
+                  try:
+                      result = await generate_video(prompt, model=model)
+                      self.tracker.record_generation(cost)
+                      return result
+                  except Exception as e:
+                      if attempt == max_retries:
+                          raise
+
+              raise Exception("Max retries exceeded")
+
+    detection_patterns:
+      - "while.*True.*generate"
+      - "range\\([5-9]|[1-9][0-9]\\).*generate"
+
+    references:
+      - "https://replicate.com/pricing"
+
+  - id: resolution-aspect-ratio
+    title: Wrong Resolution or Aspect Ratio
+    severity: medium
+    description: |
+      Videos generated with wrong aspect ratio look distorted.
+      Some models only support specific resolutions.
+      Mismatched aspect causes letterboxing or stretching.
+
+    wrong_way: |
+      # Ignoring aspect ratio
+      result = generate_video(
+          prompt="Vertical TikTok video",
+          width=1920, height=1080,  # Horizontal for vertical content!
+      )
+
+      # Using unsupported resolution
+      result = generate_video(
+          prompt="4K video",
+          width=3840, height=2160,  # Model only supports up to 1080p
+      )
+
+    right_way: |
+      # Standard aspect ratios
+      ASPECT_RATIOS = {
+          "16:9": (1280, 720),   # YouTube, horizontal
+          "9:16": (720, 1280),   # TikTok, Reels, vertical
+          "1:1": (1024, 1024),   # Instagram square
+          "4:3": (1024, 768),    # Classic video
+          "21:9": (1920, 823),   # Cinematic widescreen
+      }
+
+      # Model resolution limits
+      MODEL_LIMITS = {
+          "wan-2.1": {"max": (1280, 720), "supported": ["16:9", "9:16", "1:1"]},
+          "kling-v2.1": {"max": (1920, 1080), "supported": ["16:9", "9:16", "1:1", "4:3"]},
+          "runway-gen3": {"max": (3840, 2160), "supported": ["16:9", "9:16", "1:1", "21:9"]},
+      }
+
+      def get_resolution(
+          platform: str,
+          model: str = "wan-2.1",
+      ) -> tuple[int, int]:
+          """Get optimal resolution for platform and model."""
+
+          PLATFORM_RATIOS = {
+              "youtube": "16:9",
+              "tiktok": "9:16",
+              "reels": "9:16",
+              "instagram": "1:1",
+              "twitter": "16:9",
+          }
+
+          ratio = PLATFORM_RATIOS.get(platform, "16:9")
+          width, height = ASPECT_RATIOS[ratio]
+
+          # Check model limits
+          limits = MODEL_LIMITS.get(model, {})
+          max_w, max_h = limits.get("max", (1920, 1080))
+
+          # Scale down if needed
+          if width > max_w or height > max_h:
+              scale = min(max_w / width, max_h / height)
+              width = int(width * scale)
+              height = int(height * scale)
+
+          return width, height
+
+      # Usage
+      width, height = get_resolution("tiktok", model="wan-2.1")
+      result = generate_video(
+          prompt="Short form content",
+          width=width,
+          height=height,
+      )
+
+    detection_patterns:
+      - "width.*3840"
+      - "height.*2160.*wan"
+
+    references:
+      - "https://replicate.com/collections/text-to-video"
+
+  - id: motion-blur-artifacts
+    title: Excessive Motion Blur and Smoothing
+    severity: medium
+    description: |
+      Over-smoothed videos look artificial and "dreamlike".
+      High motion blur makes movement unclear.
+      Temporal consistency fixes can cause blur artifacts.
+
+    wrong_way: |
+      # Over-emphasizing smoothness
+      result = generate_video(
+          prompt="Action scene",
+          motion_blur=0.9,          # Too much blur!
+          temporal_smoothing=True,  # Over-smooths frames
+          guidance_scale=15.0,      # Over-constrained
+      )
+      # Result: Blurry, unclear motion, dreamlike quality
+
+    right_way: |
+      # Balance between consistency and clarity
+      def generate_natural_motion(
+          prompt: str,
+          motion_type: str = "moderate",
+      ):
+          """Generate with natural motion settings."""
+
+          MOTION_SETTINGS = {
+              "static": {
+                  "motion_blur": 0.0,
+                  "guidance_scale": 8.0,
+              },
+              "moderate": {
+                  "motion_blur": 0.15,
+                  "guidance_scale": 6.0,
+              },
+              "dynamic": {
+                  "motion_blur": 0.25,
+                  "guidance_scale": 5.0,
+              },
+              "action": {
+                  "motion_blur": 0.1,
+                  "guidance_scale": 4.0,
+                  "num_inference_steps": 20,  # Fewer steps for dynamic motion
+              },
+          }
+
+          settings = MOTION_SETTINGS.get(motion_type, MOTION_SETTINGS["moderate"])
+
+          return generate_video(
+              prompt=prompt,
+              **settings,
+          )
+
+      # For action scenes, minimize blur
+      result = generate_natural_motion(
+          prompt="Fast paced action sequence, dynamic movement",
+          motion_type="action",
+      )
+
+      # Post-process to fix over-smoothing
+      # Use alpha blending: 70% AI + 30% original (if available)
+      def blend_with_original(ai_video: str, original: str, alpha: float = 0.7):
+          """Blend AI video with original for natural texture."""
+          # Preserves original motion blur and texture
+          ...
+
+    detection_patterns:
+      - "motion_blur.*0\\.[89]"
+      - "temporal_smoothing.*True"
+
+    references:
+      - "https://help.scenario.com/en/articles/troubleshooting-video-generations/"
+
+  - id: no-content-moderation
+    title: Missing Video Content Moderation
+    severity: critical
+    description: |
+      AI video can generate inappropriate content.
+      Video moderation is more complex than image moderation.
+      Frame-by-frame analysis required for thorough checks.
+
+    wrong_way: |
+      # Direct generation without moderation
+      @app.post("/generate")
+      async def generate(prompt: str):
+          result = await generate_video(prompt)  # No checks!
+          return {"url": result}
+
+      # Only checking prompt, not output
+      @app.post("/generate")
+      async def generate(prompt: str):
+          if not await moderate_prompt(prompt):
+              return {"error": "blocked"}
+
+          result = await generate_video(prompt)
+          return {"url": result}  # Video not checked!
+
+    right_way: |
+      import asyncio
+      from typing import List
+
+      async def moderate_video(video_url: str) -> dict:
+          """Moderate video by sampling frames."""
+
+          # Extract frames at intervals
+          frames = await extract_frames(video_url, interval_seconds=1)
+
+          # Check each frame
+          results = []
+          for frame in frames:
+              result = await moderate_image(frame)
+              results.append(result)
+
+              # Early exit if any frame is blocked
+              if result["blocked"]:
+                  return {
+                      "allowed": False,
+                      "reason": result["reason"],
+                      "frame": frame,
+                  }
+
+          return {"allowed": True}
+
+      async def extract_frames(
+          video_url: str,
+          interval_seconds: float = 1,
+      ) -> List[str]:
+          """Extract frames from video at intervals."""
+          import subprocess
+          import tempfile
+
+          with tempfile.TemporaryDirectory() as tmpdir:
+              # Download video
+              video_path = f"{tmpdir}/video.mp4"
+              await download_file(video_url, video_path)
+
+              # Extract frames with ffmpeg
+              subprocess.run([
+                  "ffmpeg", "-i", video_path,
+                  "-vf", f"fps=1/{interval_seconds}",
+                  f"{tmpdir}/frame_%04d.jpg"
+              ])
+
+              # Upload frames and return URLs
+              frames = []
+              for f in sorted(os.listdir(tmpdir)):
+                  if f.startswith("frame_"):
+                      url = await upload_to_storage(f"{tmpdir}/{f}")
+                      frames.append(url)
+
+              return frames
+
+      # Full moderation pipeline
+      @app.post("/generate")
+      async def generate_safe(prompt: str):
+          # 1. Moderate prompt
+          if not await moderate_prompt(prompt):
+              return {"error": "prompt_blocked"}
+
+          # 2. Generate video
+          try:
+              result = await generate_video(prompt)
+          except Exception as e:
+              return {"error": str(e)}
+
+          # 3. Moderate output video
+          moderation = await moderate_video(result["url"])
+          if not moderation["allowed"]:
+              # Delete or quarantine video
+              await delete_video(result["url"])
+              return {
+                  "error": "video_blocked",
+                  "reason": moderation["reason"],
+              }
+
+          return {"url": result["url"]}
+
+    detection_patterns:
+      - "generate_video(?!.*moderat)"
+      - "return.*url(?!.*check)"
+
+    references:
+      - "https://www.lovart.ai/blog/video-generators-review"
+
+  - id: watermark-provenance
+    title: Missing Watermarks and Provenance
+    severity: medium
+    description: |
+      AI-generated videos should be labeled.
+      Some platforms require disclosure.
+      Regulations increasingly mandate provenance.
+
+    wrong_way: |
+      # Generating without provenance
+      result = generate_video(prompt)
+
+      # Stripping watermarks
+      result = remove_watermarks(result)  # May violate TOS
+
+      # Publishing without disclosure
+      await publish_to_platform(result)  # Regulation violation
+
+    right_way: |
+      # Preserve or add watermarks
+      def generate_with_provenance(prompt: str) -> dict:
+          result = generate_video(prompt)
+
+          # Add C2PA metadata (content authenticity)
+          result_with_provenance = add_provenance(
+              result,
+              generator="wan-2.2",
+              prompt=prompt,
+              timestamp=datetime.now().isoformat(),
+          )
+
+          # Add visible watermark if required
+          result_watermarked = add_watermark(
+              result_with_provenance,
+              text="AI Generated",
+              position="bottom-right",
+              opacity=0.5,
+          )
+
+          return {
+              "url": result_watermarked,
+              "provenance": {
+                  "generator": "wan-2.2",
+                  "created_at": datetime.now().isoformat(),
+                  "is_synthetic": True,
+              }
+          }
+
+      # Platform-specific disclosure
+      PLATFORM_REQUIREMENTS = {
+          "youtube": {
+              "requires_label": True,
+              "label_method": "metadata",
+          },
+          "tiktok": {
+              "requires_label": True,
+              "label_method": "caption",
+          },
+          "meta": {
+              "requires_label": True,
+              "label_method": "metadata_and_caption",
+          },
+      }
+
+      def prepare_for_platform(
+          video: dict,
+          platform: str,
+      ) -> dict:
+          """Prepare video for platform with proper disclosure."""
+
+          requirements = PLATFORM_REQUIREMENTS.get(platform, {})
+
+          if requirements.get("requires_label"):
+              method = requirements.get("label_method")
+
+              if "metadata" in method:
+                  video = add_ai_metadata(video)
+
+              if "caption" in method:
+                  video["caption_prefix"] = "#AIGenerated"
+
+          return video
+
+    detection_patterns:
+      - "remove_watermark"
+      - "strip.*metadata"
+
+    references:
+      - "https://www.lovart.ai/blog/video-generators-review"

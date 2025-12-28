@@ -1,0 +1,530 @@
+# Validations - Text-to-Video Generation
+# Quality checks for AI video generation implementations
+
+version: 1.0.0
+skill_id: text-to-video
+
+validations:
+  # API Security
+  - id: video-api-key-exposed
+    name: Video API Key in Client Code
+    severity: error
+    description: Video generation API keys must be server-side only
+    pattern: |
+      (NEXT_PUBLIC|REACT_APP|VITE).*(RUNWAY|LUMA|KLING|REPLICATE|PIKA).*KEY
+    message: "Video API key exposed to client. Use server-side routes only."
+    autofix: false
+
+  - id: hardcoded-video-api-key
+    name: Hardcoded Video API Key
+    severity: error
+    description: API keys should use environment variables
+    pattern: |
+      (runway_|luma_|r8_|kling_)[A-Za-z0-9]{20,}
+    message: "Hardcoded API key detected. Use environment variables."
+    autofix: false
+
+  # Content Safety
+  - id: no-video-prompt-moderation
+    name: Missing Video Prompt Moderation
+    severity: error
+    description: Video prompts must be moderated before generation
+    pattern: |
+      request\.(body|query)\.prompt.*generateVideo(?!.*moderat)
+    message: "Video prompt passed without moderation. Check for policy violations."
+    autofix: false
+
+  - id: no-video-output-moderation
+    name: Missing Video Output Moderation
+    severity: warning
+    description: Generated videos should be checked before serving
+    pattern: |
+      generateVideo\(.*\).*return.*url(?!.*check|scan)
+    message: "Generated video returned without content moderation."
+    autofix: false
+
+  - id: video-safety-disabled
+    name: Video Safety Checker Disabled
+    severity: warning
+    description: Model safety checkers should remain enabled
+    pattern: |
+      safety_checker.*false|nsfw_filter.*false|content_filter.*disabled
+    message: "Video safety checker disabled. Enable for production."
+    autofix: false
+
+  # Resource Management
+  - id: no-video-rate-limiting
+    name: Video Generation Without Rate Limiting
+    severity: warning
+    description: Video generation is expensive - rate limiting required
+    pattern: |
+      async.*generateVideo.*request(?!.*rateLimit|limit)
+    message: "Video generation endpoint without rate limiting."
+    autofix: false
+
+  - id: no-video-timeout
+    name: Missing Timeout for Video Generation
+    severity: error
+    description: Video generation can take minutes - timeout required
+    pattern: |
+      await.*generate.*video(?!.*timeout)
+    message: "Video generation without timeout. Add 5-10 minute timeout."
+    autofix: false
+
+  - id: synchronous-video-generation
+    name: Blocking Video Generation
+    severity: error
+    description: Video generation should be async with status polling
+    pattern: |
+      await.*generateVideo\((?!.*queue|poll|async|webhook)
+    message: "Synchronous video generation blocks requests. Use async pattern."
+    autofix: false
+
+  - id: no-video-cost-tracking
+    name: Missing Video Cost Tracking
+    severity: warning
+    description: Video generation costs should be tracked
+    pattern: |
+      generateVideo\((?!.*cost|budget|credits)
+    message: "No cost tracking for video generation. Add budget controls."
+    autofix: false
+
+  - id: unbounded-video-duration
+    name: Unbounded Video Duration
+    severity: warning
+    description: Video duration should be capped to control costs
+    pattern: |
+      duration.*request\.(body|query)(?!.*Math\.min|clamp|max)
+    message: "User-controlled duration without limit. Cap at maximum allowed."
+    autofix: false
+
+  # Video Processing
+  - id: invalid-video-resolution
+    name: Invalid Video Resolution
+    severity: warning
+    description: Video dimensions must match model requirements
+    pattern: |
+      generateVideo\(.*width.*(?!.*512|576|640|704|768|832|896|960|1024|1280)
+    message: "Check resolution compatibility with model requirements."
+    autofix: false
+
+  - id: invalid-aspect-ratio
+    name: Invalid Aspect Ratio
+    severity: warning
+    description: Aspect ratio must match model capabilities
+    pattern: |
+      aspect_ratio.*[0-9]+:[0-9]+(?!.*16:9|9:16|1:1|4:3|3:4)
+    message: "Non-standard aspect ratio may cause issues. Use 16:9, 9:16, or 1:1."
+    autofix: false
+
+  - id: no-input-image-validation
+    name: Missing Input Image Validation
+    severity: warning
+    description: Image-to-video inputs should be validated
+    pattern: |
+      imageToVideo\(.*image(?!.*validate|check|resize)
+    message: "Input image not validated. Check format, size, and dimensions."
+    autofix: false
+
+  # Error Handling
+  - id: no-generation-retry
+    name: Missing Retry Logic
+    severity: warning
+    description: Video generation should retry on transient failures
+    pattern: |
+      await.*generateVideo\((?!.*retry|attempts)
+    message: "No retry logic for video generation failures."
+    autofix: false
+
+  - id: no-queue-failure-handling
+    name: Missing Queue Failure Handling
+    severity: warning
+    description: Video generation queues should handle failures
+    pattern: |
+      queue\.add\(.*video(?!.*onFail|deadLetter)
+    message: "Video queue without failure handling. Add dead letter queue."
+    autofix: false
+
+code_smells:
+  - id: max-duration-request
+    name: Maximum Duration Requested
+    description: Longer videos have higher failure rates and costs
+    pattern: |
+      duration.*10|duration.*[1-9][0-9]
+    suggestion: "Long videos (10s+) have higher failure rates. Consider shorter clips."
+
+  - id: no-seed-for-iteration
+    name: No Seed for Video Testing
+    description: Setting seed helps reproduce and iterate on results
+    pattern: |
+      generateVideo\((?!.*seed)
+    suggestion: "Consider setting seed for reproducible results during development."
+
+  - id: high-fps-requested
+    name: High FPS Requested
+    description: Higher FPS increases generation time and cost
+    pattern: |
+      fps.*[3-9][0-9]|frame_rate.*[3-9][0-9]
+    suggestion: "High FPS (30+) increases cost. Standard 24fps often sufficient."
+
+  - id: missing-motion-guidance
+    name: No Motion Amount Specified
+    description: Specifying motion level improves consistency
+    pattern: |
+      generateVideo\(.*prompt(?!.*motion|movement|camera)
+    suggestion: "Consider specifying motion amount for more consistent results."
+
+  - id: client-side-polling
+    name: Client Polling for Status
+    description: Webhook callbacks are more efficient than polling
+    pattern: |
+      setInterval.*checkStatus|poll.*generation
+    suggestion: "Consider webhooks instead of polling for generation status."
+
+  - id: large-video-in-memory
+    name: Video Loaded Entirely in Memory
+    description: Stream large videos instead of loading fully
+    pattern: |
+      Buffer\.from\(.*video|readFile.*video
+    suggestion: "Stream video data instead of loading entirely into memory."
+
+best_practices:
+  - id: implement-async-generation
+    name: Implement Async Video Generation
+    check: |
+      Video generation uses queue-based async pattern with webhooks.
+    recommendation: |
+      import { Queue, Worker } from "bullmq";
+      import Replicate from "replicate";
+
+      const videoQueue = new Queue("video-generation");
+
+      // Add job to queue
+      async function queueVideoGeneration(
+        userId: string,
+        prompt: string,
+        options: VideoOptions
+      ) {
+        const job = await videoQueue.add("generate", {
+          userId,
+          prompt,
+          ...options,
+        }, {
+          attempts: 3,
+          backoff: { type: "exponential", delay: 30000 },
+          timeout: 600000, // 10 minute timeout
+        });
+
+        return { jobId: job.id };
+      }
+
+      // Worker processes jobs
+      const worker = new Worker("video-generation", async (job) => {
+        const replicate = new Replicate();
+
+        const output = await replicate.run(
+          "wan-video/wan-2.1-i2v-480p",
+          {
+            input: {
+              prompt: job.data.prompt,
+              image_url: job.data.imageUrl,
+              duration: Math.min(job.data.duration, 5), // Cap at 5s
+            },
+          }
+        );
+
+        // Notify via webhook
+        await fetch(job.data.webhookUrl, {
+          method: "POST",
+          body: JSON.stringify({
+            jobId: job.id,
+            status: "completed",
+            videoUrl: output,
+          }),
+        });
+
+        return output;
+      });
+
+  - id: implement-cost-controls
+    name: Implement Video Cost Controls
+    check: |
+      Cost tracking and budget limits enforced per user.
+    recommendation: |
+      // Video generation costs (approximate)
+      const VIDEO_COSTS = {
+        "wan-2.1": 0.05,      // per 5s video
+        "kling-v2.1": 0.08,   // per 5s video
+        "runway-gen3": 0.15,  // per 5s video
+        "luma-ray3": 0.10,    // per 5s video
+      };
+
+      class VideoCostTracker {
+        constructor(
+          private dailyBudget: number = 10.0,
+          private monthlyBudget: number = 100.0
+        ) {}
+
+        async recordGeneration(
+          userId: string,
+          model: string,
+          duration: number
+        ) {
+          const baseCost = VIDEO_COSTS[model] || 0.10;
+          const cost = baseCost * (duration / 5);
+
+          await db.videoCosts.create({
+            data: { userId, model, duration, cost, timestamp: new Date() },
+          });
+
+          return cost;
+        }
+
+        async checkBudget(userId: string): Promise<{
+          allowed: boolean;
+          dailyRemaining: number;
+          monthlyRemaining: number;
+        }> {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+
+          const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+
+          const [dailyCost, monthlyCost] = await Promise.all([
+            db.videoCosts.aggregate({
+              where: { userId, timestamp: { gte: today } },
+              _sum: { cost: true },
+            }),
+            db.videoCosts.aggregate({
+              where: { userId, timestamp: { gte: monthStart } },
+              _sum: { cost: true },
+            }),
+          ]);
+
+          const dailyUsed = dailyCost._sum.cost || 0;
+          const monthlyUsed = monthlyCost._sum.cost || 0;
+
+          return {
+            allowed: dailyUsed < this.dailyBudget && monthlyUsed < this.monthlyBudget,
+            dailyRemaining: Math.max(0, this.dailyBudget - dailyUsed),
+            monthlyRemaining: Math.max(0, this.monthlyBudget - monthlyUsed),
+          };
+        }
+      }
+
+  - id: implement-video-moderation
+    name: Implement Video Content Moderation
+    check: |
+      Both prompts and generated videos are moderated.
+    recommendation: |
+      class VideoModerationPipeline {
+        private openai = new OpenAI();
+
+        async moderatePrompt(prompt: string): Promise<ModerationResult> {
+          // Check for policy violations
+          const response = await this.openai.moderations.create({
+            input: prompt,
+          });
+
+          const result = response.results[0];
+
+          // Additional video-specific checks
+          const videoViolations = this.checkVideoSpecificContent(prompt);
+
+          return {
+            allowed: !result.flagged && !videoViolations.flagged,
+            categories: {
+              ...result.categories,
+              ...videoViolations.categories,
+            },
+          };
+        }
+
+        private checkVideoSpecificContent(prompt: string) {
+          // Check for deepfake indicators
+          const deepfakePatterns = [
+            /\b(celebrity|famous|politician|president)\b.*\b(saying|doing|video)\b/i,
+            /\b(deepfake|face\s*swap)\b/i,
+            /\bmake\s+(him|her|them)\s+(say|do)\b/i,
+          ];
+
+          const isDeepfake = deepfakePatterns.some(p => p.test(prompt));
+
+          return {
+            flagged: isDeepfake,
+            categories: {
+              potential_deepfake: isDeepfake,
+            },
+          };
+        }
+
+        async moderateVideo(videoUrl: string): Promise<ModerationResult> {
+          // Extract frames and check each
+          const frames = await this.extractKeyFrames(videoUrl);
+
+          for (const frame of frames) {
+            const result = await this.moderateFrame(frame);
+            if (!result.allowed) {
+              return result;
+            }
+          }
+
+          return { allowed: true, categories: {} };
+        }
+
+        private async extractKeyFrames(videoUrl: string) {
+          // Use ffmpeg to extract frames at intervals
+          // Return array of frame URLs or base64
+        }
+
+        private async moderateFrame(frameUrl: string) {
+          // Use image moderation API
+        }
+      }
+
+  - id: implement-generation-status
+    name: Implement Generation Status Tracking
+    check: |
+      Users can check generation status and receive updates.
+    recommendation: |
+      // Database schema for tracking
+      // model VideoGeneration {
+      //   id        String   @id @default(cuid())
+      //   userId    String
+      //   status    String   // pending, processing, completed, failed
+      //   progress  Float    // 0-100
+      //   prompt    String
+      //   videoUrl  String?
+      //   error     String?
+      //   createdAt DateTime @default(now())
+      //   updatedAt DateTime @updatedAt
+      // }
+
+      class VideoGenerationTracker {
+        async create(userId: string, prompt: string) {
+          return db.videoGeneration.create({
+            data: {
+              userId,
+              prompt,
+              status: "pending",
+              progress: 0,
+            },
+          });
+        }
+
+        async updateProgress(id: string, progress: number) {
+          await db.videoGeneration.update({
+            where: { id },
+            data: { status: "processing", progress },
+          });
+
+          // Send real-time update via websocket/SSE
+          await this.notifyProgress(id, progress);
+        }
+
+        async complete(id: string, videoUrl: string) {
+          await db.videoGeneration.update({
+            where: { id },
+            data: { status: "completed", progress: 100, videoUrl },
+          });
+
+          await this.notifyComplete(id, videoUrl);
+        }
+
+        async fail(id: string, error: string) {
+          await db.videoGeneration.update({
+            where: { id },
+            data: { status: "failed", error },
+          });
+
+          await this.notifyFailed(id, error);
+        }
+      }
+
+  - id: validate-video-inputs
+    name: Validate All Video Generation Inputs
+    check: |
+      Prompts, images, and parameters validated before generation.
+    recommendation: |
+      import { z } from "zod";
+
+      const VideoGenerationSchema = z.object({
+        prompt: z.string()
+          .min(10, "Prompt too short")
+          .max(500, "Prompt too long")
+          .refine(
+            (p) => !/<|>|script/i.test(p),
+            "Invalid characters in prompt"
+          ),
+        imageUrl: z.string().url().optional(),
+        duration: z.number()
+          .min(2, "Minimum duration is 2 seconds")
+          .max(10, "Maximum duration is 10 seconds")
+          .default(5),
+        aspectRatio: z.enum(["16:9", "9:16", "1:1", "4:3", "3:4"])
+          .default("16:9"),
+        motionAmount: z.enum(["low", "medium", "high"])
+          .default("medium"),
+        seed: z.number().int().positive().optional(),
+      });
+
+      async function validateImageInput(imageUrl: string) {
+        // Fetch image metadata
+        const response = await fetch(imageUrl, { method: "HEAD" });
+
+        const contentType = response.headers.get("content-type");
+        const contentLength = parseInt(
+          response.headers.get("content-length") || "0"
+        );
+
+        // Validate format
+        if (!["image/jpeg", "image/png", "image/webp"].includes(contentType)) {
+          throw new Error("Image must be JPEG, PNG, or WebP");
+        }
+
+        // Validate size (10MB max)
+        if (contentLength > 10 * 1024 * 1024) {
+          throw new Error("Image must be under 10MB");
+        }
+
+        // Validate dimensions
+        const dimensions = await getImageDimensions(imageUrl);
+        if (dimensions.width < 512 || dimensions.height < 512) {
+          throw new Error("Image must be at least 512x512");
+        }
+
+        return true;
+      }
+
+testing_checklist:
+  api_integration:
+    - "API keys loaded from environment"
+    - "Async generation with queue/webhook pattern"
+    - "Timeout handling (5-10 minutes)"
+    - "Retry logic for transient failures"
+    - "Rate limiting per user"
+
+  content_safety:
+    - "Prompt moderation before generation"
+    - "Deepfake detection in prompts"
+    - "Output video frame scanning"
+    - "Safety checker enabled on model"
+
+  resource_management:
+    - "Cost tracking per generation"
+    - "Budget limits per user (daily/monthly)"
+    - "Duration limits enforced"
+    - "Concurrent generation limits"
+
+  video_processing:
+    - "Input image validated (format, size, dimensions)"
+    - "Resolution matches model requirements"
+    - "Aspect ratio validated"
+    - "Output format correct"
+
+  user_experience:
+    - "Progress updates during generation"
+    - "Clear status messages"
+    - "Cost estimate shown before generation"
+    - "Generation history accessible"
+    - "Cancel/abort functionality"

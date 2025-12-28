@@ -1,0 +1,743 @@
+# Collaboration - Text-to-Video Generation
+# Integration patterns with other skills and services
+
+version: 1.0.0
+skill_id: text-to-video
+
+prerequisites:
+  required_knowledge:
+    - "async/await patterns and Promise handling"
+    - "Queue-based job processing (BullMQ, Redis)"
+    - "Webhook endpoints and callbacks"
+    - "Video prompting techniques"
+    - "Cost management for AI APIs"
+
+  environment_setup:
+    - step: "Choose video generation provider"
+      options:
+        - "Replicate (Wan, Kling, Luma models)"
+        - "Runway ML (Gen-3, Gen-4)"
+        - "Luma AI (Dream Machine, Ray3)"
+        - "Kling AI (direct API)"
+      recommendation: "Replicate for flexibility, Runway for quality"
+
+    - step: "Set up API credentials"
+      actions:
+        - "Create account with chosen provider"
+        - "Generate API key"
+        - "Store in environment variables (never client-side)"
+        - "Set up billing alerts"
+
+    - step: "Configure async infrastructure"
+      options:
+        - provider: "BullMQ + Redis"
+          best_for: "Self-hosted, full control"
+          setup: |
+            # Docker Redis
+            docker run -d -p 6379:6379 redis:alpine
+
+        - provider: "Inngest"
+          best_for: "Serverless, managed"
+          setup: |
+            npm install inngest
+            # Configure at dashboard.inngest.com
+
+        - provider: "Trigger.dev"
+          best_for: "Background jobs, good DX"
+          setup: |
+            npm install @trigger.dev/sdk
+            # Configure at cloud.trigger.dev
+
+    - step: "Set up storage for generated videos"
+      options:
+        - "Cloudflare R2 (cost-effective, S3-compatible)"
+        - "AWS S3 (battle-tested)"
+        - "Vercel Blob (simple for Vercel apps)"
+        - "Uploadthing (easy setup)"
+
+delegation_triggers:
+  delegate_to_others:
+    - condition: "Need user-facing video player"
+      delegate_to: "frontend skill"
+      handoff: |
+        Video player requirements:
+        - Handle loading states during generation
+        - Progress bar showing generation status
+        - Thumbnail/poster from first frame
+        - Mobile-responsive controls
+        - Consider: react-player, video.js, Mux Player
+
+    - condition: "Need to process uploaded videos"
+      delegate_to: "video-processing skill"
+      handoff: |
+        Video processing requirements:
+        - Extract frames for image-to-video
+        - Compress before upload
+        - Get video metadata (duration, dimensions)
+        - Generate thumbnails
+        - Consider: ffmpeg, fluent-ffmpeg
+
+    - condition: "Need webhook endpoints"
+      delegate_to: "backend skill"
+      handoff: |
+        Webhook endpoint requirements:
+        - Verify webhook signatures
+        - Handle generation complete callbacks
+        - Handle generation failed callbacks
+        - Idempotent processing (deduplicate)
+        - Store results to database
+
+    - condition: "Need real-time status updates"
+      delegate_to: "websocket skill"
+      handoff: |
+        Real-time requirements:
+        - Push generation progress updates
+        - Notify on completion
+        - Handle reconnection gracefully
+        - Consider: Pusher, Ably, Socket.io, Supabase Realtime
+
+    - condition: "Need to moderate video content"
+      delegate_to: "content-moderation skill"
+      handoff: |
+        Video moderation requirements:
+        - Extract key frames (1 per second)
+        - Run image moderation on frames
+        - Check for policy violations
+        - Age-gate or block as needed
+        - Consider: AWS Rekognition, Google Video Intelligence
+
+    - condition: "Need billing/credits system"
+      delegate_to: "payments skill"
+      handoff: |
+        Credits system requirements:
+        - Deduct credits before generation
+        - Refund on failure
+        - Show cost estimate
+        - Rate limits by tier
+        - Usage dashboard
+
+  accept_from_others:
+    - from: "ai-image-editing skill"
+      when: "Animate edited images"
+      expect: |
+        I'll receive:
+        - Image URL (edited/generated image)
+        - Motion description
+        - Duration preference
+        I'll provide: Animated video from the image
+
+    - from: "frontend skill"
+      when: "User requests video generation"
+      expect: |
+        I'll receive:
+        - Text prompt or image URL
+        - Generation parameters (duration, aspect ratio)
+        - User ID for tracking
+        I'll provide: Job ID and polling endpoint
+
+    - from: "multimodal-ai skill"
+      when: "Vision model needs video output"
+      expect: |
+        I'll receive:
+        - Structured scene description
+        - Camera movements
+        - Timing information
+        I'll provide: Generated video matching description
+
+workflow_integration:
+  standard_flow:
+    - step: 1
+      action: "Validate generation request"
+      details: |
+        - Check prompt for policy violations
+        - Validate image URL if image-to-video
+        - Verify user has budget/credits
+        - Validate parameters (duration, resolution)
+
+    - step: 2
+      action: "Estimate cost and get confirmation"
+      details: |
+        - Calculate estimated cost
+        - Show wait time estimate
+        - Get user confirmation for expensive operations
+        - Reserve credits (hold before deducting)
+
+    - step: 3
+      action: "Queue generation job"
+      details: |
+        - Create job in queue with timeout
+        - Store job metadata in database
+        - Return job ID to frontend
+        - Start progress tracking
+
+    - step: 4
+      action: "Execute generation"
+      details: |
+        - Call video API with parameters
+        - Poll for completion or receive webhook
+        - Update progress in real-time
+        - Handle retries on transient failures
+
+    - step: 5
+      action: "Process result"
+      details: |
+        - Download generated video
+        - Upload to storage (R2/S3)
+        - Generate thumbnail
+        - Run content moderation
+
+    - step: 6
+      action: "Deliver to user"
+      details: |
+        - Update database with video URL
+        - Deduct credits (release hold)
+        - Send notification (push, email)
+        - Update UI via websocket
+
+  decision_points:
+    - decision: "Sync vs async generation"
+      recommendation: "Always async for production"
+      factors:
+        - "Generation takes 30-150+ seconds"
+        - "Serverless functions timeout (Vercel 30s, Cloudflare 30s)"
+        - "Better UX with progress updates"
+
+    - decision: "Poll vs webhook"
+      options:
+        - name: "Polling"
+          when: "Simple setup, occasional use"
+          implementation: |
+            const checkStatus = async (predictionId) => {
+              while (true) {
+                const status = await replicate.predictions.get(predictionId);
+                if (status.status === "succeeded") return status;
+                if (status.status === "failed") throw new Error(status.error);
+                await sleep(2000);
+              }
+            };
+
+        - name: "Webhook"
+          when: "Production, high volume"
+          implementation: |
+            // When creating prediction
+            await replicate.predictions.create({
+              model: "...",
+              input: { ... },
+              webhook: "https://api.example.com/webhooks/replicate",
+              webhook_events_filter: ["completed"],
+            });
+
+    - decision: "Which model to use"
+      options:
+        - name: "Wan 2.1/2.2"
+          pros: "Cost-effective, good quality, open source"
+          cons: "Slower, less motion control"
+          best_for: "Budget-conscious, general use"
+
+        - name: "Kling v2.1"
+          pros: "Excellent motion, consistent characters"
+          cons: "Higher cost, API availability"
+          best_for: "Character animation, action scenes"
+
+        - name: "Runway Gen-3/Gen-4"
+          pros: "Highest quality, best prompt understanding"
+          cons: "Most expensive, rate limits"
+          best_for: "Premium content, marketing"
+
+        - name: "Luma Ray3"
+          pros: "Fast, good value, consistent style"
+          cons: "Less photorealistic"
+          best_for: "Stylized content, speed priority"
+
+    - decision: "Storage strategy"
+      options:
+        - name: "Permanent storage"
+          when: "User-generated content library"
+          approach: "Store in R2/S3, database tracks metadata"
+
+        - name: "Temporary with expiry"
+          when: "Preview generation, one-time use"
+          approach: "Use signed URLs, delete after 24-48 hours"
+
+collaboration_patterns:
+  with_nextjs:
+    pattern: "Full-stack video generation"
+    implementation: |
+      // app/api/video/generate/route.ts
+      import { NextRequest, NextResponse } from "next/server";
+      import { videoQueue } from "@/lib/queues";
+      import { db } from "@/lib/db";
+      import { auth } from "@/lib/auth";
+
+      export async function POST(req: NextRequest) {
+        const session = await auth();
+        if (!session) {
+          return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
+        const body = await req.json();
+
+        // Validate request
+        const validated = VideoGenerationSchema.safeParse(body);
+        if (!validated.success) {
+          return NextResponse.json(
+            { error: validated.error.issues },
+            { status: 400 }
+          );
+        }
+
+        // Check budget
+        const budget = await checkUserBudget(session.user.id);
+        if (!budget.canGenerate) {
+          return NextResponse.json(
+            { error: "Insufficient credits", remaining: budget.remaining },
+            { status: 402 }
+          );
+        }
+
+        // Create generation record
+        const generation = await db.videoGeneration.create({
+          data: {
+            userId: session.user.id,
+            prompt: validated.data.prompt,
+            status: "pending",
+          },
+        });
+
+        // Queue job
+        await videoQueue.add("generate", {
+          generationId: generation.id,
+          ...validated.data,
+        });
+
+        return NextResponse.json({
+          id: generation.id,
+          status: "pending",
+        });
+      }
+
+      // app/api/video/[id]/route.ts - Status endpoint
+      export async function GET(
+        req: NextRequest,
+        { params }: { params: { id: string } }
+      ) {
+        const session = await auth();
+        if (!session) {
+          return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
+        const generation = await db.videoGeneration.findUnique({
+          where: { id: params.id, userId: session.user.id },
+        });
+
+        if (!generation) {
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
+        }
+
+        return NextResponse.json(generation);
+      }
+
+  with_inngest:
+    pattern: "Serverless background jobs"
+    implementation: |
+      // lib/inngest/client.ts
+      import { Inngest } from "inngest";
+
+      export const inngest = new Inngest({ id: "video-app" });
+
+      // lib/inngest/functions.ts
+      import { inngest } from "./client";
+      import Replicate from "replicate";
+
+      export const generateVideo = inngest.createFunction(
+        {
+          id: "generate-video",
+          retries: 3,
+          timeout: "10m",
+        },
+        { event: "video/generate" },
+        async ({ event, step }) => {
+          const { prompt, imageUrl, duration, generationId } = event.data;
+
+          // Step 1: Start generation
+          const prediction = await step.run("start-generation", async () => {
+            const replicate = new Replicate();
+            return replicate.predictions.create({
+              model: "wan-video/wan-2.1-i2v-480p",
+              input: { prompt, image_url: imageUrl, duration },
+            });
+          });
+
+          // Step 2: Poll for completion
+          const result = await step.run("poll-completion", async () => {
+            const replicate = new Replicate();
+            let status = await replicate.predictions.get(prediction.id);
+
+            while (status.status === "processing" || status.status === "starting") {
+              await step.sleep("wait-2s", "2s");
+              status = await replicate.predictions.get(prediction.id);
+            }
+
+            if (status.status === "failed") {
+              throw new Error(status.error);
+            }
+
+            return status.output;
+          });
+
+          // Step 3: Upload to storage
+          const videoUrl = await step.run("upload-video", async () => {
+            return uploadToR2(result, generationId);
+          });
+
+          // Step 4: Update database
+          await step.run("update-db", async () => {
+            await db.videoGeneration.update({
+              where: { id: generationId },
+              data: { status: "completed", videoUrl },
+            });
+          });
+
+          return { videoUrl };
+        }
+      );
+
+  with_trigger_dev:
+    pattern: "Background jobs with Trigger.dev"
+    implementation: |
+      // trigger/video-generation.ts
+      import { task, wait } from "@trigger.dev/sdk/v3";
+      import Replicate from "replicate";
+
+      export const generateVideoTask = task({
+        id: "generate-video",
+        maxDuration: 600, // 10 minutes
+        retry: {
+          maxAttempts: 3,
+          factor: 2,
+          minTimeoutInMs: 30000,
+        },
+        run: async (payload: {
+          prompt: string;
+          imageUrl?: string;
+          duration: number;
+          generationId: string;
+        }) => {
+          const replicate = new Replicate();
+
+          // Update status
+          await db.videoGeneration.update({
+            where: { id: payload.generationId },
+            data: { status: "processing" },
+          });
+
+          // Start generation
+          const prediction = await replicate.predictions.create({
+            model: "wan-video/wan-2.1-i2v-480p",
+            input: {
+              prompt: payload.prompt,
+              image_url: payload.imageUrl,
+              duration: payload.duration,
+            },
+          });
+
+          // Poll for completion
+          let status = await replicate.predictions.get(prediction.id);
+
+          while (status.status !== "succeeded" && status.status !== "failed") {
+            await wait.for({ seconds: 3 });
+            status = await replicate.predictions.get(prediction.id);
+          }
+
+          if (status.status === "failed") {
+            throw new Error(`Generation failed: ${status.error}`);
+          }
+
+          // Upload and update
+          const videoUrl = await uploadToR2(status.output, payload.generationId);
+
+          await db.videoGeneration.update({
+            where: { id: payload.generationId },
+            data: { status: "completed", videoUrl },
+          });
+
+          return { videoUrl };
+        },
+      });
+
+  with_cloudflare_queues:
+    pattern: "Edge-native video processing"
+    implementation: |
+      // src/worker.ts - Cloudflare Worker with Queues
+      import { Hono } from "hono";
+
+      const app = new Hono<{ Bindings: Env }>();
+
+      // Producer - API endpoint
+      app.post("/api/video/generate", async (c) => {
+        const body = await c.req.json();
+
+        // Validate and authorize
+        const validated = VideoGenerationSchema.parse(body);
+
+        // Create record
+        const id = crypto.randomUUID();
+        await c.env.DB.prepare(
+          "INSERT INTO video_generations (id, prompt, status) VALUES (?, ?, ?)"
+        ).bind(id, validated.prompt, "pending").run();
+
+        // Send to queue
+        await c.env.VIDEO_QUEUE.send({
+          type: "generate",
+          id,
+          ...validated,
+        });
+
+        return c.json({ id, status: "pending" });
+      });
+
+      // Consumer - Queue handler
+      export default {
+        async queue(batch: MessageBatch, env: Env) {
+          for (const message of batch.messages) {
+            const { type, id, prompt, imageUrl, duration } = message.body;
+
+            if (type === "generate") {
+              try {
+                // Call Replicate
+                const response = await fetch(
+                  "https://api.replicate.com/v1/predictions",
+                  {
+                    method: "POST",
+                    headers: {
+                      Authorization: `Token ${env.REPLICATE_API_TOKEN}`,
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                      version: "...",
+                      input: { prompt, image_url: imageUrl, duration },
+                      webhook: `${env.WORKER_URL}/webhooks/replicate`,
+                      webhook_events_filter: ["completed"],
+                    }),
+                  }
+                );
+
+                const prediction = await response.json();
+
+                await env.DB.prepare(
+                  "UPDATE video_generations SET prediction_id = ?, status = ? WHERE id = ?"
+                ).bind(prediction.id, "processing", id).run();
+
+                message.ack();
+              } catch (error) {
+                message.retry();
+              }
+            }
+          }
+        },
+        fetch: app.fetch,
+      };
+
+  with_react_query:
+    pattern: "Frontend polling with React Query"
+    implementation: |
+      // hooks/useVideoGeneration.ts
+      import { useMutation, useQuery } from "@tanstack/react-query";
+
+      export function useVideoGeneration() {
+        const generateMutation = useMutation({
+          mutationFn: async (params: GenerateParams) => {
+            const response = await fetch("/api/video/generate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(params),
+            });
+            return response.json();
+          },
+        });
+
+        return generateMutation;
+      }
+
+      export function useVideoStatus(id: string | null) {
+        return useQuery({
+          queryKey: ["video", id],
+          queryFn: async () => {
+            const response = await fetch(`/api/video/${id}`);
+            return response.json();
+          },
+          enabled: !!id,
+          refetchInterval: (data) => {
+            // Poll while processing
+            if (data?.status === "processing" || data?.status === "pending") {
+              return 2000; // Poll every 2s
+            }
+            return false; // Stop polling when done
+          },
+        });
+      }
+
+      // components/VideoGenerator.tsx
+      export function VideoGenerator() {
+        const [generationId, setGenerationId] = useState<string | null>(null);
+        const generate = useVideoGeneration();
+        const { data: status } = useVideoStatus(generationId);
+
+        const handleGenerate = async () => {
+          const result = await generate.mutateAsync({
+            prompt: "...",
+            duration: 5,
+          });
+          setGenerationId(result.id);
+        };
+
+        return (
+          <div>
+            <button onClick={handleGenerate} disabled={generate.isPending}>
+              {generate.isPending ? "Starting..." : "Generate Video"}
+            </button>
+
+            {status && (
+              <div>
+                <p>Status: {status.status}</p>
+                {status.status === "processing" && (
+                  <Progress value={status.progress} />
+                )}
+                {status.videoUrl && (
+                  <video src={status.videoUrl} controls />
+                )}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+  with_r2_storage:
+    pattern: "Video storage with Cloudflare R2"
+    implementation: |
+      // lib/storage.ts
+      import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+      import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+      const r2 = new S3Client({
+        region: "auto",
+        endpoint: process.env.R2_ENDPOINT,
+        credentials: {
+          accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+          secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+        },
+      });
+
+      export async function uploadVideo(
+        videoUrl: string,
+        generationId: string
+      ): Promise<string> {
+        // Download from temporary URL
+        const response = await fetch(videoUrl);
+        const videoBuffer = await response.arrayBuffer();
+
+        const key = `videos/${generationId}.mp4`;
+
+        // Upload to R2
+        await r2.send(
+          new PutObjectCommand({
+            Bucket: process.env.R2_BUCKET,
+            Key: key,
+            Body: Buffer.from(videoBuffer),
+            ContentType: "video/mp4",
+          })
+        );
+
+        // Return public URL or generate signed URL
+        return `${process.env.R2_PUBLIC_URL}/${key}`;
+      }
+
+      export async function getSignedVideoUrl(key: string): Promise<string> {
+        const command = new GetObjectCommand({
+          Bucket: process.env.R2_BUCKET,
+          Key: key,
+        });
+
+        return getSignedUrl(r2, command, { expiresIn: 3600 });
+      }
+
+anti_patterns:
+  - name: "Synchronous generation in API route"
+    why_bad: "Blocks request, hits serverless timeouts, poor UX"
+    example_bad: |
+      // BAD: Blocks for 2+ minutes
+      export async function POST(req) {
+        const video = await replicate.run("...", { input: {...} });
+        return NextResponse.json({ video });
+      }
+    example_good: |
+      // GOOD: Queue and return immediately
+      export async function POST(req) {
+        const job = await videoQueue.add("generate", {...});
+        return NextResponse.json({ jobId: job.id });
+      }
+
+  - name: "No cost limits"
+    why_bad: "Single runaway loop can cost hundreds of dollars"
+    example_bad: |
+      // BAD: No limits
+      for (const prompt of prompts) {
+        await generateVideo(prompt);
+      }
+    example_good: |
+      // GOOD: Budget controls
+      for (const prompt of prompts) {
+        if (!await costTracker.canGenerate(userId)) {
+          throw new Error("Budget exceeded");
+        }
+        await generateVideo(prompt);
+        await costTracker.record(userId, estimatedCost);
+      }
+
+  - name: "Storing videos in database"
+    why_bad: "Databases aren't designed for large binary data"
+    example_bad: |
+      // BAD: Binary in DB
+      await db.video.create({
+        data: { content: videoBuffer }
+      });
+    example_good: |
+      // GOOD: Store URL reference
+      const url = await uploadToR2(videoBuffer);
+      await db.video.create({
+        data: { url }
+      });
+
+  - name: "Client-side API keys"
+    why_bad: "Anyone can steal keys and generate unlimited videos"
+    example_bad: |
+      // BAD: Key in frontend
+      const replicate = new Replicate({
+        auth: process.env.NEXT_PUBLIC_REPLICATE_TOKEN // Exposed!
+      });
+    example_good: |
+      // GOOD: Server-side only
+      // lib/replicate.ts (server only)
+      const replicate = new Replicate({
+        auth: process.env.REPLICATE_API_TOKEN // Private
+      });
+
+  - name: "No generation timeout"
+    why_bad: "Stuck generations consume resources indefinitely"
+    example_bad: |
+      // BAD: No timeout
+      while (status !== "completed") {
+        await sleep(1000);
+        status = await checkStatus(id);
+      }
+    example_good: |
+      // GOOD: With timeout
+      const startTime = Date.now();
+      while (status !== "completed") {
+        if (Date.now() - startTime > 600000) { // 10 min
+          await cancelGeneration(id);
+          throw new Error("Generation timeout");
+        }
+        await sleep(2000);
+        status = await checkStatus(id);
+      }
