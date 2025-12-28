@@ -1,0 +1,315 @@
+id: rate-limiting-collaboration
+skill: rate-limiting
+version: 1.0.0
+
+# ============================================================================
+# RECEIVES FROM (Who delegates TO this skill)
+# ============================================================================
+receives_from:
+  - skill: backend
+    context: "Backend needs API rate limiting"
+    receives:
+      - "Endpoints to protect"
+      - "Expected traffic patterns"
+      - "User tiers and limits"
+    provides: "Rate limiting middleware and configuration"
+
+  - skill: authentication-oauth
+    context: "Auth endpoints need brute-force protection"
+    receives:
+      - "Login/signup endpoints"
+      - "Lockout requirements"
+      - "IP vs account limits"
+    provides: "Auth-specific rate limiting"
+
+  - skill: queue-workers
+    context: "Workers need rate limiting for external APIs"
+    receives:
+      - "API rate limits to respect"
+      - "Per-tenant limits"
+      - "Backoff requirements"
+    provides: "Worker rate limiting strategy"
+
+  - skill: api-designer
+    context: "API needs abuse protection"
+    receives:
+      - "Endpoint categories"
+      - "Expected usage patterns"
+      - "SLA requirements"
+    provides: "Rate limiting design for API"
+
+  - skill: security-hardening
+    context: "Security needs DDoS/abuse protection"
+    receives:
+      - "Attack patterns to mitigate"
+      - "IP blocking requirements"
+      - "Escalation thresholds"
+    provides: "Security-focused rate limiting"
+
+# ============================================================================
+# DELEGATION TRIGGERS
+# ============================================================================
+delegation_triggers:
+  - trigger: "redis|cache|store"
+    delegate_to: caching-patterns
+    pattern: parallel
+    context: "Need Redis for distributed rate limiting"
+    handoff_data:
+      - "Connection requirements"
+      - "High availability needs"
+      - "Memory requirements"
+    receive: "Redis configuration for rate limiting"
+
+  - trigger: "monitor|metrics|alert"
+    delegate_to: observability-sre
+    pattern: parallel
+    context: "Need rate limit monitoring"
+    handoff_data:
+      - "Key metrics to track"
+      - "Alert thresholds"
+      - "Dashboard requirements"
+    receive: "Rate limit monitoring setup"
+
+  - trigger: "user tier|plan|pricing"
+    delegate_to: backend
+    pattern: parallel
+    context: "Need user plan information for tiered limits"
+    handoff_data:
+      - "Plan types"
+      - "Limit multipliers"
+      - "Upgrade prompts"
+    receive: "User plan integration"
+
+  - trigger: "cloudflare|waf|edge"
+    delegate_to: infrastructure-as-code
+    pattern: parallel
+    context: "Need edge rate limiting"
+    handoff_data:
+      - "Global limits"
+      - "Geographic rules"
+      - "DDoS thresholds"
+    receive: "Edge rate limiting configuration"
+
+  - trigger: "block|ban|abuse"
+    delegate_to: security-hardening
+    pattern: sequential
+    context: "Need abuse prevention"
+    handoff_data:
+      - "Abuse patterns"
+      - "Block durations"
+      - "Appeal process"
+    receive: "Abuse prevention strategy"
+
+# ============================================================================
+# FEEDBACK LOOPS
+# ============================================================================
+feedback_loops:
+  receives_feedback_from:
+    - skill: observability-sre
+      signal: "Rate limit hits spiking"
+      action: "Investigate if limits too low or under attack"
+
+    - skill: observability-sre
+      signal: "429 errors causing user complaints"
+      action: "Review limits, add progressive warnings, improve error messaging"
+
+    - skill: security-hardening
+      signal: "Rate limits not stopping abuse"
+      action: "Add IP-based limits, implement progressive blocking"
+
+    - skill: backend
+      signal: "Legitimate users hitting limits"
+      action: "Review limits, add tiered plans, implement burst allowance"
+
+    - skill: infrastructure-as-code
+      signal: "Redis rate limit latency high"
+      action: "Consider local cache, optimize Lua scripts, check connection pool"
+
+  sends_feedback_to:
+    - skill: backend
+      signal: "Need user plan for tiered limits"
+      action: "Expose user.plan in request context"
+
+    - skill: frontend
+      signal: "Rate limit headers available"
+      action: "Display remaining quota in UI, implement client-side throttling"
+
+    - skill: observability-sre
+      signal: "Rate limit metrics ready"
+      action: "Add dashboards for rate limit hits, blocks, and quotas"
+
+    - skill: security-hardening
+      signal: "Abuse patterns detected"
+      action: "Review and update security rules"
+
+# ============================================================================
+# CROSS-DOMAIN INSIGHTS
+# ============================================================================
+cross_domain_insights:
+  - domain: Distributed Systems
+    insight: |
+      Distributed systems engineers know rate limiting is coordination:
+      - Centralized (Redis) trades latency for accuracy
+      - Local limiters with sync trades accuracy for speed
+      - Eventually consistent is often good enough
+      - Global limits need global coordination
+
+      Rate limiting is a distributed consensus problem.
+    applies_when: "Implementing rate limiting at scale"
+
+  - domain: Security Engineering
+    insight: |
+      Security engineers understand rate limiting as defense:
+      - First line against credential stuffing
+      - Brute force requires many attempts
+      - Rate limiting buys time for detection
+      - Progressive blocking deters without blocking legitimate users
+
+      Rate limits are security controls, not just performance tools.
+    applies_when: "Protecting sensitive endpoints"
+
+  - domain: Product Management
+    insight: |
+      Product managers know limits affect user experience:
+      - Free tier limits drive upgrades
+      - Too restrictive limits cause churn
+      - Limits communicate value
+      - Quota visibility reduces friction
+
+      Rate limits are product decisions, not just technical ones.
+    applies_when: "Designing tiered API access"
+
+  - domain: Site Reliability Engineering
+    insight: |
+      SREs understand rate limits protect infrastructure:
+      - Rate limits prevent cascade failures
+      - Backpressure is essential for stability
+      - Limits should match capacity
+      - Monitor limits as health indicators
+
+      Rate limits are reliability controls.
+    applies_when: "Operating APIs in production"
+
+# ============================================================================
+# COMMON COMBINATIONS
+# ============================================================================
+common_combinations:
+  - name: API Rate Limiting
+    skills:
+      - rate-limiting
+      - backend
+      - caching-patterns
+    workflow: |
+      1. Design rate limit strategy (rate-limiting)
+      2. Set up Redis for distributed limiting (caching-patterns)
+      3. Implement middleware (rate-limiting)
+      4. Add rate limit headers (rate-limiting)
+      5. Integrate with user plans (backend)
+      6. Add monitoring (observability-sre)
+
+  - name: Auth Brute Force Protection
+    skills:
+      - rate-limiting
+      - authentication-oauth
+      - security-hardening
+    workflow: |
+      1. Define auth endpoint limits (rate-limiting)
+      2. Implement per-IP and per-account limits (rate-limiting)
+      3. Add progressive lockout (rate-limiting)
+      4. Integrate with auth flow (authentication-oauth)
+      5. Add security alerting (security-hardening)
+
+  - name: Tiered API Access
+    skills:
+      - rate-limiting
+      - backend
+      - database-schema-design
+    workflow: |
+      1. Define plan limits (rate-limiting)
+      2. Store plan info in user profile (database-schema-design)
+      3. Implement tiered limiting (rate-limiting)
+      4. Add quota tracking endpoint (backend)
+      5. Implement upgrade prompts (backend)
+
+  - name: DDoS Protection
+    skills:
+      - rate-limiting
+      - security-hardening
+      - infrastructure-as-code
+    workflow: |
+      1. Implement edge rate limiting (infrastructure-as-code)
+      2. Add application-level limits (rate-limiting)
+      3. Implement IP blocking (security-hardening)
+      4. Set up alerting (observability-sre)
+      5. Create incident response plan (security-hardening)
+
+  - name: Third-Party API Rate Limiting
+    skills:
+      - rate-limiting
+      - queue-workers
+      - caching-patterns
+    workflow: |
+      1. Document external API limits (rate-limiting)
+      2. Implement client-side limiting (rate-limiting)
+      3. Use queue for backpressure (queue-workers)
+      4. Cache responses where possible (caching-patterns)
+      5. Monitor quota usage (observability-sre)
+
+# ============================================================================
+# ECOSYSTEM
+# ============================================================================
+ecosystem:
+  primary_tools:
+    - "express-rate-limit - Express middleware"
+    - "rate-limiter-flexible - Flexible limiting library"
+    - "@upstash/ratelimit - Edge/serverless limiting"
+    - "ioredis - Redis client"
+
+  rate_limit_libraries:
+    - name: express-rate-limit
+      platform: "Express"
+      use_when: "Simple rate limiting for Express apps"
+      features: "Easy setup, Redis store, standard headers"
+
+    - name: rate-limiter-flexible
+      platform: "Any Node.js"
+      use_when: "Complex limiting scenarios"
+      features: "Multiple algorithms, blocking, insurance"
+
+    - name: "@upstash/ratelimit"
+      platform: "Edge/Serverless"
+      use_when: "Vercel, Cloudflare Workers"
+      features: "Edge-compatible, Upstash Redis"
+
+    - name: bottleneck
+      platform: "Any Node.js"
+      use_when: "Client-side limiting, job scheduling"
+      features: "Queue jobs, clustering"
+
+  cloud_services:
+    - name: Cloudflare Rate Limiting
+      type: "Edge"
+      features: "Global edge limiting, DDoS protection"
+
+    - name: AWS WAF Rate Rules
+      type: "Edge"
+      features: "CloudFront integration, geo-blocking"
+
+    - name: API Gateway Throttling
+      type: "Managed"
+      features: "Per-key limits, usage plans"
+
+    - name: Kong Rate Limiting
+      type: "API Gateway"
+      features: "Plugin-based, Redis support"
+
+  monitoring:
+    - name: Prometheus
+      purpose: "Rate limit metrics"
+      metrics: "rate_limit_hits, rate_limit_blocks"
+
+    - name: Grafana
+      purpose: "Rate limit dashboards"
+      features: "Quota visualization, alerts"
+
+

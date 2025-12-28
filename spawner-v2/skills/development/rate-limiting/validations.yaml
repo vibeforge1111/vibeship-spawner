@@ -1,0 +1,210 @@
+# Rate Limiting Validations
+# Automated checks to catch rate limiting issues
+
+validations:
+
+  # --- CRITICAL: Will fail in production ---
+
+  - id: rate-limit-memory-store
+    name: In-Memory Rate Limiting
+    severity: error
+    type: regex
+    pattern:
+      - "new Map\\(\\).*rate"
+      - "rateLimit.*store.*memory"
+      - "RateLimiterMemory(?![\\s\\S]{0,200}fallback|backup)"
+      - "limits\\s*=\\s*\\{\\}.*rate"
+    message: "In-memory rate limiting doesn't work with multiple servers. Use Redis."
+    fix_action: "Use RateLimiterRedis or express-rate-limit with Redis store"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/middleware/**"
+
+  - id: rate-limit-no-retry-after
+    name: Missing Retry-After Header
+    severity: error
+    type: regex
+    pattern:
+      - "status\\(429\\)(?![\\s\\S]{0,300}Retry-After|retryAfter)"
+      - "429.*json(?![\\s\\S]{0,200}retry)"
+    message: "429 responses should include Retry-After header for proper client backoff."
+    fix_action: "Add res.set('Retry-After', seconds) before sending 429"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: rate-limit-race-condition
+    name: Non-Atomic Rate Limit Check
+    severity: error
+    type: regex
+    pattern:
+      - "redis\\.get.*limit.*redis\\.incr"
+      - "get.*count.*incr.*count"
+      - "await.*get.*if.*await.*incr"
+    message: "Non-atomic rate limit check has race condition. Use INCR or Lua script."
+    fix_action: "Use atomic INCR (returns new value) or Lua script for check-and-increment"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  # --- HIGH: Major issues ---
+
+  - id: rate-limit-ip-only
+    name: Rate Limiting by IP Only
+    severity: warning
+    type: regex
+    pattern:
+      - "rateLimit.*req\\.ip(?![\\s\\S]{0,300}user|userId)"
+      - "keyGenerator.*req\\.ip(?![\\s\\S]{0,100}user)"
+      - "key.*=.*req\\.ip(?![\\s\\S]{0,100}user)"
+    message: "IP-only rate limiting fails for shared IPs (NAT, VPN). Consider user ID."
+    fix_action: "Use user ID when available, fall back to IP for anonymous"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: rate-limit-no-headers
+    name: No Rate Limit Headers
+    severity: warning
+    type: regex
+    pattern:
+      - "rateLimit(?![\\s\\S]{0,500}X-RateLimit|standardHeaders)"
+      - "limiter\\.consume(?![\\s\\S]{0,300}remainingPoints|headers)"
+    message: "Rate limit responses should include limit/remaining/reset headers."
+    fix_action: "Add X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset headers"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: rate-limit-blocking-health
+    name: Rate Limiting Health Endpoints
+    severity: warning
+    type: regex
+    pattern:
+      - "app\\.use.*rateLimit(?![\\s\\S]{0,500}skip.*health)"
+      - "router\\.use.*rateLimit(?![\\s\\S]{0,300}/health)"
+    message: "Rate limiting may block health check endpoints, breaking orchestration."
+    fix_action: "Add skip function to exclude /health and internal endpoints"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: rate-limit-fixed-window-only
+    name: Fixed Window Without Sliding
+    severity: warning
+    type: regex
+    pattern:
+      - "Math\\.floor.*Date\\.now.*60000(?![\\s\\S]{0,500}sliding|weighted)"
+      - "window.*=.*Math\\.floor(?![\\s\\S]{0,500}previous|sliding)"
+    message: "Fixed window allows 2x burst at boundaries. Consider sliding window."
+    fix_action: "Use sliding window counter for accurate limiting"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  # --- MEDIUM: Best practices ---
+
+  - id: rate-limit-no-backoff
+    name: Immediate Block Without Progressive
+    severity: warning
+    type: regex
+    pattern:
+      - "blockDuration.*3600|block.*hour(?![\\s\\S]{0,300}progressive)"
+      - "ban.*3600(?![\\s\\S]{0,200}warning)"
+    message: "Long blocks without warning frustrate legitimate users. Use progressive limits."
+    fix_action: "Implement progressive enforcement: warning → soft block → hard block"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: rate-limit-hardcoded
+    name: Hardcoded Rate Limits
+    severity: warning
+    type: regex
+    pattern:
+      - "max.*100(?![\\s\\S]{0,100}process\\.env|config)"
+      - "points.*100(?![\\s\\S]{0,100}LIMIT|config)"
+      - "limit.*=.*[0-9]+(?![\\s\\S]{0,100}env|config)"
+    message: "Hardcoded rate limits are difficult to tune. Use environment variables."
+    fix_action: "Use process.env.RATE_LIMIT or config file for limits"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: rate-limit-no-logging
+    name: No Rate Limit Event Logging
+    severity: info
+    type: regex
+    pattern:
+      - "status\\(429\\)(?![\\s\\S]{0,500}log|console|logger)"
+      - "rateLimit(?![\\s\\S]{0,800}on.*limited|onLimitReached)"
+    message: "Rate limit events should be logged for monitoring and abuse detection."
+    fix_action: "Log rate limit events with user ID, IP, and endpoint"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: rate-limit-no-metrics
+    name: No Rate Limit Metrics
+    severity: info
+    type: regex
+    pattern:
+      - "rateLimit(?![\\s\\S]{0,1000}counter|histogram|metric)"
+    message: "Rate limiting should expose metrics for monitoring."
+    fix_action: "Add Prometheus counters for rate limit hits and blocks"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: rate-limit-single-tier
+    name: Same Limit for All Users
+    severity: info
+    type: regex
+    pattern:
+      - "max.*[0-9]+(?![\\s\\S]{0,500}plan|tier|user\\.)"
+      - "points.*[0-9]+(?![\\s\\S]{0,500}plan|tier)"
+    message: "Consider tiered limits based on user plan (free/pro/enterprise)."
+    fix_action: "Implement per-plan limits using user.plan"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: rate-limit-no-bypass-internal
+    name: No Bypass for Internal Services
+    severity: warning
+    type: regex
+    pattern:
+      - "app\\.use.*rateLimit(?![\\s\\S]{0,800}internal|service-to-service)"
+    message: "Internal service-to-service calls may be rate limited unnecessarily."
+    fix_action: "Add skip for internal requests with service key header"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: rate-limit-no-redis-error-handling
+    name: No Redis Error Fallback
+    severity: warning
+    type: regex
+    pattern:
+      - "RateLimiterRedis(?![\\s\\S]{0,500}catch|fallback|insuranceLimiter)"
+    message: "Rate limiter should handle Redis failures gracefully."
+    fix_action: "Add fallback limiter for Redis connection failures"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: rate-limit-sync-check
+    name: Synchronous Rate Limit Check
+    severity: warning
+    type: regex
+    pattern:
+      - "rateLimitSync|checkLimitSync"
+      - "redis\\..*Sync.*rate"
+    message: "Synchronous rate limit checks block the event loop."
+    fix_action: "Use async rate limit checks with await"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+

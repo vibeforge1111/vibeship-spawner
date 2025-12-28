@@ -1,0 +1,590 @@
+# Sharp Edges: WebSocket & Real-time
+# Production gotchas that cause real-time systems to fail
+
+sharp_edges:
+  # --- CRITICAL: Will cause outages ---
+
+  - id: websocket-no-reconnection
+    summary: Connection drops and app just dies without reconnecting
+    severity: critical
+    situation: |
+      You implement WebSocket connection. It works in dev. In production,
+      connections drop randomly - mobile networks, laptop sleep, server
+      restarts. Your app just shows disconnected state forever.
+    why: |
+      WebSocket connections are NOT permanent. They WILL drop due to:
+      - Network changes (wifi to cellular)
+      - Proxy/load balancer timeouts (often 60s)
+      - Server restarts/deployments
+      - Client sleep/background
+      - Internet hiccups
+
+      Without reconnection, your app is broken for every dropped connection.
+    solution: |
+      Implement exponential backoff reconnection:
+
+      class ReconnectingWebSocket {
+        private reconnectAttempts = 0;
+        private maxReconnectAttempts = 10;
+        private baseDelay = 1000;
+        private maxDelay = 30000;
+
+        connect() {
+          this.ws = new WebSocket(this.url);
+
+          this.ws.onopen = () => {
+            this.reconnectAttempts = 0;  // Reset on success
+            this.onConnect();
+          };
+
+          this.ws.onclose = (event) => {
+            if (!event.wasClean) {
+              this.scheduleReconnect();
+            }
+          };
+        }
+
+        private scheduleReconnect() {
+          if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            this.onMaxRetriesReached();
+            return;
+          }
+
+          // Exponential backoff with jitter
+          const delay = Math.min(
+            this.baseDelay * Math.pow(2, this.reconnectAttempts) +
+            Math.random() * 1000,
+            this.maxDelay
+          );
+
+          this.reconnectAttempts++;
+          setTimeout(() => this.connect(), delay);
+        }
+      }
+    symptoms:
+      - "Connection lost" stays forever
+      - Works locally but fails in production
+      - Users report needing to refresh
+      - App dies after laptop sleep
+    detection_pattern: 'new WebSocket\\([^)]+\\)(?![\\s\\S]{0,500}reconnect)'
+
+  - id: websocket-thundering-herd
+    summary: Server restart causes all clients to reconnect simultaneously
+    severity: critical
+    situation: |
+      Your WebSocket server restarts. All 10,000 clients try to reconnect
+      at the exact same moment. Server is overwhelmed before it can fully
+      start. Connections fail, clients retry, cycle repeats.
+    why: |
+      Simultaneous reconnection creates a thundering herd:
+      - All clients use same backoff starting at 0
+      - Server can't handle 10K simultaneous handshakes
+      - Failed connections retry immediately
+      - Cascading failure ensues
+    solution: |
+      Add randomized jitter to reconnection delay:
+
+      private scheduleReconnect() {
+        // Base delay + exponential backoff
+        let delay = this.baseDelay * Math.pow(2, this.attempts);
+
+        // Add significant random jitter (0-50% of delay)
+        delay += Math.random() * delay * 0.5;
+
+        // Add initial random delay on first reconnect (0-5s)
+        if (this.attempts === 0) {
+          delay += Math.random() * 5000;
+        }
+
+        setTimeout(() => this.connect(), delay);
+      }
+
+      Server-side protection:
+      - Connection rate limiting per IP
+      - Gradual rollout of restarts
+      - Health check before accepting connections
+      - Queue connections during startup
+    symptoms:
+      - Server crashes after restart
+      - Connections fail in waves
+      - CPU spikes to 100% on restart
+      - Load balancer marks server unhealthy
+    detection_pattern: 'setTimeout.*connect.*\\d{3,4}\\)'
+
+  - id: websocket-memory-leak
+    summary: Event listeners accumulate causing memory leak and slowdown
+    severity: critical
+    situation: |
+      Your WebSocket client reconnects multiple times. Each reconnection
+      adds new event listeners without cleaning up old ones. Memory grows,
+      event handlers fire multiple times, app slows down.
+    why: |
+      Each connection might add:
+      - onmessage handlers
+      - onclose handlers
+      - Custom event listeners
+      - Interval timers for heartbeat
+
+      Without cleanup, these accumulate across reconnections.
+    solution: |
+      Clean up everything on disconnect:
+
+      class CleanWebSocket {
+        private ws: WebSocket | null = null;
+        private heartbeatInterval: number | null = null;
+        private messageHandlers: Set<Function> = new Set();
+
+        connect() {
+          // Clean up previous connection first
+          this.cleanup();
+
+          this.ws = new WebSocket(this.url);
+
+          this.ws.onopen = () => {
+            this.startHeartbeat();
+          };
+
+          this.ws.onclose = () => {
+            this.cleanup();
+            this.scheduleReconnect();
+          };
+        }
+
+        private cleanup() {
+          // Stop heartbeat
+          if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = null;
+          }
+
+          // Close existing connection
+          if (this.ws) {
+            this.ws.onclose = null;  // Prevent triggering handler
+            this.ws.close();
+            this.ws = null;
+          }
+        }
+
+        // Use AbortController for fetch-based cleanup
+        private controller: AbortController | null = null;
+
+        startSession() {
+          this.controller?.abort();  // Cancel previous
+          this.controller = new AbortController();
+
+          // All async operations use this signal
+        }
+      }
+    symptoms:
+      - Memory usage grows over time
+      - Events fire multiple times
+      - App gets slower after reconnections
+      - "Maximum call stack exceeded" errors
+    detection_pattern: 'addEventListener(?![\\s\\S]{0,200}removeEventListener)'
+
+  # --- HIGH: Will cause ongoing issues ---
+
+  - id: websocket-no-authentication
+    summary: WebSocket connection established without proper authentication
+    severity: high
+    situation: |
+      You implement WebSocket. HTTP endpoints are authenticated, but
+      WebSocket just connects. Anyone with the URL can connect and
+      receive all messages.
+    why: |
+      WebSocket upgrade bypasses normal HTTP middleware. Authentication
+      cookies might be sent, but you need to verify them. Without auth:
+      - Anyone can connect
+      - Can receive private messages
+      - Can send messages as anyone
+      - Resource exhaustion attacks
+    solution: |
+      Authenticate on connection:
+
+      // Option 1: Token in query string
+      const ws = new WebSocket(`wss://api.example.com?token=${authToken}`);
+
+      // Server verification
+      wss.on('connection', (ws, req) => {
+        const url = new URL(req.url, 'http://localhost');
+        const token = url.searchParams.get('token');
+
+        try {
+          const user = verifyToken(token);
+          ws.userId = user.id;
+        } catch {
+          ws.close(4001, 'Unauthorized');
+          return;
+        }
+      });
+
+      // Option 2: First message authentication
+      wss.on('connection', (ws) => {
+        ws.authenticated = false;
+
+        ws.on('message', (data) => {
+          const msg = JSON.parse(data);
+
+          if (!ws.authenticated) {
+            if (msg.type === 'auth' && verifyToken(msg.token)) {
+              ws.authenticated = true;
+              ws.userId = msg.userId;
+            } else {
+              ws.close(4001, 'Unauthorized');
+            }
+            return;
+          }
+
+          // Only process messages after auth
+          handleMessage(ws, msg);
+        });
+
+        // Force close if not authenticated within 5s
+        setTimeout(() => {
+          if (!ws.authenticated) ws.close(4001, 'Auth timeout');
+        }, 5000);
+      });
+    symptoms:
+      - Unauthenticated connections succeed
+      - Users see others' private messages
+      - Security audit failures
+    detection_pattern: 'on\\([\'"]connection[\'"].*\\)(?![\\s\\S]{0,300}auth|token|verify)'
+
+  - id: websocket-no-rate-limiting
+    summary: Clients can send unlimited messages overwhelming server
+    severity: high
+    situation: |
+      Your WebSocket server processes every message. A malicious or buggy
+      client sends thousands of messages per second. Server CPU spikes,
+      other clients experience delays, server may crash.
+    why: |
+      Unlike HTTP, WebSocket has no built-in rate limiting. A single
+      connection can flood the server with messages. No protection means:
+      - DoS from single client
+      - Resource exhaustion
+      - Cascade failures
+      - Other clients affected
+    solution: |
+      Implement per-connection rate limiting:
+
+      class RateLimitedConnection {
+        private messageCount = 0;
+        private lastReset = Date.now();
+        private readonly maxMessages = 100;  // per second
+        private readonly windowMs = 1000;
+
+        handleMessage(ws: WebSocket, data: string) {
+          // Reset counter if window passed
+          const now = Date.now();
+          if (now - this.lastReset > this.windowMs) {
+            this.messageCount = 0;
+            this.lastReset = now;
+          }
+
+          this.messageCount++;
+
+          if (this.messageCount > this.maxMessages) {
+            ws.send(JSON.stringify({
+              type: 'error',
+              code: 'RATE_LIMITED',
+              message: 'Too many messages, slow down'
+            }));
+
+            // Optionally disconnect repeat offenders
+            if (this.messageCount > this.maxMessages * 2) {
+              ws.close(4029, 'Rate limit exceeded');
+            }
+            return;
+          }
+
+          // Process message normally
+          this.processMessage(ws, data);
+        }
+      }
+    symptoms:
+      - Single client causes server slowdown
+      - CPU spikes with many messages
+      - Server becomes unresponsive
+      - Other clients timeout
+    detection_pattern: 'on\\([\'"]message[\'"](?![\\s\\S]{0,300}rate|limit|throttle)'
+
+  - id: websocket-missing-error-handling
+    summary: Errors in message handlers crash server or leave connection hanging
+    severity: high
+    situation: |
+      Client sends malformed message. JSON.parse throws. Handler function
+      throws. The error bubbles up, crashes the connection or even the
+      server process.
+    why: |
+      WebSocket message handlers run for every message. Any uncaught error:
+      - May crash Node.js process
+      - Leaves connection in bad state
+      - Other clients affected
+      - No error sent to client
+    solution: |
+      Wrap all message handling in try-catch:
+
+      ws.on('message', async (raw) => {
+        try {
+          // Parse JSON safely
+          let message;
+          try {
+            message = JSON.parse(raw.toString());
+          } catch {
+            ws.send(JSON.stringify({
+              type: 'error',
+              code: 'INVALID_JSON'
+            }));
+            return;
+          }
+
+          // Validate message schema
+          const result = messageSchema.safeParse(message);
+          if (!result.success) {
+            ws.send(JSON.stringify({
+              type: 'error',
+              code: 'INVALID_MESSAGE',
+              details: result.error.issues
+            }));
+            return;
+          }
+
+          // Handle message
+          await handleMessage(ws, result.data);
+
+        } catch (error) {
+          console.error('Message handler error:', error);
+
+          ws.send(JSON.stringify({
+            type: 'error',
+            code: 'INTERNAL_ERROR',
+            message: 'Something went wrong'
+          }));
+
+          // Don't crash - connection can continue
+        }
+      });
+
+      // Global error handler as safety net
+      process.on('uncaughtException', (error) => {
+        console.error('Uncaught exception:', error);
+        // Graceful shutdown
+      });
+    symptoms:
+      - Server crashes on bad input
+      - Connections die mysteriously
+      - No error messages to client
+      - Intermittent failures
+    detection_pattern: 'on\\([\'"]message[\'"].*JSON\\.parse(?![\\s\\S]{0,100}catch)'
+
+  - id: websocket-load-balancer-timeout
+    summary: Load balancer closes idle connections before app expects
+    severity: high
+    situation: |
+      WebSocket works in dev. In production behind load balancer, connections
+      drop after 60 seconds of no messages. Users constantly disconnecting.
+    why: |
+      Load balancers (ALB, nginx, CloudFlare) have idle timeouts:
+      - AWS ALB: 60 seconds default
+      - nginx: 60 seconds default
+      - CloudFlare: 100 seconds
+
+      If no data flows, load balancer assumes connection is dead and closes it.
+    solution: |
+      Keep connections active with heartbeat:
+
+      // Server-side ping (every 30 seconds)
+      const heartbeatInterval = setInterval(() => {
+        wss.clients.forEach((ws) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.ping();  // Built-in ping frame
+          }
+        });
+      }, 30000);
+
+      // Client-side ping (for ALBs that don't forward ping frames)
+      setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ping' }));
+        }
+      }, 30000);
+
+      // Also configure load balancer:
+      // ALB: Increase idle timeout to 3600s
+      // nginx: proxy_read_timeout 3600s;
+    symptoms:
+      - Connections drop after ~60 seconds idle
+      - Works in dev, fails in production
+      - Works during active use, fails when idle
+    detection_pattern: 'WebSocket(?![\\s\\S]{0,500}ping|heartbeat)'
+
+  # --- MEDIUM: Will cause user experience issues ---
+
+  - id: websocket-no-offline-queue
+    summary: Messages sent while offline are lost forever
+    severity: medium
+    situation: |
+      User loses connection briefly. They send messages during disconnect.
+      Messages are lost. Connection restores but sent messages are gone.
+    why: |
+      send() on a closed WebSocket throws or silently fails. Without
+      queuing, any message sent during disconnection is lost. Users
+      don't know their action didn't go through.
+    solution: |
+      Queue messages during disconnect:
+
+      class QueuedWebSocket {
+        private queue: string[] = [];
+        private maxQueueSize = 100;
+
+        send(message: any) {
+          const data = JSON.stringify(message);
+
+          if (this.ws?.readyState === WebSocket.OPEN) {
+            this.ws.send(data);
+          } else {
+            // Queue for later
+            if (this.queue.length < this.maxQueueSize) {
+              this.queue.push(data);
+            } else {
+              console.warn('Message queue full, dropping message');
+            }
+          }
+        }
+
+        private onConnect() {
+          // Flush queued messages
+          while (this.queue.length > 0) {
+            const msg = this.queue.shift()!;
+            this.ws!.send(msg);
+          }
+        }
+      }
+
+      // Consider which messages should be queued:
+      // - User actions: Queue
+      // - Typing indicators: Drop
+      // - Heartbeats: Drop
+    symptoms:
+      - Messages disappear during reconnection
+      - Users complain messages "didn't send"
+      - Actions need to be repeated
+    detection_pattern: 'send\\([^)]+\\)(?![\\s\\S]{0,200}queue|buffer)'
+
+  - id: websocket-presence-ghost-users
+    summary: Users show as online when they've actually disconnected
+    severity: medium
+    situation: |
+      User closes browser tab. Your presence system still shows them online.
+      Other users send messages expecting response. Ghost users everywhere.
+    why: |
+      Browser tab close doesn't always send close frame. Network drops don't
+      either. Your server thinks connection is alive when it's not. Without
+      heartbeat-based cleanup, ghosts accumulate.
+    solution: |
+      Use heartbeat to detect dead connections:
+
+      class PresenceWithCleanup {
+        private userHeartbeats = new Map<string, number>();
+
+        onHeartbeat(userId: string) {
+          this.userHeartbeats.set(userId, Date.now());
+        }
+
+        // Run every 30 seconds
+        cleanupGhosts() {
+          const now = Date.now();
+          const timeout = 60000;  // 60 seconds
+
+          this.userHeartbeats.forEach((lastSeen, userId) => {
+            if (now - lastSeen > timeout) {
+              this.markOffline(userId);
+              this.userHeartbeats.delete(userId);
+            }
+          });
+        }
+
+        // Server-side ping to detect dead connections
+        pingAllConnections() {
+          this.connections.forEach((ws, userId) => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.ping();
+              // If no pong received within 10s, close
+            }
+          });
+        }
+      }
+    symptoms:
+      - Users show online for hours after leaving
+      - Ghost users in participant lists
+      - Messages sent to disconnected users
+    detection_pattern: 'presence|online(?![\\s\\S]{0,300}heartbeat|cleanup|timeout)'
+
+  - id: websocket-no-backpressure
+    summary: Server sends faster than client can process, causing memory issues
+    severity: medium
+    situation: |
+      Your server broadcasts high-frequency updates. Some clients on slow
+      connections can't keep up. Server buffers messages, memory grows,
+      eventually server or client crashes.
+    why: |
+      WebSocket send() buffers if network can't keep up. Buffer grows
+      unbounded. Server memory exhausted. Client drowns in messages
+      when buffer finally flushes.
+    solution: |
+      Monitor and handle backpressure:
+
+      // Check bufferedAmount before sending
+      function safeSend(ws: WebSocket, data: string) {
+        const MAX_BUFFER = 1024 * 1024; // 1MB
+
+        if (ws.bufferedAmount > MAX_BUFFER) {
+          console.warn('Client buffer full, dropping message');
+          // Optionally mark client as slow
+          return false;
+        }
+
+        ws.send(data);
+        return true;
+      }
+
+      // For high-frequency updates, batch
+      class BatchedBroadcast {
+        private batch: any[] = [];
+        private batchInterval = 100; // ms
+
+        add(message: any) {
+          this.batch.push(message);
+        }
+
+        start() {
+          setInterval(() => {
+            if (this.batch.length > 0) {
+              const data = JSON.stringify(this.batch);
+              this.broadcast(data);
+              this.batch = [];
+            }
+          }, this.batchInterval);
+        }
+      }
+    symptoms:
+      - Server memory grows over time
+      - Slow clients cause issues
+      - Clients receive stale data in bursts
+    detection_pattern: 'send\\([^)]+\\)(?![\\s\\S]{0,200}bufferedAmount)'
+
+# Config
+config:
+  always_run:
+    - websocket-no-reconnection
+    - websocket-no-authentication
+    - websocket-missing-error-handling
+
+  pre_deploy:
+    - all
+
+  exclude_patterns:
+    - "**/*.test.*"
+    - "**/*.spec.*"
+    - "**/node_modules/**"
+

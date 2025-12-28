@@ -1,0 +1,578 @@
+# Sharp Edges: Microservices Patterns
+# Gotchas that cause distributed system failures
+
+sharp_edges:
+
+  # --- CRITICAL: System-breaking issues ---
+
+  - id: distributed-monolith
+    summary: Building a distributed monolith is worse than a real monolith
+    severity: critical
+    situation: |
+      You decompose your monolith into microservices. Each service calls
+      other services synchronously for every operation. When one service
+      is slow or down, the entire system fails. Deployments require
+      coordinating all services. You have all the complexity of microservices
+      with none of the benefits.
+    why: |
+      Distributed monoliths combine the worst of both worlds:
+      - Network latency on every operation
+      - Cascade failures when any service fails
+      - Deployment coupling
+      - No independent scaling
+      - Added operational complexity
+
+      You've distributed your code but not your ownership.
+    solution: |
+      Design for loose coupling:
+
+      // BAD: Sync call chain for every request
+      async function createOrder(data) {
+        const user = await userService.get(data.userId);        // Sync
+        const product = await productService.get(data.productId); // Sync
+        const inventory = await inventoryService.check(data);    // Sync
+        const payment = await paymentService.authorize(data);    // Sync
+        // All must succeed, any failure = order failure
+      }
+
+      // GOOD: Async events, eventual consistency
+      async function createOrder(data) {
+        // Validate essential data locally
+        if (!data.userId || !data.items.length) {
+          throw new ValidationError('Invalid order');
+        }
+
+        // Create order immediately
+        const order = await orderRepo.create({
+          ...data,
+          status: 'pending',
+        });
+
+        // Publish event - other services react asynchronously
+        await eventBus.publish('order.created', {
+          orderId: order.id,
+          ...order,
+        });
+
+        return order; // Return immediately
+      }
+
+      // Inventory service subscribes and reacts
+      eventBus.subscribe('order.created', async (event) => {
+        try {
+          await reserveInventory(event.items);
+          await eventBus.publish('inventory.reserved', { orderId: event.orderId });
+        } catch (error) {
+          await eventBus.publish('inventory.failed', {
+            orderId: event.orderId,
+            reason: error.message,
+          });
+        }
+      });
+
+      // Order service handles the outcome
+      eventBus.subscribe('inventory.failed', async (event) => {
+        await orderRepo.update(event.orderId, { status: 'failed' });
+        await notifyCustomer(event.orderId, 'Order failed - out of stock');
+      });
+    symptoms:
+      - One service down takes down everything
+      - Can't deploy services independently
+      - High latency due to call chains
+      - "Why is this so slow?"
+    detection_pattern: 'await.*Service.*await.*Service.*await.*Service'
+
+  - id: no-timeouts
+    summary: Missing timeouts cause cascade failures
+    severity: critical
+    situation: |
+      Your service calls another service without timeout. That service
+      hangs due to database lock. Your service waits. Thread pool exhausted.
+      All requests to your service timeout. Cascade failure spreads.
+    why: |
+      Without timeouts:
+      - One slow service blocks all callers
+      - Threads/connections exhausted
+      - Memory grows as requests queue
+      - No way to recover without restart
+
+      Hangs are worse than failures - at least failures are fast.
+    solution: |
+      Always set timeouts:
+
+      import axios from 'axios';
+      import CircuitBreaker from 'opossum';
+
+      // Axios with timeout
+      const client = axios.create({
+        timeout: 5000,  // 5 seconds
+        // Also set socket timeout
+        httpAgent: new http.Agent({ timeout: 10000 }),
+      });
+
+      // Circuit breaker adds another layer
+      const breaker = new CircuitBreaker(
+        (url) => client.get(url),
+        {
+          timeout: 3000,              // Fail fast
+          errorThresholdPercentage: 50,
+          resetTimeout: 30000,
+        }
+      );
+
+      // Fallback for when circuit is open
+      breaker.fallback(() => {
+        return { cached: true, data: getCachedData() };
+      });
+
+      // gRPC with deadline
+      const deadline = new Date(Date.now() + 5000);
+      client.getOrder(request, { deadline }, (err, response) => {
+        if (err?.code === grpc.status.DEADLINE_EXCEEDED) {
+          handleTimeout();
+        }
+      });
+
+      // Database queries with timeout
+      await prisma.$queryRaw`
+        SET statement_timeout = '5000';
+        SELECT * FROM large_table WHERE ...;
+      `;
+    symptoms:
+      - Threads stuck in WAITING state
+      - Memory grows until OOM
+      - Service stops responding but process alive
+      - "It was working until it suddenly wasn't"
+    detection_pattern: 'axios\\.get\\((?![^)]*timeout)|fetch\\((?![^)]*signal)'
+
+  - id: no-circuit-breaker
+    summary: Missing circuit breaker causes cascade failures
+    severity: critical
+    situation: |
+      Your service calls payment service. Payment service goes down.
+      Every request to your service now waits for timeout, then fails.
+      With 100 requests/second and 30 second timeout, you queue 3000
+      requests. Memory exhausted. Your service crashes. Upstream callers
+      now fail. The entire system collapses.
+    why: |
+      Without circuit breakers:
+      - Failed calls keep trying
+      - Resources exhausted waiting for hopeless calls
+      - No way to fail fast
+      - No automatic recovery detection
+    solution: |
+      Use circuit breaker for all external calls:
+
+      import CircuitBreaker from 'opossum';
+
+      // Circuit breaker configuration
+      const paymentBreaker = new CircuitBreaker(
+        async (orderId, amount) => {
+          return paymentGateway.charge(orderId, amount);
+        },
+        {
+          timeout: 5000,               // Fail after 5s
+          errorThresholdPercentage: 50, // Open after 50% failures
+          resetTimeout: 30000,          // Try again after 30s
+          volumeThreshold: 10,          // Need 10 requests to trip
+        }
+      );
+
+      // Monitor circuit state
+      paymentBreaker.on('open', () => {
+        alerting.send('Payment circuit OPEN - service down');
+        metrics.increment('circuit.payment.open');
+      });
+
+      paymentBreaker.on('halfOpen', () => {
+        console.log('Payment circuit testing...');
+      });
+
+      paymentBreaker.on('close', () => {
+        console.log('Payment circuit recovered');
+        metrics.increment('circuit.payment.close');
+      });
+
+      // Use with fallback
+      async function processPayment(orderId: string, amount: number) {
+        try {
+          return await paymentBreaker.fire(orderId, amount);
+        } catch (error) {
+          if (error.message === 'Breaker is open') {
+            // Graceful degradation
+            await queueForRetry(orderId, amount);
+            return { status: 'pending', message: 'Payment processing delayed' };
+          }
+          throw error;
+        }
+      }
+    symptoms:
+      - One service failure takes down many
+      - Memory grows during outages
+      - Slow recovery after dependency recovers
+      - "Everything failed for 30 minutes"
+    detection_pattern: 'axios|fetch|grpc(?![\\s\\S]{0,500}circuit|breaker|opossum)'
+
+  - id: shared-database
+    summary: Shared database between services defeats microservices benefits
+    severity: critical
+    situation: |
+      Both order service and inventory service read/write to the same
+      products table. You need to change the schema. Which team owns it?
+      Both teams need to coordinate deploys. You can't scale them independently.
+      You've just split a monolith into two pieces that must deploy together.
+    why: |
+      Shared database = tight coupling:
+      - Schema changes require coordination
+      - No clear ownership
+      - Can't optimize for different access patterns
+      - Can't scale independently
+      - Transaction boundaries unclear
+    solution: |
+      Each service owns its data:
+
+      // Order Service - owns orders and denormalized product info
+      interface OrderDatabase {
+        orders: Order[];
+        orderItems: OrderItem[];
+        // Copy of product info at order time
+        products: { id: string; name: string; price: number }[];
+      }
+
+      // Inventory Service - owns inventory data
+      interface InventoryDatabase {
+        products: Product[];
+        stockLevels: StockLevel[];
+        reservations: Reservation[];
+      }
+
+      // Sync via events
+      class ProductEventHandler {
+        async handleProductUpdated(event: ProductUpdatedEvent) {
+          // Update denormalized product data in order service
+          await this.orderDb.products.update({
+            where: { id: event.productId },
+            data: { name: event.name, price: event.price },
+          });
+        }
+
+        async handleProductDeleted(event: ProductDeletedEvent) {
+          // Mark as deleted, don't delete - orders reference it
+          await this.orderDb.products.update({
+            where: { id: event.productId },
+            data: { deleted: true },
+          });
+        }
+      }
+
+      // Accept eventual consistency
+      // Order service might have slightly stale product names
+      // That's OK - order captured data at order time anyway
+    symptoms:
+      - Schema changes require coordinating teams
+      - Can't deploy services independently
+      - Database becomes bottleneck
+      - "We can't change this table, three services use it"
+    detection_pattern: 'shared.?database|multiple.*services.*same.*table'
+
+  # --- HIGH: Serious issues ---
+
+  - id: sync-for-everything
+    summary: Using synchronous calls where async would work
+    severity: high
+    situation: |
+      Order creation calls inventory, payment, shipping, and notification
+      services synchronously. Total latency is sum of all services.
+      If any is slow, order is slow. You're blocking on services that
+      don't need to block.
+    why: |
+      Not everything needs immediate consistency:
+      - User doesn't need to wait for email to send
+      - Inventory check could be eventual
+      - Analytics definitely doesn't need to block
+
+      Sync calls multiply latency and failure probability.
+    solution: |
+      Use async for non-blocking operations:
+
+      async function createOrder(data) {
+        // SYNC: Things that must happen before returning to user
+        const order = await orderRepo.create(data);
+        const payment = await paymentService.charge(order.total);
+
+        // ASYNC: Things that can happen eventually
+        await eventBus.publish('order.created', { order, payment });
+
+        return order; // Return immediately
+      }
+
+      // Other services handle async
+      // Notification: sends email (user doesn't wait)
+      // Analytics: records event (definitely doesn't block)
+      // Inventory: reserves stock (could be eventual)
+
+      // Rule of thumb:
+      // - User sees result immediately? → Sync
+      // - User doesn't need to wait? → Async
+      // - Can retry later? → Async
+      // - Failure OK to handle later? → Async
+    symptoms:
+      - High latency on operations
+      - Timeout increases with each new service
+      - Simple operations become slow
+      - "Why does checkout take 5 seconds?"
+    detection_pattern: 'await.*Service.*await.*Service(?![\\s\\S]{0,200}parallel|Promise\\.all)'
+
+  - id: no-correlation-id
+    summary: Can't trace requests across services
+    severity: high
+    situation: |
+      User reports "my order failed." You check order service logs - no
+      error. You check payment service - an error! But which request?
+      There are thousands. You spend hours correlating timestamps.
+    why: |
+      Without correlation IDs:
+      - Can't trace request flow
+      - Log correlation is guesswork
+      - Debugging takes hours
+      - Can't build request timeline
+    solution: |
+      Pass correlation ID through every request:
+
+      // Generate at edge (API gateway or first service)
+      app.use((req, res, next) => {
+        req.correlationId = req.headers['x-correlation-id'] || uuidv4();
+        res.setHeader('x-correlation-id', req.correlationId);
+        next();
+      });
+
+      // Include in all logs
+      function log(level: string, message: string, data?: any) {
+        console.log(JSON.stringify({
+          timestamp: new Date().toISOString(),
+          level,
+          message,
+          correlationId: getCorrelationId(),  // From async context
+          service: process.env.SERVICE_NAME,
+          ...data,
+        }));
+      }
+
+      // Pass in service calls
+      async function callPaymentService(orderId: string) {
+        return axios.post(`${PAYMENT_URL}/charge`, data, {
+          headers: {
+            'x-correlation-id': getCorrelationId(),
+          },
+        });
+      }
+
+      // Use in events
+      await eventBus.publish('order.created', {
+        ...orderData,
+        metadata: {
+          correlationId: getCorrelationId(),
+          timestamp: new Date().toISOString(),
+        },
+      });
+
+      // Now you can: grep "correlation-id: abc123" across all services
+    symptoms:
+      - "Which request caused this error?"
+      - Hours spent correlating logs manually
+      - Can't trace request through system
+      - Debugging distributed issues is nightmare
+    detection_pattern: 'axios\\.post(?![\\s\\S]{0,200}correlation|traceId|requestId)'
+
+  - id: chatty-services
+    summary: Too many small calls between services
+    severity: high
+    situation: |
+      To render order page, you call order service (1 call), then user
+      service for customer (1 call), then product service for each item
+      (N calls), then shipping for rates (1 call). 3 + N network round
+      trips for one page.
+    why: |
+      Each network call adds:
+      - Latency (10-100ms+)
+      - Failure probability
+      - Resource consumption
+      - Complexity
+
+      N calls = N x latency = unusable.
+    solution: |
+      Aggregate data or use denormalization:
+
+      // Option 1: Aggregate endpoint
+      // Order service returns everything needed
+      async function getOrderDetails(orderId: string) {
+        return orderRepo.findWithDetails(orderId);
+        // Returns: order + items + denormalized customer/product data
+      }
+
+      // Option 2: Backend for Frontend (BFF)
+      async function getOrderPageData(orderId: string) {
+        const [order, customer, shipping] = await Promise.all([
+          orderService.get(orderId),
+          userService.get(order.customerId),
+          shippingService.getRates(order.shippingAddress),
+        ]);
+        // One call to BFF, BFF makes parallel calls
+        return { order, customer, shipping };
+      }
+
+      // Option 3: GraphQL Federation
+      // Let gateway compose data from multiple services
+
+      // Option 4: Denormalize aggressively
+      // Store customer name, product name in order
+      // Accept eventual consistency for read performance
+    symptoms:
+      - Page load requires many API calls
+      - Latency grows linearly with features
+      - One slow service slows entire page
+      - "Adding one more field adds 200ms"
+    detection_pattern: 'await.*Service.*for.*of|Promise\\.all\\([\\s\\S]{0,50}\\.map'
+
+  # --- MEDIUM: Operational issues ---
+
+  - id: no-idempotency
+    summary: Non-idempotent operations cause duplicate processing
+    severity: medium
+    situation: |
+      Order service publishes "order.created" event. Payment service
+      processes it and charges card. Network hiccup - event redelivered.
+      Payment service charges card again. Customer charged twice.
+    why: |
+      In distributed systems, messages can be:
+      - Delivered multiple times
+      - Delivered out of order
+      - Delivered after long delay
+
+      At-least-once is easy. Exactly-once is a lie. Idempotency is required.
+    solution: |
+      Make all operations idempotent:
+
+      class PaymentHandler {
+        async handleOrderCreated(event: OrderCreatedEvent) {
+          const idempotencyKey = `payment:order:${event.orderId}`;
+
+          // Check if already processed
+          const existing = await redis.get(idempotencyKey);
+          if (existing) {
+            console.log(`Payment for order ${event.orderId} already processed`);
+            return JSON.parse(existing);
+          }
+
+          // Process payment with Stripe's idempotency
+          const payment = await stripe.charges.create({
+            amount: event.total,
+            currency: 'usd',
+            idempotency_key: event.orderId,  // Stripe prevents duplicates
+          });
+
+          // Store result for our idempotency
+          await redis.setex(idempotencyKey, 86400, JSON.stringify(payment));
+
+          return payment;
+        }
+      }
+
+      // Database operations
+      async function reserveInventory(orderId: string, items: Item[]) {
+        // Use orderId as idempotency key
+        const existing = await db.reservation.findUnique({
+          where: { orderId },
+        });
+
+        if (existing) {
+          return existing;  // Already reserved
+        }
+
+        // Upsert pattern
+        return db.reservation.upsert({
+          where: { orderId },
+          create: { orderId, items, status: 'reserved' },
+          update: {},  // No-op if exists
+        });
+      }
+    symptoms:
+      - Duplicate charges on retries
+      - Duplicate emails
+      - Duplicate records
+      - "Customer was charged 3 times"
+    detection_pattern: 'eventBus\\.subscribe(?![\\s\\S]{0,500}idempotency|dedupe)'
+
+  - id: version-coupling
+    summary: All services must deploy together due to API coupling
+    severity: medium
+    situation: |
+      You change order API response format. Payment service expects old
+      format. You must deploy both together. But inventory service also
+      calls order service... You end up deploying everything together,
+      just like a monolith.
+    why: |
+      Tight API coupling defeats independent deployment:
+      - Change one service, break callers
+      - Must coordinate deploys
+      - No incremental rollout
+      - High risk changes
+    solution: |
+      Use API versioning and backward compatibility:
+
+      // Version in URL
+      app.get('/v1/orders/:id', getOrderV1);
+      app.get('/v2/orders/:id', getOrderV2);
+
+      // Backward compatible changes
+      // ADD fields: ✓ Safe (callers ignore new fields)
+      // REMOVE fields: ✗ Breaking (use deprecation)
+      // CHANGE field types: ✗ Breaking
+
+      // Deprecation with sunset header
+      app.get('/v1/orders/:id', (req, res) => {
+        res.setHeader('Deprecation', 'true');
+        res.setHeader('Sunset', 'Sat, 1 Jan 2025 00:00:00 GMT');
+        // Still works, but warns callers
+        return getOrderV1(req, res);
+      });
+
+      // Consumer-driven contracts (Pact)
+      // Callers define expectations, provider verifies
+
+      // Tolerant reader pattern
+      function parseOrderResponse(response: any): Order {
+        return {
+          id: response.id,
+          total: response.total,
+          // Use defaults for new optional fields
+          currency: response.currency || 'USD',
+          // Ignore unknown fields
+        };
+      }
+    symptoms:
+      - Deploys require coordination
+      - Fear of changing APIs
+      - All services deploy together
+      - "We can't change this, everyone uses it"
+    detection_pattern: 'break.*change|deploy.*together|coordinate.*deploy'
+
+# ============================================================================
+# CONFIG
+# ============================================================================
+config:
+  always_run:
+    - distributed-monolith
+    - no-timeouts
+    - no-circuit-breaker
+    - shared-database
+
+  pre_deploy:
+    - all
+
+  exclude_patterns:
+    - "**/*.test.*"
+    - "**/*.spec.*"
+    - "**/node_modules/**"
+
+

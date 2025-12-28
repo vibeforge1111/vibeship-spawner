@@ -1,0 +1,274 @@
+# Queue & Background Workers Validations
+# Automated checks to catch queue processing issues
+
+validations:
+
+  # --- CRITICAL: Data integrity issues ---
+
+  - id: queue-no-idempotency
+    name: Job Without Idempotency Check
+    severity: error
+    type: regex
+    pattern:
+      - "queue\\.add\\([^)]+\\)(?![\\s\\S]{0,500}idempotency)"
+      - "async.*job.*\\{(?![\\s\\S]{0,300}redis\\.get|redis\\.exists|setnx)"
+    message: "Job processing should check for idempotency to prevent duplicate side effects on retry."
+    fix_action: "Add idempotency check using Redis SETNX before processing"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/workers/**"
+      - "**/jobs/**"
+
+  - id: queue-data-mutation
+    name: Mutating Job Data
+    severity: error
+    type: regex
+    pattern:
+      - "job\\.data\\.[a-zA-Z]+\\s*="
+      - "job\\.data\\s*=\\s*\\{"
+    message: "Job data should be treated as immutable. Mutating it causes issues on retry."
+    fix_action: "Create a copy of job.data instead of mutating it"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/workers/**"
+
+  - id: queue-no-dlq
+    name: No Dead Letter Queue
+    severity: error
+    type: regex
+    pattern:
+      - "attempts.*[3-9](?![\\s\\S]{0,800}dlq|dead.?letter|failed.?queue)"
+      - "maxAttempts(?![\\s\\S]{0,800}dlq|dead.?letter)"
+    message: "Jobs with retry limits should have a dead letter queue for failed jobs."
+    fix_action: "Add DLQ handling for jobs that exhaust retries"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  # --- HIGH: Reliability issues ---
+
+  - id: queue-no-graceful-shutdown
+    name: Missing Graceful Shutdown
+    severity: error
+    type: regex
+    pattern:
+      - "new Worker\\([^)]+\\)(?![\\s\\S]{0,2000}SIGTERM|SIGINT|graceful)"
+    message: "Worker needs graceful shutdown to prevent job loss on deploy/restart."
+    fix_action: "Add SIGTERM/SIGINT handlers that call worker.close()"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/workers/**"
+
+  - id: queue-no-timeout
+    name: Job Without Timeout
+    severity: error
+    type: regex
+    pattern:
+      - "new Worker\\([^)]+\\)(?![\\s\\S]{0,500}lockDuration|timeout)"
+      - "async.*job.*\\{(?![\\s\\S]{0,300}AbortController|setTimeout|Promise\\.race)"
+    message: "Jobs should have timeout to prevent hanging workers."
+    fix_action: "Add lockDuration to worker options or use AbortController for operations"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/workers/**"
+
+  - id: queue-unbounded-retries
+    name: Unbounded Retry Count
+    severity: error
+    type: regex
+    pattern:
+      - "attempts.*Infinity"
+      - "attempts.*999"
+      - "maxRetries.*Infinity"
+    message: "Jobs with infinite retries can become zombies. Set a reasonable limit."
+    fix_action: "Set attempts to 3-5 and handle permanent failures with DLQ"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: queue-no-error-handling
+    name: Worker Without Error Handling
+    severity: error
+    type: regex
+    pattern:
+      - "new Worker\\([^,]+,\\s*async.*\\{(?![\\s\\S]{0,500}try|catch)"
+    message: "Worker processor should have error handling for proper failure tracking."
+    fix_action: "Add try/catch and handle errors appropriately"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  # --- MEDIUM: Operational issues ---
+
+  - id: queue-no-backoff
+    name: Fixed Retry Delay Without Backoff
+    severity: warning
+    type: regex
+    pattern:
+      - "backoff.*fixed"
+      - "retryDelay.*[0-9]+(?![\\s\\S]{0,100}exponential|Math\\.pow)"
+    message: "Fixed retry delay can overwhelm services. Use exponential backoff."
+    fix_action: "Use backoff: { type: 'exponential', delay: 1000 }"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: queue-no-jitter
+    name: Backoff Without Jitter
+    severity: warning
+    type: regex
+    pattern:
+      - "exponential(?![\\s\\S]{0,200}jitter|random)"
+      - "retryStrategy(?![\\s\\S]{0,200}random|Math\\.random)"
+    message: "Exponential backoff without jitter causes thundering herd on reconnect."
+    fix_action: "Add random jitter to retry delays"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: queue-no-concurrency-limit
+    name: No Concurrency Limit
+    severity: warning
+    type: regex
+    pattern:
+      - "new Worker\\([^)]+\\)(?![\\s\\S]{0,300}concurrency)"
+    message: "Worker should have concurrency limit to control resource usage."
+    fix_action: "Add concurrency option: concurrency: 5"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: queue-no-rate-limit
+    name: No Rate Limiting for External APIs
+    severity: warning
+    type: regex
+    pattern:
+      - "queue.*api|api.*queue(?![\\s\\S]{0,500}limiter|rateLimit)"
+      - "fetch\\([^)]+\\)(?![\\s\\S]{0,300}limiter)"
+    message: "Jobs calling external APIs should have rate limiting."
+    fix_action: "Add limiter option or use rate-limiter-flexible"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/workers/**"
+
+  - id: queue-no-progress
+    name: Long Job Without Progress Updates
+    severity: warning
+    type: regex
+    pattern:
+      - "for.*items(?![\\s\\S]{0,500}updateProgress|progress)"
+      - "forEach(?![\\s\\S]{0,500}updateProgress)"
+    message: "Long-running batch jobs should report progress."
+    fix_action: "Add job.updateProgress() in processing loop"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  # --- INFO: Best practices ---
+
+  - id: queue-no-correlation-id
+    name: No Correlation ID in Jobs
+    severity: info
+    type: regex
+    pattern:
+      - "queue\\.add\\([^)]+\\)(?![\\s\\S]{0,200}correlationId|requestId|traceId)"
+    message: "Jobs should include correlation ID for distributed tracing."
+    fix_action: "Include correlationId in job data from request context"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: queue-no-logging
+    name: Worker Without Event Logging
+    severity: info
+    type: regex
+    pattern:
+      - "new Worker(?![\\s\\S]{0,1000}on\\(['\"]completed|on\\(['\"]failed)"
+    message: "Worker should log job completion and failure events."
+    fix_action: "Add worker.on('completed') and worker.on('failed') handlers with logging"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: queue-hardcoded-connection
+    name: Hardcoded Redis Connection
+    severity: warning
+    type: regex
+    pattern:
+      - "new Redis\\(['\"]redis://localhost"
+      - "host.*['\"]localhost['\"]"
+      - "port.*6379"
+    message: "Redis connection should use environment variables."
+    fix_action: "Use process.env.REDIS_URL or REDIS_HOST/REDIS_PORT"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: queue-no-job-removal
+    name: No Job Cleanup Configuration
+    severity: info
+    type: regex
+    pattern:
+      - "new Queue(?![\\s\\S]{0,500}removeOnComplete|removeOnFail)"
+    message: "Queue should configure job removal to prevent memory growth."
+    fix_action: "Add removeOnComplete and removeOnFail options"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: queue-sync-in-worker
+    name: Synchronous Operations in Worker
+    severity: warning
+    type: regex
+    pattern:
+      - "readFileSync|writeFileSync|execSync"
+      - "JSON\\.parse\\(fs\\.readFileSync"
+    message: "Avoid synchronous operations in workers - they block the event loop."
+    fix_action: "Use async versions: readFile, writeFile, exec"
+    applies_to:
+      - "**/workers/**"
+      - "**/jobs/**"
+
+  - id: queue-no-scheduler
+    name: Delayed Jobs Without Scheduler
+    severity: warning
+    type: regex
+    pattern:
+      - "delay.*[0-9]+(?![\\s\\S]{0,500}QueueScheduler)"
+    message: "Delayed jobs require QueueScheduler for reliable execution."
+    fix_action: "Create QueueScheduler for the queue"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: queue-memory-storage
+    name: In-Memory Queue for Important Jobs
+    severity: error
+    type: regex
+    pattern:
+      - "new Queue.*memory"
+      - "bull.*connection.*null"
+    message: "In-memory queues lose jobs on restart. Use Redis for persistence."
+    fix_action: "Connect to Redis for job persistence"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: queue-no-health-check
+    name: No Worker Health Check
+    severity: info
+    type: regex
+    pattern:
+      - "new Worker(?![\\s\\S]{0,2000}/health|healthCheck)"
+    message: "Workers should expose health check endpoint for orchestration."
+    fix_action: "Add /health endpoint that checks worker status and queue depth"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+

@@ -1,0 +1,235 @@
+# Microservices Patterns Validations
+# Automated checks to catch distributed system issues
+
+validations:
+
+  # --- CRITICAL: System-breaking issues ---
+
+  - id: microservices-no-timeout
+    name: Service Call Without Timeout
+    severity: error
+    type: regex
+    pattern:
+      - "axios\\.(get|post|put|delete)\\([^)]+\\)(?![\\s\\S]{0,100}timeout)"
+      - "fetch\\([^)]+\\)(?![\\s\\S]{0,100}signal|AbortController)"
+      - "http\\.request(?![\\s\\S]{0,200}timeout)"
+    message: "Service calls without timeout can hang forever and cause cascade failures."
+    fix_action: "Add timeout option: axios.get(url, { timeout: 5000 })"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/services/**"
+
+  - id: microservices-no-circuit-breaker
+    name: External Call Without Circuit Breaker
+    severity: error
+    type: regex
+    pattern:
+      - "axios\\.(get|post).*Service(?![\\s\\S]{0,500}circuit|breaker|opossum)"
+      - "fetch.*api(?![\\s\\S]{0,500}circuit)"
+    message: "External service calls should use circuit breaker to prevent cascade failures."
+    fix_action: "Wrap calls with opossum circuit breaker"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/services/**"
+
+  - id: microservices-shared-db
+    name: Multiple Services Accessing Same Table
+    severity: error
+    type: regex
+    pattern:
+      - "from.*orders.*from.*products.*from.*users"
+      - "JOIN.*orders.*JOIN.*inventory"
+    message: "Services should own their data. Shared tables create coupling."
+    fix_action: "Each service should have its own database with denormalized data"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.sql"
+
+  # --- HIGH: Serious issues ---
+
+  - id: microservices-sync-chain
+    name: Synchronous Service Call Chain
+    severity: warning
+    type: regex
+    pattern:
+      - "await.*Service.*await.*Service.*await.*Service"
+      - "await.*client\\.[a-z]+.*await.*client\\.[a-z]+.*await.*client"
+    message: "Chain of sync calls multiplies latency and failure probability. Consider async."
+    fix_action: "Use events for non-blocking operations, parallelize independent calls"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: microservices-no-correlation-id
+    name: Missing Correlation ID
+    severity: warning
+    type: regex
+    pattern:
+      - "axios\\.(get|post)(?![\\s\\S]{0,300}correlation|x-request-id|traceId)"
+      - "fetch(?![\\s\\S]{0,300}correlation|requestId)"
+    message: "Service calls should include correlation ID for distributed tracing."
+    fix_action: "Add x-correlation-id header to all service calls"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/services/**"
+
+  - id: microservices-no-retry
+    name: Service Call Without Retry Logic
+    severity: warning
+    type: regex
+    pattern:
+      - "axios\\.(get|post)(?![\\s\\S]{0,500}retry|attempt|backoff)"
+      - "try.*await.*Service(?![\\s\\S]{0,300}retry)"
+    message: "Transient failures need retry with backoff."
+    fix_action: "Add retry logic with exponential backoff for transient errors"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: microservices-chatty
+    name: Chatty Service Communication
+    severity: warning
+    type: regex
+    pattern:
+      - "for.*of.*await.*Service"
+      - "map.*async.*await.*Service"
+      - "Promise\\.all.*\\.map.*Service"
+    message: "Multiple sequential service calls cause high latency. Batch or denormalize."
+    fix_action: "Use batch endpoints, denormalize data, or aggregate at source"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  # --- MEDIUM: Best practices ---
+
+  - id: microservices-no-idempotency
+    name: Event Handler Without Idempotency
+    severity: warning
+    type: regex
+    pattern:
+      - "eventBus\\.subscribe(?![\\s\\S]{0,500}idempotency|dedupe|already)"
+      - "on\\(['\"].*created['\"](?![\\s\\S]{0,300}idempotent)"
+    message: "Event handlers must be idempotent - events can be redelivered."
+    fix_action: "Check for duplicate processing using event ID or idempotency key"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/handlers/**"
+      - "**/events/**"
+
+  - id: microservices-no-fallback
+    name: No Fallback for Service Failure
+    severity: warning
+    type: regex
+    pattern:
+      - "circuitBreaker(?![\\s\\S]{0,300}fallback)"
+      - "try.*await.*Service(?![\\s\\S]{0,200}catch.*fallback|catch.*default)"
+    message: "Service calls should have fallback for graceful degradation."
+    fix_action: "Add fallback behavior when dependency is unavailable"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: microservices-hardcoded-url
+    name: Hardcoded Service URL
+    severity: warning
+    type: regex
+    pattern:
+      - "http://localhost:[0-9]+/api"
+      - "https://[a-z]+-service\\.[a-z]+\\.com"
+      - "baseURL.*=.*['\"]http"
+    message: "Service URLs should come from environment/config, not hardcoded."
+    fix_action: "Use process.env.SERVICE_URL or service discovery"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: microservices-no-health-check
+    name: Service Without Health Check
+    severity: warning
+    type: regex
+    pattern:
+      - "express\\(\\)(?![\\s\\S]{0,1000}/health|/ready|/live)"
+      - "createServer(?![\\s\\S]{0,1000}health)"
+    message: "Services need health check endpoints for orchestration."
+    fix_action: "Add /health and /ready endpoints"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/server.*"
+      - "**/app.*"
+
+  - id: microservices-no-graceful-shutdown
+    name: Missing Graceful Shutdown
+    severity: warning
+    type: regex
+    pattern:
+      - "listen\\([0-9]+(?![\\s\\S]{0,1000}SIGTERM|graceful)"
+      - "createServer(?![\\s\\S]{0,1000}SIGTERM)"
+    message: "Services need graceful shutdown for zero-downtime deploys."
+    fix_action: "Handle SIGTERM to stop accepting requests and drain connections"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/server.*"
+
+  # --- INFO: Best practices ---
+
+  - id: microservices-no-api-version
+    name: API Without Versioning
+    severity: info
+    type: regex
+    pattern:
+      - "app\\.(get|post)\\(['\"]/((?!v[0-9]).)*['\"]"
+      - "router\\.(get|post)\\(['\"]/((?!v[0-9]).)*['\"]"
+    message: "API endpoints should be versioned for backward compatibility."
+    fix_action: "Add version prefix: /v1/orders instead of /orders"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/routes/**"
+
+  - id: microservices-no-metrics
+    name: Service Without Metrics
+    severity: info
+    type: regex
+    pattern:
+      - "express\\(\\)(?![\\s\\S]{0,2000}prometheus|metrics|prom-client)"
+    message: "Services should expose metrics for monitoring."
+    fix_action: "Add Prometheus metrics endpoint with prom-client"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/server.*"
+
+  - id: microservices-no-structured-logging
+    name: Unstructured Logging
+    severity: info
+    type: regex
+    pattern:
+      - "console\\.log\\([^{]"
+      - "console\\.error\\(['\"]"
+    message: "Use structured JSON logging for log aggregation."
+    fix_action: "Use logger.info({ message, correlationId, ...data })"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: microservices-direct-db-access
+    name: Direct Database Access Across Boundaries
+    severity: warning
+    type: regex
+    pattern:
+      - "import.*from.*other-service.*db"
+      - "require.*other-service.*prisma"
+    message: "Services should not directly access another service's database."
+    fix_action: "Use service API calls instead of direct database access"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+

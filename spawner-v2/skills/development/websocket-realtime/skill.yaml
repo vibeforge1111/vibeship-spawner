@@ -1,0 +1,723 @@
+# WebSocket & Real-time Communication Skill
+# Patterns for building real-time applications with WebSockets, SSE, and Socket.IO
+
+id: websocket-realtime
+name: WebSocket & Real-time
+version: 1.0.0
+layer: 3  # Pattern skill
+
+description: |
+  Expert guidance on real-time communication patterns including WebSockets,
+  Server-Sent Events (SSE), Socket.IO, and WebRTC. Covers connection management,
+  reconnection strategies, scaling, and real-time data synchronization.
+
+owns:
+  - WebSocket connection lifecycle
+  - Real-time message protocols
+  - Reconnection and heartbeat strategies
+  - Room/channel management
+  - Presence detection
+  - Real-time data synchronization
+  - Scaling WebSocket servers
+  - SSE implementation
+
+does_not_own:
+  - REST API design → api-design skill
+  - Database real-time triggers → database-schema-design
+  - Message queue architecture → queue-workers skill
+  - Video/audio streaming → specialized media skill
+  - Push notifications → mobile/notification skill
+
+triggers:
+  - "implement websocket"
+  - "real-time updates"
+  - "live chat"
+  - "socket.io"
+  - "server-sent events"
+  - "live notifications"
+  - "collaborative editing"
+  - "presence indicators"
+  - Working with ws, Socket.IO, Pusher, Ably
+
+pairs_with:
+  - backend
+  - state-management
+  - infrastructure-as-code
+  - security-hardening
+
+requires:
+  - Understanding of HTTP
+  - Node.js or similar runtime
+  - Basic networking concepts
+
+tags:
+  - websocket
+  - realtime
+  - socket.io
+  - sse
+  - live
+  - streaming
+  - push
+  - collaboration
+
+identity: |
+  I am a real-time systems architect who has built chat systems, collaborative
+  editors, live dashboards, and multiplayer games. I've seen WebSocket connections
+  drop, reconnection storms take down servers, and presence systems go stale.
+
+  My philosophy:
+  - Real-time is harder than it looks - plan for failure
+  - Every connection can drop at any moment
+  - Scaling WebSockets is fundamentally different from scaling HTTP
+  - Client and server must agree on message formats and semantics
+  - Presence and sync state are distributed systems problems
+
+  I help you build reliable real-time systems that survive the real world.
+
+# ============================================================================
+# PATTERNS
+# ============================================================================
+patterns:
+  - name: "Connection Lifecycle Management"
+    description: |
+      Properly handle the WebSocket connection states: connecting, open,
+      closing, closed. Each state requires different handling.
+    example: |
+      class WebSocketClient {
+        private ws: WebSocket | null = null;
+        private reconnectAttempts = 0;
+        private maxReconnectAttempts = 5;
+        private reconnectDelay = 1000;
+
+        connect(url: string) {
+          this.ws = new WebSocket(url);
+
+          this.ws.onopen = () => {
+            console.log('Connected');
+            this.reconnectAttempts = 0;
+            this.startHeartbeat();
+          };
+
+          this.ws.onclose = (event) => {
+            this.stopHeartbeat();
+            if (!event.wasClean) {
+              this.scheduleReconnect();
+            }
+          };
+
+          this.ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+          };
+
+          this.ws.onmessage = (event) => {
+            this.handleMessage(JSON.parse(event.data));
+          };
+        }
+
+        private scheduleReconnect() {
+          if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            console.error('Max reconnect attempts reached');
+            return;
+          }
+
+          const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts);
+          this.reconnectAttempts++;
+
+          setTimeout(() => this.connect(this.url), delay);
+        }
+      }
+    when: Any WebSocket implementation
+
+  - name: "Heartbeat/Ping-Pong"
+    description: |
+      Keep connections alive and detect stale connections with periodic
+      heartbeats. Essential for detecting zombie connections.
+    example: |
+      // Server-side (Node.js with ws)
+      const wss = new WebSocket.Server({ port: 8080 });
+
+      wss.on('connection', (ws) => {
+        ws.isAlive = true;
+
+        ws.on('pong', () => {
+          ws.isAlive = true;
+        });
+      });
+
+      // Ping all clients every 30 seconds
+      const interval = setInterval(() => {
+        wss.clients.forEach((ws) => {
+          if (!ws.isAlive) {
+            return ws.terminate();
+          }
+          ws.isAlive = false;
+          ws.ping();
+        });
+      }, 30000);
+
+      wss.on('close', () => {
+        clearInterval(interval);
+      });
+
+      // Client-side custom heartbeat
+      class HeartbeatClient {
+        private heartbeatInterval: number | null = null;
+        private missedHeartbeats = 0;
+        private maxMissedHeartbeats = 3;
+
+        startHeartbeat() {
+          this.heartbeatInterval = setInterval(() => {
+            if (this.missedHeartbeats >= this.maxMissedHeartbeats) {
+              this.ws.close();
+              return;
+            }
+
+            this.missedHeartbeats++;
+            this.send({ type: 'ping' });
+          }, 10000);
+        }
+
+        handleMessage(msg) {
+          if (msg.type === 'pong') {
+            this.missedHeartbeats = 0;
+          }
+        }
+      }
+    when: Any persistent WebSocket connection
+
+  - name: "Room/Channel Management"
+    description: |
+      Organize connections into rooms or channels for targeted broadcasting.
+      Users subscribe to specific topics and receive only relevant messages.
+    example: |
+      // Socket.IO room management
+      io.on('connection', (socket) => {
+        // Join a room
+        socket.on('join', (roomId) => {
+          socket.join(roomId);
+          socket.to(roomId).emit('user-joined', socket.id);
+        });
+
+        // Leave a room
+        socket.on('leave', (roomId) => {
+          socket.leave(roomId);
+          socket.to(roomId).emit('user-left', socket.id);
+        });
+
+        // Send to specific room
+        socket.on('message', ({ roomId, content }) => {
+          io.to(roomId).emit('message', {
+            sender: socket.id,
+            content,
+            timestamp: Date.now()
+          });
+        });
+      });
+
+      // Custom room implementation
+      class RoomManager {
+        private rooms = new Map<string, Set<WebSocket>>();
+
+        join(roomId: string, ws: WebSocket) {
+          if (!this.rooms.has(roomId)) {
+            this.rooms.set(roomId, new Set());
+          }
+          this.rooms.get(roomId)!.add(ws);
+        }
+
+        leave(roomId: string, ws: WebSocket) {
+          this.rooms.get(roomId)?.delete(ws);
+        }
+
+        broadcast(roomId: string, message: any, exclude?: WebSocket) {
+          const room = this.rooms.get(roomId);
+          if (!room) return;
+
+          const data = JSON.stringify(message);
+          room.forEach((ws) => {
+            if (ws !== exclude && ws.readyState === WebSocket.OPEN) {
+              ws.send(data);
+            }
+          });
+        }
+      }
+    when: Multi-user features, chat rooms, collaborative editing
+
+  - name: "Message Protocol Design"
+    description: |
+      Define a clear message format with types, payloads, and optional
+      request/response correlation for bidirectional communication.
+    example: |
+      // Message envelope structure
+      interface Message<T = unknown> {
+        type: string;           // Message type for routing
+        id?: string;            // Correlation ID for request/response
+        payload: T;             // Actual data
+        timestamp: number;      // Server timestamp
+        version?: number;       // Protocol version
+      }
+
+      // Message types
+      type ClientMessage =
+        | { type: 'subscribe'; payload: { channel: string } }
+        | { type: 'unsubscribe'; payload: { channel: string } }
+        | { type: 'message'; payload: { channel: string; content: string } }
+        | { type: 'ping'; payload: {} };
+
+      type ServerMessage =
+        | { type: 'subscribed'; payload: { channel: string } }
+        | { type: 'message'; payload: { channel: string; content: string; sender: string } }
+        | { type: 'presence'; payload: { channel: string; users: string[] } }
+        | { type: 'error'; payload: { code: string; message: string } }
+        | { type: 'pong'; payload: {} };
+
+      // Server message handler
+      function handleMessage(ws: WebSocket, raw: string) {
+        let message: ClientMessage;
+        try {
+          message = JSON.parse(raw);
+        } catch {
+          ws.send(JSON.stringify({
+            type: 'error',
+            payload: { code: 'INVALID_JSON', message: 'Invalid JSON' }
+          }));
+          return;
+        }
+
+        switch (message.type) {
+          case 'subscribe':
+            handleSubscribe(ws, message.payload);
+            break;
+          case 'message':
+            handleChatMessage(ws, message.payload);
+            break;
+          // ...
+        }
+      }
+    when: Any WebSocket application
+
+  - name: "Presence System"
+    description: |
+      Track online/offline status of users with proper handling of
+      disconnections, reconnections, and stale sessions.
+    example: |
+      class PresenceManager {
+        private presence = new Map<string, {
+          status: 'online' | 'away' | 'offline';
+          lastSeen: number;
+          connections: Set<string>;
+        }>();
+
+        private cleanupInterval: NodeJS.Timer;
+
+        constructor() {
+          // Clean up stale presence every minute
+          this.cleanupInterval = setInterval(
+            () => this.cleanupStale(),
+            60000
+          );
+        }
+
+        connect(userId: string, connectionId: string) {
+          if (!this.presence.has(userId)) {
+            this.presence.set(userId, {
+              status: 'online',
+              lastSeen: Date.now(),
+              connections: new Set()
+            });
+          }
+
+          const user = this.presence.get(userId)!;
+          user.connections.add(connectionId);
+          user.status = 'online';
+          user.lastSeen = Date.now();
+
+          this.broadcastPresence(userId);
+        }
+
+        disconnect(userId: string, connectionId: string) {
+          const user = this.presence.get(userId);
+          if (!user) return;
+
+          user.connections.delete(connectionId);
+
+          // User still has other connections
+          if (user.connections.size > 0) {
+            return;
+          }
+
+          // Delay offline status for reconnection window
+          setTimeout(() => {
+            const current = this.presence.get(userId);
+            if (current && current.connections.size === 0) {
+              current.status = 'offline';
+              this.broadcastPresence(userId);
+            }
+          }, 5000);
+        }
+
+        private cleanupStale() {
+          const staleThreshold = Date.now() - 5 * 60 * 1000; // 5 minutes
+
+          this.presence.forEach((user, userId) => {
+            if (user.lastSeen < staleThreshold && user.connections.size === 0) {
+              this.presence.delete(userId);
+            }
+          });
+        }
+      }
+    when: User online status, typing indicators, collaborative features
+
+  - name: "Server-Sent Events (SSE)"
+    description: |
+      Use SSE for server-to-client unidirectional streaming. Simpler than
+      WebSocket when you don't need client-to-server messages.
+    example: |
+      // Server (Express)
+      app.get('/events', (req, res) => {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        // Send initial data
+        res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+
+        // Keep connection alive
+        const heartbeat = setInterval(() => {
+          res.write(': heartbeat\n\n');
+        }, 30000);
+
+        // Subscribe to events
+        const handler = (event: any) => {
+          res.write(`event: ${event.type}\n`);
+          res.write(`data: ${JSON.stringify(event.data)}\n\n`);
+        };
+
+        eventEmitter.on('notification', handler);
+
+        // Cleanup on disconnect
+        req.on('close', () => {
+          clearInterval(heartbeat);
+          eventEmitter.off('notification', handler);
+        });
+      });
+
+      // Client
+      const eventSource = new EventSource('/events');
+
+      eventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        console.log('Message:', data);
+      };
+
+      eventSource.addEventListener('notification', (event) => {
+        const data = JSON.parse(event.data);
+        showNotification(data);
+      });
+
+      eventSource.onerror = () => {
+        console.log('SSE connection error, will auto-reconnect');
+      };
+    when: Notifications, live feeds, one-way data streaming
+
+  - name: "Scaling with Redis Pub/Sub"
+    description: |
+      Scale WebSocket servers horizontally using Redis for cross-instance
+      message broadcasting.
+    example: |
+      import Redis from 'ioredis';
+
+      const pub = new Redis();
+      const sub = new Redis();
+
+      class ScalableWebSocketServer {
+        private wss: WebSocket.Server;
+        private channels = new Map<string, Set<WebSocket>>();
+
+        constructor(port: number) {
+          this.wss = new WebSocket.Server({ port });
+
+          // Subscribe to Redis channels
+          sub.psubscribe('channel:*');
+          sub.on('pmessage', (pattern, channel, message) => {
+            const channelName = channel.replace('channel:', '');
+            this.localBroadcast(channelName, JSON.parse(message));
+          });
+
+          this.wss.on('connection', (ws) => {
+            ws.on('message', (raw) => {
+              const msg = JSON.parse(raw.toString());
+              this.handleMessage(ws, msg);
+            });
+          });
+        }
+
+        subscribe(ws: WebSocket, channel: string) {
+          if (!this.channels.has(channel)) {
+            this.channels.set(channel, new Set());
+          }
+          this.channels.get(channel)!.add(ws);
+        }
+
+        // Broadcast via Redis to all instances
+        broadcast(channel: string, message: any) {
+          pub.publish(`channel:${channel}`, JSON.stringify(message));
+        }
+
+        // Local broadcast to connections on this instance
+        private localBroadcast(channel: string, message: any) {
+          const subs = this.channels.get(channel);
+          if (!subs) return;
+
+          const data = JSON.stringify(message);
+          subs.forEach((ws) => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(data);
+            }
+          });
+        }
+      }
+    when: Multiple server instances, horizontal scaling
+
+  - name: "Optimistic Updates with Reconciliation"
+    description: |
+      Apply changes immediately on client, then reconcile with server
+      response. Handle conflicts gracefully.
+    example: |
+      class RealtimeDocument {
+        private localVersion = 0;
+        private serverVersion = 0;
+        private pendingChanges: Change[] = [];
+
+        applyLocalChange(change: Change) {
+          // Apply immediately
+          this.localVersion++;
+          change.localVersion = this.localVersion;
+
+          this.applyChange(change);
+          this.pendingChanges.push(change);
+
+          // Send to server
+          this.ws.send(JSON.stringify({
+            type: 'change',
+            payload: change,
+            baseVersion: this.serverVersion
+          }));
+        }
+
+        handleServerMessage(msg: ServerMessage) {
+          if (msg.type === 'change-accepted') {
+            // Remove from pending
+            this.pendingChanges = this.pendingChanges.filter(
+              c => c.localVersion !== msg.localVersion
+            );
+            this.serverVersion = msg.serverVersion;
+          }
+
+          if (msg.type === 'change-rejected') {
+            // Rollback and replay
+            this.rollbackToServerState(msg.serverState);
+            this.replayPendingChanges();
+          }
+
+          if (msg.type === 'remote-change') {
+            // Transform pending changes against remote
+            this.pendingChanges = this.pendingChanges.map(
+              c => this.transform(c, msg.change)
+            );
+
+            // Apply remote change
+            this.applyChange(msg.change);
+            this.serverVersion = msg.serverVersion;
+          }
+        }
+      }
+    when: Collaborative editing, real-time sync with conflict resolution
+
+# ============================================================================
+# ANTI-PATTERNS
+# ============================================================================
+anti_patterns:
+  - name: "No Reconnection Strategy"
+    description: Not handling connection drops and not implementing reconnection
+    why: |
+      WebSocket connections WILL drop. Mobile networks, laptop sleep, server
+      restarts, load balancer timeouts - all cause disconnections. Without
+      reconnection, users see a broken app.
+    instead: |
+      Implement exponential backoff reconnection:
+      - Start with short delay (1s)
+      - Double delay on each attempt (2s, 4s, 8s...)
+      - Cap at max delay (30s)
+      - Reset on successful connection
+      - Show connection status to user
+
+  - name: "Unbounded Message Buffers"
+    description: Queueing messages without limits when connection is down
+    why: |
+      If connection drops and you buffer all messages, memory grows unbounded.
+      When connection restores, sending all buffered messages can overwhelm
+      server or cause stale data issues.
+    instead: |
+      - Set max buffer size
+      - Drop oldest messages when full
+      - Consider which messages are time-sensitive
+      - Maybe just resync state on reconnection instead of replaying
+
+  - name: "No Message Validation"
+    description: Trusting client messages without validation
+    why: |
+      Clients can send anything. Malformed JSON, wrong types, malicious
+      payloads. Trusting client input causes crashes and security issues.
+    instead: |
+      Validate every message:
+      - Parse JSON in try/catch
+      - Validate message schema (Zod, Joi)
+      - Authenticate message sender
+      - Rate limit per connection
+      - Sanitize any user-generated content
+
+  - name: "Blocking Event Loop"
+    description: Doing heavy work in WebSocket message handlers
+    why: |
+      Node.js event loop is single-threaded. Heavy computation in message
+      handlers blocks all connections. Latency spikes, timeouts, dropped
+      connections.
+    instead: |
+      Keep handlers fast:
+      - Offload heavy work to worker threads
+      - Use message queues for processing
+      - Respond immediately, process async
+      - Set reasonable timeouts
+
+  - name: "No Heartbeat"
+    description: Relying on TCP keepalive alone to detect dead connections
+    why: |
+      TCP keepalive is too slow and unreliable. Proxies and load balancers
+      may not forward keepalives. Dead connections stay "open" for minutes.
+    instead: |
+      Implement application-level heartbeat:
+      - Server pings clients every 30s
+      - Client responds with pong
+      - Close connections that miss 2-3 heartbeats
+      - Client can also ping server
+
+  - name: "Broadcasting to All Connections"
+    description: Sending every message to every connected client
+    why: |
+      Doesn't scale. With 10,000 connections, every message causes 10,000
+      sends. Server CPU spikes, clients get irrelevant messages.
+    instead: |
+      Use rooms/channels:
+      - Clients subscribe to relevant channels
+      - Broadcast only to channel subscribers
+      - Use pub/sub for multi-server broadcast
+      - Consider message filtering server-side
+
+# ============================================================================
+# TECHNOLOGY COMPARISON
+# ============================================================================
+technology_comparison:
+  - name: Native WebSocket (ws library)
+    pros:
+      - Minimal overhead
+      - Full control
+      - No client library required
+    cons:
+      - Manual reconnection
+      - Manual heartbeat
+      - Manual room management
+    best_for: "Simple use cases, when you want full control"
+
+  - name: Socket.IO
+    pros:
+      - Auto-reconnection
+      - Room management
+      - Fallback to polling
+      - Built-in events
+    cons:
+      - Larger bundle (~40KB)
+      - Requires client library
+      - Not pure WebSocket
+    best_for: "Chat apps, collaborative apps, real-time dashboards"
+
+  - name: Server-Sent Events (SSE)
+    pros:
+      - Simpler than WebSocket
+      - Auto-reconnection built-in
+      - Works over HTTP
+      - No special server needed
+    cons:
+      - Unidirectional (server to client)
+      - Limited connections per domain
+      - No binary support
+    best_for: "Notifications, live feeds, event streams"
+
+  - name: WebRTC
+    pros:
+      - Peer-to-peer
+      - Low latency
+      - Audio/video support
+    cons:
+      - Complex setup
+      - NAT traversal issues
+      - Still needs signaling server
+    best_for: "Video calls, P2P file sharing, real-time games"
+
+  - name: Pusher/Ably (Managed)
+    pros:
+      - No infrastructure to manage
+      - Global distribution
+      - Presence built-in
+    cons:
+      - Cost at scale
+      - Vendor lock-in
+      - Less control
+    best_for: "MVP, when you don't want to manage WebSocket infrastructure"
+
+# ============================================================================
+# HANDOFFS
+# ============================================================================
+handoffs:
+  receives_from:
+    - skill: backend
+      context: "Backend needs real-time features"
+      receives:
+        - "Feature requirements"
+        - "User flow"
+        - "Scale expectations"
+      provides: "WebSocket architecture and implementation"
+
+    - skill: frontend
+      context: "Frontend needs real-time updates"
+      receives:
+        - "UI requirements"
+        - "Update frequency"
+        - "Offline behavior needs"
+      provides: "Client-side WebSocket integration"
+
+  hands_to:
+    - skill: infrastructure-as-code
+      trigger: "Need to deploy WebSocket servers"
+      provides:
+        - "Server requirements"
+        - "Scaling needs"
+        - "Load balancer configuration"
+      receives: "Infrastructure for WebSocket deployment"
+
+    - skill: security-hardening
+      trigger: "Need to secure WebSocket connections"
+      provides:
+        - "Authentication needs"
+        - "Message types"
+        - "Rate limiting requirements"
+      receives: "Security patterns for WebSocket"
+
+    - skill: queue-workers
+      trigger: "Need async processing of real-time messages"
+      provides:
+        - "Message types"
+        - "Processing requirements"
+        - "Delivery guarantees"
+      receives: "Message queue integration"
+

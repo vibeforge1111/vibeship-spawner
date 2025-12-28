@@ -1,0 +1,977 @@
+# Microservices Patterns Skill
+# Service decomposition, communication, and resilience patterns
+
+id: microservices-patterns
+name: Microservices Patterns
+category: development
+complexity: advanced
+requires_skills:
+  - backend
+  - api-designer
+  - queue-workers
+
+description: |
+  Patterns for designing, building, and operating microservices architectures.
+  Covers service decomposition, inter-service communication, resilience patterns,
+  data consistency, and observability in distributed systems.
+
+# ============================================================================
+# CORE PATTERNS
+# ============================================================================
+patterns:
+
+  # --- Service Design ---
+
+  bounded_context:
+    name: Bounded Context and Service Boundaries
+    description: Define services around business domains
+    when: "Breaking down a monolith or designing new services"
+    pattern: |
+      // Identify bounded contexts using domain-driven design
+
+      // BAD: Technical decomposition
+      // - UserService, DatabaseService, CacheService
+      // - Leads to chatty services and distributed monolith
+
+      // GOOD: Business domain decomposition
+      // - OrderService: Order lifecycle (create, update, fulfill)
+      // - InventoryService: Stock management
+      // - PaymentService: Payment processing
+      // - ShippingService: Delivery management
+
+      // Each service owns its domain:
+      interface OrderService {
+        // Own data - orders table
+        // Own business logic - order validation, pricing
+        // Own API - /orders endpoints
+
+        createOrder(items: Item[], customer: CustomerId): Promise<Order>;
+        updateOrder(orderId: string, updates: Partial<Order>): Promise<Order>;
+        cancelOrder(orderId: string): Promise<void>;
+
+        // Queries only for own aggregate
+        getOrder(orderId: string): Promise<Order>;
+        getOrdersByCustomer(customerId: string): Promise<Order[]>;
+      }
+
+      // Communication with other services via:
+      // 1. Sync API calls (when response needed immediately)
+      // 2. Events (when eventual consistency is OK)
+
+      // Order service publishes events for others to react:
+      interface OrderEvents {
+        'order.created': { orderId: string; items: Item[] };
+        'order.paid': { orderId: string; amount: number };
+        'order.shipped': { orderId: string; trackingNumber: string };
+        'order.cancelled': { orderId: string; reason: string };
+      }
+
+      // Other services subscribe and react:
+      // InventoryService listens to 'order.created' → reserve stock
+      // ShippingService listens to 'order.paid' → create shipment
+      // NotificationService listens to all → send emails
+    why: "Bounded contexts minimize coupling and allow independent evolution"
+
+  api_gateway:
+    name: API Gateway Pattern
+    description: Single entry point for all client requests
+    when: "Clients need to interact with multiple services"
+    pattern: |
+      // API Gateway responsibilities:
+      // 1. Request routing
+      // 2. Authentication/Authorization
+      // 3. Rate limiting
+      // 4. Request/response transformation
+      // 5. Aggregation
+
+      // Using Express as gateway
+      import express from 'express';
+      import { createProxyMiddleware } from 'http-proxy-middleware';
+
+      const app = express();
+
+      // Shared middleware
+      app.use(authMiddleware);
+      app.use(rateLimitMiddleware);
+      app.use(requestLogging);
+
+      // Route to services
+      app.use('/api/orders', createProxyMiddleware({
+        target: process.env.ORDER_SERVICE_URL,
+        changeOrigin: true,
+        pathRewrite: { '^/api/orders': '' },
+      }));
+
+      app.use('/api/users', createProxyMiddleware({
+        target: process.env.USER_SERVICE_URL,
+        changeOrigin: true,
+        pathRewrite: { '^/api/users': '' },
+      }));
+
+      app.use('/api/payments', createProxyMiddleware({
+        target: process.env.PAYMENT_SERVICE_URL,
+        changeOrigin: true,
+        pathRewrite: { '^/api/payments': '' },
+      }));
+
+      // Aggregation endpoint (combine multiple service calls)
+      app.get('/api/dashboard', async (req, res) => {
+        const [orders, stats, notifications] = await Promise.all([
+          orderClient.getRecentOrders(req.user.id),
+          analyticsClient.getUserStats(req.user.id),
+          notificationClient.getUnread(req.user.id),
+        ]);
+
+        res.json({ orders, stats, notifications });
+      });
+
+      // Backend for Frontend (BFF) variant
+      // Mobile clients get different aggregation than web
+      app.get('/api/mobile/home', mobileHomeHandler);
+      app.get('/api/web/home', webHomeHandler);
+    why: "Gateway simplifies client code and centralizes cross-cutting concerns"
+
+  # --- Service Communication ---
+
+  sync_communication:
+    name: Synchronous Service Communication
+    description: Request-response between services
+    when: "Need immediate response from another service"
+    pattern: |
+      import axios from 'axios';
+      import CircuitBreaker from 'opossum';
+
+      // Service client with resilience patterns
+      class OrderServiceClient {
+        private baseUrl: string;
+        private circuitBreaker: CircuitBreaker;
+
+        constructor() {
+          this.baseUrl = process.env.ORDER_SERVICE_URL;
+
+          // Circuit breaker prevents cascade failures
+          this.circuitBreaker = new CircuitBreaker(
+            (url: string, options: any) => axios(url, options),
+            {
+              timeout: 5000,           // 5 second timeout
+              errorThresholdPercentage: 50,  // Open after 50% failures
+              resetTimeout: 30000,     // Try again after 30 seconds
+            }
+          );
+
+          this.circuitBreaker.on('open', () => {
+            console.log('Circuit opened - order service unavailable');
+          });
+        }
+
+        async getOrder(orderId: string): Promise<Order> {
+          try {
+            const response = await this.circuitBreaker.fire(
+              `${this.baseUrl}/orders/${orderId}`,
+              {
+                method: 'GET',
+                headers: {
+                  'Authorization': `Bearer ${this.getServiceToken()}`,
+                  'X-Correlation-Id': getCorrelationId(),
+                },
+                timeout: 3000,
+              }
+            );
+            return response.data;
+          } catch (error) {
+            if (error.message === 'Breaker is open') {
+              throw new ServiceUnavailableError('Order service unavailable');
+            }
+            throw error;
+          }
+        }
+
+        // Retry with backoff for transient failures
+        async createOrder(data: CreateOrderDto): Promise<Order> {
+          return retry(
+            () => this.circuitBreaker.fire(`${this.baseUrl}/orders`, {
+              method: 'POST',
+              data,
+              headers: this.getHeaders(),
+            }),
+            {
+              retries: 3,
+              factor: 2,
+              minTimeout: 1000,
+            }
+          );
+        }
+      }
+
+      // gRPC alternative for internal service communication
+      import { OrderServiceClient } from './generated/order_grpc_pb';
+      import { credentials } from '@grpc/grpc-js';
+
+      const orderClient = new OrderServiceClient(
+        process.env.ORDER_SERVICE_GRPC,
+        credentials.createInsecure()
+      );
+    why: "Sync communication is simple but requires resilience patterns"
+
+  async_communication:
+    name: Asynchronous Event-Driven Communication
+    description: Publish-subscribe messaging between services
+    when: "Services can react eventually, need loose coupling"
+    pattern: |
+      // Event-driven architecture using message broker
+
+      // Event publisher (in Order Service)
+      import { EventBus } from './event-bus';
+
+      class OrderService {
+        constructor(private eventBus: EventBus) {}
+
+        async createOrder(data: CreateOrderDto): Promise<Order> {
+          // 1. Create order in local database
+          const order = await this.orderRepo.create(data);
+
+          // 2. Publish event for other services
+          await this.eventBus.publish('order.created', {
+            orderId: order.id,
+            customerId: order.customerId,
+            items: order.items,
+            total: order.total,
+            timestamp: new Date().toISOString(),
+          });
+
+          return order;
+        }
+
+        async cancelOrder(orderId: string, reason: string): Promise<void> {
+          await this.orderRepo.updateStatus(orderId, 'cancelled');
+
+          await this.eventBus.publish('order.cancelled', {
+            orderId,
+            reason,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+
+      // Event consumer (in Inventory Service)
+      class InventoryEventHandler {
+        constructor(private eventBus: EventBus, private inventoryRepo: InventoryRepo) {
+          this.subscribe();
+        }
+
+        private subscribe() {
+          this.eventBus.subscribe('order.created', this.handleOrderCreated.bind(this));
+          this.eventBus.subscribe('order.cancelled', this.handleOrderCancelled.bind(this));
+        }
+
+        async handleOrderCreated(event: OrderCreatedEvent) {
+          // Reserve inventory for each item
+          for (const item of event.items) {
+            await this.inventoryRepo.reserve(item.productId, item.quantity, event.orderId);
+          }
+        }
+
+        async handleOrderCancelled(event: OrderCancelledEvent) {
+          // Release reserved inventory
+          await this.inventoryRepo.releaseReservation(event.orderId);
+        }
+      }
+
+      // Event bus implementation with RabbitMQ
+      import amqp from 'amqplib';
+
+      class RabbitMQEventBus implements EventBus {
+        private channel: amqp.Channel;
+
+        async connect() {
+          const connection = await amqp.connect(process.env.RABBITMQ_URL);
+          this.channel = await connection.createChannel();
+          await this.channel.assertExchange('events', 'topic', { durable: true });
+        }
+
+        async publish(event: string, data: any) {
+          this.channel.publish(
+            'events',
+            event,
+            Buffer.from(JSON.stringify({
+              event,
+              data,
+              metadata: {
+                timestamp: new Date().toISOString(),
+                correlationId: getCorrelationId(),
+                source: process.env.SERVICE_NAME,
+              },
+            })),
+            { persistent: true }
+          );
+        }
+
+        async subscribe(event: string, handler: (data: any) => Promise<void>) {
+          const queue = `${process.env.SERVICE_NAME}.${event}`;
+          await this.channel.assertQueue(queue, { durable: true });
+          await this.channel.bindQueue(queue, 'events', event);
+
+          this.channel.consume(queue, async (msg) => {
+            if (!msg) return;
+
+            try {
+              const { data } = JSON.parse(msg.content.toString());
+              await handler(data);
+              this.channel.ack(msg);
+            } catch (error) {
+              // Move to dead letter queue after retries
+              this.channel.nack(msg, false, false);
+            }
+          });
+        }
+      }
+    why: "Async communication provides loose coupling and better resilience"
+
+  # --- Resilience Patterns ---
+
+  circuit_breaker:
+    name: Circuit Breaker Pattern
+    description: Prevent cascade failures when services are unhealthy
+    when: "Calling external services that may fail"
+    pattern: |
+      import CircuitBreaker from 'opossum';
+
+      // Circuit breaker states:
+      // CLOSED: Normal operation, requests pass through
+      // OPEN: Service is failing, requests fail immediately
+      // HALF-OPEN: Testing if service recovered
+
+      const options = {
+        timeout: 3000,              // Time before request is considered failed
+        errorThresholdPercentage: 50, // % failures before opening circuit
+        resetTimeout: 30000,        // Time before trying again
+        volumeThreshold: 10,        // Min requests before opening
+      };
+
+      // Wrap external calls
+      const paymentBreaker = new CircuitBreaker(
+        async (orderId: string, amount: number) => {
+          return paymentGateway.charge(orderId, amount);
+        },
+        options
+      );
+
+      // Fallback when circuit is open
+      paymentBreaker.fallback(() => {
+        return { status: 'pending', message: 'Payment processing delayed' };
+      });
+
+      // Events for monitoring
+      paymentBreaker.on('success', (result) => {
+        metrics.increment('payment.success');
+      });
+
+      paymentBreaker.on('failure', (error) => {
+        metrics.increment('payment.failure');
+      });
+
+      paymentBreaker.on('open', () => {
+        alerting.send('Payment circuit opened!');
+      });
+
+      paymentBreaker.on('halfOpen', () => {
+        console.log('Payment circuit testing recovery...');
+      });
+
+      paymentBreaker.on('close', () => {
+        console.log('Payment circuit recovered');
+      });
+
+      // Usage
+      async function processPayment(orderId: string, amount: number) {
+        try {
+          return await paymentBreaker.fire(orderId, amount);
+        } catch (error) {
+          if (error.message === 'Breaker is open') {
+            // Handle graceful degradation
+            return { status: 'queued', retryAt: new Date(Date.now() + 60000) };
+          }
+          throw error;
+        }
+      }
+    why: "Circuit breakers prevent one failing service from taking down the entire system"
+
+  bulkhead:
+    name: Bulkhead Pattern
+    description: Isolate failures to prevent resource exhaustion
+    when: "Want to prevent slow services from consuming all resources"
+    pattern: |
+      import Bottleneck from 'bottleneck';
+
+      // Bulkhead: Limit concurrent requests per service
+      // Like compartments in a ship - one leak doesn't sink the whole ship
+
+      const bulkheads = {
+        orders: new Bottleneck({
+          maxConcurrent: 10,     // Max 10 concurrent order requests
+          minTime: 100,         // Min 100ms between requests
+          reservoir: 100,       // Max 100 requests per minute
+          reservoirRefreshAmount: 100,
+          reservoirRefreshInterval: 60000,
+        }),
+
+        payments: new Bottleneck({
+          maxConcurrent: 5,     // Payments are more sensitive
+          minTime: 200,
+        }),
+
+        inventory: new Bottleneck({
+          maxConcurrent: 20,    // Inventory can handle more
+        }),
+      };
+
+      // Wrap service calls
+      async function getOrder(orderId: string) {
+        return bulkheads.orders.schedule(() => orderClient.get(orderId));
+      }
+
+      async function chargePayment(amount: number) {
+        return bulkheads.payments.schedule(() => paymentClient.charge(amount));
+      }
+
+      // Thread pool isolation (conceptual - Node.js uses worker threads)
+      import { Worker, isMainThread, parentPort, workerData } from 'worker_threads';
+
+      class WorkerPool {
+        private workers: Worker[] = [];
+        private queue: Array<{ task: any; resolve: Function; reject: Function }> = [];
+
+        constructor(private poolSize: number) {
+          for (let i = 0; i < poolSize; i++) {
+            this.workers.push(this.createWorker());
+          }
+        }
+
+        async execute(task: any): Promise<any> {
+          return new Promise((resolve, reject) => {
+            const worker = this.getAvailableWorker();
+            if (worker) {
+              this.runTask(worker, task, resolve, reject);
+            } else {
+              this.queue.push({ task, resolve, reject });
+            }
+          });
+        }
+      }
+
+      // Separate pools for different workloads
+      const cpuPool = new WorkerPool(4);  // CPU-intensive tasks
+      const ioPool = new WorkerPool(10);  // I/O-bound tasks
+    why: "Bulkheads prevent one slow dependency from blocking all requests"
+
+  saga_pattern:
+    name: Saga Pattern for Distributed Transactions
+    description: Manage transactions across multiple services
+    when: "Operation spans multiple services that need consistency"
+    pattern: |
+      // Saga: Sequence of local transactions with compensating actions
+      // If any step fails, execute compensations in reverse order
+
+      interface SagaStep<T> {
+        name: string;
+        execute: (context: T) => Promise<void>;
+        compensate: (context: T) => Promise<void>;
+      }
+
+      class OrderSaga {
+        private steps: SagaStep<OrderContext>[] = [];
+        private completedSteps: SagaStep<OrderContext>[] = [];
+
+        constructor() {
+          // Define saga steps in order
+          this.steps = [
+            {
+              name: 'reserve-inventory',
+              execute: async (ctx) => {
+                ctx.reservationId = await inventoryService.reserve(ctx.items);
+              },
+              compensate: async (ctx) => {
+                await inventoryService.release(ctx.reservationId);
+              },
+            },
+            {
+              name: 'charge-payment',
+              execute: async (ctx) => {
+                ctx.paymentId = await paymentService.charge(ctx.customerId, ctx.total);
+              },
+              compensate: async (ctx) => {
+                await paymentService.refund(ctx.paymentId);
+              },
+            },
+            {
+              name: 'create-order',
+              execute: async (ctx) => {
+                ctx.orderId = await orderService.create(ctx);
+              },
+              compensate: async (ctx) => {
+                await orderService.cancel(ctx.orderId);
+              },
+            },
+            {
+              name: 'send-confirmation',
+              execute: async (ctx) => {
+                await notificationService.sendOrderConfirmation(ctx.orderId);
+              },
+              compensate: async (ctx) => {
+                // Email sent - can't unsend, but could send cancellation
+                await notificationService.sendOrderCancellation(ctx.orderId);
+              },
+            },
+          ];
+        }
+
+        async execute(context: OrderContext): Promise<void> {
+          for (const step of this.steps) {
+            try {
+              console.log(`Executing step: ${step.name}`);
+              await step.execute(context);
+              this.completedSteps.push(step);
+            } catch (error) {
+              console.error(`Step ${step.name} failed:`, error);
+              await this.compensate(context);
+              throw new SagaFailedError(step.name, error);
+            }
+          }
+        }
+
+        private async compensate(context: OrderContext): Promise<void> {
+          console.log('Starting compensation...');
+
+          // Compensate in reverse order
+          for (const step of this.completedSteps.reverse()) {
+            try {
+              console.log(`Compensating step: ${step.name}`);
+              await step.compensate(context);
+            } catch (error) {
+              // Log but continue - compensation must complete
+              console.error(`Compensation for ${step.name} failed:`, error);
+              await alerting.send(`Saga compensation failed: ${step.name}`);
+            }
+          }
+        }
+      }
+
+      // Usage
+      const saga = new OrderSaga();
+      try {
+        await saga.execute({
+          customerId: 'cust123',
+          items: [...],
+          total: 99.99,
+        });
+      } catch (error) {
+        // Saga failed and compensated
+        throw new OrderCreationFailedError(error.message);
+      }
+
+      // Event-driven saga (choreography)
+      // Each service reacts to events and emits next event
+      // Less coordination but harder to track
+    why: "Sagas maintain consistency across services without distributed transactions"
+
+  # --- Data Patterns ---
+
+  database_per_service:
+    name: Database Per Service
+    description: Each service owns its data store
+    when: "Designing microservices data architecture"
+    pattern: |
+      // Each service owns its database - no shared databases
+
+      // Order Service - owns order data
+      // - orders table
+      // - order_items table
+      // - order_status_history table
+      const orderDb = new PrismaClient({
+        datasources: { db: { url: process.env.ORDER_DB_URL } }
+      });
+
+      // Inventory Service - owns inventory data
+      // - products table
+      // - inventory_levels table
+      // - reservations table
+      const inventoryDb = new PrismaClient({
+        datasources: { db: { url: process.env.INVENTORY_DB_URL } }
+      });
+
+      // What about joins across services?
+      // DON'T do cross-service joins
+
+      // BAD: Join across service boundaries
+      // SELECT o.*, u.email FROM orders o JOIN users u ON o.user_id = u.id
+
+      // GOOD: Compose at application level
+      async function getOrderWithCustomer(orderId: string) {
+        const order = await orderService.getOrder(orderId);
+        const customer = await userService.getUser(order.customerId);
+        return { ...order, customer };
+      }
+
+      // Data duplication is OK for read performance
+      // Order service stores denormalized customer info:
+      interface Order {
+        id: string;
+        customerId: string;
+        // Denormalized - copied from user service at order time
+        customerEmail: string;
+        customerName: string;
+        shippingAddress: Address;
+      }
+
+      // Keep in sync via events
+      userEvents.on('address.updated', async (event) => {
+        await orderDb.order.updateMany({
+          where: { customerId: event.userId, status: 'pending' },
+          data: { shippingAddress: event.newAddress },
+        });
+      });
+    why: "Separate databases enable independent scaling and evolution"
+
+  cqrs_pattern:
+    name: CQRS - Command Query Responsibility Segregation
+    description: Separate read and write models
+    when: "Read and write patterns are very different"
+    pattern: |
+      // CQRS: Different models for reads vs writes
+
+      // Write side: Normalized, optimized for writes
+      // Commands go to domain model
+      class OrderCommandHandler {
+        async createOrder(command: CreateOrderCommand): Promise<string> {
+          // Validate
+          const customer = await this.customerRepo.get(command.customerId);
+          if (!customer) throw new Error('Customer not found');
+
+          // Create aggregate
+          const order = Order.create({
+            customerId: command.customerId,
+            items: command.items,
+          });
+
+          // Save
+          await this.orderRepo.save(order);
+
+          // Publish event for read side
+          await this.eventBus.publish('order.created', order.toEvent());
+
+          return order.id;
+        }
+      }
+
+      // Read side: Denormalized, optimized for queries
+      // Queries go to read model
+      class OrderQueryHandler {
+        async getOrderDashboard(customerId: string): Promise<OrderDashboard> {
+          // Read from denormalized view
+          return this.readDb.query(`
+            SELECT
+              COUNT(*) as total_orders,
+              SUM(total) as lifetime_value,
+              MAX(created_at) as last_order,
+              json_agg(
+                json_build_object('id', id, 'total', total, 'status', status)
+                ORDER BY created_at DESC
+                LIMIT 5
+              ) as recent_orders
+            FROM order_summary
+            WHERE customer_id = $1
+          `, [customerId]);
+        }
+      }
+
+      // Event handler updates read model
+      class OrderReadModelUpdater {
+        async handleOrderCreated(event: OrderCreatedEvent) {
+          await this.readDb.orderSummary.create({
+            id: event.orderId,
+            customerId: event.customerId,
+            total: event.total,
+            status: 'pending',
+            createdAt: event.timestamp,
+          });
+        }
+
+        async handleOrderStatusChanged(event: OrderStatusChangedEvent) {
+          await this.readDb.orderSummary.update({
+            where: { id: event.orderId },
+            data: { status: event.newStatus },
+          });
+        }
+      }
+
+      // Can use different databases:
+      // Write: PostgreSQL (relational, ACID)
+      // Read: Elasticsearch (fast full-text search)
+      // Read: Redis (cached aggregations)
+    why: "CQRS allows optimizing reads and writes independently"
+
+  # --- Observability ---
+
+  distributed_tracing:
+    name: Distributed Tracing
+    description: Track requests across service boundaries
+    when: "Need to debug issues in distributed system"
+    pattern: |
+      import { trace, context, SpanStatusCode } from '@opentelemetry/api';
+      import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
+      import { JaegerExporter } from '@opentelemetry/exporter-jaeger';
+
+      // Initialize tracing
+      const provider = new NodeTracerProvider();
+      provider.addSpanProcessor(
+        new BatchSpanProcessor(
+          new JaegerExporter({ endpoint: process.env.JAEGER_ENDPOINT })
+        )
+      );
+      provider.register();
+
+      const tracer = trace.getTracer('order-service');
+
+      // Trace HTTP requests
+      app.use((req, res, next) => {
+        const span = tracer.startSpan(`${req.method} ${req.path}`, {
+          attributes: {
+            'http.method': req.method,
+            'http.url': req.url,
+            'http.user_agent': req.headers['user-agent'],
+          },
+        });
+
+        // Extract trace context from headers (propagation)
+        const parentContext = propagator.extract(
+          context.active(),
+          req.headers
+        );
+
+        context.with(trace.setSpan(parentContext, span), () => {
+          res.on('finish', () => {
+            span.setAttribute('http.status_code', res.statusCode);
+            span.setStatus({
+              code: res.statusCode < 400 ? SpanStatusCode.OK : SpanStatusCode.ERROR,
+            });
+            span.end();
+          });
+          next();
+        });
+      });
+
+      // Trace service calls
+      async function callPaymentService(orderId: string, amount: number) {
+        const span = tracer.startSpan('payment-service.charge');
+
+        try {
+          // Inject trace context into outgoing request
+          const headers = {};
+          propagator.inject(context.active(), headers);
+
+          const result = await axios.post(
+            `${PAYMENT_SERVICE}/charge`,
+            { orderId, amount },
+            { headers }
+          );
+
+          span.setStatus({ code: SpanStatusCode.OK });
+          return result.data;
+        } catch (error) {
+          span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+          span.recordException(error);
+          throw error;
+        } finally {
+          span.end();
+        }
+      }
+
+      // Structured logging with trace context
+      function log(level: string, message: string, data?: any) {
+        const span = trace.getActiveSpan();
+        console.log(JSON.stringify({
+          timestamp: new Date().toISOString(),
+          level,
+          message,
+          traceId: span?.spanContext().traceId,
+          spanId: span?.spanContext().spanId,
+          service: process.env.SERVICE_NAME,
+          ...data,
+        }));
+      }
+    why: "Distributed tracing is essential for debugging microservices"
+
+# ============================================================================
+# ANTI-PATTERNS
+# ============================================================================
+anti_patterns:
+
+  distributed_monolith:
+    name: Distributed Monolith
+    description: Microservices tightly coupled like a monolith
+    problem: |
+      // Services call each other synchronously for everything
+      // One service down = entire system down
+      // Shared database = coupling
+
+      async function createOrder(data) {
+        const user = await userService.getUser(data.userId);  // Sync
+        const inventory = await inventoryService.check(data.items);  // Sync
+        const payment = await paymentService.authorize(data.total);  // Sync
+        const shipping = await shippingService.calculateRate(data);  // Sync
+
+        // If any fails, order fails
+        return orderService.create({ ...data, user, inventory, payment, shipping });
+      }
+    solution: |
+      // Use async communication where possible
+      // Accept eventual consistency
+      // Own your data
+
+      async function createOrder(data) {
+        // Only validate critical data synchronously
+        const order = await orderRepo.create({
+          userId: data.userId,
+          items: data.items,
+          status: 'pending',
+        });
+
+        // Publish event - other services react asynchronously
+        await eventBus.publish('order.created', order);
+
+        return order;  // Return immediately
+      }
+    impact: "Defeats the purpose of microservices, fragile system"
+
+  chatty_services:
+    name: Chatty Service Communication
+    description: Too many small calls between services
+    problem: |
+      // Getting order details requires many calls
+      const order = await orderService.get(id);
+      const customer = await userService.get(order.customerId);
+      const address = await userService.getAddress(order.addressId);
+      const items = await Promise.all(
+        order.items.map(i => productService.get(i.productId))
+      );
+      const shipping = await shippingService.getRate(order.shippingId);
+      // 2 + N calls for one page!
+    solution: |
+      // Aggregate at source or use BFF
+      // Order service stores what it needs
+      const order = await orderService.getOrderDetails(id);
+      // Returns denormalized data in one call
+
+      // Or use GraphQL federation
+      // Let gateway compose data
+
+      // Or use BFF that aggregates
+      const dashboard = await bffService.getOrderDashboard(id);
+    impact: "High latency, cascade failures, network saturation"
+
+  shared_database:
+    name: Shared Database Anti-Pattern
+    description: Multiple services sharing one database
+    problem: |
+      // Both order and inventory services access same tables
+      // Order service: SELECT * FROM orders JOIN products...
+      // Inventory service: UPDATE products SET stock = ...
+
+      // Problems:
+      // - Can't change schema without coordinating
+      // - No clear ownership
+      // - Tight coupling through data
+      // - Can't scale independently
+    solution: |
+      // Each service owns its data
+      // Order service: orders DB with denormalized product info
+      // Inventory service: products DB with stock levels
+
+      // Sync via events
+      productEvents.on('product.updated', async (event) => {
+        await orderDb.product.update({
+          where: { id: event.productId },
+          data: { name: event.name, price: event.price },
+        });
+      });
+    impact: "Tight coupling, no independent evolution, scaling issues"
+
+  no_timeout:
+    name: Missing Timeouts on Service Calls
+    description: Calls hang forever when service is slow
+    problem: |
+      const result = await axios.get(`${SERVICE_URL}/data`);
+      // No timeout - waits forever if service hangs
+    solution: |
+      const result = await axios.get(`${SERVICE_URL}/data`, {
+        timeout: 5000,  // 5 second timeout
+      });
+
+      // Better: Circuit breaker with timeout
+      const breaker = new CircuitBreaker(fetch, {
+        timeout: 3000,
+      });
+    impact: "Thread exhaustion, cascade failures, poor UX"
+
+# ============================================================================
+# DECISION FRAMEWORK
+# ============================================================================
+decision_tree:
+  start: "Should this be a separate service?"
+  nodes:
+    decomposition:
+      question: "Does it have independent business domain?"
+      options:
+        - answer: "Yes, distinct domain"
+          next: "Consider separate service"
+        - answer: "No, shared concerns"
+          next: "Keep in same service"
+
+    communication:
+      question: "How should services communicate?"
+      options:
+        - answer: "Need immediate response"
+          next: "Use sync (HTTP/gRPC) with circuit breaker"
+        - answer: "Can be eventually consistent"
+          next: "Use async (events/messages)"
+        - answer: "Mixed"
+          next: "Sync for queries, async for commands"
+
+# ============================================================================
+# HANDOFFS
+# ============================================================================
+handoffs:
+  - to: queue-workers
+    when: "Need async service communication"
+    pass: "Event types, message patterns"
+
+  - to: api-designer
+    when: "Designing service APIs"
+    pass: "API contracts, versioning needs"
+
+  - to: infrastructure-as-code
+    when: "Deploying microservices"
+    pass: "Service topology, scaling requirements"
+
+  - to: observability-sre
+    when: "Need distributed monitoring"
+    pass: "Tracing requirements, alert patterns"
+
+ecosystem:
+  core_tools:
+    - "Docker - Container runtime"
+    - "Kubernetes - Container orchestration"
+    - "OpenTelemetry - Observability"
+    - "gRPC - Service communication"
+
+  message_brokers:
+    - "RabbitMQ - Message queue"
+    - "Kafka - Event streaming"
+    - "NATS - Lightweight messaging"
+
+  service_mesh:
+    - "Istio - Full-featured mesh"
+    - "Linkerd - Lightweight mesh"
+    - "Consul Connect - Service discovery"
+
+

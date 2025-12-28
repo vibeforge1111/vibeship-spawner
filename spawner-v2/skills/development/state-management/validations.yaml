@@ -1,0 +1,284 @@
+# State Management Validations
+# Automated checks to catch state management anti-patterns
+
+validations:
+  # --- CRITICAL: State mutation issues ---
+
+  - id: state-direct-mutation
+    name: Direct State Mutation
+    severity: error
+    type: regex
+    pattern:
+      - "state\\.\\w+\\s*="
+      - "state\\.push\\("
+      - "state\\.splice\\("
+      - "state\\.pop\\("
+      - "state\\.shift\\("
+      - "state\\.unshift\\("
+      - "state\\[\\w+\\]\\s*="
+    message: "Direct state mutation detected. This will cause bugs in Redux/React state."
+    fix_action: "Use immutable update patterns or Immer: set({...state, key: value})"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: state-object-assign-mutation
+    name: Object.assign Mutation
+    severity: warning
+    type: regex
+    pattern:
+      - "Object\\.assign\\(state,"
+    message: "Object.assign mutates first argument. Use spread instead."
+    fix_action: "Replace with: Object.assign({}, state, changes) or {...state, ...changes}"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  # --- HIGH: Performance issues ---
+
+  - id: state-inline-selector
+    name: Inline Selector in Component
+    severity: warning
+    type: regex
+    pattern:
+      - "useSelector\\(\\s*\\(\\s*state\\s*\\)\\s*=>\\s*state\\.\\w+\\.filter"
+      - "useSelector\\(\\s*\\(\\s*state\\s*\\)\\s*=>\\s*state\\.\\w+\\.map"
+      - "useSelector\\(\\s*\\(\\s*state\\s*\\)\\s*=>\\s*\\{[^}]+filter"
+    message: "Inline selector with filter/map creates new reference every render."
+    fix_action: "Use createSelector from @reduxjs/toolkit for memoization"
+    applies_to:
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  - id: state-context-frequent-update
+    name: Context with Frequently Changing Value
+    severity: warning
+    type: regex
+    pattern:
+      - "Provider\\s+value=\\{\\{[^}]+\\}\\}"
+      - "createContext.*useState"
+    message: "Context value may change frequently, causing cascading re-renders."
+    fix_action: "Use Zustand/Jotai for frequent updates, or memoize context value"
+    applies_to:
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  - id: state-missing-shallow-compare
+    name: Object Selection Without Shallow Compare
+    severity: info
+    type: regex
+    pattern:
+      - "useStore\\(\\s*\\(\\s*state\\s*\\)\\s*=>\\s*\\(\\{"
+      - "useStore\\(\\s*state\\s*=>\\s*\\(\\{"
+    message: "Selecting object without shallow compare may cause extra re-renders."
+    fix_action: "Use useShallow: useStore(useShallow(state => ({...})))"
+    applies_to:
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  # --- MEDIUM: Code organization ---
+
+  - id: state-business-logic-in-component
+    name: Business Logic in Component with State
+    severity: info
+    type: regex
+    pattern:
+      - "useSelector[\\s\\S]{0,100}if\\s*\\([\\s\\S]{0,50}dispatch"
+      - "useStore[\\s\\S]{0,100}if\\s*\\([\\s\\S]{0,50}\\w+Store"
+    message: "Business logic mixed with state selection in component."
+    fix_action: "Move complex logic to actions/thunks or custom hooks"
+    applies_to:
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  - id: state-derived-stored
+    name: Storing Derived State
+    severity: warning
+    type: regex
+    pattern:
+      - "\\bcount\\b.*length"
+      - "\\btotal\\b.*reduce"
+      - "\\bfiltered\\b.*filter"
+      - "\\bsorted\\b.*sort"
+    message: "Possibly storing derived state. Consider computing from source state."
+    fix_action: "Use selectors to derive state: const count = items.length"
+    applies_to:
+      - "**/store/**/*.ts"
+      - "**/redux/**/*.ts"
+      - "**/slices/**/*.ts"
+
+  - id: state-generic-action-name
+    name: Generic Action Type Name
+    severity: info
+    type: regex
+    pattern:
+      - "type:\\s*['\"]SET_DATA['\"]"
+      - "type:\\s*['\"]UPDATE['\"]"
+      - "type:\\s*['\"]RESET['\"]"
+      - "type:\\s*['\"]CLEAR['\"]"
+      - "type:\\s*['\"]LOAD['\"]"
+    message: "Generic action type may conflict with other reducers."
+    fix_action: "Use namespaced action types: 'users/setData', 'cart/reset'"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  # --- Async state issues ---
+
+  - id: state-async-no-loading
+    name: Async Action Without Loading State
+    severity: warning
+    type: regex
+    pattern:
+      - "async.*dispatch\\([^)]+\\)(?![\\s\\S]{0,100}loading)"
+      - "await.*set\\(\\{(?![^}]*loading)"
+    message: "Async operation without loading state handling."
+    fix_action: "Add loading state: set({ loading: true }) before, false after"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+
+  - id: state-async-no-error-handling
+    name: Async State Without Error Handling
+    severity: warning
+    type: regex
+    pattern:
+      - "createAsyncThunk(?![\\s\\S]{0,500}rejected)"
+      - "async.*set\\([^)]+\\)(?![\\s\\S]{0,100}catch)"
+    message: "Async operation without error state handling."
+    fix_action: "Add error handling: catch errors and set error state"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+
+  - id: state-race-condition-risk
+    name: Potential Async Race Condition
+    severity: info
+    type: regex
+    pattern:
+      - "await.*await.*set"
+      - "setTimeout.*set.*State"
+      - "setInterval.*dispatch"
+    message: "Multiple async operations may cause race conditions."
+    fix_action: "Use request cancellation or request ID tracking"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+
+  # --- Closure issues ---
+
+  - id: state-stale-closure
+    name: Potential Stale Closure
+    severity: warning
+    type: regex
+    pattern:
+      - "useCallback\\([^)]+\\)\\s*,\\s*\\[\\s*\\]\\)"
+      - "useMemo\\([^)]+state[^)]+\\)\\s*,\\s*\\[\\s*\\]\\)"
+    message: "Empty dependency array with state reference may cause stale closure."
+    fix_action: "Add state to dependencies or use functional updates"
+    applies_to:
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  - id: state-subscribe-no-cleanup
+    name: Store Subscription Without Cleanup
+    severity: warning
+    type: regex
+    pattern:
+      - "\\.subscribe\\([^)]+\\)(?![\\s\\S]{0,50}return)"
+      - "store\\.subscribe(?![\\s\\S]{0,100}unsubscribe)"
+    message: "Store subscription without cleanup may cause memory leaks."
+    fix_action: "Return unsubscribe function from useEffect cleanup"
+    applies_to:
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  # --- Non-serializable state ---
+
+  - id: state-non-serializable-date
+    name: Date Object in State
+    severity: info
+    type: regex
+    pattern:
+      - ":\\s*new Date\\(\\)"
+      - "Date\\.now\\(\\)"
+    message: "Date objects in state may break serialization. Use ISO strings."
+    fix_action: "Use date.toISOString() or timestamp number instead"
+    applies_to:
+      - "**/store/**/*.ts"
+      - "**/slices/**/*.ts"
+      - "**/redux/**/*.ts"
+
+  - id: state-non-serializable-function
+    name: Function in State
+    severity: warning
+    type: regex
+    pattern:
+      - "initialState.*=>\\s*\\{"
+      - "state:\\s*\\{[^}]*:\\s*\\([^)]*\\)\\s*=>"
+    message: "Functions in state break Redux serialization and DevTools."
+    fix_action: "Keep functions in action creators, not in state"
+    applies_to:
+      - "**/store/**/*.ts"
+      - "**/slices/**/*.ts"
+
+  # --- Redux-specific ---
+
+  - id: redux-connect-deprecation
+    name: Using Deprecated connect() HOC
+    severity: info
+    type: regex
+    pattern:
+      - "connect\\(mapStateToProps"
+      - "import.*connect.*from ['\"]react-redux['\"]"
+    message: "connect() is deprecated. Use useSelector and useDispatch hooks."
+    fix_action: "Replace with: const data = useSelector(selector); const dispatch = useDispatch();"
+    applies_to:
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  - id: redux-no-toolkit
+    name: Using Classic Redux Without Toolkit
+    severity: info
+    type: regex
+    pattern:
+      - "createStore\\("
+      - "combineReducers\\("
+      - "import.*createStore.*from ['\"]redux['\"]"
+    message: "Classic Redux detected. Redux Toolkit is recommended."
+    fix_action: "Migrate to @reduxjs/toolkit: configureStore, createSlice"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  # --- Zustand-specific ---
+
+  - id: zustand-missing-immer
+    name: Complex Nested Updates Without Immer
+    severity: info
+    type: regex
+    pattern:
+      - "set\\(\\{\\s*\\.\\.\\.state,\\s*\\w+:\\s*\\{\\s*\\.\\.\\.state\\.\\w+"
+    message: "Deep nested updates are verbose. Consider Immer middleware."
+    fix_action: "Add immer middleware: create(immer((set) => ...))"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+
+  - id: zustand-full-state-select
+    name: Selecting Entire Zustand State
+    severity: warning
+    type: regex
+    pattern:
+      - "useStore\\(\\s*\\)(?!\\s*\\.)"
+      - "useStore\\(\\s*state\\s*=>\\s*state\\s*\\)"
+    message: "Selecting entire store causes re-render on any change."
+    fix_action: "Select specific state: useStore(state => state.user)"
+    applies_to:
+      - "**/*.tsx"
+      - "**/*.jsx"
+

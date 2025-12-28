@@ -1,0 +1,268 @@
+# WebSocket & Real-time Validations
+# Automated checks to catch real-time implementation issues
+
+validations:
+  # --- CRITICAL: Connection issues ---
+
+  - id: ws-no-reconnection
+    name: WebSocket Without Reconnection
+    severity: error
+    type: regex
+    pattern:
+      - "new WebSocket\\([^)]+\\)(?![\\s\\S]{0,500}reconnect)"
+      - "new WebSocket\\([^)]+\\)(?![\\s\\S]{0,500}onclose.*connect)"
+    message: "WebSocket created without reconnection logic. Connections will stay dead after drops."
+    fix_action: "Implement exponential backoff reconnection in onclose handler"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: ws-no-heartbeat
+    name: WebSocket Without Heartbeat
+    severity: warning
+    type: regex
+    pattern:
+      - "new WebSocket\\([^)]+\\)(?![\\s\\S]{0,500}ping|heartbeat)"
+      - "WebSocket\\.Server(?![\\s\\S]{0,500}ping)"
+    message: "WebSocket without heartbeat. Idle connections may be dropped by proxies."
+    fix_action: "Add ping/pong every 30 seconds to keep connections alive"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: ws-no-error-handler
+    name: WebSocket Without Error Handler
+    severity: warning
+    type: regex
+    pattern:
+      - "new WebSocket\\([^)]+\\)(?![\\s\\S]{0,200}\\.onerror)"
+      - "WebSocket\\([^)]+\\);(?![\\s\\S]{0,200}onerror)"
+    message: "WebSocket without error handler. Errors will go unnoticed."
+    fix_action: "Add onerror handler to log and handle connection errors"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  # --- HIGH: Security issues ---
+
+  - id: ws-no-auth
+    name: WebSocket Without Authentication
+    severity: error
+    type: regex
+    pattern:
+      - "on\\(['\"]connection['\"].*\\)(?![\\s\\S]{0,300}auth|token|verify|jwt)"
+      - "wss\\.on\\(['\"]connection['\"](?![\\s\\S]{0,300}authenticate)"
+    message: "WebSocket connection handler without authentication check."
+    fix_action: "Verify auth token on connection before allowing messages"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: ws-no-rate-limit
+    name: WebSocket Without Rate Limiting
+    severity: warning
+    type: regex
+    pattern:
+      - "on\\(['\"]message['\"](?![\\s\\S]{0,300}rate|limit|throttle)"
+    message: "WebSocket message handler without rate limiting."
+    fix_action: "Add per-connection rate limiting to prevent abuse"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: ws-unsafe-json-parse
+    name: Unsafe JSON.parse in Message Handler
+    severity: warning
+    type: regex
+    pattern:
+      - "on\\(['\"]message['\"].*JSON\\.parse(?![\\s\\S]{0,100}try|catch)"
+      - "JSON\\.parse\\(.*\\.data(?![\\s\\S]{0,50}catch)"
+    message: "JSON.parse without try-catch in message handler. Malformed messages will crash."
+    fix_action: "Wrap JSON.parse in try-catch and send error to client"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: ws-no-message-validation
+    name: No Message Schema Validation
+    severity: info
+    type: regex
+    pattern:
+      - "JSON\\.parse\\([^)]+\\)(?![\\s\\S]{0,200}schema|validate|safeParse|parse\\()"
+    message: "Parsed message not validated against schema."
+    fix_action: "Validate message structure with Zod or similar before processing"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  # --- MEDIUM: Memory and performance ---
+
+  - id: ws-event-listener-leak
+    name: Event Listener Without Cleanup
+    severity: warning
+    type: regex
+    pattern:
+      - "addEventListener(?![\\s\\S]{0,500}removeEventListener)"
+      - "\\.on\\(['\"]\\w+['\"](?![\\s\\S]{0,500}\\.off\\(|\\.removeListener)"
+    message: "Event listener added without corresponding removal. May cause memory leak."
+    fix_action: "Remove listeners in cleanup/disconnect handler"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: ws-interval-not-cleared
+    name: Interval Without Cleanup
+    severity: warning
+    type: regex
+    pattern:
+      - "setInterval\\([^)]+\\)(?![\\s\\S]{0,300}clearInterval)"
+    message: "setInterval without clearInterval. Will cause memory leak on disconnect."
+    fix_action: "Store interval ID and clear it in onclose/cleanup"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: ws-no-buffer-check
+    name: Send Without Buffer Check
+    severity: info
+    type: regex
+    pattern:
+      - "\\.send\\([^)]+\\)(?![\\s\\S]{0,200}bufferedAmount)"
+    message: "WebSocket send without checking buffer. May cause backpressure issues."
+    fix_action: "Check ws.bufferedAmount before sending high-frequency messages"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: ws-broadcast-all
+    name: Broadcasting to All Connections
+    severity: info
+    type: regex
+    pattern:
+      - "\\.clients\\.forEach\\([^)]*send"
+      - "connections\\.forEach\\([^)]*send"
+    message: "Broadcasting to all connections. Consider using rooms/channels for efficiency."
+    fix_action: "Implement room-based broadcasting to reduce unnecessary messages"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  # --- Connection state ---
+
+  - id: ws-send-without-ready-check
+    name: Send Without Ready State Check
+    severity: warning
+    type: regex
+    pattern:
+      - "\\.send\\([^)]+\\)(?![\\s\\S]{0,100}readyState|OPEN)"
+    message: "WebSocket send without checking readyState. Will throw if not open."
+    fix_action: "Check ws.readyState === WebSocket.OPEN before sending"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: ws-close-code-missing
+    name: Close Without Status Code
+    severity: info
+    type: regex
+    pattern:
+      - "\\.close\\(\\)(?!\\d)"
+    message: "WebSocket closed without status code. Consider providing meaningful close code."
+    fix_action: "Use appropriate close code: ws.close(1000, 'Normal closure')"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  # --- Reconnection issues ---
+
+  - id: ws-constant-reconnect-delay
+    name: Fixed Reconnection Delay
+    severity: info
+    type: regex
+    pattern:
+      - "setTimeout.*connect.*\\d{4}\\)"
+      - "reconnect.*setTimeout.*1000"
+    message: "Fixed reconnection delay may cause thundering herd on server restart."
+    fix_action: "Use exponential backoff with jitter for reconnection"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: ws-no-max-reconnect
+    name: Unlimited Reconnection Attempts
+    severity: info
+    type: regex
+    pattern:
+      - "reconnect(?![\\s\\S]{0,200}max|limit|attempts)"
+    message: "Reconnection without max attempts. Client may retry forever."
+    fix_action: "Limit reconnection attempts and show user error after max"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  # --- Socket.IO specific ---
+
+  - id: socketio-no-disconnect-handler
+    name: Socket.IO Without Disconnect Handler
+    severity: warning
+    type: regex
+    pattern:
+      - "io\\.on\\(['\"]connection['\"](?![\\s\\S]{0,500}disconnect)"
+    message: "Socket.IO connection without disconnect handler."
+    fix_action: "Add socket.on('disconnect') to clean up resources"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: socketio-emit-without-ack
+    name: Socket.IO Emit Without Acknowledgment
+    severity: info
+    type: regex
+    pattern:
+      - "\\.emit\\(['\"][^'\"]+['\"],\\s*[^,)]+\\)(?!.*=>)"
+    message: "Socket.IO emit without callback. Consider using ack for important messages."
+    fix_action: "Add callback for delivery confirmation: emit('event', data, (ack) => {})"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  # --- SSE specific ---
+
+  - id: sse-no-retry
+    name: SSE Without Retry Header
+    severity: info
+    type: regex
+    pattern:
+      - "text/event-stream(?![\\s\\S]{0,200}retry:)"
+    message: "SSE without retry directive. Client will use default reconnection timing."
+    fix_action: "Set retry interval: res.write('retry: 3000\\n')"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: sse-no-heartbeat
+    name: SSE Without Keepalive
+    severity: warning
+    type: regex
+    pattern:
+      - "text/event-stream(?![\\s\\S]{0,500}heartbeat|interval|setInterval)"
+    message: "SSE without heartbeat. Connection may be dropped by proxies."
+    fix_action: "Send heartbeat comment every 30s: res.write(': heartbeat\\n\\n')"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+

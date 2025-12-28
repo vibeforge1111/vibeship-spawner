@@ -1,0 +1,284 @@
+# Authentication & OAuth Validations
+# Automated checks to catch authentication security issues
+
+validations:
+  # --- CRITICAL: Token storage ---
+
+  - id: auth-jwt-localstorage
+    name: JWT Token in localStorage
+    severity: error
+    type: regex
+    pattern:
+      - "localStorage\\.setItem\\([^)]*token"
+      - "localStorage\\.setItem\\([^)]*jwt"
+      - "localStorage\\.setItem\\([^)]*accessToken"
+      - "localStorage\\[.*(token|jwt)"
+    message: "JWT stored in localStorage is vulnerable to XSS. Use HttpOnly cookies or memory."
+    fix_action: "Store access tokens in memory, refresh tokens in HttpOnly cookies"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: auth-token-in-url
+    name: Token in URL Query Parameter
+    severity: error
+    type: regex
+    pattern:
+      - "\\?.*token="
+      - "\\?.*access_token="
+      - "\\?.*jwt="
+      - "searchParams.*token"
+    message: "Token in URL can leak via referrer, logs, and browser history."
+    fix_action: "Pass tokens in headers or request body instead"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  # --- CRITICAL: Password handling ---
+
+  - id: auth-plaintext-password
+    name: Plaintext Password Storage
+    severity: error
+    type: regex
+    pattern:
+      - "password:\\s*req\\.body\\.password"
+      - "password:\\s*password\\b"
+      - "user\\.password\\s*=\\s*password"
+    message: "Possible plaintext password storage. Always hash passwords."
+    fix_action: "Use bcrypt.hash(password, 12) before storing"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: auth-weak-hash
+    name: Weak Password Hashing
+    severity: error
+    type: regex
+    pattern:
+      - "md5\\([^)]*password"
+      - "sha1\\([^)]*password"
+      - "sha256\\([^)]*password"
+      - "createHash\\(['\"](?:md5|sha1|sha256)['\"]\\).*password"
+    message: "MD5/SHA1/SHA256 are too fast for password hashing. Use bcrypt or Argon2."
+    fix_action: "Replace with bcrypt.hash(password, 12) or argon2.hash(password)"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: auth-hardcoded-secret
+    name: Hardcoded JWT Secret
+    severity: error
+    type: regex
+    pattern:
+      - "jwt\\.sign\\([^)]+['\"][a-zA-Z0-9]{1,30}['\"]\\s*\\)"
+      - "secret.*=.*['\"][a-zA-Z0-9]{1,30}['\"]"
+      - "JWT_SECRET.*=.*['\"][a-zA-Z0-9]{1,30}['\"]"
+    message: "Hardcoded or weak JWT secret. Use environment variable with strong random value."
+    fix_action: "Use process.env.JWT_SECRET with 256+ bit random value"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  # --- HIGH: OAuth security ---
+
+  - id: auth-no-oauth-state
+    name: OAuth Without State Parameter
+    severity: error
+    type: regex
+    pattern:
+      - "oauth.*callback(?![\\s\\S]{0,200}state)"
+      - "/callback.*code(?![\\s\\S]{0,100}state)"
+      - "authorization_code(?![\\s\\S]{0,200}state)"
+    message: "OAuth callback without state validation. Vulnerable to CSRF."
+    fix_action: "Generate random state on auth start, validate on callback"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: auth-no-pkce
+    name: OAuth Without PKCE
+    severity: warning
+    type: regex
+    pattern:
+      - "response_type.*code(?![\\s\\S]{0,300}code_challenge)"
+      - "authorization_code(?![\\s\\S]{0,300}code_verifier)"
+    message: "OAuth without PKCE. Consider adding for extra security on public clients."
+    fix_action: "Add code_challenge and code_verifier for PKCE flow"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  # --- HIGH: Session security ---
+
+  - id: auth-no-session-regenerate
+    name: Login Without Session Regeneration
+    severity: error
+    type: regex
+    pattern:
+      - "session\\.userId\\s*=(?![\\s\\S]{0,50}regenerate)"
+      - "session\\.user\\s*=(?![\\s\\S]{0,50}regenerate)"
+      - "req\\.session\\..*=.*user(?![\\s\\S]{0,100}regenerate)"
+    message: "Setting session user without regenerating session ID. Vulnerable to session fixation."
+    fix_action: "Call session.regenerate() before storing user in session"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: auth-insecure-cookie
+    name: Insecure Session Cookie
+    severity: warning
+    type: regex
+    pattern:
+      - "cookie.*httpOnly.*false"
+      - "cookie.*secure.*false"
+      - "cookie(?![\\s\\S]{0,100}httpOnly)"
+      - "session\\(\\{(?![\\s\\S]{0,200}httpOnly)"
+    message: "Session cookie may be insecure. Set httpOnly, secure, and sameSite."
+    fix_action: "Add cookie options: { httpOnly: true, secure: true, sameSite: 'lax' }"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: auth-no-session-expiry
+    name: Session Without Expiry
+    severity: warning
+    type: regex
+    pattern:
+      - "session\\(\\{(?![\\s\\S]{0,300}maxAge|expires)"
+    message: "Session without expiry. Sessions should have maximum lifetime."
+    fix_action: "Add maxAge to session config: maxAge: 24 * 60 * 60 * 1000"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  # --- MEDIUM: Token security ---
+
+  - id: auth-long-access-token
+    name: Long-Lived Access Token
+    severity: warning
+    type: regex
+    pattern:
+      - "expiresIn.*['\"][0-9]+d"
+      - "expiresIn.*['\"][0-9]+h(?!.*1[0-5]?h)"
+      - "expiresIn.*3600000"
+    message: "Access token expiry seems too long. Keep access tokens short (5-15 minutes)."
+    fix_action: "Use expiresIn: '15m' for access tokens, use refresh tokens for longer sessions"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: auth-no-refresh-rotation
+    name: Refresh Token Without Rotation
+    severity: warning
+    type: regex
+    pattern:
+      - "refreshToken(?![\\s\\S]{0,500}rotate|revoke|delete|update)"
+    message: "Refresh tokens should be rotated on use. One-time use prevents theft."
+    fix_action: "Invalidate old refresh token and issue new one on each refresh"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  # --- MEDIUM: Password policies ---
+
+  - id: auth-weak-password-policy
+    name: Weak Password Requirements
+    severity: warning
+    type: regex
+    pattern:
+      - "password\\.length.*[<>=]+.*[1-7]\\b"
+      - "minLength.*[1-7]\\b"
+      - "min.*password.*[1-7]"
+    message: "Password minimum length too short. Require at least 12 characters."
+    fix_action: "Increase minimum password length to 12+ characters"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: auth-password-no-strength-check
+    name: No Password Strength Validation
+    severity: info
+    type: regex
+    pattern:
+      - "password.*length(?![\\s\\S]{0,200}strength|zxcvbn|complexity)"
+    message: "Password validation checks only length. Consider using zxcvbn for strength."
+    fix_action: "Add password strength check: const result = zxcvbn(password)"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  # --- MEDIUM: Error handling ---
+
+  - id: auth-timing-attack
+    name: Possible Timing Attack
+    severity: warning
+    type: regex
+    pattern:
+      - "if.*!user.*return|throw"
+      - "user.*null.*throw"
+      - "user not found"
+    message: "Early return when user not found may leak user existence via timing."
+    fix_action: "Always perform password hash comparison even when user not found"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: auth-specific-error
+    name: Specific Authentication Error Message
+    severity: info
+    type: regex
+    pattern:
+      - "['\"]user.*not.*found['\"]"
+      - "['\"]invalid.*password['\"]"
+      - "['\"]wrong.*password['\"]"
+      - "['\"]email.*not.*registered['\"]"
+    message: "Specific auth errors leak information. Use generic 'Invalid credentials'."
+    fix_action: "Return generic error: 'Invalid email or password'"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  # --- INFO: Best practices ---
+
+  - id: auth-no-mfa
+    name: No Multi-Factor Authentication
+    severity: info
+    type: regex
+    pattern:
+      - "login(?![\\s\\S]{0,500}mfa|totp|2fa|twoFactor)"
+    message: "No MFA implementation detected. Consider adding TOTP for sensitive apps."
+    fix_action: "Implement TOTP-based MFA using otplib"
+    applies_to:
+      - "**/auth/**/*.ts"
+      - "**/auth/**/*.js"
+
+  - id: auth-no-audit-log
+    name: No Auth Event Logging
+    severity: info
+    type: regex
+    pattern:
+      - "login(?![\\s\\S]{0,200}log|audit|track)"
+    message: "Authentication events not logged. Consider audit logging for security."
+    fix_action: "Log login attempts, failures, password changes, and MFA events"
+    applies_to:
+      - "**/auth/**/*.ts"
+      - "**/auth/**/*.js"
+
+  - id: auth-password-in-log
+    name: Password in Log Statement
+    severity: error
+    type: regex
+    pattern:
+      - "console\\.log.*password"
+      - "logger\\..*password"
+      - "log\\(.*password"
+    message: "Password may be logged. Never log passwords or credentials."
+    fix_action: "Remove password from log statement"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
