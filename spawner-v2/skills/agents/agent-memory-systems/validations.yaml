@@ -1,0 +1,311 @@
+# Validations - Agent Memory Systems
+# Quality checks for memory implementations
+
+version: 1.0.0
+skill_id: agent-memory-systems
+
+validations:
+  # Storage Checks
+  - id: in-memory-store-production
+    name: In-Memory Store in Production Code
+    severity: error
+    description: In-memory stores lose data on restart
+    pattern: |
+      (MemorySaver|InMemoryStore|chromadb\.Client\(\))
+    anti_pattern: |
+      (test|spec|mock|dev|development)
+    message: "In-memory store detected. Use persistent storage (Postgres, Qdrant, Pinecone) for production."
+    autofix: false
+
+  - id: no-metadata-on-upsert
+    name: Vector Upsert Without Metadata
+    severity: warning
+    description: Vectors should have metadata for filtering
+    pattern: |
+      (upsert|insert|add)\s*\([^)]*vector
+    anti_pattern: |
+      metadata|user_id|type|timestamp
+    message: "Vector upsert without metadata. Add user_id, type, timestamp for proper filtering."
+    autofix: false
+
+  - id: no-user-isolation
+    name: Query Without User Filtering
+    severity: error
+    description: Queries should filter by user to prevent data leakage
+    pattern: |
+      (query|search)\s*\([^)]*vector
+    anti_pattern: |
+      filter.*user_id|where.*user
+    message: "Vector query without user filtering. Always filter by user_id to prevent data leakage."
+    autofix: false
+
+  # Chunking Checks
+  - id: hardcoded-chunk-size
+    name: Hardcoded Chunk Size Without Justification
+    severity: info
+    description: Chunk size should be tested and justified
+    pattern: |
+      chunk_size\s*=\s*\d{3,4}
+    message: "Hardcoded chunk size. Test different sizes for your content type and measure retrieval accuracy."
+    autofix: false
+
+  - id: no-chunk-overlap
+    name: Chunking Without Overlap
+    severity: warning
+    description: Chunk overlap prevents boundary issues
+    pattern: |
+      (RecursiveCharacterTextSplitter|TextSplitter)
+    anti_pattern: |
+      overlap|chunk_overlap
+    message: "Text splitting without overlap. Add chunk_overlap (10-20%) to prevent boundary issues."
+    autofix: false
+
+  # Retrieval Checks
+  - id: semantic-only-retrieval
+    name: Semantic Search Without Filters
+    severity: warning
+    description: Pure semantic search often returns irrelevant results
+    pattern: |
+      (query|search)\s*\(\s*vector
+    anti_pattern: |
+      filter|where|metadata
+    message: "Pure semantic search. Add metadata filters (user, type, time) for better relevance."
+    autofix: false
+
+  - id: no-retrieval-limit
+    name: Retrieval Without Result Limit
+    severity: warning
+    description: Unbounded retrieval can overflow context
+    pattern: |
+      (query|search|retrieve)
+    anti_pattern: |
+      (limit|top_k|k=|max_results)
+    message: "Retrieval without limit. Set top_k to prevent context overflow."
+    autofix: false
+
+  # Embedding Checks
+  - id: no-model-versioning
+    name: Embeddings Without Model Version Tracking
+    severity: warning
+    description: Track embedding model to handle migrations
+    pattern: |
+      (embed|embedding).*upsert
+    anti_pattern: |
+      (model|version|embedding_model).*metadata
+    message: "Store embedding model version in metadata to handle model migrations."
+    autofix: false
+
+  - id: different-embed-query-model
+    name: Different Models for Document and Query Embedding
+    severity: error
+    description: Documents and queries must use same embedding model
+    pattern: |
+      # Manual check - ensure same model for index and query
+    message: "Ensure same embedding model for indexing and querying."
+    autofix: false
+
+code_smells:
+  - id: append-only-memory
+    name: Memory That Only Grows
+    description: Without decay, memory bloat affects performance
+    pattern: |
+      memory\.(add|append|insert)(?!.*delete|archive|decay)
+    suggestion: "Implement memory decay or consolidation to prevent bloat"
+
+  - id: synchronous-embedding
+    name: Blocking Embedding Calls
+    description: Embedding in request path adds latency
+    pattern: |
+      def\s+\w+\(.*\).*embed\(
+    suggestion: "Use async embedding or background processing"
+
+  - id: no-batch-embedding
+    name: Single Document Embedding
+    description: Batch embedding is more efficient
+    pattern: |
+      for.*in.*:\s*embed\(
+    suggestion: "Batch embeddings: embed([doc1, doc2, ...]) instead of loop"
+
+  - id: raw-similarity-score
+    name: Using Raw Similarity Without Threshold
+    severity: info
+    description: Low similarity results pollute context
+    pattern: |
+      results\s*=.*query.*\n(?!.*threshold|score.*>)
+    suggestion: "Filter results by minimum similarity threshold (e.g., 0.7)"
+
+best_practices:
+  - id: test-retrieval-accuracy
+    name: Test Retrieval Before Production
+    check: |
+      Create test queries with known correct answers.
+    recommendation: |
+      # Retrieval test framework
+      TEST_QUERIES = [
+          {
+              "query": "What are the user's color preferences?",
+              "expected_chunk_ids": ["pref-dark-mode", "pref-accent-blue"],
+          },
+          # ... more test cases
+      ]
+
+      def test_retrieval_accuracy():
+          for test in TEST_QUERIES:
+              results = index.query(test["query"], top_k=5)
+              result_ids = [r.id for r in results]
+
+              recall = len(set(result_ids) & set(test["expected_chunk_ids"])) / len(test["expected_chunk_ids"])
+              assert recall >= 0.8, f"Low recall for: {test['query']}"
+
+  - id: structure-metadata
+    name: Use Structured Metadata
+    check: |
+      Every vector should have consistent metadata schema.
+    recommendation: |
+      MEMORY_SCHEMA = {
+          "user_id": str,        # Required: who owns this
+          "type": str,           # Required: semantic/episodic/procedural
+          "created_at": datetime, # Required: for decay
+          "last_accessed": datetime,  # For usage tracking
+          "source": str,         # Where this came from
+          "topic": list[str],    # For filtering
+      }
+
+      def validate_metadata(metadata):
+          for field, dtype in MEMORY_SCHEMA.items():
+              if field in ["user_id", "type", "created_at"]:
+                  assert field in metadata, f"Missing required: {field}"
+              if field in metadata:
+                  assert isinstance(metadata[field], dtype)
+
+  - id: implement-memory-types
+    name: Use CoALA Memory Types
+    check: |
+      Different information needs different treatment.
+    recommendation: |
+      # Semantic memory: facts (structured)
+      class SemanticMemory:
+          def __init__(self, user_id):
+              self.profile = {}  # Structured user profile
+              self.facts = []    # General knowledge
+
+      # Episodic memory: experiences (timestamped)
+      class EpisodicMemory:
+          def __init__(self, user_id):
+              self.events = []  # Time-indexed interactions
+
+      # Procedural memory: skills (few-shot examples)
+      class ProceduralMemory:
+          def __init__(self):
+              self.skills = {}  # Task patterns
+
+  - id: background-memory-formation
+    name: Form Memories in Background
+    check: |
+      Don't slow conversations with memory extraction.
+    recommendation: |
+      from celery import shared_task
+
+      @shared_task
+      def process_conversation_memory(thread_id: str):
+          """Run after conversation ends or goes idle."""
+          conversation = load_conversation(thread_id)
+
+          # Extract insights without time pressure
+          insights = llm.invoke(f'''
+              Extract key learnings from this conversation:
+              - User preferences revealed
+              - Facts learned
+              - Task patterns observed
+
+              {conversation}
+          ''')
+
+          for insight in insights:
+              memory.store(insight)
+
+      # Trigger on idle
+      @on_conversation_idle(timeout_minutes=5)
+      def trigger_memory_processing(thread_id):
+          process_conversation_memory.delay(thread_id)
+
+  - id: implement-memory-decay
+    name: Implement Memory Decay
+    check: |
+      Old memories should fade to prevent bloat.
+    recommendation: |
+      from datetime import datetime, timedelta
+
+      async def decay_memories():
+          """Run periodically (e.g., daily)."""
+          # Archive old episodic memories
+          cutoff = datetime.now() - timedelta(days=90)
+          old_episodes = await memory.episodic.list(
+              filter={"last_accessed": {"$lt": cutoff}}
+          )
+          for episode in old_episodes:
+              await memory.archive(episode.id)
+
+          # Consolidate similar semantic memories
+          await consolidate_similar_memories()
+
+          # Delete truly old archived memories
+          ancient_cutoff = datetime.now() - timedelta(days=365)
+          await memory.delete_archived(before=ancient_cutoff)
+
+retrieval_benchmarks:
+  quality_targets:
+    recall_at_5: ">85% for tested queries"
+    precision_at_5: ">70% for tested queries"
+    mrr: ">0.7 mean reciprocal rank"
+
+  latency_targets:
+    p50: "<50ms query latency"
+    p95: "<150ms query latency"
+    p99: "<300ms query latency"
+
+  scale_considerations:
+    small: "<100K vectors - ChromaDB/pgvector fine"
+    medium: "100K-10M vectors - Qdrant/Weaviate recommended"
+    large: ">10M vectors - Pinecone/Milvus recommended"
+
+testing_recommendations:
+  - id: test-retrieval-quality
+    name: Measure Retrieval Quality
+    check: |
+      Create ground truth test set.
+    approach: |
+      1. Manually label 100+ query-document pairs
+      2. Measure recall@k for k in [1, 3, 5, 10]
+      3. Measure precision@k
+      4. Track metrics as you tune chunking/embedding
+
+  - id: test-scale-performance
+    name: Load Test at Target Scale
+    check: |
+      Performance degrades with scale.
+    approach: |
+      1. Generate realistic volume of vectors
+      2. Measure query latency distribution
+      3. Test concurrent query handling
+      4. Monitor memory usage
+
+  - id: test-memory-isolation
+    name: Verify User Isolation
+    check: |
+      Users must not see each other's memories.
+    approach: |
+      1. Create memories for user A
+      2. Query as user B
+      3. Verify zero results returned
+      4. Test with various filter bypasses
+
+  - id: test-staleness-handling
+    name: Verify Temporal Correctness
+    check: |
+      Recent info should override old.
+    approach: |
+      1. Store preference at T0
+      2. Update preference at T1
+      3. Query should return T1 version
+      4. Verify no T0 contamination
