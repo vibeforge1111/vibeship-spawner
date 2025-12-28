@@ -1,0 +1,281 @@
+# Validations - Shopify Apps
+# Quality checks for Shopify app implementations
+
+version: 1.0.0
+skill_id: shopify-apps
+
+validations:
+  # Security Checks
+  - id: hardcoded-api-secret
+    name: Hardcoded Shopify API Secret
+    severity: error
+    description: API secrets must never be hardcoded
+    pattern: |
+      (SHOPIFY_API_SECRET|apiSecretKey)\s*[:=]\s*["'][a-z0-9]{32,}["']
+    message: "Hardcoded Shopify API secret. Use environment variables."
+    autofix: false
+
+  - id: hardcoded-api-key
+    name: Hardcoded Shopify API Key
+    severity: error
+    description: API keys should use environment variables
+    pattern: |
+      (SHOPIFY_API_KEY|apiKey)\s*[:=]\s*["'][a-z0-9]{32}["']
+    message: "Hardcoded Shopify API key. Use environment variables."
+    autofix: false
+
+  - id: missing-hmac-verification
+    name: Missing HMAC Verification
+    severity: error
+    description: Webhook endpoints must verify HMAC signature
+    pattern: |
+      (webhooks|webhook).*\.(post|action)
+    anti_pattern: |
+      (authenticate\.webhook|verifyWebhookRequest|X-Shopify-Hmac)
+    message: "Webhook handler without HMAC verification. Use authenticate.webhook()."
+    autofix: false
+
+  # Webhook Checks
+  - id: sync-webhook-processing
+    name: Synchronous Webhook Processing
+    severity: warning
+    description: Webhook handlers should respond quickly
+    pattern: |
+      authenticate\.webhook.*await.*await.*await
+    message: "Multiple await calls in webhook handler. Consider async processing."
+    autofix: false
+
+  - id: missing-webhook-response
+    name: Missing Webhook Response
+    severity: error
+    description: Webhooks must return 200 status
+    pattern: |
+      authenticate\.webhook.*\n(?!.*return.*Response|.*return.*200)
+    message: "Webhook handler may not return proper response."
+    autofix: false
+
+  - id: duplicate-webhook-registration
+    name: Duplicate Webhook Registration
+    severity: warning
+    description: Webhooks should be defined in TOML only
+    pattern: |
+      (afterAuth|registerWebhooks|webhookSubscriptionCreate)
+    message: "Code-based webhook registration. Define webhooks in shopify.app.toml."
+    autofix: false
+
+  # API Usage Checks
+  - id: rest-api-usage
+    name: REST API Usage
+    severity: info
+    description: REST API is deprecated, use GraphQL
+    pattern: |
+      (/admin/api/.*\.json|admin-rest-api|RestApiClient)
+    message: "REST API usage detected. Consider migrating to GraphQL."
+    autofix: false
+
+  - id: missing-rate-limit-handling
+    name: Missing Rate Limit Handling
+    severity: warning
+    description: API calls should handle 429 responses
+    pattern: |
+      admin\.graphql\(|fetch\(.*admin
+    anti_pattern: |
+      (retry|backoff|429|rate.?limit)
+    message: "API call without rate limit handling. Implement retry logic."
+    autofix: false
+
+  # Session Checks
+  - id: in-memory-session-storage
+    name: In-Memory Session Storage
+    severity: warning
+    description: In-memory sessions don't scale
+    pattern: |
+      (MemorySessionStorage|new Map\(\)|sessions\s*=\s*\{\})
+    message: "In-memory session storage. Use PrismaSessionStorage or similar."
+    autofix: false
+
+  - id: missing-session-validation
+    name: Missing Session Validation
+    severity: error
+    description: Routes should validate session
+    pattern: |
+      export.*loader.*\{(?!.*authenticate)
+    message: "Loader without authentication. Use authenticate.admin(request)."
+    autofix: false
+
+  # GDPR Checks
+  - id: missing-gdpr-handlers
+    name: Missing GDPR Webhook Handlers
+    severity: error
+    description: GDPR webhooks are mandatory
+    pattern: |
+      (ORDERS_CREATE|PRODUCTS_UPDATE)
+    anti_pattern: |
+      (CUSTOMERS_DATA_REQUEST|CUSTOMERS_REDACT|SHOP_REDACT)
+    message: "Missing GDPR webhook handlers. Implement all three GDPR handlers."
+    autofix: false
+
+code_smells:
+  - id: large-graphql-query
+    name: Large GraphQL Query Without Pagination
+    description: Large queries should use pagination
+    pattern: |
+      (first:\s*100|first:\s*250)(?!.*after)
+    suggestion: "Use cursor-based pagination for large queries"
+
+  - id: polling-instead-of-webhooks
+    name: Polling Instead of Webhooks
+    description: Wastes rate limits, use webhooks
+    pattern: |
+      (setInterval|setTimeout).*admin\.graphql
+    suggestion: "Use webhooks instead of polling for changes"
+
+  - id: missing-error-handling
+    name: Missing Error Handling for API Calls
+    description: GraphQL calls should handle errors
+    pattern: |
+      admin\.graphql\(.*\)\.json\(\)
+    anti_pattern: |
+      (userErrors|catch|error)
+    suggestion: "Check for userErrors in GraphQL responses"
+
+  - id: hardcoded-shop-domain
+    name: Hardcoded Shop Domain
+    description: Shop domain should come from session
+    pattern: |
+      (\.myshopify\.com|shop\.shopify\.com)
+    suggestion: "Use session.shop instead of hardcoded domain"
+
+best_practices:
+  - id: use-graphql-api
+    name: Use GraphQL Admin API
+    check: |
+      All API calls use GraphQL instead of REST.
+    recommendation: |
+      // GraphQL call
+      const response = await admin.graphql(`
+        query {
+          products(first: 10) {
+            edges {
+              node {
+                id
+                title
+              }
+            }
+          }
+        }
+      `);
+
+      const { data, extensions } = await response.json();
+
+  - id: implement-bulk-operations
+    name: Use Bulk Operations for Large Datasets
+    check: |
+      Operations on 250+ items use bulk operations.
+    recommendation: |
+      // For large datasets, use bulk operations
+      const response = await admin.graphql(`
+        mutation {
+          bulkOperationRunQuery(
+            query: """
+              { products { edges { node { id title } } } }
+            """
+          ) {
+            bulkOperation {
+              id
+              status
+            }
+          }
+        }
+      `);
+
+      // Poll for completion or use BULK_OPERATIONS_FINISH webhook
+
+  - id: use-database-sessions
+    name: Use Database Session Storage
+    check: |
+      Sessions stored in database, not memory.
+    recommendation: |
+      import { PrismaSessionStorage } from
+        "@shopify/shopify-app-session-storage-prisma";
+
+      const shopify = shopifyApp({
+        // ...
+        sessionStorage: new PrismaSessionStorage(prisma),
+      });
+
+  - id: handle-gdpr-webhooks
+    name: Implement All GDPR Webhooks
+    check: |
+      All three GDPR webhooks have handlers.
+    recommendation: |
+      switch (topic) {
+        case "CUSTOMERS_DATA_REQUEST":
+          await handleDataRequest(payload);
+          break;
+        case "CUSTOMERS_REDACT":
+          await handleCustomerRedact(payload);
+          break;
+        case "SHOP_REDACT":
+          await handleShopRedact(payload);
+          break;
+      }
+
+  - id: async-webhook-processing
+    name: Process Webhooks Asynchronously
+    check: |
+      Heavy webhook processing happens after response.
+    recommendation: |
+      export const action = async ({ request }) => {
+        const { topic, payload } = await authenticate.webhook(request);
+
+        // Queue for async processing
+        await queue.add("process-webhook", { topic, payload });
+
+        // Respond immediately
+        return new Response(null, { status: 200 });
+      };
+
+  - id: configure-webhooks-in-toml
+    name: Configure Webhooks in TOML
+    check: |
+      Webhooks defined in shopify.app.toml, not code.
+    recommendation: |
+      # shopify.app.toml
+      [webhooks]
+      api_version = "2024-10"
+
+      [webhooks.subscriptions]
+      topics = ["orders/create", "products/update"]
+      uri = "/webhooks"
+
+testing_checklist:
+  local_development:
+    - "shopify app dev runs without errors"
+    - "App installs on development store"
+    - "OAuth flow completes successfully"
+    - "Embedded app renders in admin"
+
+  webhooks:
+    - "HMAC verification working"
+    - "Responses within 5 seconds"
+    - "All GDPR handlers implemented"
+    - "Webhook topics registered correctly"
+
+  api:
+    - "GraphQL calls authenticated"
+    - "Rate limits handled"
+    - "Errors handled gracefully"
+    - "Pagination implemented for lists"
+
+  security:
+    - "No hardcoded credentials"
+    - "Session storage is persistent"
+    - "CSRF protection enabled"
+    - "Scopes are minimal"
+
+  production_readiness:
+    - "shopify app deploy succeeds"
+    - "App works on multiple stores"
+    - "Billing implemented (if paid)"
+    - "Error monitoring configured"

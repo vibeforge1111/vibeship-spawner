@@ -1,0 +1,446 @@
+# Collaboration - Shopify Apps
+# How this skill works with other skills
+
+version: 1.0.0
+skill_id: shopify-apps
+
+prerequisites:
+  required: []
+
+  recommended:
+    - skill: frontend
+      reason: "Polaris components and React patterns"
+      what_to_know:
+        - "React hooks and components"
+        - "State management"
+        - "Form handling"
+
+    - skill: backend
+      reason: "API design and webhook handling"
+      what_to_know:
+        - "REST/GraphQL API design"
+        - "Webhook processing"
+        - "Job queues"
+
+    - skill: postgres-wizard
+      reason: "Session storage and app data"
+      what_to_know:
+        - "Prisma ORM"
+        - "Database design"
+        - "Migrations"
+
+delegation_triggers:
+  - trigger: "user needs payment processing"
+    delegate_to: stripe-integration
+    context: "Shopify Payments or Stripe integration"
+
+  - trigger: "user needs custom authentication"
+    delegate_to: auth-specialist
+    context: "Beyond Shopify OAuth"
+
+  - trigger: "user needs email/SMS notifications"
+    delegate_to: twilio-communications
+    context: "Customer notifications outside Shopify"
+
+  - trigger: "user needs AI features"
+    delegate_to: llm-architect
+    context: "Product descriptions, chatbots"
+
+  - trigger: "user needs serverless deployment"
+    delegate_to: aws-serverless
+    context: "Lambda or Vercel deployment"
+
+receives_context_from:
+  - skill: frontend
+    receives:
+      - "React component patterns"
+      - "State management strategies"
+      - "Form handling"
+
+  - skill: backend
+    receives:
+      - "API design patterns"
+      - "Queue processing"
+      - "Error handling"
+
+  - skill: postgres-wizard
+    receives:
+      - "Database schema design"
+      - "Query optimization"
+      - "Prisma patterns"
+
+provides_context_to:
+  - skill: ecommerce-general
+    provides:
+      - "Shopify-specific patterns"
+      - "Product/order structures"
+      - "Webhook handling"
+
+  - skill: workflow-automation
+    provides:
+      - "Shopify event triggers"
+      - "Order processing flows"
+      - "Inventory sync patterns"
+
+escalation_paths:
+  - situation: "Complex frontend requirements"
+    escalate_to: frontend
+    context: "Custom components beyond Polaris"
+
+  - situation: "Database performance issues"
+    escalate_to: postgres-wizard
+    context: "Query optimization, indexing"
+
+  - situation: "Scaling/infrastructure concerns"
+    escalate_to: devops
+    context: "High-volume webhooks, caching"
+
+  - situation: "Payment integration"
+    escalate_to: stripe-integration
+    context: "Custom payment flows"
+
+workflow_integration:
+  typical_sequence:
+    1:
+      step: "Create Shopify app"
+      skills: [shopify-apps]
+      output: "App project with CLI"
+
+    2:
+      step: "Set up database and sessions"
+      skills: [shopify-apps, postgres-wizard]
+      output: "Prisma schema, session storage"
+
+    3:
+      step: "Implement OAuth and authentication"
+      skills: [shopify-apps]
+      output: "Working OAuth flow"
+
+    4:
+      step: "Build admin UI with Polaris"
+      skills: [shopify-apps, frontend]
+      output: "Embedded app interface"
+
+    5:
+      step: "Implement API integrations"
+      skills: [shopify-apps, backend]
+      output: "GraphQL queries/mutations"
+
+    6:
+      step: "Set up webhooks"
+      skills: [shopify-apps]
+      output: "Webhook handlers"
+
+    7:
+      step: "Add billing"
+      skills: [shopify-apps]
+      output: "Subscription billing"
+
+    8:
+      step: "Deploy and submit"
+      skills: [shopify-apps, devops]
+      output: "Live app, App Store listing"
+
+  decision_points:
+    - question: "Embedded app or standalone?"
+      guidance: |
+        Embedded (RECOMMENDED):
+        - Appears inside Shopify Admin
+        - Uses App Bridge for navigation
+        - Required for Built for Shopify
+        - Better merchant experience
+
+        Standalone:
+        - Separate website
+        - Own authentication UI
+        - More flexibility
+        - Less integration with admin
+
+    - question: "Custom app or public app?"
+      guidance: |
+        Custom App:
+        - Single merchant use
+        - No App Store listing
+        - Simpler approval process
+        - Direct installation
+
+        Public App:
+        - App Store distribution
+        - Multiple merchants
+        - Shopify review required
+        - Revenue share (Shopify takes %)
+
+    - question: "React Router or custom framework?"
+      guidance: |
+        React Router Template (RECOMMENDED):
+        - Official Shopify template
+        - Built-in authentication
+        - Polaris integration
+        - Webhook handling included
+
+        Custom Framework:
+        - More control
+        - Different tech stack
+        - Must implement OAuth, sessions
+        - More work but flexibility
+
+collaboration_patterns:
+  with_prisma:
+    when: "Need database for session storage and app data"
+    approach: |
+      Session storage with Prisma:
+
+      ```typescript
+      // prisma/schema.prisma
+      model Session {
+        id          String    @id
+        shop        String
+        state       String
+        isOnline    Boolean   @default(false)
+        scope       String?
+        expires     DateTime?
+        accessToken String
+        userId      BigInt?
+        firstName   String?
+        lastName    String?
+        email       String?
+        locale      String?
+        accountOwner Boolean   @default(false)
+        collaborator Boolean   @default(false)
+
+        @@index([shop])
+      }
+
+      // App-specific data
+      model ShopSettings {
+        id        String   @id @default(cuid())
+        shop      String   @unique
+        setting1  String?
+        setting2  Boolean  @default(true)
+        createdAt DateTime @default(now())
+        updatedAt DateTime @updatedAt
+      }
+
+      // shopify.server.ts
+      import { PrismaSessionStorage } from
+        "@shopify/shopify-app-session-storage-prisma";
+
+      const shopify = shopifyApp({
+        sessionStorage: new PrismaSessionStorage(prisma),
+        // ...
+      });
+      ```
+
+  with_job_queues:
+    when: "Processing webhooks or background tasks"
+    approach: |
+      BullMQ for async webhook processing:
+
+      ```typescript
+      // lib/queue.server.ts
+      import { Queue, Worker } from "bullmq";
+      import Redis from "ioredis";
+
+      const connection = new Redis(process.env.REDIS_URL);
+
+      export const webhookQueue = new Queue("webhooks", { connection });
+
+      // Worker (separate process or serverless)
+      const worker = new Worker(
+        "webhooks",
+        async (job) => {
+          const { topic, shop, payload } = job.data;
+
+          switch (topic) {
+            case "ORDERS_CREATE":
+              await processNewOrder(shop, payload);
+              break;
+            case "PRODUCTS_UPDATE":
+              await syncProduct(shop, payload);
+              break;
+          }
+        },
+        { connection }
+      );
+
+      // app/routes/webhooks.tsx
+      export const action = async ({ request }) => {
+        const { topic, shop, payload } = await authenticate.webhook(request);
+
+        await webhookQueue.add(topic, { topic, shop, payload });
+
+        return new Response(null, { status: 200 });
+      };
+      ```
+
+  with_caching:
+    when: "Reducing API calls and improving performance"
+    approach: |
+      Redis caching for Shopify data:
+
+      ```typescript
+      // lib/cache.server.ts
+      import Redis from "ioredis";
+
+      const redis = new Redis(process.env.REDIS_URL);
+      const CACHE_TTL = 300; // 5 minutes
+
+      export async function getCachedProducts(shop: string, admin: any) {
+        const cacheKey = `products:${shop}`;
+        const cached = await redis.get(cacheKey);
+
+        if (cached) {
+          return JSON.parse(cached);
+        }
+
+        const response = await admin.graphql(`
+          query {
+            products(first: 50) {
+              edges { node { id title } }
+            }
+          }
+        `);
+
+        const { data } = await response.json();
+        await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(data.products));
+
+        return data.products;
+      }
+
+      // Invalidate on webhook
+      export async function invalidateProductCache(shop: string) {
+        await redis.del(`products:${shop}`);
+      }
+      ```
+
+  with_extensions:
+    when: "Building checkout or admin UI extensions"
+    approach: |
+      Creating UI extensions:
+
+      ```bash
+      # Add extension to app
+      shopify app generate extension
+
+      # Choose extension type:
+      # - Admin block
+      # - Checkout UI
+      # - Product subscription
+      # - Theme app extension
+      ```
+
+      ```typescript
+      // extensions/admin-block/src/BlockExtension.tsx
+      import {
+        reactExtension,
+        useApi,
+        AdminBlock,
+        BlockStack,
+        Text,
+        Button,
+      } from "@shopify/ui-extensions-react/admin";
+
+      export default reactExtension(
+        "admin.product-details.block.render",
+        () => <ProductBlock />
+      );
+
+      function ProductBlock() {
+        const { data } = useApi<"admin.product-details.block.render">();
+        const productId = data.selected?.[0]?.id;
+
+        return (
+          <AdminBlock title="My Extension">
+            <BlockStack>
+              <Text>Product: {productId}</Text>
+              <Button onPress={() => console.log("clicked")}>
+                Action
+              </Button>
+            </BlockStack>
+          </AdminBlock>
+        );
+      }
+      ```
+
+platform_integration:
+  vercel:
+    setup: |
+      # Deploy to Vercel
+      # 1. Push to GitHub
+      # 2. Connect to Vercel
+      # 3. Set environment variables:
+      #    - SHOPIFY_API_KEY
+      #    - SHOPIFY_API_SECRET
+      #    - SCOPES
+      #    - SHOPIFY_APP_URL (your Vercel URL)
+
+      # vercel.json (if needed)
+      {
+        "functions": {
+          "app/routes/webhooks.tsx": {
+            "maxDuration": 10
+          }
+        }
+      }
+
+      # Update shopify.app.toml after deployment
+      application_url = "https://your-app.vercel.app"
+
+      # Deploy app config
+      shopify app deploy
+
+  railway:
+    setup: |
+      # Deploy to Railway
+      # 1. Connect GitHub repo
+      # 2. Add PostgreSQL service
+      # 3. Add Redis service (for queues)
+      # 4. Set environment variables
+      # 5. Deploy
+
+      # railway.json
+      {
+        "build": {
+          "builder": "nixpacks"
+        },
+        "deploy": {
+          "startCommand": "npm run start",
+          "healthcheckPath": "/health"
+        }
+      }
+
+  fly_io:
+    setup: |
+      # fly.toml
+      app = "my-shopify-app"
+      primary_region = "iad"
+
+      [http_service]
+        internal_port = 3000
+        force_https = true
+        auto_stop_machines = true
+        auto_start_machines = true
+
+      [env]
+        NODE_ENV = "production"
+
+      # Deploy
+      fly launch
+      fly secrets set SHOPIFY_API_KEY=xxx SHOPIFY_API_SECRET=xxx
+
+cost_optimization:
+  - "Use webhooks instead of polling"
+  - "Cache frequently accessed data"
+  - "Batch API calls when possible"
+  - "Use bulk operations for large datasets"
+  - "Implement proper rate limit handling"
+
+security_checklist:
+  - "HMAC verification on all webhooks"
+  - "No hardcoded credentials"
+  - "Session tokens validated"
+  - "CSRF protection enabled"
+  - "Minimal OAuth scopes"
+  - "Protected customer data access only if needed"
+  - "GDPR webhooks implemented"
+  - "Secure session storage"
