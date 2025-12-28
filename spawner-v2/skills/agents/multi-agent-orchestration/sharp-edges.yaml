@@ -1,0 +1,351 @@
+# Sharp Edges - Multi-Agent Orchestration
+# The gotchas that break production systems
+
+version: 1.0.0
+skill_id: multi-agent-orchestration
+
+sharp_edges:
+  - id: coordination-latency-quadratic
+    severity: high
+    title: Coordination Latency Grows Quadratically
+    situation: Adding more agents to handle complexity
+    symptom: |
+      System gets slower as you add agents. 2 agents: ~200ms coordination.
+      4 agents: ~800ms. 8 agents: 4+ seconds. Performance degrades faster
+      than linearly, and users notice.
+    why: |
+      Each agent pair needs potential coordination. With n agents, you have
+      O(n²) potential interactions. Even if not all happen, the orchestration
+      overhead scales poorly. Most teams discover this in production.
+    solution: |
+      1. Minimize agent count - 3-4 agents max for most use cases
+      2. Use hierarchical orchestration - supervisor talks to sub-supervisors
+      3. Make agents more capable rather than adding more agents
+      4. Profile coordination overhead explicitly
+    detection_pattern:
+      - "add.*more.*agent"
+      - "new agent for"
+      - "agent.*each.*task"
+
+  - id: handoff-context-loss
+    severity: critical
+    title: Context Lost During Handoffs
+    situation: Transferring work between specialized agents
+    symptom: |
+      User repeats information. Agent asks questions already answered.
+      Solution addresses wrong aspect of the problem. Users say "I already
+      told you that" after every handoff.
+    why: |
+      Default handoff passes minimal context. Previous agent's understanding,
+      nuances from earlier conversation, and implicit context don't transfer.
+      The receiving agent starts fresh without full picture.
+    solution: |
+      # Explicit context packaging at handoff:
+
+      def create_handoff_context(conversation, current_agent, target_agent):
+          return {
+              "summary": summarize_conversation(conversation),
+              "key_facts": extract_key_facts(conversation),
+              "user_intent": current_agent.understood_intent,
+              "attempted_solutions": current_agent.attempted,
+              "why_handoff": current_agent.handoff_reason,
+              "relevant_history": filter_relevant(conversation, target_agent.domain)
+          }
+
+      # Test handoffs explicitly:
+      # After handoff, target agent should be able to answer:
+      # - What is the user trying to do?
+      # - What has already been tried?
+      # - Why am I receiving this?
+    detection_pattern:
+      - "transfer_to"
+      - "handoff"
+      - "hand.*off.*to"
+
+  - id: memory-poisoning-cascade
+    severity: critical
+    title: Hallucination Poisoning Shared Memory
+    situation: Multiple agents reading/writing shared memory
+    symptom: |
+      Accuracy degrades gradually over conversation. Wrong information
+      appears confidently. Later agents make decisions based on false "facts"
+      that earlier agent hallucinated and stored.
+    why: |
+      When Agent A hallucinates and stores it in shared memory, Agent B
+      treats it as verified fact. No validation at write time. No provenance
+      tracking. Memory becomes progressively corrupted.
+    solution: |
+      1. NEVER write to shared memory without confidence score
+      2. Track provenance - which agent wrote what, when
+      3. Validate critical facts before storing:
+
+         async def validated_memory_write(fact, source_agent):
+             # Check against authoritative sources
+             verification = await fact_checker.verify(fact)
+
+             if verification.confidence < 0.8:
+                 # Store as hypothesis, not fact
+                 return memory.write(
+                     content=fact,
+                     type="hypothesis",
+                     confidence=verification.confidence,
+                     source=source_agent.id,
+                     needs_verification=True
+                 )
+
+             return memory.write(fact, type="verified_fact", ...)
+
+      4. Periodic memory audit for contradictions
+      5. Clear memory between unrelated sessions
+    detection_pattern:
+      - "memory.write"
+      - "shared.*memory"
+      - "store.*fact"
+      - "save.*to.*memory"
+
+  - id: deadlock-circular-wait
+    severity: high
+    title: Agent Deadlock from Circular Dependencies
+    situation: Agents waiting on each other to complete
+    symptom: |
+      System hangs indefinitely. No progress on any task. Logs show agents
+      waiting. No errors, just infinite wait. Often discovered only in
+      production with real complex queries.
+    why: |
+      Agent A waits for Agent B. Agent B waits for Agent C. Agent C waits
+      for Agent A. Classic distributed deadlock. Especially common when
+      agents can dynamically request work from each other.
+    solution: |
+      1. Implement timeouts on ALL agent interactions:
+
+         async def agent_call_with_timeout(agent, task, timeout_seconds=30):
+             try:
+                 return await asyncio.wait_for(
+                     agent.process(task),
+                     timeout=timeout_seconds
+                 )
+             except asyncio.TimeoutError:
+                 logger.error(f"Agent {agent.id} timed out on {task.id}")
+                 return AgentResult.timeout(task, agent)
+
+      2. Detect cycles in request graph
+      3. Use async patterns - don't block waiting
+      4. Design acyclic agent dependencies where possible
+      5. Circuit breaker for agents that keep timing out
+    detection_pattern:
+      - "await.*agent"
+      - "wait.*for.*result"
+      - "blocking"
+
+  - id: concurrent-state-corruption
+    severity: critical
+    title: Race Conditions in Shared State
+    situation: Multiple agents modifying same state concurrently
+    symptom: |
+      Lost updates. Inconsistent state. Same file shows different content
+      to different agents. Operations succeed but results disappear.
+      Intermittent, hard to reproduce.
+    why: |
+      Agent A reads state, Agent B reads same state. Both modify. Both write.
+      One write overwrites the other. Classic read-modify-write race. LLM
+      agents are slower, making the race window larger.
+    solution: |
+      1. Use optimistic locking:
+
+         def update_with_lock(key, update_fn):
+             while True:
+                 current = state.read(key)
+                 new_value = update_fn(current.value)
+                 success = state.compare_and_swap(
+                     key, current.version, new_value
+                 )
+                 if success:
+                     return new_value
+                 # Version changed, retry with new value
+
+      2. Use CRDTs for mergeable state
+      3. Serialize writes through single agent
+      4. Scope state to individual agents where possible
+      5. Use transactional state updates
+    detection_pattern:
+      - "concurrent"
+      - "parallel.*agent"
+      - "shared.*state"
+      - "multiple.*write"
+
+  - id: retry-storm-amplification
+    severity: high
+    title: Retry Storms Under Load
+    situation: Multiple agents hitting same external service
+    symptom: |
+      External API rate limited. All agents retry simultaneously.
+      Retry volume is 3x original. Then 9x. Then 27x. Service collapses.
+      Cascading failure across all agents.
+    why: |
+      Each agent has independent retry logic. When service fails, all retry.
+      Retries create more load. More failures. More retries. Exponential
+      amplification. One API hiccup becomes system-wide outage.
+    solution: |
+      1. Centralized rate limiting across all agents:
+
+         class SharedRateLimiter:
+             def __init__(self, calls_per_minute: int):
+                 self.semaphore = asyncio.Semaphore(calls_per_minute)
+                 self.reset_task = asyncio.create_task(self._reset_loop())
+
+             async def acquire(self):
+                 await self.semaphore.acquire()
+
+             async def _reset_loop(self):
+                 while True:
+                     await asyncio.sleep(60)
+                     # Reset permits
+                     self.semaphore = asyncio.Semaphore(self.calls_per_minute)
+
+      2. Jittered exponential backoff (not synchronized retries)
+      3. Circuit breaker at service level, not agent level
+      4. Queue requests through single gateway
+      5. Graceful degradation - work without the service if possible
+    detection_pattern:
+      - "retry"
+      - "rate.*limit"
+      - "api.*call"
+
+  - id: unbounded-context-growth
+    severity: high
+    title: Context Window Overflow
+    situation: Long multi-agent conversations accumulating context
+    symptom: |
+      Token limit errors. Truncated context. Agent "forgets" important
+      information. Errors like "maximum context length exceeded."
+      Behavior degrades as conversation grows.
+    why: |
+      Each agent interaction adds to context. Group chats especially bad -
+      5 agents × 10 rounds = 50 messages minimum. Context grows unbounded
+      until it hits model limits and gets truncated unpredictably.
+    solution: |
+      1. Summarize at checkpoints:
+
+         def manage_context(messages, max_tokens=8000):
+             current_tokens = count_tokens(messages)
+
+             if current_tokens > max_tokens * 0.8:  # 80% threshold
+                 # Keep recent messages, summarize rest
+                 recent = messages[-10:]
+                 older = messages[:-10]
+                 summary = summarize(older)
+
+                 return [
+                     {"role": "system", "content": f"Previous context: {summary}"},
+                     *recent
+                 ]
+
+             return messages
+
+      2. Scope context to relevant agents only
+      3. Use external memory for facts, not conversation replay
+      4. Set conversation length limits with graceful handoff
+      5. Monitor token usage per agent interaction
+    detection_pattern:
+      - "context"
+      - "message.*history"
+      - "conversation"
+      - "token"
+
+  - id: silent-agent-failure
+    severity: high
+    title: Agent Failures Not Surfaced
+    situation: One agent in a pipeline fails silently
+    symptom: |
+      Wrong results but no errors. Missing data in output. Pipeline
+      "completes" but skips steps. Quality issues discovered by users,
+      not monitoring.
+    why: |
+      Agents often return partial results rather than throwing errors.
+      Orchestrator treats any response as success. Downstream agents work
+      with incomplete input. No validation of agent output quality.
+    solution: |
+      1. Define success criteria for each agent:
+
+         @dataclass
+         class AgentResult:
+             content: Any
+             success: bool
+             confidence: float
+             errors: list[str]
+             warnings: list[str]
+
+             def is_valid(self) -> bool:
+                 return self.success and self.confidence > 0.7 and not self.errors
+
+      2. Validate outputs before passing downstream
+      3. Log and alert on low-confidence results
+      4. Implement output contracts between agents
+      5. Human review for critical paths
+    detection_pattern:
+      - "result"
+      - "output"
+      - "return"
+
+  - id: framework-lock-in
+    severity: medium
+    title: Deep Framework Coupling Prevents Migration
+    situation: Building heavily on one orchestration framework
+    symptom: |
+      AutoGen deprecated, migration required. LangGraph interface changed.
+      CrewAI doesn't support your use case. Months of refactoring needed.
+      Framework drives architecture instead of business needs.
+    why: |
+      Multi-agent frameworks are young and changing fast. AutoGen is being
+      merged into Microsoft Agent Framework. LangChain APIs shift frequently.
+      Deep coupling means framework changes = application rewrites.
+    solution: |
+      1. Abstract orchestration behind your own interfaces:
+
+         class AgentOrchestrator(Protocol):
+             async def run_sequential(self, agents: list[Agent], input: str) -> str: ...
+             async def run_parallel(self, agents: list[Agent], input: str) -> list[str]: ...
+             async def handoff(self, from_agent: Agent, to_agent: Agent, context: dict): ...
+
+         # Framework-specific implementation
+         class LangGraphOrchestrator(AgentOrchestrator):
+             ...
+
+         class CrewAIOrchestrator(AgentOrchestrator):
+             ...
+
+      2. Keep agent logic separate from orchestration logic
+      3. Test agents independently of framework
+      4. Monitor framework development roadmaps
+      5. Consider simpler patterns that don't need a framework
+    detection_pattern:
+      - "from langgraph"
+      - "from crewai"
+      - "from autogen"
+      - "import.*swarm"
+
+common_mistakes:
+  - mistake: "Using multi-agent when single agent would work"
+    frequency: very_common
+    impact: "2-5x complexity for no benefit"
+    fix: "Prove single agent fails before adding second"
+
+  - mistake: "No observability into agent interactions"
+    frequency: very_common
+    impact: "Impossible to debug production issues"
+    fix: "Log every handoff, every agent call, every decision"
+
+  - mistake: "Testing agents individually but not together"
+    frequency: common
+    impact: "Integration failures in production"
+    fix: "Integration tests for full agent workflows"
+
+  - mistake: "Assuming agents will coordinate automatically"
+    frequency: common
+    impact: "Agents work at cross-purposes, duplicated work"
+    fix: "Explicit coordination protocols and shared state"
+
+  - mistake: "No fallback when orchestration fails"
+    frequency: common
+    impact: "Complete system failure on any agent issue"
+    fix: "Graceful degradation to simpler behavior"

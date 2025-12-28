@@ -1,0 +1,232 @@
+# Validations - Multi-Agent Orchestration
+# Automated checks for multi-agent system quality
+
+version: 1.0.0
+skill_id: multi-agent-orchestration
+
+validations:
+  # Timeout and Error Handling
+  - id: agent-call-timeout
+    name: Agent Calls Must Have Timeouts
+    severity: error
+    description: Every agent call should have a timeout to prevent deadlocks
+    pattern: |
+      async\s+def\s+\w+.*agent.*\(
+    anti_pattern: |
+      timeout|wait_for|asyncio\.timeout
+    message: "Agent call without timeout - add asyncio.wait_for() or timeout parameter"
+    autofix: false
+
+  - id: missing-error-handling
+    name: Agent Calls Need Error Handling
+    severity: error
+    description: Agent calls can fail - wrap in try/except
+    pattern: |
+      await\s+\w+_agent\.|\.run\(|\.invoke\(
+    anti_pattern: |
+      try:|except
+    message: "Agent call without error handling - wrap in try/except block"
+    autofix: false
+
+  # Handoff Patterns
+  - id: handoff-without-context
+    name: Handoff Missing Context Transfer
+    severity: warning
+    description: Handoffs should pass relevant context to receiving agent
+    pattern: |
+      transfer_to_|handoff\(|hand_off\(
+    anti_pattern: |
+      context|summary|history
+    message: "Handoff may be losing context - ensure context is passed to receiving agent"
+    autofix: false
+
+  - id: unbounded-handoff-depth
+    name: No Maximum Handoff Depth
+    severity: warning
+    description: Without max depth, agents can loop forever
+    pattern: |
+      def\s+transfer_to|handoff_to|route_to
+    anti_pattern: |
+      max_handoff|depth|max_depth|handoff_count
+    message: "Handoff function without depth limit - add maximum handoff counter"
+    autofix: false
+
+  # Memory and State
+  - id: shared-memory-no-lock
+    name: Shared Memory Access Without Locking
+    severity: error
+    description: Concurrent memory access needs synchronization
+    pattern: |
+      shared_memory\[|memory\.write\(|memory\.update\(
+    anti_pattern: |
+      lock|Lock|mutex|synchronized|atomic
+    message: "Shared memory access without locking mechanism - add threading.Lock or asyncio.Lock"
+    autofix: false
+
+  - id: memory-write-no-validation
+    name: Memory Write Without Validation
+    severity: warning
+    description: Validate data before writing to shared memory
+    pattern: |
+      memory\.write\(|memory\.store\(|memory\.set\(
+    anti_pattern: |
+      validate|verify|confidence|check
+    message: "Writing to shared memory without validation - consider adding confidence score or verification"
+    autofix: false
+
+  # Observability
+  - id: missing-handoff-logging
+    name: Handoff Not Logged
+    severity: warning
+    description: Log all handoffs for debugging and monitoring
+    pattern: |
+      transfer_to|handoff\(|hand_off
+    anti_pattern: |
+      log|logger|logging|print|track
+    message: "Agent handoff not logged - add logging for debugging"
+    autofix: false
+
+  - id: no-agent-metrics
+    name: Missing Agent Metrics
+    severity: info
+    description: Track agent performance metrics for optimization
+    pattern: |
+      class\s+\w*[Aa]gent|def\s+run_agent
+    anti_pattern: |
+      metric|timer|duration|latency|counter
+    message: "Consider adding metrics to track agent performance"
+    autofix: false
+
+  # Configuration
+  - id: hardcoded-agent-count
+    name: Hardcoded Number of Agents
+    severity: info
+    description: Agent count should be configurable for scaling
+    pattern: |
+      agents\s*=\s*\[.*,.*,.*\]|num_agents\s*=\s*\d+
+    anti_pattern: |
+      config|settings|env|environ
+    message: "Consider making agent count configurable"
+    autofix: false
+
+  - id: missing-circuit-breaker
+    name: No Circuit Breaker for External Calls
+    severity: warning
+    description: External service calls should have circuit breakers
+    pattern: |
+      api\.|\.get\(|\.post\(|fetch\(|request\(
+    anti_pattern: |
+      circuit|breaker|CircuitBreaker|retry.*max|max.*retry
+    message: "External API call without circuit breaker - add failure isolation"
+    autofix: false
+
+  # Concurrency
+  - id: parallel-without-semaphore
+    name: Parallel Agents Without Rate Limiting
+    severity: warning
+    description: Parallel agent calls should be rate limited
+    pattern: |
+      asyncio\.gather|await\s+\[|concurrent\.futures
+    anti_pattern: |
+      Semaphore|rate.*limit|throttle|max_concurrent
+    message: "Parallel agent calls without rate limiting - add Semaphore for API protection"
+    autofix: false
+
+  - id: no-graceful-degradation
+    name: Missing Graceful Degradation
+    severity: warning
+    description: System should work with partial agent failures
+    pattern: |
+      async\s+def\s+orchestrate|async\s+def\s+run_agents
+    anti_pattern: |
+      fallback|degrade|partial|best.*effort|some.*failed
+    message: "Consider adding graceful degradation when some agents fail"
+    autofix: false
+
+  # Framework Patterns
+  - id: crewai-no-memory
+    name: CrewAI Crew Without Memory
+    severity: info
+    description: CrewAI crews often benefit from memory for multi-turn
+    pattern: |
+      Crew\s*\(
+    anti_pattern: |
+      memory\s*=|Memory\(
+    message: "CrewAI Crew without memory configuration - consider adding for multi-turn conversations"
+    autofix: false
+
+  - id: langgraph-no-checkpointer
+    name: LangGraph Without Checkpointing
+    severity: warning
+    description: Long workflows should checkpoint for recovery
+    pattern: |
+      StateGraph\s*\(|CompiledGraph
+    anti_pattern: |
+      checkpointer|MemorySaver|SqliteSaver
+    message: "LangGraph workflow without checkpointer - add for recovery on failure"
+    autofix: false
+
+  - id: autogen-unlimited-rounds
+    name: AutoGen GroupChat Without Round Limit
+    severity: warning
+    description: Group chats should have maximum rounds to prevent infinite discussion
+    pattern: |
+      GroupChat\s*\(
+    anti_pattern: |
+      max_round
+    message: "AutoGen GroupChat without max_round - agents may discuss indefinitely"
+    autofix: false
+
+code_smells:
+  - id: too-many-agents
+    name: Too Many Agents in Single Orchestration
+    description: More than 5 agents suggests over-engineering
+    pattern: |
+      agents\s*=\s*\[.*,.*,.*,.*,.*,.*\]
+    suggestion: "Consider consolidating agents or using hierarchical orchestration"
+
+  - id: agent-doing-everything
+    name: Agent With Too Many Responsibilities
+    description: Single agent with many tools/functions may be doing too much
+    pattern: |
+      tools\s*=\s*\[.*,.*,.*,.*,.*,.*,.*,.*\]|functions\s*=\s*\[.*,.*,.*,.*,.*
+    suggestion: "Consider splitting into specialized agents"
+
+  - id: sync-agent-calls
+    name: Synchronous Agent Calls
+    description: Agent calls should typically be async for better performance
+    pattern: |
+      def\s+run_agent|def\s+orchestrate
+    anti_pattern: |
+      async\s+def
+    suggestion: "Consider using async/await for agent calls"
+
+best_practices:
+  - id: explicit-agent-contracts
+    name: Define Agent Input/Output Contracts
+    check: |
+      Look for Pydantic models, TypedDicts, or dataclasses defining
+      what each agent expects and returns.
+    recommendation: |
+      Each agent should have:
+      - Input schema (what it expects)
+      - Output schema (what it returns)
+      - Error conditions (when it fails)
+
+  - id: agent-independence
+    name: Agents Should Be Independently Testable
+    check: |
+      Each agent should be testable without the full orchestration.
+    recommendation: |
+      Write unit tests for individual agents.
+      Mock dependencies, not the agent itself.
+      Integration test the full workflow separately.
+
+  - id: idempotent-operations
+    name: Agent Operations Should Be Idempotent
+    check: |
+      Running the same operation twice should produce same result.
+    recommendation: |
+      Design agents to handle retries safely.
+      Use idempotency keys for external operations.
+      Store operation results for deduplication.
