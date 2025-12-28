@@ -1,0 +1,196 @@
+id: fintech-integration-sharp-edges
+skill: fintech-integration
+version: 1.0.0
+
+sharp_edges:
+
+  - id: missing-idempotency-key
+    severity: critical
+    title: "Missing Idempotency Key Causes Duplicate Charges"
+    summary: "Network retries without idempotency create duplicate payments"
+    symptoms:
+      - "Customer charged multiple times"
+      - "Support tickets for double charges"
+      - "Refund requests spike after outages"
+    why: |
+      Network failures happen. When a payment request times out, the client
+      retries. Without an idempotency key, Stripe processes each retry as
+      a new payment. Customer gets charged 2-3x.
+    gotcha: |
+      # No idempotency key
+      payment_intent = stripe.PaymentIntent.create(
+          amount=5000,
+          currency='usd',
+          customer=customer_id
+      )
+
+      # If this times out and retries, customer charged twice!
+    solution: |
+      # Always include idempotency key
+      idempotency_key = f"{user_id}:{order_id}:{uuid.uuid4().hex[:8]}"
+
+      payment_intent = stripe.PaymentIntent.create(
+          amount=5000,
+          currency='usd',
+          customer=customer_id,
+          idempotency_key=idempotency_key  # Safe to retry
+      )
+
+      # Stripe returns same result for same idempotency key
+
+  - id: webhook-signature-skip
+    severity: critical
+    title: "Unverified Webhooks Enable Spoofing"
+    summary: "Attackers can fake payment confirmations"
+    symptoms:
+      - "Orders marked paid without actual payment"
+      - "Fraudulent refund requests"
+      - "Inventory discrepancies"
+    why: |
+      Webhook endpoints are public URLs. Anyone can POST to them.
+      Without signature verification, attackers can send fake
+      payment.succeeded events and get products for free.
+    gotcha: |
+      @app.post("/webhooks/stripe")
+      async def stripe_webhook(request: Request):
+          payload = await request.json()
+          event_type = payload['type']  # Trusting unverified data!
+
+          if event_type == 'payment_intent.succeeded':
+              fulfill_order(payload['data']['object'])  # Fraud!
+    solution: |
+      @app.post("/webhooks/stripe")
+      async def stripe_webhook(request: Request):
+          payload = await request.body()
+          signature = request.headers.get('stripe-signature')
+
+          try:
+              event = stripe.Webhook.construct_event(
+                  payload,
+                  signature,
+                  webhook_secret  # From Stripe Dashboard
+              )
+          except stripe.error.SignatureVerificationError:
+              raise HTTPException(status_code=400, detail="Invalid signature")
+
+          # Now safe to process
+          if event.type == 'payment_intent.succeeded':
+              fulfill_order(event.data.object)
+
+  - id: plaid-token-expiry
+    severity: high
+    title: "Plaid Access Tokens Expire Without Warning"
+    summary: "Bank connections break and users must relink"
+    symptoms:
+      - "Transaction sync stops working"
+      - "Users complain about 'disconnected' banks"
+      - "ITEM_LOGIN_REQUIRED errors"
+    why: |
+      Plaid access tokens can expire when banks require re-authentication.
+      This happens after password changes, security updates, or bank
+      policy changes. Without handling, your app silently loses access.
+    gotcha: |
+      # Assuming token works forever
+      transactions = plaid_client.transactions_get(access_token, ...)
+
+      # Works for months... then suddenly fails
+      # No notification to user, data goes stale
+    solution: |
+      # Handle Plaid webhooks for token issues
+      @app.post("/webhooks/plaid")
+      async def plaid_webhook(request: Request):
+          payload = await request.json()
+
+          if payload['webhook_type'] == 'ITEM':
+              if payload['webhook_code'] == 'ERROR':
+                  # Token needs refresh
+                  await notify_user_relink(payload['item_id'])
+
+              elif payload['webhook_code'] == 'PENDING_EXPIRATION':
+                  # Proactive warning
+                  await send_relink_reminder(payload['item_id'])
+
+          elif payload['webhook_type'] == 'TRANSACTIONS':
+              if payload['webhook_code'] == 'SYNC_UPDATES_AVAILABLE':
+                  await sync_transactions(payload['item_id'])
+
+  - id: ach-not-instant
+    severity: medium
+    title: "ACH Transfers Take 3-5 Business Days"
+    summary: "Treating ACH as instant leads to premature fulfillment"
+    symptoms:
+      - "Orders shipped before payment clears"
+      - "Returns create negative balances"
+      - "Fraud via 'succeeded' status confusion"
+    why: |
+      ACH bank transfers are not instant. A 'pending' charge can fail
+      days later due to insufficient funds, closed account, or fraud.
+      Treating 'pending' as 'succeeded' leads to losses.
+    gotcha: |
+      charge = stripe.Charge.create(
+          amount=10000,
+          currency='usd',
+          source=bank_account_id
+      )
+
+      if charge.status == 'pending':
+          fulfill_order()  # Dangerous! Payment hasn't cleared
+    solution: |
+      # Wait for actual settlement via webhook
+      @app.post("/webhooks/stripe")
+      async def handle_ach(request: Request):
+          event = verify_webhook(request)
+
+          if event.type == 'charge.succeeded':
+              # ACH has actually cleared
+              await fulfill_order(event.data.object)
+
+          elif event.type == 'charge.failed':
+              # ACH failed after days
+              await cancel_order(event.data.object)
+              await notify_customer_payment_failed()
+
+      # For high-value orders, consider waiting for settlement
+
+  - id: storing-credentials
+    severity: critical
+    title: "Storing Raw Card Numbers Violates PCI"
+    summary: "Handling card data directly creates compliance nightmare"
+    symptoms:
+      - "PCI DSS audit failures"
+      - "Security breach liability"
+      - "Massive fines and reputation damage"
+    why: |
+      PCI DSS compliance for storing card numbers is extremely expensive
+      and complex. One breach can cost millions. Stripe and Plaid handle
+      this so you don't have to.
+    gotcha: |
+      # Never do this
+      card_number = request.form['card_number']
+      cvv = request.form['cvv']
+
+      # Store in database
+      db.execute("INSERT INTO cards (number, cvv) VALUES (?, ?)",
+                 card_number, cvv)  # Massive liability!
+    solution: |
+      # Use Stripe.js to tokenize on frontend
+      # Card numbers never touch your server
+
+      // Frontend (Stripe.js)
+      const {token} = await stripe.createToken(cardElement);
+      // Send only token.id to your server
+
+      // Backend
+      customer = stripe.Customer.create(source=token_id)
+      # Stripe stores card securely, you store customer_id
+
+      # Never log card data
+      logger.info(f"Created customer {customer.id}")  # OK
+      # logger.info(f"Card: {card_number}")  # NEVER
+
+detection:
+  file_patterns:
+    - "**/*payment*.py"
+    - "**/*stripe*.py"
+    - "**/*plaid*.py"
+    - "**/*webhook*.py"

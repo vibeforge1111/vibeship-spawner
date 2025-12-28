@@ -1,0 +1,87 @@
+validations:
+
+  - id: ppo-no-clipping
+    name: PPO Without Clipping
+    severity: error
+    type: regex
+    pattern:
+      - "ratio.*advantage(?!.*clamp|clip)"
+      - "policy_loss.*=.*-.*ratio.*advantage(?!.*min)"
+    message: "PPO requires clipping to prevent catastrophic policy updates."
+    fix_action: "Add: torch.clamp(ratio, 1-eps, 1+eps) and use min of clipped/unclipped"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-advantage-normalization
+    name: Advantages Not Normalized
+    severity: warning
+    type: regex
+    pattern:
+      - "advantage.*=(?!.*(mean|std|normalize))"
+    message: "Normalizing advantages reduces variance and improves training stability."
+    fix_action: "Add: advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)"
+    applies_to:
+      - "**/*ppo*.py"
+      - "**/*rl*.py"
+
+  - id: no-entropy-bonus
+    name: Missing Entropy Bonus
+    severity: warning
+    type: regex
+    pattern:
+      - "policy_loss(?!.*entropy)"
+      - "actor_loss(?!.*entropy)"
+    message: "Entropy bonus encourages exploration and prevents premature convergence."
+    fix_action: "Add: total_loss = policy_loss - entropy_coef * entropy.mean()"
+    applies_to:
+      - "**/*ppo*.py"
+      - "**/*a2c*.py"
+
+  - id: rlhf-no-kl-penalty
+    name: RLHF Without KL Penalty
+    severity: error
+    type: regex
+    pattern:
+      - "reward_model.*response(?!.*kl|.*reference)"
+    message: "RLHF requires KL penalty to prevent model drift and reward hacking."
+    fix_action: "Add: reward = reward_score - kl_coef * kl_divergence(policy, reference)"
+    applies_to:
+      - "**/*rlhf*.py"
+      - "**/*alignment*.py"
+
+  - id: dqn-no-target-network
+    name: DQN Without Target Network
+    severity: error
+    type: regex
+    pattern:
+      - "q_network.*max(?!.*target)"
+      - "q_net.*next_state(?!.*target)"
+    message: "DQN requires separate target network for stable learning."
+    fix_action: "Add target network and periodically update: target_net.load_state_dict(q_net.state_dict())"
+    applies_to:
+      - "**/*dqn*.py"
+      - "**/*q_learning*.py"
+
+  - id: no-gradient-clipping-rl
+    name: RL Training Without Gradient Clipping
+    severity: warning
+    type: regex
+    pattern:
+      - "loss\\.backward\\(\\)\\s*\\n\\s*optimizer\\.step(?!.*clip_grad)"
+    message: "RL training benefits from gradient clipping for stability."
+    fix_action: "Add: nn.utils.clip_grad_norm_(parameters, max_grad_norm)"
+    applies_to:
+      - "**/*rl*.py"
+      - "**/*ppo*.py"
+
+  - id: no-reward-logging
+    name: Training Without Reward Logging
+    severity: info
+    type: regex
+    pattern:
+      - "for.*episode(?!.*log|.*print|.*wandb|.*writer)"
+    message: "RL training requires careful monitoring of reward and metrics."
+    fix_action: "Log: episode_reward, policy_loss, value_loss, entropy, KL divergence"
+    applies_to:
+      - "**/*train*.py"
+      - "**/*rl*.py"

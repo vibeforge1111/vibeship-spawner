@@ -1,0 +1,200 @@
+id: blockchain-defi-sharp-edges
+skill: blockchain-defi
+version: 1.0.0
+
+sharp_edges:
+
+  - id: reentrancy-attack
+    severity: critical
+    title: "Reentrancy Allows Recursive Exploitation"
+    summary: "External calls before state updates enable theft"
+    symptoms:
+      - "Funds drained in single transaction"
+      - "Balance discrepancies after withdrawals"
+      - "Same function called recursively"
+    why: |
+      When a contract sends ETH or calls another contract before
+      updating its state, the receiving contract can call back
+      into the original function. This was the DAO hack ($60M).
+    gotcha: |
+      function withdraw(uint amount) external {
+          require(balances[msg.sender] >= amount);
+
+          // VULNERABLE: External call before state update
+          (bool success, ) = msg.sender.call{value: amount}("");
+          require(success);
+
+          balances[msg.sender] -= amount;  // Too late!
+      }
+    solution: |
+      // Check-Effects-Interactions pattern
+      function withdraw(uint amount) external nonReentrant {
+          require(balances[msg.sender] >= amount);
+
+          // EFFECTS: Update state first
+          balances[msg.sender] -= amount;
+
+          // INTERACTIONS: External call last
+          (bool success, ) = msg.sender.call{value: amount}("");
+          require(success);
+      }
+
+      // Plus use ReentrancyGuard from OpenZeppelin
+
+  - id: flash-loan-oracle-manipulation
+    severity: critical
+    title: "Spot Price Oracles Enable Flash Loan Attacks"
+    summary: "Attackers manipulate price within single transaction"
+    symptoms:
+      - "Massive liquidations in one block"
+      - "Protocol loses millions instantly"
+      - "Price spikes that don't match market"
+    why: |
+      Flash loans give attackers unlimited capital within a transaction.
+      If your protocol uses spot price (current reserves ratio),
+      attackers can manipulate it, exploit your protocol, and
+      return the loan - all atomically.
+    gotcha: |
+      // Using spot price
+      function getPrice() public view returns (uint) {
+          return reserve1 / reserve0;  // Manipulable!
+      }
+
+      function liquidate(address user) external {
+          if (getPrice() < collateralRatio) {
+              // Attacker flash loaned to crash price
+              seizeCollateral(user);
+          }
+      }
+    solution: |
+      // Use TWAP (Time-Weighted Average Price)
+      function getPrice() public view returns (uint) {
+          // Uniswap V3 oracle - aggregates over time
+          (int24 tick, ) = pool.observe([3600, 0]);  // 1 hour TWAP
+          return tickToPrice(tick);
+      }
+
+      // Or use Chainlink with staleness checks
+      function getPrice() public view returns (uint) {
+          (, int256 price, , uint256 updatedAt, ) = priceFeed.latestRoundData();
+          require(block.timestamp - updatedAt < 3600, "Stale price");
+          return uint256(price);
+      }
+
+  - id: impermanent-loss-surprise
+    severity: high
+    title: "Impermanent Loss Exceeds Fee Income"
+    summary: "LPs lose money despite high APY display"
+    symptoms:
+      - "LP position worth less than holding"
+      - "High APY but negative actual returns"
+      - "Losses accelerate with price movement"
+    why: |
+      AMM LPs are constantly selling winners and buying losers.
+      If price moves 2x, you lose 5.7% vs holding. At 5x, you
+      lose 25.5%. Trading fees may not compensate, especially
+      in low-volume pools.
+    gotcha: |
+      # Deposited $10k each of ETH and USDC
+      # ETH 2x'd - but LP only up 15% vs 50% for just holding ETH
+
+      initial_value = 20000  # $10k each
+      eth_price_change = 2.0
+
+      # IL calculation
+      il = 2 * sqrt(2.0) / (1 + 2.0) - 1  # -5.7%
+
+      # Holding: $10k * 2 + $10k = $30k (50% gain)
+      # LP: $28,284 - 5.7% IL = ~$26,700 (33% gain)
+    solution: |
+      def should_lp(volatility, pool_fee, expected_volume):
+          """Estimate if LP will be profitable."""
+          # Simplified model
+          daily_vol = volatility / sqrt(365)
+
+          # Expected IL from volatility
+          expected_price_move = 1 + daily_vol * 30  # 30-day estimate
+          expected_il = 2 * sqrt(expected_price_move) / (1 + expected_price_move) - 1
+
+          # Expected fees
+          expected_fees = pool_fee * expected_volume * 30
+
+          return expected_fees > abs(expected_il)
+
+      # Also consider: concentrated liquidity, stable pairs, hedging
+
+  - id: unlimited-approval-risk
+    severity: high
+    title: "Unlimited Token Approvals Enable Future Theft"
+    summary: "Compromised contract can drain tokens years later"
+    symptoms:
+      - "Tokens disappear from wallet"
+      - "User didn't interact with protocol recently"
+      - "Exploit uses old approvals"
+    why: |
+      Common practice is approving max uint256 for convenience.
+      If that contract is ever compromised (or has hidden
+      functionality), attackers can drain all your tokens
+      even years later.
+    gotcha: |
+      // Frontend approval - max approval for convenience
+      await token.approve(dexRouter, ethers.MaxUint256);
+
+      // Two years later, router is exploited
+      // Attacker drains all user tokens
+    solution: |
+      // Approve only exact amount needed
+      const exactAmount = parseUnits("100", 18);
+      await token.approve(dexRouter, exactAmount);
+
+      // Or use permit for single-transaction approval
+      const { v, r, s } = await signPermit(owner, spender, value, deadline);
+      await token.permit(owner, spender, value, deadline, v, r, s);
+
+      // Revoke unused approvals regularly
+      await token.approve(oldProtocol, 0);
+
+  - id: sandwich-attack
+    severity: medium
+    title: "Transactions Get Sandwiched by MEV Bots"
+    summary: "Bots front-run and back-run your swaps for profit"
+    symptoms:
+      - "Worse execution price than expected"
+      - "Large trades especially affected"
+      - "Visible front-run transactions in block"
+    why: |
+      MEV bots monitor mempool for pending swaps. They front-run
+      with a buy to move price, let your trade execute at worse
+      price, then back-run with a sell. The bot profits from
+      your slippage.
+    gotcha: |
+      // No slippage protection
+      router.swapExactTokensForTokens(
+          amountIn,
+          0,  // Accept any output - guaranteed to be sandwiched
+          path,
+          recipient,
+          deadline
+      );
+    solution: |
+      // Calculate minimum output with slippage tolerance
+      const quote = await router.getAmountsOut(amountIn, path);
+      const minOut = quote[1] * 995n / 1000n;  // 0.5% slippage
+
+      router.swapExactTokensForTokens(
+          amountIn,
+          minOut,  // Reject if sandwich pushes price too far
+          path,
+          recipient,
+          deadline
+      );
+
+      // For large trades: use private mempool (Flashbots)
+      // Or split into smaller chunks
+
+detection:
+  file_patterns:
+    - "**/*.sol"
+    - "**/*defi*.py"
+    - "**/*swap*.py"
+    - "**/*liquidity*.py"

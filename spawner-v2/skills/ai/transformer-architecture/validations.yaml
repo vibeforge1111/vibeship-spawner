@@ -1,0 +1,82 @@
+validations:
+
+  - id: missing-attention-scaling
+    name: Attention Without Scaling Factor
+    severity: error
+    type: regex
+    pattern:
+      - "softmax.*matmul.*query.*key(?!.*/.*sqrt)"
+      - "torch\\.matmul\\(.*query.*key(?!.*math\\.sqrt|/.*d_k)"
+    message: "Attention scores must be scaled by sqrt(d_k) to prevent gradient issues."
+    fix_action: "Add: scores = scores / math.sqrt(d_k)"
+    applies_to:
+      - "**/*.py"
+
+  - id: hardcoded-mask-direction
+    name: Potentially Wrong Causal Mask
+    severity: warning
+    type: regex
+    pattern:
+      - "torch\\.triu\\(.*ones(?!.*transpose)"
+      - "np\\.triu\\(.*ones"
+    message: "Upper triangular mask may be wrong for causal attention. Verify mask direction."
+    fix_action: "Use torch.tril for causal (decoder) masks, torch.triu for encoder padding masks."
+    applies_to:
+      - "**/*.py"
+
+  - id: missing-residual-connection
+    name: Attention Block Without Residual
+    severity: warning
+    type: regex
+    pattern:
+      - "self\\.attention\\(.*\\)\\s*$(?!.*\\+.*x|.*residual)"
+    message: "Transformer blocks require residual connections for gradient flow."
+    fix_action: "Add: output = residual + self.attention(x)"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-mixed-precision
+    name: Training Without Mixed Precision
+    severity: info
+    type: regex
+    pattern:
+      - "model\\.train\\(\\)(?!.*autocast|.*amp|.*bf16|.*fp16)"
+    message: "Consider using mixed precision (bf16/fp16) for 2x memory savings and faster training."
+    fix_action: "Add: with torch.autocast(device_type='cuda', dtype=torch.bfloat16)"
+    applies_to:
+      - "**/*train*.py"
+
+  - id: fixed-position-limit
+    name: Fixed Position Embedding Limit
+    severity: info
+    type: regex
+    pattern:
+      - "nn\\.Embedding\\(\\s*\\d{3,4}\\s*,.*position"
+      - "max_position_embeddings\\s*=\\s*\\d{3,4}"
+    message: "Fixed position embeddings may limit sequence length. Consider RoPE for longer contexts."
+    fix_action: "Use RoPE or ALiBi for better length extrapolation."
+    applies_to:
+      - "**/*.py"
+
+  - id: no-gradient-checkpointing
+    name: Large Model Without Gradient Checkpointing
+    severity: info
+    type: regex
+    pattern:
+      - "num_layers\\s*=\\s*(?:[2-9]\\d|\\d{3,})(?!.*checkpoint)"
+      - "n_layer\\s*=\\s*(?:[2-9]\\d|\\d{3,})"
+    message: "Large models benefit from gradient checkpointing for memory efficiency."
+    fix_action: "Add: model.gradient_checkpointing_enable()"
+    applies_to:
+      - "**/*.py"
+
+  - id: flash-attention-not-enabled
+    name: FlashAttention Not Enabled
+    severity: info
+    type: regex
+    pattern:
+      - "scaled_dot_product_attention(?!.*enable_flash)"
+    message: "Enable FlashAttention for better memory efficiency and speed."
+    fix_action: "Use: with torch.backends.cuda.sdp_kernel(enable_flash=True)"
+    applies_to:
+      - "**/*.py"

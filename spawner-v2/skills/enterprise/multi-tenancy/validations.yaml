@@ -1,0 +1,100 @@
+validations:
+
+  - id: missing-tenant-filter
+    name: Query Without Tenant Filter
+    severity: error
+    type: regex
+    pattern:
+      - "SELECT.*FROM(?!.*tenant_id)"
+      - "UPDATE.*SET(?!.*WHERE.*tenant_id)"
+      - "DELETE FROM(?!.*tenant_id)"
+    message: "Database query may lack tenant_id filter - potential data leakage."
+    fix_action: "Add WHERE tenant_id = :tenant_id to all queries"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.sql"
+
+  - id: global-tenant-context
+    name: Global Tenant Context
+    severity: error
+    type: regex
+    pattern:
+      - "global\\s+tenant"
+      - "threading\\.local\\(\\).*tenant"
+      - "let\\s+currentTenant\\s*="
+    message: "Global or thread-local tenant context is unsafe in async environments."
+    fix_action: "Use contextvars (Python) or AsyncLocalStorage (Node.js)"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: hardcoded-tenant-id
+    name: Hardcoded Tenant ID
+    severity: warning
+    type: regex
+    pattern:
+      - "tenant_id\\s*=\\s*['\"][a-z0-9-]+['\"]"
+      - "tenantId:\\s*['\"][a-z0-9-]+['\"]"
+    message: "Hardcoded tenant ID found - should come from request context."
+    fix_action: "Get tenant ID from authenticated request context"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: no-rate-limiting
+    name: Missing Rate Limiting
+    severity: warning
+    type: regex
+    pattern:
+      - "app\\.route\\((?!.*rate_limit)"
+      - "@router\\.(?!.*RateLimiter)"
+      - "express\\.Router\\(\\)(?!.*rateLimit)"
+    message: "API route may lack rate limiting - noisy neighbor risk."
+    fix_action: "Add per-tenant rate limiting middleware"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: tenant-join-missing
+    name: JOIN Without Tenant ID
+    severity: error
+    type: regex
+    pattern:
+      - "JOIN.*ON(?!.*tenant_id)"
+      - "INNER JOIN.*=(?!.*tenant_id)"
+      - "LEFT JOIN.*ON(?!.*tenant_id)"
+    message: "JOIN clause may lack tenant_id - cross-tenant data risk."
+    fix_action: "Include tenant_id in all JOIN conditions"
+    applies_to:
+      - "**/*.py"
+      - "**/*.sql"
+
+  - id: missing-metering
+    name: Missing Usage Metering
+    severity: info
+    type: regex
+    pattern:
+      - "api_call\\((?!.*meter)"
+      - "process_request\\((?!.*track_usage)"
+    message: "API operation may not be metered - billing accuracy risk."
+    fix_action: "Add usage metering for billing-relevant operations"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+
+  - id: tenant-context-not-cleared
+    name: Tenant Context Not Cleared
+    severity: warning
+    type: regex
+    pattern:
+      - "set_tenant\\((?!.*finally.*clear)"
+      - "setTenantContext\\((?!.*finally)"
+    message: "Tenant context may not be cleared after request."
+    fix_action: "Use try/finally or middleware to ensure context cleanup"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"

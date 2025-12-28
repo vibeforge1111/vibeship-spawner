@@ -1,0 +1,189 @@
+id: integration-patterns-sharp-edges
+skill: integration-patterns
+version: 1.0.0
+
+sharp_edges:
+
+  - id: sync-chain-cascade
+    severity: critical
+    title: "Synchronous Call Chain Causes Cascade Failure"
+    summary: "One slow service brings down entire request path"
+    symptoms:
+      - "Request timeouts cascade"
+      - "One service issue affects all callers"
+      - "Thread pool exhaustion"
+    why: |
+      When Service A calls B calls C synchronously, a problem in C
+      causes B to block, which causes A to block. Threads pile up,
+      timeouts cascade, and your entire system becomes unavailable.
+    gotcha: |
+      "The payment service is slow"
+      "And now the order service is down"
+      "And the checkout page times out"
+      "But we only changed the inventory service!"
+
+      # Synchronous chain: checkout → order → payment → inventory
+    solution: |
+      1. Break synchronous chains:
+         - Use async events where possible
+         - Add circuit breakers
+         - Set aggressive timeouts
+
+      2. Bulkhead pattern:
+         - Separate thread pools per integration
+         - Rate limit downstream calls
+         - Fail fast when pool exhausted
+
+      3. Fallback strategies:
+         - Return cached data
+         - Degrade gracefully
+         - Queue for later retry
+
+  - id: no-idempotency
+    severity: critical
+    title: "Non-Idempotent Operations Cause Duplicates"
+    summary: "Retry logic processes same request multiple times"
+    symptoms:
+      - "Duplicate orders"
+      - "Double charges"
+      - "Duplicate notifications"
+    why: |
+      Networks are unreliable. Requests will be retried. If your
+      operations aren't idempotent, retries cause duplicates.
+      This is especially dangerous for financial operations.
+    gotcha: |
+      "Customer was charged twice"
+      "The first request timed out, so we retried"
+      "But the first one actually went through"
+      "We just didn't get the response"
+
+      # Network timeout doesn't mean the operation failed
+    solution: |
+      1. Idempotency keys:
+         - Client generates unique key
+         - Server stores key → result
+         - Return cached result on retry
+
+      2. Natural idempotency:
+         - PUT over POST where possible
+         - Include timestamp/version in request
+         - Check for existing before insert
+
+      3. Deduplication:
+         - Message deduplication in queues
+         - Track processed message IDs
+         - Time-based dedup windows
+
+  - id: missing-dlq
+    severity: high
+    title: "No Dead Letter Queue for Failed Messages"
+    summary: "Failed messages disappear or block the queue"
+    symptoms:
+      - "Messages silently dropped"
+      - "Queue blocked by poison messages"
+      - "No visibility into failures"
+    why: |
+      Some messages will fail processing - bad data, temporary issues,
+      bugs. Without a DLQ, these either disappear forever or block
+      your queue. You need a place to park failures for investigation.
+    gotcha: |
+      "Where did those orders go?"
+      "They were in the queue..."
+      "The consumer crashed processing them"
+      "And then?"
+      "They were lost"
+
+      # No DLQ = lost data
+    solution: |
+      1. Configure DLQ for every queue:
+         - Set max retry attempts
+         - Route to DLQ after exhaustion
+         - Alert on DLQ depth
+
+      2. DLQ processing:
+         - Monitor DLQ continuously
+         - Investigate root causes
+         - Replay after fixes
+
+      3. Poison message handling:
+         - Catch and log exceptions
+         - Don't block healthy messages
+         - Track failure patterns
+
+  - id: schema-breaking-change
+    severity: high
+    title: "Schema Change Breaks Consumers"
+    summary: "Producer schema update breaks existing consumers"
+    symptoms:
+      - "Consumers crash after producer deploy"
+      - "Deserialization failures"
+      - "Data loss from unknown fields"
+    why: |
+      Producers and consumers deploy independently. If you change
+      a schema without backward compatibility, old consumers break.
+      This is especially painful with many consumers.
+    gotcha: |
+      "We renamed the 'user_id' field to 'customer_id'"
+      "All consumers are crashing"
+      "They expect 'user_id'"
+      "We need to update 15 services"
+
+      # Breaking change requires synchronized deploy of everything
+    solution: |
+      1. Schema evolution rules:
+         - Add fields as optional
+         - Never remove required fields
+         - Never change field types
+         - Deprecate before removing
+
+      2. Schema registry:
+         - Version all schemas
+         - Compatibility checks on publish
+         - Block breaking changes
+
+      3. Consumer tolerance:
+         - Ignore unknown fields
+         - Handle missing optional fields
+         - Multiple schema version support
+
+  - id: no-circuit-breaker
+    severity: high
+    title: "No Circuit Breaker on External Calls"
+    summary: "Failing external service consumes all resources"
+    symptoms:
+      - "Thread pool exhaustion"
+      - "Cascading timeouts"
+      - "Slow degradation then crash"
+    why: |
+      When an external service fails, continuing to call it wastes
+      resources (threads, connections) and adds latency. A circuit
+      breaker fails fast, protecting your system from cascade failure.
+    gotcha: |
+      "The API is timing out"
+      "We're retrying..."
+      "All threads are blocked waiting for responses"
+      "Now our API is timing out too"
+
+      # Failing service consumed all available threads
+    solution: |
+      1. Circuit breaker per external dependency:
+         - Track failure rate
+         - Open circuit on threshold
+         - Fail fast when open
+
+      2. Configure properly:
+         - Failure threshold (e.g., 5 failures)
+         - Recovery timeout (e.g., 30 seconds)
+         - Half-open test requests
+
+      3. Combine with bulkhead:
+         - Dedicated thread pool
+         - Limited connections
+         - Independent failure domains
+
+detection:
+  file_patterns:
+    - "**/*gateway*.py"
+    - "**/*event*.ts"
+    - "**/*integration*.yaml"
+    - "**/*saga*.py"

@@ -1,0 +1,77 @@
+validations:
+
+  - id: missing-idempotency-key
+    name: Stripe Call Without Idempotency Key
+    severity: error
+    type: regex
+    pattern:
+      - "stripe\\.PaymentIntent\\.create\\((?!.*idempotency_key)"
+      - "stripe\\.Charge\\.create\\((?!.*idempotency_key)"
+      - "stripe\\.Subscription\\.create\\((?!.*idempotency_key)"
+    message: "Stripe payment calls need idempotency keys to prevent duplicates."
+    fix_action: "Add: idempotency_key=f'{user_id}:{order_id}:{uuid}'"
+    applies_to:
+      - "**/*stripe*.py"
+      - "**/*payment*.py"
+
+  - id: webhook-no-signature
+    name: Webhook Without Signature Verification
+    severity: error
+    type: regex
+    pattern:
+      - "webhook.*json\\(\\)(?!.*verify|.*signature|.*construct_event)"
+      - "@.*post.*webhook(?!.*SignatureVerification|.*verify)"
+    message: "Webhooks must verify signatures to prevent spoofing."
+    fix_action: "Use stripe.Webhook.construct_event() with signature header"
+    applies_to:
+      - "**/*webhook*.py"
+
+  - id: hardcoded-api-key
+    name: Hardcoded API Key
+    severity: error
+    type: regex
+    pattern:
+      - "sk_live_[a-zA-Z0-9]{24}"
+      - "sk_test_[a-zA-Z0-9]{24}"
+      - "access-sandbox-[a-z0-9-]{36}"
+    message: "API keys must not be hardcoded in source code."
+    fix_action: "Use environment variables: os.environ['STRIPE_API_KEY']"
+    applies_to:
+      - "**/*.py"
+
+  - id: card-number-logged
+    name: Potential Card Number in Logs
+    severity: error
+    type: regex
+    pattern:
+      - "log.*card.*number"
+      - "print.*\\d{16}"
+      - "logger.*cvv|cvc"
+    message: "Never log card numbers or CVV - PCI violation."
+    fix_action: "Log only last 4 digits or token IDs"
+    applies_to:
+      - "**/*.py"
+
+  - id: ach-treated-instant
+    name: ACH Treated as Instant
+    severity: warning
+    type: regex
+    pattern:
+      - "charge.*pending.*fulfill"
+      - "bank.*transfer.*status.*ship"
+    message: "ACH transfers take 3-5 days - don't fulfill on 'pending'."
+    fix_action: "Wait for charge.succeeded webhook before fulfillment"
+    applies_to:
+      - "**/*payment*.py"
+      - "**/*order*.py"
+
+  - id: no-webhook-idempotency
+    name: Webhook Processing Without Idempotency
+    severity: warning
+    type: regex
+    pattern:
+      - "def.*webhook(?!.*processed|.*idempotent|.*event_id)"
+    message: "Webhooks can be sent multiple times - track processed events."
+    fix_action: "Store event_id and check before processing"
+    applies_to:
+      - "**/*webhook*.py"

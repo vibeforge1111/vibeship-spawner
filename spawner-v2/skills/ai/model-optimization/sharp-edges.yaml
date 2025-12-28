@@ -1,0 +1,176 @@
+id: model-optimization-sharp-edges
+skill: model-optimization
+version: 1.0.0
+
+sharp_edges:
+
+  - id: calibration-data-mismatch
+    severity: critical
+    title: "Quantization Fails on Production Data"
+    summary: "Calibration data doesn't represent real inference data"
+    symptoms:
+      - "Model works on test set, fails on production"
+      - "Quantized model much worse than baseline"
+      - "Accuracy drops for certain input patterns"
+    why: |
+      Static quantization learns activation ranges from calibration data.
+      If calibration data doesn't cover production distribution,
+      clipping occurs on out-of-distribution inputs.
+    gotcha: |
+      # Calibrating on clean test data
+      calibration_data = test_dataset[:100]  # WRONG: Test is too clean
+
+      model_prepared = torch.quantization.prepare(model)
+      for batch in calibration_data:
+          model_prepared(batch)  # Learns wrong ranges
+    solution: |
+      # Use production-representative data
+      calibration_data = sample_production_logs(n=1000)
+
+      # Include edge cases and outliers
+      calibration_data += get_edge_case_samples(n=100)
+
+      # Verify coverage
+      for category in data_categories:
+          assert category in calibration_data
+
+  - id: qat-forgetting
+    severity: high
+    title: "QAT Model Forgets After Training"
+    summary: "Quantization-aware training causes catastrophic forgetting"
+    symptoms:
+      - "QAT accuracy drops significantly"
+      - "Model performs worse than PTQ"
+      - "Loss spikes during QAT"
+    why: |
+      QAT adds fake quantization operations that change gradients.
+      If learning rate is too high or training too long,
+      model can forget what it learned.
+    gotcha: |
+      # Too aggressive QAT
+      model_prepared = prepare_qat(model)
+
+      optimizer = Adam(model.parameters(), lr=1e-3)  # Too high!
+
+      for epoch in range(50):  # Too many epochs!
+          train_epoch(model_prepared)
+    solution: |
+      # Gentle QAT
+      model_prepared = prepare_qat(model)
+
+      # Much lower learning rate
+      optimizer = Adam(model.parameters(), lr=1e-5)
+
+      # Few epochs (3-5 typically enough)
+      for epoch in range(3):
+          train_epoch(model_prepared)
+
+          # Early stop if accuracy drops
+          if accuracy < baseline - 0.02:
+              break
+
+  - id: onnx-dynamic-axes-missing
+    severity: high
+    title: "ONNX Model Has Fixed Batch Size"
+    summary: "Forgot to specify dynamic axes during export"
+    symptoms:
+      - "ONNX model only works with batch size 1"
+      - "RuntimeError on different input shapes"
+      - "Can't use dynamic batching in production"
+    why: |
+      torch.onnx.export defaults to static shapes.
+      The exported model is traced with example input shapes,
+      which become fixed without dynamic_axes parameter.
+    gotcha: |
+      # Missing dynamic_axes
+      sample = torch.randn(1, 3, 224, 224)
+
+      torch.onnx.export(
+          model, sample, "model.onnx",
+          input_names=['input'],
+          output_names=['output'],
+      )  # Shape is now fixed at (1, 3, 224, 224)
+    solution: |
+      torch.onnx.export(
+          model, sample, "model.onnx",
+          input_names=['input'],
+          output_names=['output'],
+          dynamic_axes={
+              'input': {0: 'batch', 2: 'height', 3: 'width'},
+              'output': {0: 'batch'},
+          }
+      )
+
+  - id: tensorrt-precision-mismatch
+    severity: medium
+    title: "TensorRT Engine Doesn't Use FP16"
+    summary: "Enabled FP16 but engine still runs in FP32"
+    symptoms:
+      - "No speedup from FP16 flag"
+      - "Memory usage same as FP32"
+      - "Build logs show FP32 layers"
+    why: |
+      TensorRT FP16 is opt-in per layer.
+      Some ops don't have FP16 kernels.
+      If calibration fails, falls back to FP32.
+    gotcha: |
+      config = builder.create_builder_config()
+      config.set_flag(trt.BuilderFlag.FP16)  # Enabled...
+
+      # But many layers stay FP32 because:
+      # 1. No FP16 kernel exists
+      # 2. Accuracy check failed
+      # 3. Layer is compute-bound not memory-bound
+    solution: |
+      # Check build logs for precision
+      config.profiling_verbosity = trt.ProfilingVerbosity.DETAILED
+
+      # Force strict FP16 (may hurt accuracy)
+      config.set_flag(trt.BuilderFlag.STRICT_TYPES)
+
+      # Or use INT8 for better speedup
+      config.set_flag(trt.BuilderFlag.INT8)
+      config.int8_calibrator = calibrator
+
+  - id: pruning-no-speedup
+    severity: medium
+    title: "Pruned Model Same Speed as Original"
+    summary: "Unstructured pruning doesn't give actual speedup"
+    symptoms:
+      - "90% sparsity but same latency"
+      - "Memory usage unchanged"
+      - "GPU utilization same"
+    why: |
+      Unstructured pruning creates sparse tensors.
+      Most hardware/frameworks don't accelerate sparse ops.
+      You need structured pruning or sparse-aware hardware.
+    gotcha: |
+      # 90% sparse but no speedup
+      prune.l1_unstructured(layer, 'weight', amount=0.9)
+
+      # Weights are masked, not removed
+      # Dense matmul still runs on full tensor
+    solution: |
+      # Option 1: Structured pruning (actual smaller model)
+      prune.ln_structured(
+          layer, 'weight',
+          amount=0.3,
+          n=2, dim=0  # Remove entire channels
+      )
+
+      # Option 2: Use sparse-aware hardware/library
+      # - NVIDIA Ampere+ sparse tensor cores
+      # - Intel Neural Compressor
+      # - DeepSparse (CPU)
+
+      # Option 3: Convert to smaller dense model
+      # Prune → Remove zero channels → Retrain
+
+detection:
+  file_patterns:
+    - "**/*quantiz*.py"
+    - "**/*optim*.py"
+    - "**/*export*.py"
+    - "**/*prune*.py"
+    - "**/*onnx*.py"
+    - "**/*tensorrt*.py"

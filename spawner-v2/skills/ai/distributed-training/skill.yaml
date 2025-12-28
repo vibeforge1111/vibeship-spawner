@@ -1,0 +1,125 @@
+id: distributed-training
+name: Distributed Training
+category: ai
+description: Use when training models across multiple GPUs or nodes, handling large models that don't fit in memory, or optimizing training throughput - covers DDP, FSDP, DeepSpeed ZeRO, model/data parallelism, and gradient checkpointing
+
+patterns:
+  golden_rules:
+    - rule: "Profile before parallelizing"
+      reason: "Know if you're memory or compute bound"
+    - rule: "Start with DDP, scale to FSDP/DeepSpeed"
+      reason: "DDP is simpler and faster for small models"
+    - rule: "Gradient checkpointing trades compute for memory"
+      reason: "30% slower but 60%+ memory savings"
+    - rule: "Mixed precision is almost free"
+      reason: "bf16/fp16 = 2x memory savings, minimal accuracy loss"
+    - rule: "Communication is the bottleneck"
+      reason: "Minimize gradient sync frequency"
+    - rule: "Use NCCL for multi-GPU"
+      reason: "Purpose-built for GPU collective ops"
+
+  parallelism_types:
+    data_parallelism:
+      description: "Same model on each GPU, different data batches"
+      memory: "Full model per GPU"
+      communication: "Sync gradients"
+      implementations: ["DDP", "DataParallel"]
+    model_parallelism:
+      description: "Model split across GPUs"
+      types:
+        tensor: "Split individual layers"
+        pipeline: "Split layers into stages"
+      best_for: "Models too large for single GPU"
+    zero_redundancy:
+      description: "Shard optimizer, gradients, parameters"
+      stages:
+        zero1: "Shard optimizer state (4x memory savings)"
+        zero2: "Shard gradients (8x memory savings)"
+        zero3: "Shard parameters (linear scaling)"
+      implementations: ["FSDP", "DeepSpeed ZeRO"]
+
+  memory_requirements:
+    7b_model:
+      fp32: "28GB"
+      fp16: "14GB"
+      with_optimizer: "84GB (Adam)"
+      fsdp_full_shard: "14GB per GPU (8 GPUs)"
+    70b_model:
+      fp32: "280GB"
+      fp16: "140GB"
+      qlora: "~48GB"
+
+  fsdp_vs_deepspeed:
+    fsdp:
+      pros: ["Native PyTorch", "torch.compile support", "Lower learning curve"]
+      cons: ["No NVMe offload", "All-or-nothing CPU offload"]
+    deepspeed:
+      pros: ["NVMe offload", "More config options", "Trillion-scale tested"]
+      cons: ["External dependency", "More complex setup"]
+
+anti_patterns:
+  - pattern: "DDP for large models"
+    problem: "OOM"
+    solution: "Use FSDP or DeepSpeed ZeRO"
+  - pattern: "No gradient checkpointing"
+    problem: "OOM on long sequences"
+    solution: "Enable for transformer layers"
+  - pattern: "fp32 training"
+    problem: "2x memory waste"
+    solution: "Use bf16/fp16 mixed precision"
+  - pattern: "Small batch with many GPUs"
+    problem: "Communication overhead"
+    solution: "Gradient accumulation"
+  - pattern: "Sync on every step"
+    problem: "Slow training"
+    solution: "Reduce sync frequency"
+  - pattern: "Not pinning memory"
+    problem: "Slow data loading"
+    solution: "pin_memory=True in DataLoader"
+
+implementation_checklist:
+  setup:
+    - "NCCL backend initialized"
+    - "Correct MASTER_ADDR and MASTER_PORT"
+    - "DistributedSampler for DataLoader"
+    - "set_epoch() called each epoch"
+  memory_optimization:
+    - "Mixed precision enabled (bf16 preferred)"
+    - "Gradient checkpointing for large models"
+    - "Appropriate sharding strategy (FSDP/DeepSpeed)"
+    - "Gradient accumulation if needed"
+  performance:
+    - "num_workers > 0 in DataLoader"
+    - "pin_memory=True"
+    - "Prefetching enabled (backward_prefetch)"
+    - "torch.compile() for additional speedup"
+
+handoffs:
+  - skill: transformer-architecture
+    trigger: "model architecture for training"
+  - skill: llm-fine-tuning
+    trigger: "distributed fine-tuning setup"
+  - skill: model-optimization
+    trigger: "after training, before deployment"
+
+ecosystem:
+  frameworks:
+    - "PyTorch DDP - Basic data parallelism"
+    - "FSDP - Fully Sharded Data Parallel"
+    - "DeepSpeed - Microsoft's training library"
+    - "Megatron-LM - NVIDIA's large-scale training"
+  tools:
+    - "torchrun - PyTorch distributed launcher"
+    - "Accelerate - HuggingFace wrapper"
+    - "Lightning - High-level training framework"
+  schedulers:
+    - "SLURM - HPC job scheduler"
+    - "Kubernetes - Container orchestration"
+
+sources:
+  tutorials:
+    - "PyTorch FSDP Tutorial"
+    - "DeepSpeed ZeRO Documentation"
+    - "PyTorch Distributed Training Guide"
+  comparisons:
+    - "FSDP vs DeepSpeed Comparison - HuggingFace"

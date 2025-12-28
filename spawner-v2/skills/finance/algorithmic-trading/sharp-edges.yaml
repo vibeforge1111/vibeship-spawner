@@ -1,0 +1,160 @@
+id: algorithmic-trading-sharp-edges
+skill: algorithmic-trading
+version: 1.0.0
+
+sharp_edges:
+
+  - id: look-ahead-bias
+    severity: critical
+    title: "Strategy Uses Future Data"
+    summary: "Signal uses information not available at trade time"
+    symptoms:
+      - "Backtest returns unrealistically high"
+      - "Live trading dramatically underperforms"
+      - "Strategy 'knows' exact highs and lows"
+    why: |
+      Look-ahead bias occurs when the backtest uses data that wouldn't
+      have been available at the time of the trading decision.
+      Common sources: using same-day close for signals, peak prices,
+      or data that gets revised after publication.
+    gotcha: |
+      # Using today's close to trade today
+      signal = df['close'].pct_change(20)  # 20-day momentum
+      df['position'] = np.where(signal > 0, 1, -1)
+
+      # This trades on close using close price - impossible!
+    solution: |
+      # Shift signal by 1 to trade on next bar
+      signal = df['close'].pct_change(20)
+      df['position'] = np.where(signal.shift(1) > 0, 1, -1)
+
+      # Or use event-driven backtest that respects time
+
+  - id: survivorship-bias
+    severity: critical
+    title: "Testing on Survivor-Only Data"
+    summary: "Backtest excludes delisted stocks"
+    symptoms:
+      - "Strategy performs well on historical data"
+      - "Selecting 'value' stocks that all recovered"
+      - "Missing the companies that went bankrupt"
+    why: |
+      Most data providers only include currently listed stocks.
+      This biases results because you're only seeing winners.
+      The stocks that failed are missing from your universe.
+    gotcha: |
+      # Getting S&P 500 constituents
+      sp500_tickers = get_current_sp500()  # Today's list
+
+      # Backtesting 2010-2020 with 2024 constituents
+      # Excludes companies that were in S&P in 2010 but not now
+    solution: |
+      # Use point-in-time constituents
+      for date in trading_dates:
+          constituents = get_sp500_at_date(date)
+          signals = generate_signals(constituents, date)
+
+      # Use survivorship-bias-free data sources
+      # - Sharadar, Quandl/Nasdaq, Bloomberg include delistings
+
+  - id: overfitting-params
+    severity: high
+    title: "Too Many Optimized Parameters"
+    summary: "Strategy has more parameters than predictive value"
+    symptoms:
+      - "Perfect in-sample performance"
+      - "Terrible out-of-sample performance"
+      - "Strategy breaks on slight market changes"
+    why: |
+      With enough parameters, you can fit any historical pattern.
+      But this memorizes noise, not signal.
+      Rule of thumb: need 252 observations per parameter.
+    gotcha: |
+      # Too many parameters
+      def strategy(lookback1, lookback2, threshold1, threshold2,
+                   ma_period1, ma_period2, atr_mult, vol_window):
+          # 8 parameters = needs 2000+ observations minimum
+          pass
+
+      # Grid search over 10x10x10x10x10x10x10x10 = 100M combinations
+    solution: |
+      # Keep it simple
+      def strategy(lookback: int, threshold: float):
+          # 2 parameters - much more robust
+          pass
+
+      # Use cross-validation
+      from sklearn.model_selection import TimeSeriesSplit
+
+      tscv = TimeSeriesSplit(n_splits=5)
+      for train_idx, test_idx in tscv.split(data):
+          # Optimize on train, validate on test
+
+  - id: transaction-cost-underestimate
+    severity: high
+    title: "Ignoring Real Trading Costs"
+    summary: "Backtest assumes zero or minimal costs"
+    symptoms:
+      - "Profitable backtest, losing live trades"
+      - "High turnover strategy"
+      - "Trading illiquid instruments"
+    why: |
+      Real costs include: commissions, bid-ask spread, slippage,
+      market impact. For high-frequency, impact dominates.
+      A strategy with 2% annual edge can easily lose 3% to costs.
+    gotcha: |
+      # No costs
+      returns = position_changes * price_changes
+
+      # Or unrealistic costs
+      commission = 0.001  # $1 per $1000 traded
+      # But spread + slippage can be 0.5-2% for small caps!
+    solution: |
+      @dataclass
+      class RealisticCosts:
+          commission_per_share: float = 0.005
+          spread_bps: float = 10.0  # Half spread
+          slippage_bps: float = 10.0  # Market impact
+          min_commission: float = 1.0
+
+          def calculate(self, shares, price):
+              commission = max(shares * self.commission_per_share, self.min_commission)
+              spread = shares * price * (self.spread_bps / 10000)
+              slippage = shares * price * (self.slippage_bps / 10000)
+              return commission + spread + slippage
+
+  - id: capacity-ignored
+    severity: medium
+    title: "Strategy Can't Scale"
+    summary: "Profitable at $10K, fails at $10M"
+    symptoms:
+      - "Works on paper, fails with real capital"
+      - "Market impact exceeds expected returns"
+      - "Can't get fills at expected prices"
+    why: |
+      Small strategies have unlimited capacity.
+      Large strategies move markets.
+      A 1% edge disappears when you need 5% of daily volume to enter.
+    gotcha: |
+      # Testing with infinite liquidity
+      position_size = portfolio_value * signal_strength
+
+      # No check if you can actually get that position
+    solution: |
+      def calculate_capacity(
+          target_shares: int,
+          average_daily_volume: int,
+          max_participation: float = 0.10  # 10% of ADV
+      ) -> int:
+          """Limit position to what market can absorb."""
+          max_shares = int(average_daily_volume * max_participation)
+          return min(target_shares, max_shares)
+
+      # Also consider: number of days to enter/exit
+
+detection:
+  file_patterns:
+    - "**/*backtest*.py"
+    - "**/*trading*.py"
+    - "**/*strategy*.py"
+    - "**/*signal*.py"
