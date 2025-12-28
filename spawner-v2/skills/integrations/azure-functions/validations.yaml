@@ -1,0 +1,320 @@
+# Validations - Azure Functions
+# Quality checks for Azure Functions implementations
+
+version: 1.0.0
+skill_id: azure-functions
+
+validations:
+  # Security Checks
+  - id: hardcoded-connection-string
+    name: Hardcoded Connection String
+    severity: error
+    description: Connection strings must never be hardcoded
+    pattern: |
+      (DefaultEndpointsProtocol=https;AccountName=|Server=.*Password=|mongodb\+srv://.*@)
+    message: "Hardcoded connection string. Use Key Vault or App Settings."
+    autofix: false
+
+  - id: hardcoded-api-key
+    name: Hardcoded API Key in Code
+    severity: error
+    description: API keys should use Key Vault or App Settings
+    pattern: |
+      (api[_-]?key\s*=\s*["'][A-Za-z0-9]{20,}["']|Bearer\s+[A-Za-z0-9._-]{20,})
+    message: "Hardcoded API key. Use Key Vault or environment variables."
+    autofix: false
+
+  - id: authorization-level-anonymous
+    name: Anonymous Authorization Level in Production
+    severity: warning
+    description: Anonymous endpoints should be protected by other means
+    pattern: |
+      AuthorizationLevel\.Anonymous
+    message: "Anonymous authorization. Ensure protected by API Management or other auth."
+    autofix: false
+
+  # Async Pattern Checks
+  - id: blocking-result
+    name: Blocking .Result Call
+    severity: error
+    description: Using .Result blocks threads and causes deadlocks
+    pattern: |
+      \.(Result|GetAwaiter\(\)\.GetResult\(\))
+    message: "Blocking .Result call. Use await instead."
+    autofix: false
+
+  - id: blocking-wait
+    name: Blocking .Wait() Call
+    severity: error
+    description: Using .Wait() blocks threads
+    pattern: |
+      \.Wait\(\)
+    message: "Blocking .Wait() call. Use await instead."
+    autofix: false
+
+  - id: thread-sleep
+    name: Thread.Sleep Usage
+    severity: error
+    description: Thread.Sleep blocks threads
+    pattern: |
+      Thread\.Sleep\(
+    message: "Thread.Sleep blocks threads. Use await Task.Delay() instead."
+    autofix: false
+
+  # HttpClient Checks
+  - id: new-httpclient
+    name: New HttpClient Instance
+    severity: warning
+    description: Creating HttpClient per request causes socket exhaustion
+    pattern: |
+      new\s+HttpClient\s*\(
+    message: "New HttpClient per request. Use IHttpClientFactory or static client."
+    autofix: false
+
+  - id: using-httpclient
+    name: HttpClient in Using Statement
+    severity: warning
+    description: Disposing HttpClient causes socket exhaustion
+    pattern: |
+      using\s*\(.*HttpClient
+    message: "HttpClient in using statement. Use IHttpClientFactory for proper lifecycle."
+    autofix: false
+
+  # Model Checks
+  - id: in-process-function-name
+    name: In-Process FunctionName Attribute
+    severity: info
+    description: In-process model deprecated November 2026
+    pattern: |
+      \[FunctionName\(
+    message: "In-process FunctionName attribute. Consider migrating to isolated worker."
+    autofix: false
+
+  - id: missing-function-attribute
+    name: Missing Function Attribute
+    severity: warning
+    description: Isolated worker requires [Function] attribute
+    pattern: |
+      public.*Task.*\[HttpTrigger
+    anti_pattern: |
+      \[Function\(
+    message: "HttpTrigger without [Function] attribute (isolated worker requires it)."
+    autofix: false
+
+  # Configuration Checks
+  - id: missing-timeout-config
+    name: Missing Timeout Configuration
+    severity: info
+    description: Function timeout should be explicitly configured
+    file_pattern: "host.json"
+    pattern: |
+      "version":\s*"2\.0"
+    anti_pattern: |
+      "functionTimeout"
+    message: "No functionTimeout in host.json. Consider configuring explicitly."
+    autofix: false
+
+  - id: verbose-logging-production
+    name: Verbose Logging Level
+    severity: info
+    description: Verbose logging impacts performance
+    file_pattern: "host.json"
+    pattern: |
+      "logLevel".*"Trace"|"logLevel".*"Debug"
+    message: "Verbose log level. Use Information or Warning in production."
+    autofix: false
+
+  # Durable Functions Checks
+  - id: durable-non-deterministic
+    name: Non-Deterministic Code in Orchestrator
+    severity: error
+    description: Orchestrators must be deterministic
+    pattern: |
+      \[OrchestrationTrigger\].*\n.*DateTime\.(Now|UtcNow)|Guid\.NewGuid\(\)|Random\(
+    message: "Non-deterministic code in orchestrator. Use context.CurrentUtcDateTime."
+    autofix: false
+
+  - id: durable-await-non-activity
+    name: Await Non-Activity in Orchestrator
+    severity: warning
+    description: Orchestrators should only await activity/sub-orchestrator calls
+    pattern: |
+      \[OrchestrationTrigger\].*await\s+(?!context\.)
+    message: "Await non-activity in orchestrator. Use context.CallActivityAsync."
+    autofix: false
+
+code_smells:
+  - id: sync-http-calls
+    name: Synchronous HTTP Calls
+    description: Blocks threads, use async methods
+    pattern: |
+      \.GetStringAsync\(.*\.Result|\.GetAsync\(.*\.Result
+    suggestion: "Use await with async HTTP methods"
+
+  - id: large-payload-return
+    name: Large Payload in HTTP Response
+    description: Large payloads should use streaming or storage
+    pattern: |
+      WriteAsJsonAsync\(.*List<|WriteAsJsonAsync\(.*\[\]
+    suggestion: "Consider paging or storage for large responses"
+
+  - id: missing-error-handling
+    name: Missing Error Handling
+    description: Functions should handle and log errors
+    pattern: |
+      \[Function\(.*public.*Task
+    anti_pattern: |
+      try\s*\{|catch\s*\(
+    suggestion: "Add try/catch with proper error logging"
+
+  - id: console-writeline
+    name: Console.WriteLine in Function
+    description: Use ILogger for proper log routing
+    pattern: |
+      Console\.(WriteLine|Write)\(
+    suggestion: "Use ILogger.LogInformation() instead"
+
+best_practices:
+  - id: use-dependency-injection
+    name: Use Dependency Injection
+    check: |
+      Services should be injected, not created in function code.
+    recommendation: |
+      // Program.cs
+      var host = new HostBuilder()
+          .ConfigureFunctionsWorkerDefaults()
+          .ConfigureServices(services =>
+          {
+              services.AddHttpClient<IMyClient, MyClient>();
+              services.AddSingleton<IMyService, MyService>();
+          })
+          .Build();
+
+      // Function.cs
+      public class MyFunction
+      {
+          private readonly IMyService _service;
+
+          public MyFunction(IMyService service)
+          {
+              _service = service;  // Injected
+          }
+      }
+
+  - id: use-managed-identity
+    name: Use Managed Identity
+    check: |
+      Access Azure services without credentials in code.
+    recommendation: |
+      // Azure.Identity package
+      using Azure.Identity;
+      using Azure.Security.KeyVault.Secrets;
+
+      // Uses managed identity automatically
+      var client = new SecretClient(
+          new Uri("https://myvault.vault.azure.net"),
+          new DefaultAzureCredential());
+
+      var secret = await client.GetSecretAsync("my-secret");
+
+  - id: structured-logging
+    name: Use Structured Logging
+    check: |
+      Log with structured data for better querying.
+    recommendation: |
+      // BAD - string concatenation
+      _logger.LogInformation("Processing order " + orderId);
+
+      // GOOD - structured logging
+      _logger.LogInformation("Processing order {OrderId}", orderId);
+
+      // With additional context
+      _logger.LogInformation(
+          "Order {OrderId} processed in {Duration}ms",
+          orderId, duration);
+
+  - id: configure-retry-policies
+    name: Configure Retry Policies
+    check: |
+      External calls should have retry policies.
+    recommendation: |
+      // Using Polly with IHttpClientFactory
+      services.AddHttpClient<IMyClient, MyClient>()
+          .AddPolicyHandler(GetRetryPolicy());
+
+      static IAsyncPolicy<HttpResponseMessage> GetRetryPolicy()
+      {
+          return HttpPolicyExtensions
+              .HandleTransientHttpError()
+              .WaitAndRetryAsync(3, retryAttempt =>
+                  TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
+      }
+
+  - id: use-health-checks
+    name: Implement Health Checks
+    check: |
+      Function apps should have health endpoints.
+    recommendation: |
+      [Function("Health")]
+      public HttpResponseData Health(
+          [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "health")]
+          HttpRequestData req)
+      {
+          var response = req.CreateResponse(HttpStatusCode.OK);
+          response.WriteAsJsonAsync(new
+          {
+              status = "healthy",
+              timestamp = DateTime.UtcNow
+          });
+          return response;
+      }
+
+  - id: use-activity-triggers-for-io
+    name: Use Activity Triggers for I/O in Durable Functions
+    check: |
+      Orchestrators should delegate I/O to activity functions.
+    recommendation: |
+      // GOOD - I/O in activity
+      [Function("MyOrchestrator")]
+      public static async Task<string> RunOrchestrator(
+          [OrchestrationTrigger] TaskOrchestrationContext context)
+      {
+          // Delegate I/O to activity
+          var data = await context.CallActivityAsync<string>("FetchData", input);
+          return data;
+      }
+
+      [Function("FetchData")]
+      public static async Task<string> FetchData(
+          [ActivityTrigger] string input,
+          FunctionContext context)
+      {
+          // I/O operations here
+          return await httpClient.GetStringAsync(url);
+      }
+
+testing_checklist:
+  local_development:
+    - "func start runs without errors"
+    - "All functions registered and listed"
+    - "Triggers fire as expected"
+    - "local.settings.json has required settings"
+
+  security:
+    - "No hardcoded credentials"
+    - "Managed identity configured for Azure services"
+    - "Authorization levels appropriate"
+    - "Secrets in Key Vault"
+
+  production_readiness:
+    - "Timeout configured appropriately"
+    - "Log levels set for production"
+    - "Application Insights configured"
+    - "Health endpoint implemented"
+    - "Error handling in all functions"
+
+  performance:
+    - "No blocking async calls"
+    - "HttpClientFactory used"
+    - "Connection pooling configured"
+    - "Cold start optimized"

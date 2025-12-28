@@ -1,0 +1,655 @@
+# Azure Functions Integration Skill
+# Expert patterns for Azure serverless development
+
+version: 1.0.0
+skill_id: azure-functions
+name: Azure Functions Specialist
+category: integrations
+tags: [azure, serverless, functions, durable-functions, cloud]
+
+description: |
+  Expert patterns for Azure Functions development including isolated worker model,
+  Durable Functions orchestration, cold start optimization, and production patterns.
+  Covers .NET, Python, and Node.js programming models.
+
+triggers:
+  - "azure function"
+  - "azure functions"
+  - "durable functions"
+  - "azure serverless"
+  - "function app"
+
+anti_patterns:
+  - name: Blocking Async Calls
+    description: Using .Result, .Wait(), or Thread.Sleep blocks threads
+    instead: Use await/async pattern with Task.Delay
+
+  - name: New HttpClient Per Request
+    description: Creating HttpClient instances causes socket exhaustion
+    instead: Use IHttpClientFactory or static client with DI
+
+  - name: In-Process Model for New Projects
+    description: In-process model deprecated in November 2026
+    instead: Use isolated worker model for .NET
+
+  - name: Synchronous External Calls
+    description: Blocks threads, causes thread starvation
+    instead: Use async patterns for all I/O
+
+  - name: Verbose Logging in Production
+    description: Excessive logging degrades performance
+    instead: Use appropriate log levels, structured logging
+
+handoffs:
+  - situation: User needs AWS serverless
+    delegate_to: aws-serverless
+    context: Lambda, API Gateway, SAM
+
+  - situation: User needs container-based serverless
+    delegate_to: gcp-cloud-run
+    context: Cloud Run for containerized functions
+
+  - situation: User needs complex data workflows
+    delegate_to: workflow-automation
+    context: Logic Apps, Data Factory
+
+patterns:
+  - name: Isolated Worker Model (.NET)
+    description: Modern .NET execution model with process isolation
+    when: Building new .NET Azure Functions apps
+    template: |
+      // Program.cs - Isolated Worker Model
+      using Microsoft.Azure.Functions.Worker;
+      using Microsoft.Extensions.DependencyInjection;
+      using Microsoft.Extensions.Hosting;
+
+      var host = new HostBuilder()
+          .ConfigureFunctionsWorkerDefaults()
+          .ConfigureServices(services =>
+          {
+              // Add Application Insights
+              services.AddApplicationInsightsTelemetryWorkerService();
+              services.ConfigureFunctionsApplicationInsights();
+
+              // Add HttpClientFactory (prevents socket exhaustion)
+              services.AddHttpClient();
+
+              // Add your services
+              services.AddSingleton<IMyService, MyService>();
+          })
+          .Build();
+
+      host.Run();
+
+      // HttpTriggerFunction.cs
+      using Microsoft.Azure.Functions.Worker;
+      using Microsoft.Azure.Functions.Worker.Http;
+      using Microsoft.Extensions.Logging;
+
+      public class HttpTriggerFunction
+      {
+          private readonly ILogger<HttpTriggerFunction> _logger;
+          private readonly IMyService _service;
+
+          public HttpTriggerFunction(
+              ILogger<HttpTriggerFunction> logger,
+              IMyService service)
+          {
+              _logger = logger;
+              _service = service;
+          }
+
+          [Function("HttpTrigger")]
+          public async Task<HttpResponseData> Run(
+              [HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequestData req)
+          {
+              _logger.LogInformation("Processing request");
+
+              try
+              {
+                  var result = await _service.ProcessAsync(req);
+
+                  var response = req.CreateResponse(HttpStatusCode.OK);
+                  await response.WriteAsJsonAsync(result);
+                  return response;
+              }
+              catch (Exception ex)
+              {
+                  _logger.LogError(ex, "Error processing request");
+                  var response = req.CreateResponse(HttpStatusCode.InternalServerError);
+                  await response.WriteAsJsonAsync(new { error = "Internal server error" });
+                  return response;
+              }
+          }
+      }
+    notes:
+      - "In-process model deprecated November 2026"
+      - "Isolated worker supports .NET 8, 9, 10, and .NET Framework"
+      - "Full dependency injection support"
+      - "Custom middleware support"
+
+  - name: Node.js v4 Programming Model
+    description: Modern code-centric approach for TypeScript/JavaScript
+    when: Building Node.js Azure Functions
+    template: |
+      // src/functions/httpTrigger.ts
+      import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
+
+      export async function httpTrigger(
+        request: HttpRequest,
+        context: InvocationContext
+      ): Promise<HttpResponseInit> {
+        context.log(`Http function processed request for url "${request.url}"`);
+
+        try {
+          const name = request.query.get("name") || (await request.text()) || "world";
+
+          return {
+            status: 200,
+            jsonBody: { message: `Hello, ${name}!` }
+          };
+        } catch (error) {
+          context.error("Error processing request:", error);
+          return {
+            status: 500,
+            jsonBody: { error: "Internal server error" }
+          };
+        }
+      }
+
+      // Register function with app object
+      app.http("httpTrigger", {
+        methods: ["GET", "POST"],
+        authLevel: "function",
+        handler: httpTrigger
+      });
+
+      // Timer trigger example
+      app.timer("timerTrigger", {
+        schedule: "0 */5 * * * *",  // Every 5 minutes
+        handler: async (myTimer, context) => {
+          context.log("Timer function executed at:", new Date().toISOString());
+        }
+      });
+
+      // Blob trigger example
+      app.storageBlob("blobTrigger", {
+        path: "samples-workitems/{name}",
+        connection: "AzureWebJobsStorage",
+        handler: async (blob, context) => {
+          context.log(`Blob trigger processing: ${context.triggerMetadata.name}`);
+          context.log(`Blob size: ${blob.length} bytes`);
+        }
+      });
+    notes:
+      - "v4 model is code-centric, no function.json files"
+      - "Uses app object similar to Express.js"
+      - "TypeScript first-class support"
+      - "All triggers registered in code"
+
+  - name: Python v2 Programming Model
+    description: Decorator-based approach for Python functions
+    when: Building Python Azure Functions
+    template: |
+      # function_app.py
+      import azure.functions as func
+      import logging
+      import json
+
+      app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
+
+      @app.route(route="hello", methods=["GET", "POST"])
+      async def http_trigger(req: func.HttpRequest) -> func.HttpResponse:
+          logging.info("Python HTTP trigger function processed a request.")
+
+          try:
+              name = req.params.get("name")
+              if not name:
+                  try:
+                      req_body = req.get_json()
+                      name = req_body.get("name")
+                  except ValueError:
+                      pass
+
+              if name:
+                  return func.HttpResponse(
+                      json.dumps({"message": f"Hello, {name}!"}),
+                      mimetype="application/json"
+                  )
+              else:
+                  return func.HttpResponse(
+                      json.dumps({"message": "Hello, World!"}),
+                      mimetype="application/json"
+                  )
+          except Exception as e:
+              logging.error(f"Error processing request: {str(e)}")
+              return func.HttpResponse(
+                  json.dumps({"error": "Internal server error"}),
+                  status_code=500,
+                  mimetype="application/json"
+              )
+
+      @app.timer_trigger(schedule="0 */5 * * * *", arg_name="myTimer")
+      def timer_trigger(myTimer: func.TimerRequest) -> None:
+          logging.info("Timer trigger executed")
+
+      @app.blob_trigger(arg_name="myblob", path="samples-workitems/{name}",
+                        connection="AzureWebJobsStorage")
+      def blob_trigger(myblob: func.InputStream):
+          logging.info(f"Blob trigger: {myblob.name}, Size: {myblob.length} bytes")
+
+      @app.queue_trigger(arg_name="msg", queue_name="myqueue",
+                         connection="AzureWebJobsStorage")
+      def queue_trigger(msg: func.QueueMessage) -> None:
+          logging.info(f"Queue message: {msg.get_body().decode('utf-8')}")
+    notes:
+      - "v2 model uses decorators, no function.json files"
+      - "Python runs out-of-process (always isolated)"
+      - "Linux-based hosting required for Python"
+      - "Async functions supported"
+
+  - name: Durable Functions - Function Chaining
+    description: Sequential execution with state persistence
+    when: Need sequential workflow with automatic retry
+    template: |
+      // C# Isolated Worker - Function Chaining
+      using Microsoft.Azure.Functions.Worker;
+      using Microsoft.DurableTask;
+      using Microsoft.DurableTask.Client;
+
+      public class OrderWorkflow
+      {
+          [Function("OrderOrchestrator")]
+          public static async Task<OrderResult> RunOrchestrator(
+              [OrchestrationTrigger] TaskOrchestrationContext context)
+          {
+              var order = context.GetInput<Order>();
+
+              // Functions execute sequentially, state persisted between each
+              var validated = await context.CallActivityAsync<ValidatedOrder>(
+                  "ValidateOrder", order);
+
+              var payment = await context.CallActivityAsync<PaymentResult>(
+                  "ProcessPayment", validated);
+
+              var shipped = await context.CallActivityAsync<ShippingResult>(
+                  "ShipOrder", new ShipRequest { Order = validated, Payment = payment });
+
+              var notification = await context.CallActivityAsync<bool>(
+                  "SendNotification", shipped);
+
+              return new OrderResult
+              {
+                  OrderId = order.Id,
+                  Status = "Completed",
+                  TrackingNumber = shipped.TrackingNumber
+              };
+          }
+
+          [Function("ValidateOrder")]
+          public static async Task<ValidatedOrder> ValidateOrder(
+              [ActivityTrigger] Order order, FunctionContext context)
+          {
+              var logger = context.GetLogger<OrderWorkflow>();
+              logger.LogInformation("Validating order {OrderId}", order.Id);
+
+              // Validation logic...
+              return new ValidatedOrder { /* ... */ };
+          }
+
+          [Function("ProcessPayment")]
+          public static async Task<PaymentResult> ProcessPayment(
+              [ActivityTrigger] ValidatedOrder order, FunctionContext context)
+          {
+              // Payment processing with built-in retry...
+              return new PaymentResult { /* ... */ };
+          }
+
+          [Function("OrderWorkflow_HttpStart")]
+          public static async Task<HttpResponseData> HttpStart(
+              [HttpTrigger(AuthorizationLevel.Function, "post")] HttpRequestData req,
+              [DurableClient] DurableTaskClient client,
+              FunctionContext context)
+          {
+              var order = await req.ReadFromJsonAsync<Order>();
+              string instanceId = await client.ScheduleNewOrchestrationInstanceAsync(
+                  "OrderOrchestrator", order);
+
+              return client.CreateCheckStatusResponse(req, instanceId);
+          }
+      }
+    notes:
+      - "State automatically persisted between activities"
+      - "Automatic retry on transient failures"
+      - "Survives process restarts"
+      - "Built-in status endpoint for monitoring"
+
+  - name: Durable Functions - Fan-Out/Fan-In
+    description: Parallel execution with result aggregation
+    when: Processing multiple items in parallel
+    template: |
+      // C# Isolated Worker - Fan-Out/Fan-In
+      using Microsoft.Azure.Functions.Worker;
+      using Microsoft.DurableTask;
+
+      public class ParallelProcessing
+      {
+          [Function("ProcessImagesOrchestrator")]
+          public static async Task<ProcessingResult> RunOrchestrator(
+              [OrchestrationTrigger] TaskOrchestrationContext context)
+          {
+              var images = context.GetInput<List<string>>();
+
+              // Fan-out: Start all tasks in parallel
+              var tasks = images.Select(image =>
+                  context.CallActivityAsync<ImageResult>("ProcessImage", image));
+
+              // Fan-in: Wait for all tasks to complete
+              var results = await Task.WhenAll(tasks);
+
+              // Aggregate results
+              var successful = results.Count(r => r.Success);
+              var failed = results.Count(r => !r.Success);
+
+              return new ProcessingResult
+              {
+                  TotalProcessed = results.Length,
+                  Successful = successful,
+                  Failed = failed,
+                  Results = results.ToList()
+              };
+          }
+
+          [Function("ProcessImage")]
+          public static async Task<ImageResult> ProcessImage(
+              [ActivityTrigger] string imageUrl, FunctionContext context)
+          {
+              var logger = context.GetLogger<ParallelProcessing>();
+              logger.LogInformation("Processing image: {Url}", imageUrl);
+
+              try
+              {
+                  // Image processing logic...
+                  await Task.Delay(1000); // Simulated work
+
+                  return new ImageResult
+                  {
+                      Url = imageUrl,
+                      Success = true,
+                      ProcessedUrl = $"processed-{imageUrl}"
+                  };
+              }
+              catch (Exception ex)
+              {
+                  logger.LogError(ex, "Failed to process {Url}", imageUrl);
+                  return new ImageResult { Url = imageUrl, Success = false };
+              }
+          }
+
+          // Python equivalent
+          // @app.orchestration_trigger(context_name="context")
+          // def process_images_orchestrator(context: df.DurableOrchestrationContext):
+          //     images = context.get_input()
+          //
+          //     # Fan-out: Create parallel tasks
+          //     tasks = [context.call_activity("ProcessImage", img) for img in images]
+          //
+          //     # Fan-in: Wait for all
+          //     results = yield context.task_all(tasks)
+          //
+          //     return {"processed": len(results), "results": results}
+      }
+    notes:
+      - "Parallel execution for independent tasks"
+      - "Results aggregated when all complete"
+      - "Memory efficient - only stores task IDs"
+      - "Up to thousands of parallel activities"
+
+  - name: Cold Start Optimization
+    description: Minimize cold start latency in production
+    when: Need fast response times in production
+    template: |
+      // 1. Use Premium Plan with pre-warmed instances
+      // host.json
+      {
+        "version": "2.0",
+        "extensions": {
+          "durableTask": {
+            "hubName": "MyTaskHub"
+          }
+        },
+        "functionTimeout": "00:30:00"
+      }
+
+      // 2. Add warmup trigger (Premium Plan)
+      [Function("Warmup")]
+      public static void Warmup(
+          [WarmupTrigger] object warmupContext,
+          FunctionContext context)
+      {
+          var logger = context.GetLogger("Warmup");
+          logger.LogInformation("Warmup trigger executed - initializing dependencies");
+
+          // Pre-initialize expensive resources
+          // Database connections, HttpClients, etc.
+      }
+
+      // 3. Use static/singleton clients with DI
+      public class Startup
+      {
+          public void ConfigureServices(IServiceCollection services)
+          {
+              // HttpClientFactory prevents socket exhaustion
+              services.AddHttpClient<IMyApiClient, MyApiClient>(client =>
+              {
+                  client.BaseAddress = new Uri("https://api.example.com");
+                  client.Timeout = TimeSpan.FromSeconds(30);
+              });
+
+              // Singleton for expensive initialization
+              services.AddSingleton<IExpensiveService>(sp =>
+              {
+                  // Initialize once, reuse across invocations
+                  return new ExpensiveService();
+              });
+          }
+      }
+
+      // 4. Reduce package size
+      // .csproj - exclude unnecessary dependencies
+      <PropertyGroup>
+        <PublishTrimmed>true</PublishTrimmed>
+        <TrimMode>partial</TrimMode>
+      </PropertyGroup>
+
+      // 5. Run from package deployment
+      // Azure CLI
+      // az functionapp deployment source config-zip \
+      //   --resource-group myResourceGroup \
+      //   --name myFunctionApp \
+      //   --src myapp.zip \
+      //   --build-remote true
+    notes:
+      - "Cold starts improved ~53% across all regions/languages"
+      - "Premium Plan provides pre-warmed instances"
+      - "Warmup trigger initializes before traffic"
+      - "Package deployment can reduce cold start"
+
+  - name: Queue Trigger with Error Handling
+    description: Reliable message processing with poison queue
+    when: Processing messages from Azure Storage Queue
+    template: |
+      // C# Isolated Worker - Queue Trigger
+      using Microsoft.Azure.Functions.Worker;
+
+      public class QueueProcessor
+      {
+          private readonly ILogger<QueueProcessor> _logger;
+          private readonly IMyService _service;
+
+          public QueueProcessor(ILogger<QueueProcessor> logger, IMyService service)
+          {
+              _logger = logger;
+              _service = service;
+          }
+
+          [Function("ProcessQueueMessage")]
+          public async Task Run(
+              [QueueTrigger("myqueue-items", Connection = "AzureWebJobsStorage")]
+              QueueMessage message)
+          {
+              _logger.LogInformation("Processing message: {Id}", message.MessageId);
+
+              try
+              {
+                  var payload = JsonSerializer.Deserialize<MyPayload>(message.Body);
+                  await _service.ProcessAsync(payload);
+
+                  _logger.LogInformation("Message processed successfully: {Id}", message.MessageId);
+              }
+              catch (Exception ex)
+              {
+                  _logger.LogError(ex, "Error processing message: {Id}", message.MessageId);
+
+                  // Message will be retried up to maxDequeueCount (default 5)
+                  // Then moved to poison queue: myqueue-items-poison
+                  throw;
+              }
+          }
+
+          // Optional: Monitor poison queue
+          [Function("ProcessPoisonQueue")]
+          public async Task ProcessPoison(
+              [QueueTrigger("myqueue-items-poison", Connection = "AzureWebJobsStorage")]
+              QueueMessage message)
+          {
+              _logger.LogWarning("Processing poison message: {Id}", message.MessageId);
+
+              // Log to monitoring, alert, or store for manual review
+              await _service.HandlePoisonMessageAsync(message);
+          }
+      }
+
+      // host.json - Queue configuration
+      // {
+      //   "version": "2.0",
+      //   "extensions": {
+      //     "queues": {
+      //       "maxPollingInterval": "00:00:02",
+      //       "visibilityTimeout": "00:00:30",
+      //       "batchSize": 16,
+      //       "maxDequeueCount": 5,
+      //       "newBatchThreshold": 8
+      //     }
+      //   }
+      // }
+    notes:
+      - "Messages retried up to maxDequeueCount times"
+      - "Failed messages moved to poison queue"
+      - "Configure visibilityTimeout for processing time"
+      - "batchSize controls parallel processing"
+
+  - name: HTTP Trigger with Long-Running Pattern
+    description: Handle work exceeding 230-second HTTP limit
+    when: HTTP request triggers long-running work
+    template: |
+      // Async HTTP pattern - return immediately, poll for status
+      [Function("StartLongRunning")]
+      public static async Task<HttpResponseData> StartLongRunning(
+          [HttpTrigger(AuthorizationLevel.Function, "post")] HttpRequestData req,
+          [DurableClient] DurableTaskClient client,
+          FunctionContext context)
+      {
+          var input = await req.ReadFromJsonAsync<WorkRequest>();
+
+          // Start orchestration (returns immediately)
+          string instanceId = await client.ScheduleNewOrchestrationInstanceAsync(
+              "LongRunningOrchestrator", input);
+
+          // Return status URLs for polling
+          return client.CreateCheckStatusResponse(req, instanceId);
+      }
+
+      // Response includes:
+      // {
+      //   "id": "abc123",
+      //   "statusQueryGetUri": "https://.../instances/abc123",
+      //   "sendEventPostUri": "https://.../instances/abc123/raiseEvent/{eventName}",
+      //   "terminatePostUri": "https://.../instances/abc123/terminate"
+      // }
+
+      // Alternative: Queue-based pattern without Durable Functions
+      [Function("StartWork")]
+      [QueueOutput("work-queue")]
+      public static async Task<WorkItem> StartWork(
+          [HttpTrigger(AuthorizationLevel.Function, "post")] HttpRequestData req,
+          FunctionContext context)
+      {
+          var input = await req.ReadFromJsonAsync<WorkRequest>();
+          var workId = Guid.NewGuid().ToString();
+
+          // Queue the work, return immediately
+          var workItem = new WorkItem
+          {
+              Id = workId,
+              Request = input
+          };
+
+          // Return work ID for status checking
+          var response = req.CreateResponse(HttpStatusCode.Accepted);
+          await response.WriteAsJsonAsync(new
+          {
+              workId = workId,
+              statusUrl = $"/api/status/{workId}"
+          });
+
+          return workItem;
+      }
+
+      [Function("ProcessWork")]
+      public static async Task ProcessWork(
+          [QueueTrigger("work-queue")] WorkItem work,
+          FunctionContext context)
+      {
+          // Long-running processing here
+          // Update status in storage for polling
+      }
+    notes:
+      - "HTTP timeout is 230 seconds regardless of plan"
+      - "Use Durable Functions for async patterns"
+      - "Return immediately with status endpoint"
+      - "Client polls for completion"
+
+best_practices:
+  - practice: Use IHttpClientFactory
+    why: Prevents socket exhaustion, enables proper connection pooling
+    implementation: |
+      services.AddHttpClient<IMyClient, MyClient>();
+
+  - practice: Use async/await throughout
+    why: Prevents thread starvation at scale
+    implementation: |
+      // Never use .Result, .Wait(), or Thread.Sleep()
+      var result = await httpClient.GetAsync(url);
+
+  - practice: Use separate storage accounts
+    why: Prevents contention, especially for Durable Functions
+    implementation: |
+      // Each function app should have its own storage account
+      // Critical for Event Hub and Durable Functions
+
+  - practice: Configure appropriate timeouts
+    why: Prevents runaway executions and unexpected costs
+    implementation: |
+      // host.json
+      {
+        "functionTimeout": "00:10:00"  // 10 minutes
+      }
+
+  - practice: Use managed identity
+    why: No credentials in code or configuration
+    implementation: |
+      // Access Key Vault with managed identity
+      var client = new SecretClient(
+          new Uri("https://myvault.vault.azure.net"),
+          new DefaultAzureCredential());

@@ -1,0 +1,559 @@
+# Collaboration - Azure Functions
+# How this skill works with other skills
+
+version: 1.0.0
+skill_id: azure-functions
+
+prerequisites:
+  required: []
+
+  recommended:
+    - skill: backend
+      reason: "API design and error handling patterns"
+      what_to_know:
+        - "REST API design"
+        - "Error handling strategies"
+        - "Async programming"
+
+    - skill: devops
+      reason: "CI/CD, monitoring, infrastructure"
+      what_to_know:
+        - "Azure DevOps / GitHub Actions"
+        - "Application Insights"
+        - "Infrastructure as Code"
+
+delegation_triggers:
+  - trigger: "user needs AWS serverless"
+    delegate_to: aws-serverless
+    context: "Lambda, API Gateway, SAM"
+
+  - trigger: "user needs GCP serverless"
+    delegate_to: gcp-cloud-run
+    context: "Cloud Run, Cloud Functions"
+
+  - trigger: "user needs container-based deployment"
+    delegate_to: gcp-cloud-run
+    context: "Azure Container Apps or Cloud Run"
+
+  - trigger: "user needs database design"
+    delegate_to: postgres-wizard
+    context: "Azure SQL, Cosmos DB data modeling"
+
+  - trigger: "user needs authentication"
+    delegate_to: auth-specialist
+    context: "Azure AD, Easy Auth, managed identity"
+
+  - trigger: "user needs complex orchestration"
+    delegate_to: workflow-automation
+    context: "Logic Apps, Power Automate"
+
+receives_context_from:
+  - skill: backend
+    receives:
+      - "API design patterns"
+      - "Error handling strategies"
+      - "Async programming patterns"
+
+  - skill: devops
+    receives:
+      - "CI/CD pipeline patterns"
+      - "Monitoring best practices"
+      - "Infrastructure as Code"
+
+  - skill: auth-specialist
+    receives:
+      - "Azure AD integration"
+      - "Managed identity patterns"
+      - "API authentication"
+
+provides_context_to:
+  - skill: aws-serverless
+    provides:
+      - "Serverless patterns"
+      - "Durable workflow patterns"
+      - "Cold start strategies"
+
+  - skill: gcp-cloud-run
+    provides:
+      - "Event-driven patterns"
+      - "Async processing"
+      - "Scaling strategies"
+
+  - skill: workflow-automation
+    provides:
+      - "Durable Functions patterns"
+      - "Event triggers"
+      - "Orchestration examples"
+
+escalation_paths:
+  - situation: "Complex container requirements"
+    escalate_to: devops
+    context: "Azure Container Apps, AKS"
+
+  - situation: "Database design and optimization"
+    escalate_to: postgres-wizard
+    context: "Azure SQL, Cosmos DB modeling"
+
+  - situation: "Multi-cloud requirements"
+    escalate_to: gcp-cloud-run
+    context: "Cross-cloud patterns, vendor abstraction"
+
+  - situation: "Complex integration flows"
+    escalate_to: workflow-automation
+    context: "Logic Apps, enterprise integration"
+
+workflow_integration:
+  typical_sequence:
+    1:
+      step: "Create Function App project"
+      skills: [azure-functions]
+      output: "Project structure, Program.cs"
+
+    2:
+      step: "Implement function handlers"
+      skills: [azure-functions, backend]
+      output: "HTTP, queue, timer triggers"
+
+    3:
+      step: "Configure bindings and triggers"
+      skills: [azure-functions]
+      output: "host.json, extensions"
+
+    4:
+      step: "Add Durable Functions (if needed)"
+      skills: [azure-functions]
+      output: "Orchestrators, activities"
+
+    5:
+      step: "Configure authentication"
+      skills: [azure-functions, auth-specialist]
+      output: "Managed identity, Easy Auth"
+
+    6:
+      step: "Set up CI/CD pipeline"
+      skills: [azure-functions, devops]
+      output: "GitHub Actions, Azure DevOps"
+
+    7:
+      step: "Configure monitoring"
+      skills: [azure-functions, devops]
+      output: "Application Insights, alerts"
+
+  decision_points:
+    - question: "Consumption vs Premium vs Dedicated plan?"
+      guidance: |
+        Consumption Plan:
+        - Pay per execution
+        - Auto-scale 0 to 200 instances
+        - Max 10 min timeout
+        - Best for: Variable workloads, cost-sensitive
+
+        Premium Plan:
+        - Pre-warmed instances
+        - VNet integration
+        - Up to 60 min timeout (unbounded available)
+        - Best for: Low latency, long-running, VNet access
+
+        Dedicated (App Service) Plan:
+        - Predictable billing
+        - Manual scaling
+        - Always-on available
+        - Best for: Existing App Service, predictable load
+
+    - question: "Durable Functions vs Logic Apps?"
+      guidance: |
+        Durable Functions:
+        - Code-first orchestration
+        - Complex branching/loops
+        - Fine-grained control
+        - Best for: Developers, complex workflows
+
+        Logic Apps:
+        - Designer-first
+        - 400+ connectors
+        - Built-in error handling
+        - Best for: Integration, citizen developers
+
+    - question: "In-process vs Isolated worker?"
+      guidance: |
+        Isolated Worker (RECOMMENDED):
+        - Process isolation
+        - Latest .NET versions
+        - Full DI support
+        - Future-proof (in-process deprecated 2026)
+
+        In-process (LEGACY):
+        - Only use for existing apps
+        - Limited to LTS .NET
+        - Migrate before Nov 2026
+
+collaboration_patterns:
+  with_cosmos_db:
+    when: "Need globally distributed NoSQL database"
+    approach: |
+      Azure Functions with Cosmos DB bindings:
+
+      ```csharp
+      // Input binding - read from Cosmos DB
+      [Function("GetItem")]
+      public HttpResponseData GetItem(
+          [HttpTrigger(AuthorizationLevel.Function, "get", Route = "items/{id}")]
+          HttpRequestData req,
+          [CosmosDBInput(
+              databaseName: "mydb",
+              containerName: "items",
+              Connection = "CosmosDBConnection",
+              Id = "{id}",
+              PartitionKey = "{id}")]
+          MyItem item)
+      {
+          var response = req.CreateResponse(HttpStatusCode.OK);
+          response.WriteAsJsonAsync(item);
+          return response;
+      }
+
+      // Output binding - write to Cosmos DB
+      [Function("CreateItem")]
+      [CosmosDBOutput(
+          databaseName: "mydb",
+          containerName: "items",
+          Connection = "CosmosDBConnection")]
+      public MyItem CreateItem(
+          [HttpTrigger(AuthorizationLevel.Function, "post")]
+          HttpRequestData req)
+      {
+          var item = req.ReadFromJsonAsync<MyItem>().Result;
+          item.Id = Guid.NewGuid().ToString();
+          return item;  // Automatically written to Cosmos DB
+      }
+
+      // Change feed trigger
+      [Function("ProcessChanges")]
+      public void ProcessChanges(
+          [CosmosDBTrigger(
+              databaseName: "mydb",
+              containerName: "items",
+              Connection = "CosmosDBConnection",
+              LeaseContainerName = "leases",
+              CreateLeaseContainerIfNotExists = true)]
+          IReadOnlyList<MyItem> changes)
+      {
+          foreach (var item in changes)
+          {
+              _logger.LogInformation("Item changed: {Id}", item.Id);
+          }
+      }
+      ```
+
+  with_service_bus:
+    when: "Need reliable message queuing"
+    approach: |
+      Azure Functions with Service Bus:
+
+      ```csharp
+      // Queue trigger
+      [Function("ProcessMessage")]
+      public async Task ProcessMessage(
+          [ServiceBusTrigger("myqueue", Connection = "ServiceBusConnection")]
+          ServiceBusReceivedMessage message,
+          ServiceBusMessageActions messageActions)
+      {
+          try
+          {
+              var payload = message.Body.ToObjectFromJson<MyPayload>();
+              await ProcessAsync(payload);
+
+              // Complete the message
+              await messageActions.CompleteMessageAsync(message);
+          }
+          catch (Exception ex)
+          {
+              _logger.LogError(ex, "Failed to process message");
+              // Message will be retried or dead-lettered
+              throw;
+          }
+      }
+
+      // Topic subscription trigger
+      [Function("ProcessTopicMessage")]
+      public void ProcessTopicMessage(
+          [ServiceBusTrigger("mytopic", "mysubscription",
+              Connection = "ServiceBusConnection")]
+          string message)
+      {
+          _logger.LogInformation("Received: {Message}", message);
+      }
+
+      // Output binding
+      [Function("SendMessage")]
+      [ServiceBusOutput("myqueue", Connection = "ServiceBusConnection")]
+      public string SendMessage(
+          [HttpTrigger(AuthorizationLevel.Function, "post")]
+          HttpRequestData req)
+      {
+          var body = req.ReadAsStringAsync().Result;
+          return body;  // Sent to queue
+      }
+      ```
+
+  with_event_grid:
+    when: "Need event-driven architecture with filtering"
+    approach: |
+      Azure Functions with Event Grid:
+
+      ```csharp
+      // Event Grid trigger
+      [Function("ProcessEvent")]
+      public void ProcessEvent(
+          [EventGridTrigger] EventGridEvent eventGridEvent)
+      {
+          _logger.LogInformation("Event type: {Type}", eventGridEvent.EventType);
+          _logger.LogInformation("Event data: {Data}", eventGridEvent.Data);
+
+          switch (eventGridEvent.EventType)
+          {
+              case "Microsoft.Storage.BlobCreated":
+                  HandleBlobCreated(eventGridEvent.Data);
+                  break;
+              case "MyApp.OrderCreated":
+                  HandleOrderCreated(eventGridEvent.Data);
+                  break;
+          }
+      }
+
+      // Publish custom events
+      [Function("PublishEvent")]
+      public async Task PublishEvent(
+          [HttpTrigger(AuthorizationLevel.Function, "post")]
+          HttpRequestData req)
+      {
+          var client = new EventGridPublisherClient(
+              new Uri("https://mytopic.eastus-1.eventgrid.azure.net/api/events"),
+              new DefaultAzureCredential());
+
+          var events = new[]
+          {
+              new EventGridEvent(
+                  subject: "orders/12345",
+                  eventType: "MyApp.OrderCreated",
+                  dataVersion: "1.0",
+                  data: new { OrderId = "12345", Total = 99.99 })
+          };
+
+          await client.SendEventsAsync(events);
+      }
+      ```
+
+  with_key_vault:
+    when: "Need secure secret management"
+    approach: |
+      Azure Functions with Key Vault:
+
+      ```csharp
+      // Program.cs - Use Key Vault references in config
+      var host = new HostBuilder()
+          .ConfigureFunctionsWorkerDefaults()
+          .ConfigureAppConfiguration((context, config) =>
+          {
+              var builtConfig = config.Build();
+              var keyVaultUri = builtConfig["KeyVaultUri"];
+
+              config.AddAzureKeyVault(
+                  new Uri(keyVaultUri),
+                  new DefaultAzureCredential());
+          })
+          .Build();
+
+      // Or use Key Vault references in App Settings
+      // App Setting value: @Microsoft.KeyVault(SecretUri=https://myvault.vault.azure.net/secrets/mysecret/)
+
+      // Direct SDK access
+      public class MyService
+      {
+          private readonly SecretClient _secretClient;
+
+          public MyService()
+          {
+              _secretClient = new SecretClient(
+                  new Uri("https://myvault.vault.azure.net"),
+                  new DefaultAzureCredential());
+          }
+
+          public async Task<string> GetSecretAsync(string name)
+          {
+              var secret = await _secretClient.GetSecretAsync(name);
+              return secret.Value.Value;
+          }
+      }
+      ```
+
+platform_integration:
+  github_actions:
+    setup: |
+      # .github/workflows/deploy.yml
+      name: Deploy Azure Functions
+
+      on:
+        push:
+          branches: [main]
+
+      env:
+        AZURE_FUNCTIONAPP_NAME: my-function-app
+        AZURE_FUNCTIONAPP_PACKAGE_PATH: '.'
+        DOTNET_VERSION: '8.0.x'
+
+      jobs:
+        build-and-deploy:
+          runs-on: ubuntu-latest
+
+          steps:
+            - uses: actions/checkout@v4
+
+            - name: Setup .NET
+              uses: actions/setup-dotnet@v4
+              with:
+                dotnet-version: ${{ env.DOTNET_VERSION }}
+
+            - name: Build
+              run: dotnet build --configuration Release
+
+            - name: Publish
+              run: dotnet publish -c Release -o ./output
+
+            - name: Deploy to Azure Functions
+              uses: Azure/functions-action@v1
+              with:
+                app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
+                package: ./output
+                publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
+
+  azure_devops:
+    setup: |
+      # azure-pipelines.yml
+      trigger:
+        - main
+
+      pool:
+        vmImage: 'ubuntu-latest'
+
+      variables:
+        azureSubscription: 'MyAzureSubscription'
+        functionAppName: 'my-function-app'
+        vmImageName: 'ubuntu-latest'
+
+      stages:
+        - stage: Build
+          jobs:
+            - job: Build
+              steps:
+                - task: UseDotNet@2
+                  inputs:
+                    version: '8.0.x'
+
+                - task: DotNetCoreCLI@2
+                  inputs:
+                    command: 'build'
+                    projects: '**/*.csproj'
+                    arguments: '--configuration Release'
+
+                - task: DotNetCoreCLI@2
+                  inputs:
+                    command: 'publish'
+                    publishWebProjects: false
+                    projects: '**/*.csproj'
+                    arguments: '-c Release -o $(Build.ArtifactStagingDirectory)'
+
+                - task: PublishBuildArtifacts@1
+                  inputs:
+                    pathToPublish: $(Build.ArtifactStagingDirectory)
+
+        - stage: Deploy
+          dependsOn: Build
+          jobs:
+            - deployment: Deploy
+              environment: 'production'
+              strategy:
+                runOnce:
+                  deploy:
+                    steps:
+                      - task: AzureFunctionApp@2
+                        inputs:
+                          azureSubscription: $(azureSubscription)
+                          appType: 'functionApp'
+                          appName: $(functionAppName)
+                          package: '$(Pipeline.Workspace)/**/*.zip'
+
+  terraform:
+    setup: |
+      # main.tf
+      resource "azurerm_resource_group" "example" {
+        name     = "my-function-rg"
+        location = "East US"
+      }
+
+      resource "azurerm_storage_account" "example" {
+        name                     = "myfuncstorage"
+        resource_group_name      = azurerm_resource_group.example.name
+        location                 = azurerm_resource_group.example.location
+        account_tier             = "Standard"
+        account_replication_type = "LRS"
+      }
+
+      resource "azurerm_service_plan" "example" {
+        name                = "my-function-plan"
+        resource_group_name = azurerm_resource_group.example.name
+        location            = azurerm_resource_group.example.location
+        os_type             = "Linux"
+        sku_name            = "Y1"  # Consumption plan
+      }
+
+      resource "azurerm_linux_function_app" "example" {
+        name                = "my-function-app"
+        resource_group_name = azurerm_resource_group.example.name
+        location            = azurerm_resource_group.example.location
+
+        storage_account_name       = azurerm_storage_account.example.name
+        storage_account_access_key = azurerm_storage_account.example.primary_access_key
+        service_plan_id            = azurerm_service_plan.example.id
+
+        site_config {
+          application_stack {
+            dotnet_version              = "8.0"
+            use_dotnet_isolated_runtime = true
+          }
+        }
+
+        app_settings = {
+          "FUNCTIONS_WORKER_RUNTIME" = "dotnet-isolated"
+        }
+
+        identity {
+          type = "SystemAssigned"
+        }
+      }
+
+      # Grant Key Vault access
+      resource "azurerm_key_vault_access_policy" "function" {
+        key_vault_id = azurerm_key_vault.example.id
+        tenant_id    = azurerm_linux_function_app.example.identity[0].tenant_id
+        object_id    = azurerm_linux_function_app.example.identity[0].principal_id
+
+        secret_permissions = ["Get", "List"]
+      }
+
+cost_optimization:
+  - "Use Consumption plan for variable/low workloads"
+  - "Right-size Premium plan worker SKUs"
+  - "Configure appropriate max instances limits"
+  - "Use storage-based timers instead of always-running"
+  - "Batch operations to reduce execution count"
+  - "Use event-driven patterns instead of polling"
+
+security_checklist:
+  - "Use managed identity for Azure service access"
+  - "Store secrets in Key Vault"
+  - "Configure appropriate authorization levels"
+  - "Enable HTTPS only"
+  - "Configure network restrictions if needed"
+  - "Enable Application Insights"
+  - "Use slots for production deployments"
