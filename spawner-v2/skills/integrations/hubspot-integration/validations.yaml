@@ -1,0 +1,369 @@
+# Validations - HubSpot Integration
+# Quality checks for HubSpot implementations
+
+version: 1.0.0
+skill_id: hubspot-integration
+
+validations:
+  # Security Checks
+  - id: hardcoded-api-key
+    name: Hardcoded HubSpot API Key
+    severity: error
+    description: API keys must never be hardcoded
+    pattern: |
+      (hapikey|HUBSPOT.*KEY)\s*[:=]\s*["'][a-f0-9-]{36}["']
+    message: "Hardcoded HubSpot API key detected. Use environment variables. Note: API keys are deprecated - use Private App tokens."
+    autofix: false
+
+  - id: hardcoded-access-token
+    name: Hardcoded HubSpot Access Token
+    severity: error
+    description: Access tokens must use environment variables
+    pattern: |
+      (accessToken|HUBSPOT.*TOKEN)\s*[:=]\s*["']pat-[a-zA-Z0-9-]+["']
+    message: "Hardcoded HubSpot access token. Use environment variables."
+    autofix: false
+
+  - id: hardcoded-client-secret
+    name: Hardcoded Client Secret
+    severity: error
+    description: OAuth client secrets must be secured
+    pattern: |
+      (clientSecret|CLIENT_SECRET)\s*[:=]\s*["'][a-f0-9-]{36}["']
+    message: "Hardcoded client secret. Use environment variables."
+    autofix: false
+
+  - id: missing-webhook-validation
+    name: Missing Webhook Signature Validation
+    severity: error
+    description: Webhook endpoints must validate HubSpot signatures
+    pattern: |
+      (webhooks?.*hubspot|hubspot.*webhooks?).*\.(post|action)
+    anti_pattern: |
+      (X-HubSpot-Signature|validateSignature|hubspot.*signature)
+    message: "Webhook endpoint without signature validation. Validate X-HubSpot-Signature-v3."
+    autofix: false
+
+  # Rate Limiting Checks
+  - id: missing-rate-limit-handling
+    name: Missing Rate Limit Handling
+    severity: warning
+    description: API calls should handle 429 responses
+    pattern: |
+      hubspotClient\.crm\.|hubspotClient\.marketing\.
+    anti_pattern: |
+      (retry|429|rate.?limit|Bottleneck|limiter)
+    message: "HubSpot API calls without rate limit handling. Implement retry logic with backoff."
+    autofix: false
+
+  - id: parallel-api-calls
+    name: Unthrottled Parallel API Calls
+    severity: warning
+    description: Parallel calls can exceed rate limits
+    pattern: |
+      Promise\.all\(.*hubspotClient
+    anti_pattern: |
+      (Bottleneck|limiter|throttle)
+    message: "Parallel HubSpot API calls without throttling. Use rate limiter."
+    autofix: false
+
+  # Pagination Checks
+  - id: missing-pagination
+    name: Missing Pagination for List Calls
+    severity: warning
+    description: List endpoints return paginated results
+    pattern: |
+      \.(getPage|getAll|search)\(\)
+    anti_pattern: |
+      (while|paging|after)
+    message: "API call without pagination handling. Implement cursor-based pagination."
+    autofix: false
+
+  # Batch Operation Checks
+  - id: individual-operations-loop
+    name: Individual Operations in Loop
+    severity: info
+    description: Use batch operations for multiple items
+    pattern: |
+      (for|forEach|map).*hubspotClient\.(crm|marketing)\.[^.]+\.(basicApi|searchApi)\.(create|update|getById)
+    message: "Individual API calls in loop. Consider batch operations for better performance."
+    autofix: false
+
+  # Token Management Checks
+  - id: token-without-expiry
+    name: Token Storage Without Expiry
+    severity: warning
+    description: OAuth tokens expire and need refresh logic
+    pattern: |
+      (accessToken|hubspotToken)\s*[:=]
+    anti_pattern: |
+      (expir|refresh|expiresAt|expiresIn)
+    message: "Token storage without expiry tracking. Store expiresAt for refresh logic."
+    autofix: false
+
+  - id: deprecated-api-key
+    name: Deprecated API Key Usage
+    severity: error
+    description: API keys are deprecated
+    pattern: |
+      (hapikey|apiKey.*hubspot|new.*Client\(\{.*apiKey)
+    message: "Using deprecated API key. Migrate to Private App token or OAuth 2.0."
+    autofix: false
+
+  # Error Handling Checks
+  - id: missing-error-handling
+    name: Missing Error Handling for API Calls
+    severity: warning
+    description: HubSpot API calls should handle errors
+    pattern: |
+      await\s+hubspotClient\.
+    anti_pattern: |
+      (try|catch|\.catch|userErrors)
+    message: "API call without error handling. Wrap in try/catch."
+    autofix: false
+
+  - id: silent-error-swallow
+    name: Silently Swallowing Errors
+    severity: warning
+    description: Errors should be logged or handled
+    pattern: |
+      catch\s*\([^)]*\)\s*\{\s*(return|continue|\})
+    message: "Catching error without logging or handling. Log errors for debugging."
+    autofix: false
+
+  # Association Checks
+  - id: v3-associations-api
+    name: Using v3 Associations API
+    severity: warning
+    description: Associations v4 is current, v3 is deprecated
+    pattern: |
+      associations\.(batchApi|basicApi)\.(?!v4)
+    message: "Using v3 associations API. Upgrade to v4 with associationCategory."
+    autofix: false
+
+  - id: missing-association-category
+    name: Missing Association Category
+    severity: warning
+    description: v4 associations require category field
+    pattern: |
+      associationTypeId(?!.*associationCategory)
+    message: "Association without category. Add associationCategory for v4 API."
+    autofix: false
+
+code_smells:
+  - id: large-batch-size
+    name: Batch Size Exceeds Limit
+    description: Batch operations have max 100 items
+    pattern: |
+      inputs:\s*[^}]*\.slice\(\d+,\s*(\d{3,})\)
+    suggestion: "HubSpot batch operations support max 100 items. Split into chunks."
+
+  - id: polling-interval-too-short
+    name: Polling Interval Too Short
+    description: Frequent polling wastes API quota
+    pattern: |
+      setInterval.*hubspotClient.*\d{1,4}\)
+    suggestion: "Polling interval under 10 seconds. Consider webhooks or longer intervals."
+
+  - id: hardcoded-property-names
+    name: Hardcoded Property Names
+    description: Property names may vary by portal
+    pattern: |
+      propertyName:\s*["'](firstname|lastname|email)["']
+    suggestion: "Using default property names. Custom portals may have different properties."
+
+  - id: missing-properties-param
+    name: Fetching All Properties
+    description: Specify properties to reduce payload
+    pattern: |
+      getPage\(\d+,\s*undefined,\s*undefined
+    suggestion: "Fetching with default properties. Specify needed properties for performance."
+
+best_practices:
+  - id: use-batch-operations
+    name: Use Batch Operations for Bulk Actions
+    check: |
+      Multiple similar operations use batch API instead of loops.
+    recommendation: |
+      // Instead of individual creates
+      // for (const contact of contacts) {
+      //   await hubspotClient.crm.contacts.basicApi.create(contact);
+      // }
+
+      // Use batch operations
+      const batchInput = {
+        inputs: contacts.map(c => ({ properties: c }))
+      };
+
+      // Process in chunks of 100
+      for (let i = 0; i < contacts.length; i += 100) {
+        const chunk = contacts.slice(i, i + 100);
+        await hubspotClient.crm.contacts.batchApi.create({
+          inputs: chunk.map(c => ({ properties: c }))
+        });
+      }
+
+  - id: implement-rate-limiting
+    name: Implement Rate Limiting
+    check: |
+      All HubSpot API calls go through rate limiter.
+    recommendation: |
+      import Bottleneck from 'bottleneck';
+
+      const limiter = new Bottleneck({
+        reservoir: 150,
+        reservoirRefreshAmount: 150,
+        reservoirRefreshInterval: 10 * 1000,
+        maxConcurrent: 10
+      });
+
+      // Wrap all API calls
+      export const hubspot = {
+        contacts: {
+          get: limiter.wrap(hubspotClient.crm.contacts.basicApi.getById),
+          create: limiter.wrap(hubspotClient.crm.contacts.basicApi.create),
+          // ...
+        }
+      };
+
+  - id: use-oauth-token-refresh
+    name: Implement OAuth Token Refresh
+    check: |
+      OAuth integrations have automatic token refresh before expiry.
+    recommendation: |
+      async function getHubSpotClient(userId: string) {
+        const auth = await getStoredAuth(userId);
+
+        // Refresh if expiring within 5 minutes
+        if (auth.expiresAt < Date.now() + 5 * 60 * 1000) {
+          const newTokens = await refreshTokens(auth.refreshToken);
+          await saveAuth(userId, newTokens);
+          auth.accessToken = newTokens.accessToken;
+        }
+
+        const client = new hubspot.Client({
+          accessToken: auth.accessToken
+        });
+
+        return client;
+      }
+
+  - id: validate-webhook-signatures
+    name: Validate Webhook Signatures
+    check: |
+      All webhook endpoints validate HubSpot signatures.
+    recommendation: |
+      import crypto from 'crypto';
+
+      function validateSignature(
+        secret: string,
+        body: string,
+        signature: string,
+        timestamp: string,
+        url: string
+      ): boolean {
+        // Check timestamp (5 min window)
+        if (Math.abs(Date.now() / 1000 - parseInt(timestamp)) > 300) {
+          return false;
+        }
+
+        const signatureBase = `POST${url}${body}${timestamp}`;
+        const expected = crypto
+          .createHmac('sha256', secret)
+          .update(signatureBase)
+          .digest('base64');
+
+        return crypto.timingSafeEquals(
+          Buffer.from(signature),
+          Buffer.from(expected)
+        );
+      }
+
+  - id: use-search-api-for-filtering
+    name: Use Search API for Filtered Queries
+    check: |
+      Filtering done server-side with Search API, not client-side.
+    recommendation: |
+      // Don't fetch all and filter client-side
+      // const all = await hubspotClient.crm.contacts.getAll();
+      // const filtered = all.filter(c => c.properties.state === 'CA');
+
+      // Use Search API with filters
+      const response = await hubspotClient.crm.contacts.searchApi.doSearch({
+        filterGroups: [{
+          filters: [{
+            propertyName: 'state',
+            operator: 'EQ',
+            value: 'CA'
+          }]
+        }],
+        limit: 100,
+        properties: ['email', 'firstname', 'lastname', 'state']
+      });
+
+  - id: handle-duplicate-contacts
+    name: Handle Duplicate Contact Creation
+    check: |
+      Contact creation handles 409 conflict for existing emails.
+    recommendation: |
+      async function createOrUpdateContact(email: string, properties: object) {
+        try {
+          // Try to create
+          return await hubspotClient.crm.contacts.basicApi.create({
+            properties: { email, ...properties }
+          });
+        } catch (error) {
+          if (error.code === 409) {
+            // Contact exists - search and update
+            const existing = await hubspotClient.crm.contacts.searchApi.doSearch({
+              filterGroups: [{
+                filters: [{
+                  propertyName: 'email',
+                  operator: 'EQ',
+                  value: email
+                }]
+              }],
+              limit: 1
+            });
+
+            if (existing.results[0]) {
+              return await hubspotClient.crm.contacts.basicApi.update(
+                existing.results[0].id,
+                { properties }
+              );
+            }
+          }
+          throw error;
+        }
+      }
+
+testing_checklist:
+  authentication:
+    - "OAuth flow redirects correctly"
+    - "Token refresh works before expiry"
+    - "Private app token authenticates"
+    - "Invalid credentials return proper error"
+
+  rate_limiting:
+    - "429 responses trigger retry"
+    - "Retry-After header respected"
+    - "Rate limiter prevents burst"
+    - "Batch operations reduce call count"
+
+  webhooks:
+    - "Signature validation rejects invalid"
+    - "Old timestamps rejected (5+ min)"
+    - "Valid signatures accepted"
+    - "Webhook processing is async"
+
+  data_operations:
+    - "Pagination fetches all pages"
+    - "Batch operations chunk to 100"
+    - "Duplicate handling works"
+    - "Property filtering reduces payload"
+
+  error_handling:
+    - "API errors logged with context"
+    - "Error rate tracked for Marketplace"
+    - "Graceful degradation on failures"
+    - "Retryable errors retried"

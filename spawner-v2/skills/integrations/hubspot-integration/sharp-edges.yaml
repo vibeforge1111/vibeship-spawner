@@ -1,0 +1,609 @@
+# Sharp Edges - HubSpot Integration
+# Common pitfalls and gotchas that cause production issues
+
+version: 1.0.0
+skill_id: hubspot-integration
+
+sharp_edges:
+  - id: rate-limit-tiers
+    title: Rate Limits Vary by App Type and Hub Tier
+    severity: high
+    description: |
+      Rate limits differ significantly based on app type and HubSpot subscription:
+      - Private apps (Pro/Enterprise): 150 requests per 10 seconds
+      - Private apps (Free/Starter): 100 requests per 10 seconds
+      - Public apps: 100 requests per 10 seconds per account
+      - OAuth apps share limits across all users of that app
+
+      Exceeding limits returns 429 Too Many Requests with Retry-After header.
+
+    wrong_way: |
+      // Ignoring rate limits - parallel requests without throttling
+      const contacts = await Promise.all(
+        contactIds.map(id => hubspotClient.crm.contacts.basicApi.getById(id))
+      );
+
+      // Polling API frequently without checking limits
+      setInterval(async () => {
+        const deals = await hubspotClient.crm.deals.basicApi.getPage();
+        processDeals(deals);
+      }, 1000); // Every second!
+
+    right_way: |
+      import Bottleneck from 'bottleneck';
+
+      // Rate limiter respecting 150/10s = 15/second
+      const limiter = new Bottleneck({
+        reservoir: 150,
+        reservoirRefreshAmount: 150,
+        reservoirRefreshInterval: 10 * 1000, // 10 seconds
+        maxConcurrent: 10,
+        minTime: 67 // ~15 requests/second
+      });
+
+      // Wrap all API calls
+      const rateLimitedGet = limiter.wrap(
+        hubspotClient.crm.contacts.basicApi.getById.bind(
+          hubspotClient.crm.contacts.basicApi
+        )
+      );
+
+      // Handle 429 with retry
+      async function apiCallWithRetry(fn, maxRetries = 3) {
+        for (let i = 0; i < maxRetries; i++) {
+          try {
+            return await fn();
+          } catch (error) {
+            if (error.code === 429) {
+              const retryAfter = error.headers?.['retry-after'] || 10;
+              await new Promise(r => setTimeout(r, retryAfter * 1000));
+              continue;
+            }
+            throw error;
+          }
+        }
+      }
+
+    detection_patterns:
+      - "Promise.all.*hubspotClient"
+      - "setInterval.*hubspotClient"
+      - "for.*await.*hubspotClient"
+
+    references:
+      - "https://developers.hubspot.com/docs/api/usage-details"
+
+  - id: error-rate-threshold
+    title: 5% Error Rate Threshold for Marketplace Apps
+    severity: high
+    description: |
+      Public/Marketplace apps must maintain error rates below 5% of total daily requests.
+      Exceeding this can result in app suspension or removal from Marketplace.
+
+      HubSpot monitors:
+      - 4xx errors (your fault - bad requests, auth issues)
+      - 5xx errors (server errors during processing)
+      - Timeout errors
+
+    wrong_way: |
+      // Not handling errors - counts against your error rate
+      async function syncContact(contact) {
+        await hubspotClient.crm.contacts.basicApi.create({
+          properties: contact
+        });
+      }
+
+      // Batch processing that fails entire batch on one error
+      for (const contact of contacts) {
+        await syncContact(contact); // One failure = entire sync fails
+      }
+
+    right_way: |
+      async function syncContactSafely(contact) {
+        try {
+          // Validate before API call
+          if (!contact.email || !isValidEmail(contact.email)) {
+            logger.warn('Invalid contact data, skipping', { contact });
+            return { success: false, reason: 'validation' };
+          }
+
+          const result = await hubspotClient.crm.contacts.basicApi.create({
+            properties: {
+              email: contact.email,
+              firstname: contact.firstname || '',
+              lastname: contact.lastname || ''
+            }
+          });
+
+          return { success: true, id: result.id };
+        } catch (error) {
+          // Handle specific error types
+          if (error.code === 409) {
+            // Duplicate - not an error, just update instead
+            return await updateExistingContact(contact);
+          }
+
+          logger.error('Contact sync failed', {
+            error: error.message,
+            contact: contact.email
+          });
+
+          return { success: false, reason: error.message };
+        }
+      }
+
+      // Process with error isolation
+      const results = await Promise.allSettled(
+        contacts.map(c => syncContactSafely(c))
+      );
+
+      const successCount = results.filter(r => r.value?.success).length;
+      const errorRate = (contacts.length - successCount) / contacts.length;
+
+      if (errorRate > 0.03) { // Warning at 3%
+        alertOps('High error rate in HubSpot sync', { errorRate });
+      }
+
+    detection_patterns:
+      - "hubspotClient.*catch.*throw"
+      - "hubspotClient(?!.*try)"
+
+    references:
+      - "https://developers.hubspot.com/docs/api/usage-details#error-responses"
+
+  - id: deprecated-api-keys
+    title: API Keys Deprecated - Use OAuth or Private App Tokens
+    severity: critical
+    description: |
+      HubSpot API keys (hapikey) are deprecated and being sunset. They:
+      - Provide full account access (no scopes)
+      - Cannot be rotated easily
+      - Are visible in server logs if passed as query param
+      - Will stop working (check HubSpot announcements for date)
+
+      Use Private App tokens (internal) or OAuth 2.0 (public apps).
+
+    wrong_way: |
+      // DEPRECATED: API Key in query string
+      const response = await fetch(
+        `https://api.hubapi.com/contacts/v1/lists/all/contacts/all?hapikey=${HUBSPOT_API_KEY}`
+      );
+
+      // DEPRECATED: API Key in SDK
+      const hubspotClient = new hubspot.Client({
+        apiKey: process.env.HUBSPOT_API_KEY  // Deprecated!
+      });
+
+    right_way: |
+      // Private App Token (internal integrations)
+      const hubspotClient = new hubspot.Client({
+        accessToken: process.env.HUBSPOT_PRIVATE_APP_TOKEN
+      });
+
+      // OAuth 2.0 (public apps)
+      const hubspotClient = new hubspot.Client({
+        accessToken: userAccessToken  // From OAuth flow
+      });
+
+      // OAuth with automatic refresh
+      const hubspotClient = new hubspot.Client();
+      hubspotClient.setAccessToken(accessToken);
+
+      // Refresh when needed
+      async function refreshTokenIfNeeded() {
+        if (tokenExpiresAt < Date.now() + 60000) { // 1 min buffer
+          const result = await hubspotClient.oauth.tokensApi.create(
+            'refresh_token',
+            undefined,
+            undefined,
+            process.env.HUBSPOT_CLIENT_ID,
+            process.env.HUBSPOT_CLIENT_SECRET,
+            refreshToken
+          );
+
+          await saveTokens(result);
+          hubspotClient.setAccessToken(result.accessToken);
+        }
+      }
+
+    detection_patterns:
+      - "hapikey"
+      - "apiKey.*HUBSPOT"
+      - "api_key.*hubspot"
+
+    references:
+      - "https://developers.hubspot.com/docs/api/private-apps"
+      - "https://developers.hubspot.com/docs/api/oauth-quickstart-guide"
+
+  - id: oauth-token-expiry
+    title: OAuth Access Tokens Expire in 30 Minutes
+    severity: high
+    description: |
+      OAuth access tokens expire after 30 minutes (1800 seconds).
+      Refresh tokens expire after 6 months of non-use.
+
+      You must implement token refresh logic for any OAuth integration.
+      Private App tokens do NOT expire but should be rotated every 6 months.
+
+    wrong_way: |
+      // Storing token without expiry tracking
+      const tokens = await getOAuthTokens(code);
+      await db.user.update({
+        where: { id: userId },
+        data: { hubspotToken: tokens.accessToken }  // No expiry!
+      });
+
+      // Using stale token
+      const hubspot = new hubspot.Client({
+        accessToken: user.hubspotToken  // Might be expired!
+      });
+
+    right_way: |
+      interface HubSpotTokens {
+        accessToken: string;
+        refreshToken: string;
+        expiresAt: number;  // Unix timestamp
+      }
+
+      async function saveTokens(userId: string, tokenResponse: any) {
+        const expiresAt = Date.now() + (tokenResponse.expiresIn * 1000);
+
+        await db.hubspotAuth.upsert({
+          where: { userId },
+          create: {
+            userId,
+            accessToken: tokenResponse.accessToken,
+            refreshToken: tokenResponse.refreshToken,
+            expiresAt: new Date(expiresAt)
+          },
+          update: {
+            accessToken: tokenResponse.accessToken,
+            refreshToken: tokenResponse.refreshToken,
+            expiresAt: new Date(expiresAt)
+          }
+        });
+      }
+
+      async function getValidToken(userId: string): Promise<string> {
+        const auth = await db.hubspotAuth.findUnique({ where: { userId }});
+
+        if (!auth) throw new Error('No HubSpot connection');
+
+        // Refresh if expiring within 5 minutes
+        if (auth.expiresAt.getTime() < Date.now() + 5 * 60 * 1000) {
+          const client = new hubspot.Client();
+          const result = await client.oauth.tokensApi.create(
+            'refresh_token',
+            undefined,
+            undefined,
+            process.env.HUBSPOT_CLIENT_ID,
+            process.env.HUBSPOT_CLIENT_SECRET,
+            auth.refreshToken
+          );
+
+          await saveTokens(userId, result);
+          return result.accessToken;
+        }
+
+        return auth.accessToken;
+      }
+
+    detection_patterns:
+      - "accessToken(?!.*refresh|.*expir)"
+      - "hubspotToken(?!.*expir)"
+
+    references:
+      - "https://developers.hubspot.com/docs/api/oauth-quickstart-guide"
+
+  - id: webhook-signature-validation
+    title: Webhook Requests Must Be Validated
+    severity: critical
+    description: |
+      HubSpot signs webhook requests using v1 (deprecated), v2, or v3 signatures.
+      Always validate signatures to prevent spoofed requests.
+
+      v3 signatures (recommended) include:
+      - X-HubSpot-Request-Timestamp
+      - X-HubSpot-Signature-v3 (SHA-256 HMAC)
+
+      Reject requests older than 5 minutes (replay protection).
+
+    wrong_way: |
+      // No signature validation - anyone can POST to this endpoint!
+      app.post('/webhooks/hubspot', async (req, res) => {
+        const events = req.body;
+
+        for (const event of events) {
+          await processEvent(event);
+        }
+
+        res.sendStatus(200);
+      });
+
+    right_way: |
+      import crypto from 'crypto';
+
+      function validateHubSpotSignatureV3(
+        clientSecret: string,
+        requestBody: string,
+        signature: string,
+        timestamp: string,
+        method: string,
+        url: string
+      ): boolean {
+        // Check timestamp (5 minute window)
+        const requestTime = parseInt(timestamp, 10);
+        const currentTime = Math.floor(Date.now() / 1000);
+
+        if (Math.abs(currentTime - requestTime) > 300) {
+          console.warn('HubSpot webhook timestamp too old');
+          return false;
+        }
+
+        // Build signature base string
+        const signatureBase = `${method}${url}${requestBody}${timestamp}`;
+
+        // Calculate expected signature
+        const expectedSignature = crypto
+          .createHmac('sha256', clientSecret)
+          .update(signatureBase)
+          .digest('base64');
+
+        return crypto.timingSafeEquals(
+          Buffer.from(signature),
+          Buffer.from(expectedSignature)
+        );
+      }
+
+      app.post('/webhooks/hubspot', express.raw({ type: '*/*' }), (req, res) => {
+        const signature = req.headers['x-hubspot-signature-v3'];
+        const timestamp = req.headers['x-hubspot-request-timestamp'];
+        const body = req.body.toString();
+
+        const isValid = validateHubSpotSignatureV3(
+          process.env.HUBSPOT_CLIENT_SECRET,
+          body,
+          signature,
+          timestamp,
+          'POST',
+          `https://${req.headers.host}${req.originalUrl}`
+        );
+
+        if (!isValid) {
+          console.warn('Invalid HubSpot webhook signature');
+          return res.sendStatus(401);
+        }
+
+        // Process valid webhook
+        const events = JSON.parse(body);
+        // Queue for async processing
+        res.sendStatus(200);
+      });
+
+    detection_patterns:
+      - "webhooks.*hubspot(?!.*signature|.*hmac|.*validate)"
+      - "X-HubSpot-Signature(?!.*verify|.*validate)"
+
+    references:
+      - "https://developers.hubspot.com/docs/api/webhooks#webhook-signature-validation"
+
+  - id: pagination-required
+    title: All List Endpoints Require Pagination
+    severity: medium
+    description: |
+      HubSpot APIs return paginated results. Default page size varies (10-100).
+      Maximum page size is typically 100-200 items.
+
+      Always implement pagination for:
+      - Contact/Company/Deal lists
+      - Association lists
+      - Search results
+      - Timeline events
+
+      Use cursor-based pagination (after parameter) not offset.
+
+    wrong_way: |
+      // Only gets first page!
+      async function getAllContacts() {
+        const response = await hubspotClient.crm.contacts.basicApi.getPage();
+        return response.results;  // Missing 90% of contacts!
+      }
+
+      // Using offset pagination (deprecated)
+      async function getContactsOffset() {
+        const contacts = [];
+        let offset = 0;
+
+        while (true) {
+          const response = await fetch(
+            `/contacts/v1/lists/all/contacts/all?count=100&vidOffset=${offset}`
+          );
+          // Offset pagination is deprecated!
+        }
+      }
+
+    right_way: |
+      async function getAllContacts(): Promise<Contact[]> {
+        const allContacts: Contact[] = [];
+        let after: string | undefined;
+
+        do {
+          const response = await hubspotClient.crm.contacts.basicApi.getPage(
+            100,        // limit (max 100)
+            after,      // cursor
+            undefined,  // properties
+            undefined,  // propertiesWithHistory
+            undefined   // associations
+          );
+
+          allContacts.push(...response.results);
+          after = response.paging?.next?.after;
+
+        } while (after);
+
+        return allContacts;
+      }
+
+      // With search API
+      async function searchAllDeals(filters: FilterGroup[]): Promise<Deal[]> {
+        const allDeals: Deal[] = [];
+        let after = 0;
+
+        do {
+          const response = await hubspotClient.crm.deals.searchApi.doSearch({
+            filterGroups: filters,
+            limit: 100,
+            after,
+            properties: ['dealname', 'amount', 'dealstage']
+          });
+
+          allDeals.push(...response.results);
+
+          // Search uses numeric after, not cursor
+          after = response.paging?.next?.after
+            ? parseInt(response.paging.next.after)
+            : 0;
+
+        } while (after > 0);
+
+        return allDeals;
+      }
+
+    detection_patterns:
+      - "getPage\\(\\)(?!.*while|.*after)"
+      - "doSearch(?!.*paging|.*after)"
+
+    references:
+      - "https://developers.hubspot.com/docs/api/crm/contacts"
+
+  - id: associations-v4-breaking-changes
+    title: Associations v4 API Has Breaking Changes
+    severity: high
+    description: |
+      Associations v4 API (SDK 9.0.0+) has significant changes from v3:
+      - Different method signatures
+      - Category field required for labeled associations
+      - Batch operations have different structure
+      - Default associations no longer automatically created
+
+      Check SDK version before using associations code from tutorials.
+
+    wrong_way: |
+      // v3 API (deprecated)
+      await hubspotClient.crm.associations.batchApi.create(
+        'contacts',
+        'companies',
+        { inputs: associations }
+      );
+
+      // Missing category for labeled associations
+      await hubspotClient.crm.associations.v4.basicApi.create(
+        'contacts',
+        contactId,
+        'companies',
+        companyId,
+        [{ associationTypeId: 1 }]  // Missing category!
+      );
+
+    right_way: |
+      // Check SDK version
+      import { version } from '@hubspot/api-client/package.json';
+      const isV4 = parseInt(version.split('.')[0]) >= 9;
+
+      // v4 API with proper structure
+      await hubspotClient.crm.associations.v4.basicApi.create(
+        'contacts',
+        contactId,
+        'companies',
+        companyId,
+        [{
+          associationCategory: 'HUBSPOT_DEFINED',  // Required!
+          associationTypeId: 1  // Primary company
+        }]
+      );
+
+      // Batch create with v4
+      await hubspotClient.crm.associations.v4.batchApi.create(
+        'contacts',
+        'companies',
+        {
+          inputs: contactCompanyPairs.map(pair => ({
+            from: { id: pair.contactId },
+            to: { id: pair.companyId },
+            types: [{
+              associationCategory: 'HUBSPOT_DEFINED',
+              associationTypeId: 1
+            }]
+          }))
+        }
+      );
+
+      // Get association labels
+      const labels = await hubspotClient.crm.associations.v4.schema
+        .definitionsApi.getAll('contacts', 'companies');
+
+      console.log('Available association types:', labels.results);
+
+    detection_patterns:
+      - "associations\\.batchApi(?!\\.v4)"
+      - "associationTypeId(?!.*Category)"
+
+    references:
+      - "https://developers.hubspot.com/docs/api/crm/associations"
+      - "https://github.com/HubSpot/hubspot-api-nodejs/releases/tag/9.0.0"
+
+  - id: polling-daily-limit
+    title: Polling Limited to 100,000 Requests Per Day
+    severity: medium
+    description: |
+      HubSpot restricts polling-based integrations to 100,000 requests per day.
+      This is separate from the per-10-second rate limit.
+
+      Use webhooks for real-time updates instead of polling.
+      Use the Changelog API for incremental sync if webhooks not available.
+
+    wrong_way: |
+      // Polling every minute = 1440 requests/day per endpoint
+      // Multiple objects = exceeds limit quickly
+      setInterval(async () => {
+        const contacts = await hubspotClient.crm.contacts.basicApi.getPage();
+        const companies = await hubspotClient.crm.companies.basicApi.getPage();
+        const deals = await hubspotClient.crm.deals.basicApi.getPage();
+        // 4320 requests/day just for these three!
+      }, 60000);
+
+    right_way: |
+      // Use webhooks for real-time updates
+      // Configure in HubSpot App Settings
+
+      // For batch sync, use Search API with lastmodifieddate filter
+      async function syncRecentChanges(objectType: string, since: Date) {
+        const results = await hubspotClient.crm[objectType].searchApi.doSearch({
+          filterGroups: [{
+            filters: [{
+              propertyName: 'lastmodifieddate',
+              operator: 'GTE',
+              value: since.getTime().toString()
+            }]
+          }],
+          limit: 100,
+          properties: ['*']
+        });
+
+        return results;
+      }
+
+      // Schedule sync at reasonable intervals
+      // Every 15 minutes = 96 requests/day per object type
+      cron.schedule('*/15 * * * *', async () => {
+        const lastSync = await getLastSyncTime();
+        const changes = await syncRecentChanges('contacts', lastSync);
+        await processChanges(changes);
+        await updateLastSyncTime();
+      });
+
+    detection_patterns:
+      - "setInterval.*hubspotClient"
+      - "setTimeout.*hubspotClient.*1000"
+
+    references:
+      - "https://developers.hubspot.com/docs/api/usage-details"

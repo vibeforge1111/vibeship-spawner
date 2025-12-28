@@ -1,0 +1,602 @@
+# Collaboration - HubSpot Integration
+# How this skill works with other skills
+
+version: 1.0.0
+skill_id: hubspot-integration
+
+prerequisites:
+  required: []
+
+  recommended:
+    - skill: backend
+      reason: "API design and webhook handling"
+      what_to_know:
+        - "REST API patterns"
+        - "Webhook processing"
+        - "Job queues for async"
+
+    - skill: postgres-wizard
+      reason: "Token storage and sync data"
+      what_to_know:
+        - "OAuth token storage"
+        - "Contact sync tables"
+        - "Upsert patterns"
+
+    - skill: auth-specialist
+      reason: "OAuth 2.0 implementation"
+      what_to_know:
+        - "OAuth flow patterns"
+        - "Token refresh logic"
+        - "Secure storage"
+
+delegation_triggers:
+  - trigger: "user needs email marketing automation"
+    delegate_to: email-marketing
+    context: "Beyond HubSpot's built-in email tools"
+
+  - trigger: "user needs custom CRM UI"
+    delegate_to: frontend
+    context: "Building portal or dashboard"
+
+  - trigger: "user needs data pipeline"
+    delegate_to: data-engineer
+    context: "ETL from HubSpot to warehouse"
+
+  - trigger: "user needs Salesforce integration"
+    delegate_to: salesforce-development
+    context: "HubSpot + Salesforce sync"
+
+  - trigger: "user needs payment processing"
+    delegate_to: stripe-integration
+    context: "Payments beyond HubSpot quotes"
+
+  - trigger: "user needs analytics dashboard"
+    delegate_to: analytics-specialist
+    context: "Custom reporting beyond HubSpot"
+
+receives_context_from:
+  - skill: backend
+    receives:
+      - "API design patterns"
+      - "Queue processing"
+      - "Error handling"
+
+  - skill: auth-specialist
+    receives:
+      - "OAuth 2.0 patterns"
+      - "Token management"
+      - "Secure storage"
+
+  - skill: postgres-wizard
+    receives:
+      - "Database schema design"
+      - "Query patterns"
+      - "Migration patterns"
+
+provides_context_to:
+  - skill: salesforce-development
+    provides:
+      - "CRM object patterns"
+      - "Contact/Deal structures"
+      - "Sync strategies"
+
+  - skill: workflow-automation
+    provides:
+      - "HubSpot triggers"
+      - "CRM event patterns"
+      - "Webhook handling"
+
+  - skill: email-marketing
+    provides:
+      - "Contact lists"
+      - "Marketing events"
+      - "Subscription preferences"
+
+escalation_paths:
+  - situation: "Complex OAuth flows"
+    escalate_to: auth-specialist
+    context: "Multi-tenant, SSO integration"
+
+  - situation: "Data warehouse sync"
+    escalate_to: data-engineer
+    context: "ETL, data modeling"
+
+  - situation: "Custom portal development"
+    escalate_to: frontend
+    context: "React/Next.js dashboard"
+
+  - situation: "Scaling sync operations"
+    escalate_to: devops
+    context: "Job queues, workers"
+
+workflow_integration:
+  typical_sequence:
+    1:
+      step: "Set up HubSpot app"
+      skills: [hubspot-integration]
+      output: "App credentials and scopes"
+
+    2:
+      step: "Implement OAuth flow"
+      skills: [hubspot-integration, auth-specialist]
+      output: "Working authentication"
+
+    3:
+      step: "Design sync schema"
+      skills: [hubspot-integration, postgres-wizard]
+      output: "Database tables for HubSpot data"
+
+    4:
+      step: "Build sync logic"
+      skills: [hubspot-integration, backend]
+      output: "Contact/deal sync implementation"
+
+    5:
+      step: "Set up webhooks"
+      skills: [hubspot-integration]
+      output: "Real-time update handlers"
+
+    6:
+      step: "Add monitoring"
+      skills: [hubspot-integration, devops]
+      output: "Error tracking, rate limit monitoring"
+
+  decision_points:
+    - question: "Private App or OAuth?"
+      guidance: |
+        Private App (single HubSpot account):
+        - Simpler setup, no OAuth flow
+        - Token doesn't expire
+        - Great for internal tools
+        - One portal only
+
+        OAuth 2.0 (multiple accounts):
+        - Required for SaaS products
+        - Marketplace distribution
+        - Token refresh needed
+        - Works with any portal
+
+    - question: "Polling or webhooks?"
+      guidance: |
+        Webhooks (RECOMMENDED):
+        - Real-time updates
+        - No rate limit impact
+        - More efficient
+        - Setup in HubSpot app settings
+
+        Polling:
+        - Limited to 100K requests/day
+        - Useful for initial sync
+        - Combine with lastmodifieddate filter
+        - Use for backup/recovery
+
+    - question: "Batch or individual operations?"
+      guidance: |
+        Batch Operations (bulk data):
+        - Up to 100 items per request
+        - 80% rate limit savings
+        - Better for sync operations
+        - createBatch, updateBatch, upsertBatch
+
+        Individual Operations (single records):
+        - Simpler error handling
+        - Better for real-time updates
+        - Use for user-triggered actions
+        - Easier retry logic
+
+collaboration_patterns:
+  with_prisma:
+    when: "Storing HubSpot data locally"
+    approach: |
+      OAuth token and sync storage with Prisma:
+
+      ```prisma
+      // prisma/schema.prisma
+      model HubSpotAuth {
+        id           String   @id @default(cuid())
+        userId       String   @unique
+        accessToken  String
+        refreshToken String
+        expiresAt    DateTime
+        scopes       String[] // Granted scopes
+        portalId     Int      // HubSpot account ID
+        createdAt    DateTime @default(now())
+        updatedAt    DateTime @updatedAt
+
+        user         User     @relation(fields: [userId], references: [id])
+      }
+
+      model HubSpotContact {
+        id              String   @id @default(cuid())
+        hubspotId       String   @unique // HubSpot contact ID
+        email           String?
+        firstName       String?
+        lastName        String?
+        company         String?
+        lifecycleStage  String?
+        lastSyncedAt    DateTime
+        properties      Json     // All HubSpot properties
+        createdAt       DateTime @default(now())
+        updatedAt       DateTime @updatedAt
+
+        @@index([email])
+        @@index([lastSyncedAt])
+      }
+
+      model HubSpotDeal {
+        id            String   @id @default(cuid())
+        hubspotId     String   @unique
+        dealName      String
+        amount        Float?
+        stage         String
+        closeDate     DateTime?
+        contactIds    String[] // Associated contact IDs
+        companyIds    String[] // Associated company IDs
+        lastSyncedAt  DateTime
+        properties    Json
+        createdAt     DateTime @default(now())
+        updatedAt     DateTime @updatedAt
+
+        @@index([stage])
+        @@index([lastSyncedAt])
+      }
+      ```
+
+  with_job_queues:
+    when: "Processing webhooks and bulk sync"
+    approach: |
+      BullMQ for async HubSpot operations:
+
+      ```typescript
+      // lib/hubspot-queue.server.ts
+      import { Queue, Worker } from "bullmq";
+      import Redis from "ioredis";
+
+      const connection = new Redis(process.env.REDIS_URL);
+
+      // Webhook processing queue
+      export const hubspotWebhookQueue = new Queue("hubspot-webhooks", {
+        connection,
+        defaultJobOptions: {
+          attempts: 3,
+          backoff: { type: "exponential", delay: 1000 }
+        }
+      });
+
+      // Sync queue with rate limiting
+      export const hubspotSyncQueue = new Queue("hubspot-sync", {
+        connection,
+        defaultJobOptions: {
+          attempts: 3,
+          backoff: { type: "exponential", delay: 5000 }
+        },
+        limiter: {
+          max: 10,  // 10 jobs
+          duration: 1000  // per second
+        }
+      });
+
+      // Webhook worker
+      const webhookWorker = new Worker(
+        "hubspot-webhooks",
+        async (job) => {
+          const { eventType, objectId, portalId, properties } = job.data;
+
+          switch (eventType) {
+            case "contact.creation":
+              await syncContact(objectId, portalId);
+              break;
+            case "contact.propertyChange":
+              await updateContactProperty(objectId, properties);
+              break;
+            case "deal.creation":
+              await syncDeal(objectId, portalId);
+              break;
+          }
+        },
+        { connection }
+      );
+
+      // Bulk sync worker
+      const syncWorker = new Worker(
+        "hubspot-sync",
+        async (job) => {
+          const { type, userId, after } = job.data;
+
+          const client = await getHubSpotClient(userId);
+
+          switch (type) {
+            case "contacts":
+              await syncContactsPage(client, userId, after);
+              break;
+            case "deals":
+              await syncDealsPage(client, userId, after);
+              break;
+          }
+        },
+        {
+          connection,
+          concurrency: 5
+        }
+      );
+      ```
+
+  with_rate_limiter:
+    when: "Managing API quotas"
+    approach: |
+      Bottleneck for rate limiting:
+
+      ```typescript
+      // lib/hubspot-limiter.ts
+      import Bottleneck from "bottleneck";
+      import { Client } from "@hubspot/api-client";
+
+      // Per-account rate limiter store
+      const limiters = new Map<string, Bottleneck>();
+
+      function getLimiter(portalId: string): Bottleneck {
+        if (!limiters.has(portalId)) {
+          const limiter = new Bottleneck({
+            reservoir: 150,
+            reservoirRefreshAmount: 150,
+            reservoirRefreshInterval: 10 * 1000,
+            maxConcurrent: 10,
+            minTime: 67  // ~15 requests/second max
+          });
+
+          limiter.on("depleted", () => {
+            console.warn(`Rate limit depleted for portal ${portalId}`);
+          });
+
+          limiters.set(portalId, limiter);
+        }
+
+        return limiters.get(portalId)!;
+      }
+
+      // Wrapped client factory
+      export function createRateLimitedClient(
+        accessToken: string,
+        portalId: string
+      ) {
+        const client = new Client({ accessToken });
+        const limiter = getLimiter(portalId);
+
+        // Wrap common operations
+        return {
+          contacts: {
+            getById: limiter.wrap(
+              client.crm.contacts.basicApi.getById.bind(
+                client.crm.contacts.basicApi
+              )
+            ),
+            create: limiter.wrap(
+              client.crm.contacts.basicApi.create.bind(
+                client.crm.contacts.basicApi
+              )
+            ),
+            search: limiter.wrap(
+              client.crm.contacts.searchApi.doSearch.bind(
+                client.crm.contacts.searchApi
+              )
+            ),
+            batchCreate: limiter.wrap(
+              client.crm.contacts.batchApi.create.bind(
+                client.crm.contacts.batchApi
+              )
+            )
+          },
+          deals: {
+            getById: limiter.wrap(
+              client.crm.deals.basicApi.getById.bind(
+                client.crm.deals.basicApi
+              )
+            ),
+            create: limiter.wrap(
+              client.crm.deals.basicApi.create.bind(
+                client.crm.deals.basicApi
+              )
+            ),
+            search: limiter.wrap(
+              client.crm.deals.searchApi.doSearch.bind(
+                client.crm.deals.searchApi
+              )
+            )
+          },
+          raw: client  // Access to unwrapped client if needed
+        };
+      }
+      ```
+
+  with_nextjs:
+    when: "Building OAuth flow in Next.js"
+    approach: |
+      Next.js App Router OAuth implementation:
+
+      ```typescript
+      // app/api/hubspot/auth/route.ts
+      import { redirect } from "next/navigation";
+      import { Client } from "@hubspot/api-client";
+
+      const SCOPES = [
+        "crm.objects.contacts.read",
+        "crm.objects.contacts.write",
+        "crm.objects.deals.read"
+      ];
+
+      export async function GET(request: Request) {
+        const { searchParams } = new URL(request.url);
+        const code = searchParams.get("code");
+
+        if (!code) {
+          // Start OAuth flow
+          const authUrl = new URL("https://app.hubspot.com/oauth/authorize");
+          authUrl.searchParams.set("client_id", process.env.HUBSPOT_CLIENT_ID!);
+          authUrl.searchParams.set("redirect_uri", `${process.env.NEXT_PUBLIC_URL}/api/hubspot/auth`);
+          authUrl.searchParams.set("scope", SCOPES.join(" "));
+
+          return redirect(authUrl.toString());
+        }
+
+        // Exchange code for tokens
+        const client = new Client();
+        const tokens = await client.oauth.tokensApi.create(
+          "authorization_code",
+          code,
+          `${process.env.NEXT_PUBLIC_URL}/api/hubspot/auth`,
+          process.env.HUBSPOT_CLIENT_ID,
+          process.env.HUBSPOT_CLIENT_SECRET
+        );
+
+        // Get portal info
+        const accessInfo = await client.oauth.accessTokensApi.get(
+          tokens.accessToken
+        );
+
+        // Save to database
+        await prisma.hubSpotAuth.upsert({
+          where: { userId: getCurrentUserId() },
+          create: {
+            userId: getCurrentUserId(),
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+            expiresAt: new Date(Date.now() + tokens.expiresIn * 1000),
+            portalId: accessInfo.hubId,
+            scopes: SCOPES
+          },
+          update: {
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+            expiresAt: new Date(Date.now() + tokens.expiresIn * 1000)
+          }
+        });
+
+        return redirect("/dashboard?hubspot=connected");
+      }
+
+      // app/api/hubspot/webhooks/route.ts
+      import { validateHubSpotSignature } from "@/lib/hubspot";
+      import { hubspotWebhookQueue } from "@/lib/hubspot-queue.server";
+
+      export async function POST(request: Request) {
+        const body = await request.text();
+        const signature = request.headers.get("x-hubspot-signature-v3")!;
+        const timestamp = request.headers.get("x-hubspot-request-timestamp")!;
+
+        const isValid = validateHubSpotSignature(
+          process.env.HUBSPOT_CLIENT_SECRET!,
+          body,
+          signature,
+          timestamp,
+          request.url
+        );
+
+        if (!isValid) {
+          return new Response("Invalid signature", { status: 401 });
+        }
+
+        // Queue events for async processing
+        const events = JSON.parse(body);
+        for (const event of events) {
+          await hubspotWebhookQueue.add("process", event);
+        }
+
+        return new Response(null, { status: 200 });
+      }
+      ```
+
+platform_integration:
+  vercel:
+    setup: |
+      # Environment variables in Vercel
+      HUBSPOT_CLIENT_ID=xxx
+      HUBSPOT_CLIENT_SECRET=xxx
+      HUBSPOT_PRIVATE_APP_TOKEN=xxx  # For private apps
+
+      # Webhook endpoint URL
+      https://your-app.vercel.app/api/hubspot/webhooks
+
+      # For long-running syncs, use Vercel background functions
+      # vercel.json
+      {
+        "functions": {
+          "app/api/hubspot/sync/route.ts": {
+            "maxDuration": 60
+          }
+        }
+      }
+
+  railway:
+    setup: |
+      # Railway environment
+      HUBSPOT_CLIENT_ID=xxx
+      HUBSPOT_CLIENT_SECRET=xxx
+      REDIS_URL=xxx  # For job queues
+
+      # Separate worker for job processing
+      # Procfile
+      web: npm start
+      worker: npm run worker
+
+  inngest:
+    setup: |
+      # Inngest for durable sync operations
+      import { Inngest } from "inngest";
+
+      const inngest = new Inngest({ id: "hubspot-integration" });
+
+      // Durable sync function
+      export const syncContacts = inngest.createFunction(
+        { id: "sync-hubspot-contacts" },
+        { event: "hubspot/sync.requested" },
+        async ({ event, step }) => {
+          const { userId } = event.data;
+
+          // Step 1: Get token (auto-retried)
+          const token = await step.run("get-token", async () => {
+            return await getValidHubSpotToken(userId);
+          });
+
+          // Step 2: Paginated sync (each page is a step)
+          let after = undefined;
+          let total = 0;
+
+          do {
+            const result = await step.run(`sync-page-${after || "first"}`, async () => {
+              const client = new Client({ accessToken: token });
+              const page = await client.crm.contacts.basicApi.getPage(100, after);
+
+              await syncContactsToDb(userId, page.results);
+
+              return {
+                count: page.results.length,
+                after: page.paging?.next?.after
+              };
+            });
+
+            total += result.count;
+            after = result.after;
+
+          } while (after);
+
+          return { synced: total };
+        }
+      );
+
+security_checklist:
+  - "OAuth client secret in env vars only"
+  - "Private app token in env vars only"
+  - "Webhook signatures validated"
+  - "Token refresh before expiry"
+  - "Rate limits implemented"
+  - "Error rate monitored (<5%)"
+  - "Minimal scopes requested"
+  - "Timestamps validated on webhooks"
+
+cost_optimization:
+  - "Use batch operations (80% fewer calls)"
+  - "Implement caching for frequently accessed data"
+  - "Use webhooks instead of polling"
+  - "Filter properties to reduce payload"
+  - "Use Search API instead of fetching all"
+  - "Rate limit to avoid 429 retries"
