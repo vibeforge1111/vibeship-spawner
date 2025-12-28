@@ -1,0 +1,691 @@
+# Collaboration - AI Personalization
+# Integration patterns with other skills
+
+version: 1.0.0
+skill_id: ai-personalization
+
+prerequisites:
+  required:
+    - skill: semantic-search
+      reason: "Vector similarity for embeddings and ANN"
+
+  recommended:
+    - skill: ai-observability
+      reason: "Track recommendation quality metrics"
+    - skill: llm-integration
+      reason: "LLM-enhanced personalization"
+
+delegates_to:
+  - skill: semantic-search
+    when: "Building embedding indexes for users/items"
+    handoff: "Use semantic-search for vector operations"
+
+  - skill: ai-safety-alignment
+    when: "Filtering inappropriate recommendations"
+    handoff: "Apply safety checks before returning recommendations"
+
+  - skill: ai-observability
+    when: "Tracking recommendation performance"
+    handoff: "Log metrics to observability system"
+
+receives_from:
+  - skill: llm-integration
+    when: "LLM-powered content analysis for embeddings"
+    input: "Item descriptions, user conversations"
+
+  - skill: semantic-search
+    when: "Vector similarity results"
+    input: "Similar users/items from vector search"
+
+integration_patterns:
+  nextjs_recommendation_api:
+    description: "Next.js API route for personalized recommendations"
+    pattern: |
+      // app/api/recommendations/route.ts
+      import { NextRequest, NextResponse } from "next/server";
+      import { z } from "zod";
+      import { auth } from "@/lib/auth";
+      import { getHybridRecommendations } from "@/lib/recommendations";
+      import { redis } from "@/lib/redis";
+
+      const QuerySchema = z.object({
+        limit: z.coerce.number().min(1).max(50).default(20),
+        context: z.enum(["home", "category", "product"]).default("home"),
+        category: z.string().optional(),
+        excludeIds: z.string().transform((s) => s.split(",")).optional(),
+      });
+
+      export async function GET(req: NextRequest) {
+        const session = await auth();
+
+        if (!session?.user?.id) {
+          return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
+        const searchParams = Object.fromEntries(req.nextUrl.searchParams);
+        const params = QuerySchema.safeParse(searchParams);
+
+        if (!params.success) {
+          return NextResponse.json(
+            { error: "Invalid params", issues: params.error.issues },
+            { status: 400 }
+          );
+        }
+
+        const { limit, context, category, excludeIds } = params.data;
+        const userId = session.user.id;
+
+        // Check cache first (short TTL for personalized)
+        const cacheKey = `recs:${userId}:${context}:${category ?? "all"}`;
+        const cached = await redis.get(cacheKey);
+
+        if (cached) {
+          const parsed = JSON.parse(cached as string);
+          // Filter excluded and limit
+          const filtered = parsed
+            .filter((r: { itemId: string }) => !excludeIds?.includes(r.itemId))
+            .slice(0, limit);
+          return NextResponse.json({ recommendations: filtered, cached: true });
+        }
+
+        try {
+          const recommendations = await getHybridRecommendations(userId, {
+            limit: limit + 20, // Extra for filtering
+            context,
+            categoryFilter: category ? [category] : undefined,
+            excludeItems: excludeIds ?? [],
+          });
+
+          // Cache for 5 minutes
+          await redis.set(cacheKey, JSON.stringify(recommendations), { ex: 300 });
+
+          return NextResponse.json({
+            recommendations: recommendations.slice(0, limit),
+            cached: false,
+          });
+        } catch (error) {
+          console.error("Recommendation error", error);
+
+          // Fallback to popular items
+          const popular = await getPopularItems(limit, category);
+          return NextResponse.json({
+            recommendations: popular,
+            fallback: true,
+          });
+        }
+      }
+
+      async function getPopularItems(
+        limit: number,
+        category?: string
+      ): Promise<Array<{ itemId: string; score: number }>> {
+        const key = category ? `popular:${category}` : "popular:all";
+        const popular = await redis.zrevrange(key, 0, limit - 1, {
+          withScores: true,
+        });
+
+        return popular.map(({ member, score }) => ({
+          itemId: member as string,
+          score: score ?? 0,
+        }));
+      }
+
+  react_query_hook:
+    description: "React Query hook for recommendations"
+    pattern: |
+      // hooks/useRecommendations.ts
+      "use client";
+
+      import { useQuery, useQueryClient } from "@tanstack/react-query";
+      import { useCallback, useEffect } from "react";
+
+      interface RecommendationOptions {
+        context: "home" | "category" | "product";
+        category?: string;
+        limit?: number;
+        excludeIds?: string[];
+        enabled?: boolean;
+      }
+
+      interface Recommendation {
+        itemId: string;
+        score: number;
+        reason?: string;
+        sources?: string[];
+      }
+
+      export function useRecommendations(options: RecommendationOptions) {
+        const {
+          context,
+          category,
+          limit = 20,
+          excludeIds = [],
+          enabled = true,
+        } = options;
+
+        return useQuery({
+          queryKey: ["recommendations", context, category, limit],
+          queryFn: async (): Promise<Recommendation[]> => {
+            const params = new URLSearchParams({
+              context,
+              limit: limit.toString(),
+            });
+
+            if (category) params.set("category", category);
+            if (excludeIds.length) params.set("excludeIds", excludeIds.join(","));
+
+            const res = await fetch(`/api/recommendations?${params}`);
+
+            if (!res.ok) {
+              throw new Error("Failed to fetch recommendations");
+            }
+
+            const data = await res.json();
+            return data.recommendations;
+          },
+          enabled,
+          staleTime: 5 * 60 * 1000, // 5 minutes
+          gcTime: 15 * 60 * 1000, // 15 minutes
+        });
+      }
+
+      // Prefetch recommendations on hover
+      export function usePrefetchRecommendations() {
+        const queryClient = useQueryClient();
+
+        return useCallback(
+          (context: "home" | "category" | "product", category?: string) => {
+            queryClient.prefetchQuery({
+              queryKey: ["recommendations", context, category, 20],
+              queryFn: async () => {
+                const params = new URLSearchParams({ context, limit: "20" });
+                if (category) params.set("category", category);
+
+                const res = await fetch(`/api/recommendations?${params}`);
+                const data = await res.json();
+                return data.recommendations;
+              },
+              staleTime: 5 * 60 * 1000,
+            });
+          },
+          [queryClient]
+        );
+      }
+
+      // Track recommendation impressions
+      export function useTrackRecommendations(
+        recommendations: Recommendation[] | undefined
+      ) {
+        useEffect(() => {
+          if (!recommendations?.length) return;
+
+          // Log impressions
+          fetch("/api/analytics/impressions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: "recommendation",
+              itemIds: recommendations.map((r) => r.itemId),
+              timestamp: Date.now(),
+            }),
+          }).catch(console.error);
+        }, [recommendations]);
+      }
+
+  inngest_embedding_pipeline:
+    description: "Background embedding updates with Inngest"
+    pattern: |
+      // inngest/recommendation-jobs.ts
+      import { inngest } from "./client";
+      import { db } from "@/lib/db";
+      import { openai } from "@/lib/openai";
+      import { pinecone } from "@/lib/pinecone";
+
+      // Update user embedding after interactions
+      export const updateUserEmbedding = inngest.createFunction(
+        {
+          id: "update-user-embedding",
+          throttle: { key: "event.data.userId", count: 1, period: "5m" },
+        },
+        { event: "user/interaction" },
+        async ({ event, step }) => {
+          const { userId } = event.data;
+
+          // Get recent interactions
+          const interactions = await step.run("get-interactions", async () => {
+            return db.interaction.findMany({
+              where: {
+                userId,
+                createdAt: { gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000) },
+              },
+              include: { item: true },
+              orderBy: { createdAt: "desc" },
+              take: 100,
+            });
+          });
+
+          if (interactions.length === 0) return { skipped: true };
+
+          // Build weighted text representation
+          const embedding = await step.run("generate-embedding", async () => {
+            const weights: Record<string, number> = {
+              purchase: 5,
+              like: 3,
+              save: 2,
+              view: 1,
+            };
+
+            const now = Date.now();
+            const halfLife = 14 * 24 * 60 * 60 * 1000; // 14 days
+
+            const texts: string[] = [];
+
+            for (const interaction of interactions) {
+              const actionWeight = weights[interaction.action] ?? 1;
+              const age = now - interaction.createdAt.getTime();
+              const recencyWeight = Math.exp(-age / halfLife);
+              const totalWeight = Math.round(actionWeight * recencyWeight * 10);
+
+              for (let i = 0; i < totalWeight; i++) {
+                texts.push(interaction.item.description);
+              }
+            }
+
+            const response = await openai.embeddings.create({
+              model: "text-embedding-3-small",
+              input: texts.join(" ").slice(0, 8000),
+            });
+
+            return response.data[0].embedding;
+          });
+
+          // Update vector index
+          await step.run("update-index", async () => {
+            const index = pinecone.index("user-embeddings");
+
+            await index.namespace("users").upsert([
+              {
+                id: userId,
+                values: embedding,
+                metadata: {
+                  interactionCount: interactions.length,
+                  lastUpdated: new Date().toISOString(),
+                },
+              },
+            ]);
+          });
+
+          // Invalidate recommendation cache
+          await step.run("invalidate-cache", async () => {
+            const redis = await getRedis();
+            const keys = await redis.keys(`recs:${userId}:*`);
+            if (keys.length) await redis.del(...keys);
+          });
+
+          return { updated: true, interactionCount: interactions.length };
+        }
+      );
+
+      // Batch update item embeddings
+      export const updateItemEmbeddings = inngest.createFunction(
+        { id: "update-item-embeddings" },
+        { cron: "0 2 * * *" }, // Daily at 2 AM
+        async ({ step }) => {
+          // Get items updated in last 24 hours
+          const items = await step.run("get-updated-items", async () => {
+            return db.item.findMany({
+              where: {
+                OR: [
+                  { updatedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+                  { embedding: null },
+                ],
+              },
+              take: 1000,
+            });
+          });
+
+          if (items.length === 0) return { processed: 0 };
+
+          // Process in batches
+          const batchSize = 100;
+          let processed = 0;
+
+          for (let i = 0; i < items.length; i += batchSize) {
+            const batch = items.slice(i, i + batchSize);
+
+            await step.run(`process-batch-${i}`, async () => {
+              const texts = batch.map((item) =>
+                [item.title, item.description, item.tags.join(", ")].join(". ")
+              );
+
+              const response = await openai.embeddings.create({
+                model: "text-embedding-3-small",
+                input: texts,
+              });
+
+              const vectors = response.data.map((d, idx) => ({
+                id: batch[idx].id,
+                values: d.embedding,
+                metadata: {
+                  title: batch[idx].title,
+                  category: batch[idx].category,
+                  price: batch[idx].price,
+                },
+              }));
+
+              const index = pinecone.index("item-embeddings");
+              await index.namespace("items").upsert(vectors);
+
+              processed += batch.length;
+            });
+          }
+
+          return { processed };
+        }
+      );
+
+      // Precompute popular items
+      export const precomputePopular = inngest.createFunction(
+        { id: "precompute-popular" },
+        { cron: "0 * * * *" }, // Every hour
+        async ({ step }) => {
+          const categories = await step.run("get-categories", async () => {
+            return db.category.findMany({ select: { id: true, name: true } });
+          });
+
+          for (const category of categories) {
+            await step.run(`compute-${category.id}`, async () => {
+              const popular = await db.interaction.groupBy({
+                by: ["itemId"],
+                where: {
+                  item: { categoryId: category.id },
+                  createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+                },
+                _count: { itemId: true },
+                orderBy: { _count: { itemId: "desc" } },
+                take: 100,
+              });
+
+              const redis = await getRedis();
+              const key = `popular:${category.id}`;
+
+              await redis.del(key);
+
+              if (popular.length > 0) {
+                await redis.zadd(
+                  key,
+                  ...popular.map((p) => ({
+                    score: p._count.itemId,
+                    member: p.itemId,
+                  }))
+                );
+                await redis.expire(key, 7200); // 2 hours
+              }
+            });
+          }
+
+          return { categories: categories.length };
+        }
+      );
+
+  langfuse_tracking:
+    description: "Track recommendation quality with Langfuse"
+    pattern: |
+      // lib/recommendations/tracked.ts
+      import { Langfuse } from "langfuse";
+
+      const langfuse = new Langfuse({
+        publicKey: process.env.LANGFUSE_PUBLIC_KEY!,
+        secretKey: process.env.LANGFUSE_SECRET_KEY!,
+      });
+
+      interface TrackedRecommendationResult {
+        recommendations: ScoredItem[];
+        trace: ReturnType<typeof langfuse.trace>;
+        metrics: {
+          latencyMs: number;
+          candidateCount: number;
+          strategy: string;
+        };
+      }
+
+      export async function trackedRecommendations(
+        userId: string,
+        options: RecommendationOptions
+      ): Promise<TrackedRecommendationResult> {
+        const start = Date.now();
+
+        const trace = langfuse.trace({
+          name: "recommendations",
+          userId,
+          metadata: {
+            context: options.context,
+            category: options.categoryFilter?.[0],
+            limit: options.limit,
+          },
+        });
+
+        try {
+          // Track candidate generation
+          const candidateSpan = trace.span({ name: "candidate-generation" });
+          const candidates = await generateCandidates(userId, 500);
+          candidateSpan.end({ output: { count: candidates.length } });
+
+          // Track filtering
+          const filterSpan = trace.span({ name: "filtering" });
+          const filtered = await filterCandidates(candidates, userId, 100);
+          filterSpan.end({ output: { count: filtered.length } });
+
+          // Track scoring
+          const scoreSpan = trace.span({ name: "scoring" });
+          const scored = await scoreAndRank(filtered, userId);
+          scoreSpan.end({ output: { count: scored.length } });
+
+          // Track diversity reranking
+          const diversitySpan = trace.span({ name: "diversity-rerank" });
+          const final = applyDiversityReranking(scored, options.limit);
+          diversitySpan.end({ output: { count: final.length } });
+
+          const latencyMs = Date.now() - start;
+
+          trace.update({
+            output: {
+              recommendationCount: final.length,
+              latencyMs,
+              topCategories: getTopCategories(final),
+            },
+          });
+
+          return {
+            recommendations: final,
+            trace,
+            metrics: {
+              latencyMs,
+              candidateCount: candidates.length,
+              strategy: "hybrid",
+            },
+          };
+        } catch (error) {
+          trace.update({
+            level: "ERROR",
+            statusMessage: error instanceof Error ? error.message : "Unknown",
+          });
+          throw error;
+        } finally {
+          await langfuse.flushAsync();
+        }
+      }
+
+      // Track user feedback on recommendations
+      export async function trackRecommendationFeedback(
+        traceId: string,
+        feedback: {
+          itemId: string;
+          action: "click" | "purchase" | "dismiss" | "like";
+          position: number;
+        }
+      ): Promise<void> {
+        const score = {
+          click: 0.3,
+          like: 0.6,
+          purchase: 1.0,
+          dismiss: -0.2,
+        }[feedback.action];
+
+        await langfuse.score({
+          traceId,
+          name: "recommendation-feedback",
+          value: score,
+          comment: `${feedback.action} on item at position ${feedback.position}`,
+        });
+      }
+
+  redis_session_tracking:
+    description: "Real-time session behavior tracking"
+    pattern: |
+      // lib/recommendations/session.ts
+      import { Redis } from "@upstash/redis";
+
+      const redis = new Redis({
+        url: process.env.UPSTASH_REDIS_REST_URL!,
+        token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+      });
+
+      interface SessionSignal {
+        type: "view" | "click" | "cart" | "time";
+        itemId: string;
+        value?: number;
+        timestamp: number;
+      }
+
+      // Track session signals
+      export async function trackSessionSignal(
+        sessionId: string,
+        signal: SessionSignal
+      ): Promise<void> {
+        const key = `session:${sessionId}:signals`;
+
+        await redis.zadd(key, {
+          score: signal.timestamp,
+          member: JSON.stringify(signal),
+        });
+
+        // Keep last hour
+        await redis.zremrangebyscore(key, 0, Date.now() - 3600000);
+        await redis.expire(key, 7200);
+      }
+
+      // Get session-boosted recommendations
+      export async function getSessionBoostedRecs(
+        sessionId: string,
+        baseRecs: ScoredItem[]
+      ): Promise<ScoredItem[]> {
+        const signalsKey = `session:${sessionId}:signals`;
+        const rawSignals = await redis.zrange(signalsKey, 0, -1);
+
+        if (rawSignals.length === 0) return baseRecs;
+
+        const signals = rawSignals.map((s) => JSON.parse(s as string) as SessionSignal);
+
+        // Build session interest map
+        const interests = new Map<string, number>();
+        const weights = { cart: 5, click: 2, view: 1, time: 0.1 };
+
+        for (const signal of signals) {
+          const weight = weights[signal.type] ?? 1;
+          const value = signal.type === "time" ? Math.min(signal.value ?? 0, 60) : 1;
+          const current = interests.get(signal.itemId) ?? 0;
+          interests.set(signal.itemId, current + weight * value);
+        }
+
+        // Find similar items to session interests
+        const topInterests = Array.from(interests.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10)
+          .map(([id]) => id);
+
+        const similar = await findSimilarItems(topInterests, 50);
+        const boostSet = new Set(similar.map((s) => s.itemId));
+
+        // Apply boost
+        return baseRecs
+          .map((rec) => ({
+            ...rec,
+            score: boostSet.has(rec.itemId) ? rec.score * 1.5 : rec.score,
+            sessionBoosted: boostSet.has(rec.itemId),
+          }))
+          .sort((a, b) => b.score - a.score);
+      }
+
+  ab_testing:
+    description: "A/B testing for recommendation algorithms"
+    pattern: |
+      // lib/recommendations/ab-test.ts
+      import { createHash } from "crypto";
+
+      interface ABTestConfig {
+        id: string;
+        variants: Array<{
+          name: string;
+          weight: number; // 0-100
+          handler: (userId: string, options: RecommendationOptions) => Promise<ScoredItem[]>;
+        }>;
+      }
+
+      const activeTests: ABTestConfig[] = [
+        {
+          id: "diversity-factor",
+          variants: [
+            { name: "control", weight: 50, handler: controlRecommendations },
+            { name: "high-diversity", weight: 50, handler: highDiversityRecommendations },
+          ],
+        },
+      ];
+
+      function assignVariant(userId: string, testId: string, variants: ABTestConfig["variants"]): string {
+        // Deterministic assignment based on user + test
+        const hash = createHash("md5")
+          .update(`${userId}:${testId}`)
+          .digest("hex");
+
+        const bucket = parseInt(hash.slice(0, 8), 16) % 100;
+
+        let cumulative = 0;
+        for (const variant of variants) {
+          cumulative += variant.weight;
+          if (bucket < cumulative) {
+            return variant.name;
+          }
+        }
+
+        return variants[0].name;
+      }
+
+      export async function getABTestedRecommendations(
+        userId: string,
+        options: RecommendationOptions
+      ): Promise<{ recommendations: ScoredItem[]; variant: string; testId: string }> {
+        const test = activeTests[0]; // Current active test
+
+        const variantName = assignVariant(userId, test.id, test.variants);
+        const variant = test.variants.find((v) => v.name === variantName)!;
+
+        const recommendations = await variant.handler(userId, options);
+
+        // Log assignment for analysis
+        await logABAssignment(userId, test.id, variantName);
+
+        return {
+          recommendations,
+          variant: variantName,
+          testId: test.id,
+        };
+      }
+
+      async function logABAssignment(
+        userId: string,
+        testId: string,
+        variant: string
+      ): Promise<void> {
+        // Log to analytics system
+      }

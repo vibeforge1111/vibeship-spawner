@@ -1,0 +1,377 @@
+# Validations - AI Personalization
+# Quality checks for recommendation system implementations
+
+version: 1.0.0
+skill_id: ai-personalization
+
+validations:
+  # Cold Start
+  - id: no-cold-start-handling
+    name: No Cold Start Handling
+    severity: error
+    description: New users must get useful recommendations
+    pattern: |
+      collaborative.*filter(?!.*cold|fallback|default|popular)
+    message: "Handle cold start for new users (popular items, onboarding)."
+    autofix: false
+
+  - id: missing-fallback-strategy
+    name: Missing Fallback Strategy
+    severity: error
+    description: Recommendations should never return empty
+    pattern: |
+      getRecommendations(?!.*fallback|default|popular)
+    message: "Add fallback strategy when primary recommendations are empty."
+    autofix: false
+
+  # Diversity
+  - id: no-diversity-check
+    name: No Diversity in Recommendations
+    severity: warning
+    description: Recommendations should have category diversity
+    pattern: |
+      topK.*recommendations(?!.*diversity|mmr|category)
+    message: "Apply diversity reranking to avoid filter bubble effect."
+    autofix: false
+
+  - id: no-exploration-slots
+    name: No Exploration in Recommendations
+    severity: warning
+    description: Include exploration items to avoid feedback loops
+    pattern: |
+      slice.*0.*limit(?!.*explore|random|serendipity)
+    message: "Reserve slots for exploration items to break feedback loops."
+    autofix: false
+
+  # Privacy
+  - id: recommendations-expose-pii
+    name: Recommendations May Expose PII
+    severity: error
+    description: Similar user IDs should not be exposed
+    pattern: |
+      similar.*users.*map.*userId(?!.*anonymize|hash)
+    message: "Anonymize user IDs before exposing similar user data."
+    autofix: false
+
+  - id: sensitive-category-unfiltered
+    name: Sensitive Categories Unfiltered
+    severity: error
+    description: Health/adult categories need explicit consent
+    pattern: |
+      recommendations(?!.*filter.*sensitive|privacy|category.*check)
+    message: "Filter sensitive categories unless user explicitly consents."
+    autofix: false
+
+  # Performance
+  - id: scoring-all-items
+    name: Scoring All Items
+    severity: warning
+    description: Full catalog scoring is too slow at scale
+    pattern: |
+      for.*item.*of.*catalog|items\.map.*score
+    message: "Use candidate generation (ANN) before scoring. Don't score full catalog."
+    autofix: false
+
+  - id: no-caching-embeddings
+    name: User Embeddings Not Cached
+    severity: warning
+    description: Embedding generation should be cached
+    pattern: |
+      getUserEmbedding.*await.*openai(?!.*cache|redis)
+    message: "Cache user embeddings instead of regenerating on every request."
+    autofix: false
+
+  - id: synchronous-embedding-updates
+    name: Synchronous Embedding Updates
+    severity: warning
+    description: Embedding updates should be async
+    pattern: |
+      await.*updateEmbedding.*await.*getRecommendations
+    message: "Update embeddings asynchronously (background job) not in request path."
+    autofix: false
+
+  # Data Quality
+  - id: no-negative-signals
+    name: Ignoring Negative Signals
+    severity: warning
+    description: Dislikes and skips should influence recommendations
+    pattern: |
+      interactions.*filter.*like(?!.*dislike|skip|negative)
+    message: "Include negative signals (dislikes, skips) in preference learning."
+    autofix: false
+
+  - id: no-recency-weighting
+    name: No Recency Weighting
+    severity: warning
+    description: Recent interactions should weight more heavily
+    pattern: |
+      interactions\.map(?!.*timestamp|recency|decay|weight)
+    message: "Weight recent interactions higher than old ones."
+    autofix: false
+
+  - id: stale-popularity-data
+    name: Stale Popularity Data
+    severity: warning
+    description: Popularity scores should be updated regularly
+    pattern: |
+      popular.*items(?!.*updated|refresh|ttl)
+    message: "Refresh popularity data regularly (hourly/daily)."
+    autofix: false
+
+  # Error Handling
+  - id: no-recommendation-fallback
+    name: No Error Fallback for Recommendations
+    severity: error
+    description: Failed recommendations should degrade gracefully
+    pattern: |
+      getRecommendations(?!.*catch|try|fallback)
+    message: "Handle recommendation errors with graceful fallback."
+    autofix: false
+
+  - id: no-timeout-handling
+    name: No Timeout for Recommendation Calls
+    severity: warning
+    description: Recommendation calls should have timeouts
+    pattern: |
+      await.*recommend(?!.*timeout|Promise\.race)
+    message: "Add timeout to recommendation calls (200-500ms)."
+    autofix: false
+
+  # Metrics
+  - id: no-recommendation-tracking
+    name: No Recommendation Tracking
+    severity: warning
+    description: Track which recommendations were shown and clicked
+    pattern: |
+      recommendations(?!.*track|log|metric|analytics)
+    message: "Track impressions and clicks for recommendation quality metrics."
+    autofix: false
+
+  - id: no-a-b-testing
+    name: No A/B Testing Infrastructure
+    severity: info
+    description: Recommendation algorithms should be A/B testable
+    pattern: |
+      getRecommendations(?!.*variant|experiment|ab)
+    message: "Support A/B testing for recommendation algorithm changes."
+    autofix: false
+
+code_smells:
+  - id: hardcoded-recommendation-count
+    name: Hardcoded Recommendation Count
+    description: Recommendation count should be configurable
+    pattern: |
+      slice.*0.*10|topK.*=.*10
+    suggestion: "Make recommendation count configurable per context."
+
+  - id: single-embedding-model
+    name: Single Embedding Model
+    description: Consider separate user and item embedding models
+    pattern: |
+      text-embedding.*user.*item
+    suggestion: "Evaluate separate embedding models for users vs items."
+
+  - id: missing-item-freshness
+    name: Missing Item Freshness Boost
+    description: New items may need visibility boost
+    pattern: |
+      score.*sort(?!.*fresh|new|created)
+    suggestion: "Consider freshness boost for new items to break feedback loops."
+
+  - id: no-context-awareness
+    name: No Context Awareness
+    description: Recommendations should consider context (time, location)
+    pattern: |
+      getRecommendations.*userId(?!.*context|session|time)
+    suggestion: "Consider context (time of day, device, session behavior)."
+
+best_practices:
+  - id: hybrid-recommendation-system
+    name: Hybrid Recommendation System
+    check: |
+      System combines multiple strategies with fallbacks.
+    recommendation: |
+      interface HybridRecommender {
+        // Multiple strategies with weights
+        strategies: Array<{
+          name: string;
+          weight: number;
+          handler: RecommendationStrategy;
+        }>;
+
+        // Fallback chain
+        fallbacks: Array<{
+          condition: (userId: string) => Promise<boolean>;
+          strategy: RecommendationStrategy;
+        }>;
+      }
+
+      async function hybridRecommendations(
+        userId: string,
+        config: HybridRecommender,
+        options: { limit: number }
+      ): Promise<ScoredItem[]> {
+        // Check fallback conditions first
+        for (const fallback of config.fallbacks) {
+          if (await fallback.condition(userId)) {
+            return fallback.strategy.recommend(userId, options);
+          }
+        }
+
+        // Run all strategies in parallel
+        const results = await Promise.all(
+          config.strategies.map(async (s) => {
+            try {
+              const recs = await s.handler.recommend(userId, options);
+              return { name: s.name, weight: s.weight, recs };
+            } catch (error) {
+              console.error(`Strategy ${s.name} failed`, error);
+              return { name: s.name, weight: 0, recs: [] };
+            }
+          })
+        );
+
+        // Merge with weights
+        return mergeWeightedRecommendations(results, options.limit);
+      }
+
+  - id: three-stage-pipeline
+    name: Three-Stage Recommendation Pipeline
+    check: |
+      Recommendations use candidate generation, filtering, and scoring.
+    recommendation: |
+      async function scalableRecommendations(
+        userId: string,
+        limit: number
+      ): Promise<ScoredItem[]> {
+        // Stage 1: Candidate Generation (fast, broad)
+        // Use ANN index, returns 500-1000 candidates
+        const candidates = await generateCandidates(userId, 500);
+
+        // Stage 2: Filtering (fast, eliminates invalid)
+        // Remove seen, out of stock, not matching basic prefs
+        const filtered = await filterCandidates(candidates, userId, 100);
+
+        // Stage 3: Scoring (slow, personalized)
+        // Heavy model inference on reduced set
+        const scored = await scoreAndRank(filtered, userId);
+
+        return scored.slice(0, limit);
+      }
+
+  - id: diversity-aware-ranking
+    name: Diversity-Aware Ranking
+    check: |
+      Recommendations include category and novelty diversity.
+    recommendation: |
+      interface DiversityMetrics {
+        intraCategoryRatio: number; // Max items from one category
+        noveltyRatio: number; // Min items from unexplored categories
+        explorationRatio: number; // Items outside top-K exploitation
+      }
+
+      function diversifyRecommendations(
+        ranked: ScoredItem[],
+        metrics: DiversityMetrics,
+        limit: number
+      ): ScoredItem[] {
+        const result: ScoredItem[] = [];
+        const categoryCounts = new Map<string, number>();
+        let novelItems = 0;
+
+        for (const item of ranked) {
+          if (result.length >= limit) break;
+
+          const category = item.metadata.category;
+          const currentCount = categoryCounts.get(category) ?? 0;
+          const maxPerCategory = Math.floor(limit * metrics.intraCategoryRatio);
+
+          // Enforce category limit
+          if (currentCount >= maxPerCategory) continue;
+
+          categoryCounts.set(category, currentCount + 1);
+
+          if (item.metadata.isNovel) novelItems++;
+
+          result.push(item);
+        }
+
+        // Ensure novelty ratio
+        const minNovel = Math.floor(limit * metrics.noveltyRatio);
+        if (novelItems < minNovel) {
+          // Swap some exploitation items for novel ones
+          const novelCandidates = ranked.filter(
+            (r) => r.metadata.isNovel && !result.includes(r)
+          );
+          // ... swap logic
+        }
+
+        return result;
+      }
+
+  - id: real-time-personalization
+    name: Real-Time Session Personalization
+    check: |
+      Recommendations adapt to current session behavior.
+    recommendation: |
+      interface SessionSignals {
+        currentViews: string[];
+        currentClicks: string[];
+        timeOnPage: Map<string, number>;
+        searchQueries: string[];
+      }
+
+      async function sessionAwareRecommendations(
+        userId: string,
+        session: SessionSignals,
+        baseRecs: ScoredItem[]
+      ): Promise<ScoredItem[]> {
+        // Build session interest vector
+        const sessionEmbedding = await buildSessionEmbedding(session);
+
+        // Find items similar to session behavior
+        const sessionRelevant = await findSimilarItems(sessionEmbedding, 50);
+        const sessionRelevantSet = new Set(sessionRelevant.map((r) => r.itemId));
+
+        // Boost items matching session interests
+        const boosted = baseRecs.map((rec) => ({
+          ...rec,
+          score: sessionRelevantSet.has(rec.itemId)
+            ? rec.score * 1.5
+            : rec.score,
+          sessionBoosted: sessionRelevantSet.has(rec.itemId),
+        }));
+
+        return boosted.sort((a, b) => b.score - a.score);
+      }
+
+testing_checklist:
+  cold_start:
+    - "New user with no history gets recommendations"
+    - "Onboarding preferences influence first recommendations"
+    - "New item with no interactions appears in recommendations"
+    - "Cold start fallback doesn't block page load"
+
+  diversity:
+    - "Top 10 contains items from at least 3 categories"
+    - "Exploration items included in recommendation set"
+    - "Same user doesn't see identical recommendations daily"
+    - "Popularity bias doesn't dominate results"
+
+  privacy:
+    - "Sensitive categories filtered unless consented"
+    - "Similar user IDs not exposed in response"
+    - "Shared account recommendations use common preferences"
+    - "No PII in recommendation logs"
+
+  performance:
+    - "Recommendations return in <200ms p95"
+    - "System handles 1000+ RPS"
+    - "Cache hit rate >80% for user embeddings"
+    - "Candidate generation uses ANN index"
+
+  quality:
+    - "Click-through rate tracked per algorithm variant"
+    - "A/B testing infrastructure works correctly"
+    - "Negative signals (dislikes) reduce future recommendations"
+    - "Recency weighting reflects recent preference changes"
