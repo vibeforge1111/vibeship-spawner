@@ -1,0 +1,564 @@
+# Collaboration - Plaid Fintech Integration
+# How this skill works with other skills
+
+version: 1.0.0
+skill_id: plaid-fintech
+
+prerequisites:
+  required: []
+
+  recommended:
+    - skill: backend
+      reason: "API design and webhook handling"
+      what_to_know:
+        - "REST API patterns"
+        - "Webhook processing"
+        - "Encryption/security"
+
+    - skill: postgres-wizard
+      reason: "Transaction and account storage"
+      what_to_know:
+        - "Financial data modeling"
+        - "Encryption at rest"
+        - "Time-series queries"
+
+    - skill: auth-specialist
+      reason: "User authentication for linked accounts"
+      what_to_know:
+        - "Session management"
+        - "Multi-account linking"
+        - "Security best practices"
+
+delegation_triggers:
+  - trigger: "user needs payment processing"
+    delegate_to: stripe-integration
+    context: "Stripe for actual payment, Plaid for account linking"
+
+  - trigger: "user needs budgeting features"
+    delegate_to: analytics-specialist
+    context: "Transaction categorization and analysis"
+
+  - trigger: "user needs investment tracking"
+    delegate_to: data-engineer
+    context: "Portfolio analysis and reporting"
+
+  - trigger: "user needs compliance/audit"
+    delegate_to: security-specialist
+    context: "SOC 2, PCI compliance"
+
+  - trigger: "user needs mobile app"
+    delegate_to: mobile-developer
+    context: "React Native Plaid SDK"
+
+receives_context_from:
+  - skill: backend
+    receives:
+      - "API design patterns"
+      - "Queue processing"
+      - "Error handling"
+
+  - skill: auth-specialist
+    receives:
+      - "User session patterns"
+      - "Token management"
+      - "Security practices"
+
+  - skill: postgres-wizard
+    receives:
+      - "Database schema design"
+      - "Query optimization"
+      - "Data encryption"
+
+provides_context_to:
+  - skill: stripe-integration
+    provides:
+      - "Bank account verification"
+      - "ACH payment data"
+      - "Balance checks"
+
+  - skill: workflow-automation
+    provides:
+      - "Transaction triggers"
+      - "Balance alerts"
+      - "Account events"
+
+  - skill: analytics-specialist
+    provides:
+      - "Transaction data"
+      - "Spending categories"
+      - "Cash flow patterns"
+
+escalation_paths:
+  - situation: "Complex compliance requirements"
+    escalate_to: security-specialist
+    context: "SOC 2, PCI DSS, state regulations"
+
+  - situation: "Advanced analytics"
+    escalate_to: data-engineer
+    context: "Data warehouse, ML models"
+
+  - situation: "Payment processing"
+    escalate_to: stripe-integration
+    context: "ACH transfers, card payments"
+
+  - situation: "Mobile SDK integration"
+    escalate_to: mobile-developer
+    context: "React Native, iOS, Android SDKs"
+
+workflow_integration:
+  typical_sequence:
+    1:
+      step: "Set up Plaid account and API keys"
+      skills: [plaid-fintech]
+      output: "Client ID, secrets, webhook URL"
+
+    2:
+      step: "Implement Link flow"
+      skills: [plaid-fintech, frontend]
+      output: "Working bank connection UI"
+
+    3:
+      step: "Set up secure token storage"
+      skills: [plaid-fintech, postgres-wizard]
+      output: "Encrypted access token storage"
+
+    4:
+      step: "Implement transaction sync"
+      skills: [plaid-fintech, backend]
+      output: "Transaction fetching and storage"
+
+    5:
+      step: "Configure webhooks"
+      skills: [plaid-fintech]
+      output: "Real-time update handlers"
+
+    6:
+      step: "Handle item errors"
+      skills: [plaid-fintech]
+      output: "Update mode flow"
+
+    7:
+      step: "Add payment features"
+      skills: [plaid-fintech, stripe-integration]
+      output: "ACH transfers working"
+
+  decision_points:
+    - question: "Which Plaid products to use?"
+      guidance: |
+        Transactions (most common):
+        - Bank transaction history
+        - Spending categorization
+        - 90-180 days history
+
+        Auth:
+        - Account and routing numbers
+        - Required for ACH transfers
+        - Instant verification
+
+        Identity:
+        - Account owner verification
+        - Name, email, phone matching
+        - Fraud prevention
+
+        Balance:
+        - Real-time balance checks
+        - Payment validation
+        - Paid API calls
+
+        Investments:
+        - Brokerage accounts
+        - Holdings and transactions
+        - Portfolio tracking
+
+    - question: "Sandbox vs Production testing?"
+      guidance: |
+        Sandbox (free):
+        - Instant test credentials
+        - Predictable responses
+        - Great for development
+        - Does NOT reflect production complexity
+
+        Limited Production:
+        - Real bank connections
+        - Your own accounts
+        - Real data edge cases
+        - Free for testing
+
+        Production:
+        - All institutions
+        - Real user data
+        - Paid usage
+        - Full complexity
+
+    - question: "Transaction sync frequency?"
+      guidance: |
+        Webhook-based (recommended):
+        - Real-time updates via SYNC_UPDATES_AVAILABLE
+        - No polling overhead
+        - Most efficient
+
+        Scheduled sync:
+        - Daily background jobs as backup
+        - Catch missed webhooks
+        - Handle items without webhook
+
+        On-demand:
+        - User-triggered refresh
+        - Fresh data when needed
+        - Higher API usage
+
+collaboration_patterns:
+  with_stripe:
+    when: "ACH payments using Plaid-linked accounts"
+    approach: |
+      Plaid for verification, Stripe for payment:
+
+      ```typescript
+      // 1. Link bank account with Plaid (Auth product)
+      const linkResponse = await plaidClient.linkTokenCreate({
+        user: { client_user_id: userId },
+        products: [Products.Auth],
+        country_codes: [CountryCode.Us],
+        language: 'en',
+      });
+
+      // 2. After Link success, get account info
+      const authResponse = await plaidClient.authGet({
+        access_token: accessToken,
+      });
+
+      const account = authResponse.data.accounts[0];
+      const numbers = authResponse.data.numbers.ach.find(
+        n => n.account_id === account.account_id
+      );
+
+      // 3. Create Stripe bank account token
+      const bankToken = await stripe.tokens.create({
+        bank_account: {
+          country: 'US',
+          currency: 'usd',
+          routing_number: numbers.routing,
+          account_number: numbers.account,
+          account_holder_name: account.owners?.[0]?.names?.[0] || 'Account Holder',
+          account_holder_type: 'individual',
+        },
+      });
+
+      // 4. Attach to Stripe customer
+      await stripe.customers.createSource(customerId, {
+        source: bankToken.id,
+      });
+
+      // 5. Create ACH payment
+      await stripe.paymentIntents.create({
+        amount: 1000,
+        currency: 'usd',
+        payment_method_types: ['us_bank_account'],
+        customer: customerId,
+      });
+      ```
+
+  with_prisma:
+    when: "Storing Plaid data securely"
+    approach: |
+      Prisma schema for Plaid data:
+
+      ```prisma
+      // prisma/schema.prisma
+      model PlaidItem {
+        id                   String    @id @default(cuid())
+        userId               String
+        itemId               String    @unique
+        accessToken          String    // Encrypted!
+        institutionId        String?
+        institutionName      String?
+        status               PlaidItemStatus @default(ACTIVE)
+        errorCode            String?
+        transactionsCursor   String?
+        consentExpiresAt     DateTime?
+        createdAt            DateTime  @default(now())
+        updatedAt            DateTime  @updatedAt
+
+        user                 User      @relation(fields: [userId], references: [id])
+        accounts             PlaidAccount[]
+
+        @@index([userId])
+        @@index([status])
+      }
+
+      enum PlaidItemStatus {
+        ACTIVE
+        NEEDS_RECONNECT
+        ERROR
+        REVOKED
+      }
+
+      model PlaidAccount {
+        id                String    @id @default(cuid())
+        itemId            String
+        accountId         String    @unique  // Plaid account_id
+        name              String
+        mask              String?
+        type              String    // checking, savings, credit
+        subtype           String?
+        currentBalance    Float?
+        availableBalance  Float?
+        limit             Float?
+        isoCurrencyCode   String    @default("USD")
+        balanceUpdatedAt  DateTime?
+        createdAt         DateTime  @default(now())
+        updatedAt         DateTime  @updatedAt
+
+        item              PlaidItem @relation(fields: [itemId], references: [itemId])
+        transactions      Transaction[]
+
+        @@index([itemId])
+      }
+
+      model Transaction {
+        id                      String    @id @default(cuid())
+        plaidTransactionId      String    @unique
+        accountId               String
+        amount                  Float
+        date                    DateTime
+        name                    String
+        merchantName            String?
+        category                String?
+        subcategory             String?
+        pending                 Boolean   @default(false)
+        paymentChannel          String?   // online, in store
+        location                Json?
+        createdAt               DateTime  @default(now())
+        updatedAt               DateTime  @updatedAt
+
+        account                 PlaidAccount @relation(fields: [accountId], references: [accountId])
+
+        @@index([accountId])
+        @@index([date])
+        @@index([category])
+      }
+
+      model WebhookLog {
+        id                String    @id
+        webhookType       String
+        webhookCode       String
+        itemId            String?
+        payload           Json
+        processedAt       DateTime  @default(now())
+
+        @@index([itemId])
+        @@index([processedAt])
+      }
+      ```
+
+  with_queues:
+    when: "Processing webhooks and syncs asynchronously"
+    approach: |
+      BullMQ for async Plaid operations:
+
+      ```typescript
+      // lib/plaid-queue.ts
+      import { Queue, Worker } from 'bullmq';
+      import Redis from 'ioredis';
+
+      const connection = new Redis(process.env.REDIS_URL);
+
+      // Transaction sync queue
+      export const syncQueue = new Queue('plaid-sync', {
+        connection,
+        defaultJobOptions: {
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 5000 },
+        },
+      });
+
+      // Webhook processing queue
+      export const webhookQueue = new Queue('plaid-webhooks', {
+        connection,
+        defaultJobOptions: {
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 1000 },
+        },
+      });
+
+      // Sync worker
+      const syncWorker = new Worker(
+        'plaid-sync',
+        async (job) => {
+          const { itemId } = job.data;
+
+          const item = await db.plaidItem.findUnique({
+            where: { itemId },
+          });
+
+          if (!item || item.status !== 'ACTIVE') {
+            return { skipped: true };
+          }
+
+          const accessToken = decrypt(item.accessToken);
+          await syncTransactions(accessToken, itemId);
+
+          return { synced: true };
+        },
+        { connection, concurrency: 5 }
+      );
+
+      // Webhook worker
+      const webhookWorker = new Worker(
+        'plaid-webhooks',
+        async (job) => {
+          const { webhook_type, webhook_code, item_id } = job.data;
+
+          switch (webhook_type) {
+            case 'TRANSACTIONS':
+              if (['SYNC_UPDATES_AVAILABLE', 'INITIAL_UPDATE', 'HISTORICAL_UPDATE'].includes(webhook_code)) {
+                await syncQueue.add('sync', { itemId: item_id });
+              }
+              break;
+
+            case 'ITEM':
+              await handleItemWebhook(webhook_code, item_id, job.data);
+              break;
+          }
+        },
+        { connection }
+      );
+      ```
+
+  with_nextjs:
+    when: "Building fintech app with Next.js"
+    approach: |
+      Next.js API routes for Plaid:
+
+      ```typescript
+      // app/api/plaid/create-link-token/route.ts
+      import { NextResponse } from 'next/server';
+      import { auth } from '@/lib/auth';
+      import { plaidClient } from '@/lib/plaid';
+      import { Products, CountryCode } from 'plaid';
+
+      export async function POST() {
+        const session = await auth();
+        if (!session?.user) {
+          return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
+        const response = await plaidClient.linkTokenCreate({
+          user: { client_user_id: session.user.id },
+          client_name: 'My Fintech App',
+          products: [Products.Transactions],
+          country_codes: [CountryCode.Us],
+          language: 'en',
+          webhook: `${process.env.NEXT_PUBLIC_URL}/api/plaid/webhooks`,
+        });
+
+        return NextResponse.json({ link_token: response.data.link_token });
+      }
+
+      // app/api/plaid/exchange-token/route.ts
+      export async function POST(req: Request) {
+        const session = await auth();
+        if (!session?.user) {
+          return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
+        const { publicToken } = await req.json();
+
+        const exchangeResponse = await plaidClient.itemPublicTokenExchange({
+          public_token: publicToken,
+        });
+
+        // Store encrypted
+        await prisma.plaidItem.create({
+          data: {
+            userId: session.user.id,
+            itemId: exchangeResponse.data.item_id,
+            accessToken: encrypt(exchangeResponse.data.access_token),
+          },
+        });
+
+        // Queue initial sync
+        await syncQueue.add('initial-sync', {
+          itemId: exchangeResponse.data.item_id,
+        });
+
+        return NextResponse.json({ success: true });
+      }
+
+      // app/api/plaid/webhooks/route.ts
+      export async function POST(req: Request) {
+        const body = await req.text();
+
+        // Verify webhook
+        if (!await verifyPlaidWebhook(req.headers, body)) {
+          return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
+        }
+
+        const payload = JSON.parse(body);
+
+        // Queue for async processing
+        await webhookQueue.add('process', payload);
+
+        return new NextResponse(null, { status: 200 });
+      }
+      ```
+
+platform_integration:
+  react_native:
+    setup: |
+      # React Native Plaid SDK
+      npm install react-native-plaid-link-sdk
+
+      # iOS: pod install
+      cd ios && pod install
+
+      # Configure in app
+      import { PlaidLink, LinkSuccess } from 'react-native-plaid-link-sdk';
+
+      function LinkButton({ linkToken }: { linkToken: string }) {
+        const handleSuccess = async (success: LinkSuccess) => {
+          await fetch('/api/plaid/exchange-token', {
+            method: 'POST',
+            body: JSON.stringify({ publicToken: success.publicToken }),
+          });
+        };
+
+        return (
+          <PlaidLink
+            tokenConfig={{ token: linkToken }}
+            onSuccess={handleSuccess}
+            onExit={(exit) => console.log('Link exit:', exit)}
+          >
+            <Text>Connect Bank</Text>
+          </PlaidLink>
+        );
+      }
+
+  vercel:
+    setup: |
+      # Environment variables
+      PLAID_CLIENT_ID=xxx
+      PLAID_SECRET_SANDBOX=xxx
+      PLAID_SECRET_PRODUCTION=xxx
+      PLAID_ENV=sandbox  # or production
+      ENCRYPTION_KEY=xxx  # 32-byte hex key
+
+      # Webhook URL
+      # https://your-app.vercel.app/api/plaid/webhooks
+
+security_checklist:
+  - "Access tokens encrypted at rest (AES-256-GCM)"
+  - "Secrets in environment variables only"
+  - "Webhook signatures verified"
+  - "No sensitive data in logs"
+  - "Item errors handled and users notified"
+  - "Tokens rotated if compromised"
+  - "Real-time balance for payment decisions"
+  - "Duplicate webhooks handled idempotently"
+
+compliance_notes:
+  - "Plaid is SOC 2 Type II certified"
+  - "Data stored compliant with bank regulations"
+  - "User consent required for data access"
+  - "Item removal deletes access token"
+  - "Handle USER_PERMISSION_REVOKED webhook"

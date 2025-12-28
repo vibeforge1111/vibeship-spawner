@@ -1,0 +1,339 @@
+# Validations - Plaid Fintech Integration
+# Quality checks for banking API implementations
+
+version: 1.0.0
+skill_id: plaid-fintech
+
+validations:
+  # Security Checks
+  - id: plaintext-access-token
+    name: Access Token Stored in Plain Text
+    severity: error
+    description: Plaid access tokens must be encrypted at rest
+    pattern: |
+      (accessToken|access_token)\s*[:=]\s*[^encrypt][^}]+
+    anti_pattern: |
+      (encrypt|cipher|kms|vault)
+    message: "Plaid access token appears to be stored unencrypted. Encrypt at rest."
+    autofix: false
+
+  - id: exposed-plaid-secret
+    name: Plaid Secret in Client Code
+    severity: error
+    description: Plaid secret must never be exposed to clients
+    pattern: |
+      PLAID_SECRET|plaidSecret
+    message: "Plaid secret may be exposed. Keep server-side only."
+    autofix: false
+
+  - id: hardcoded-credentials
+    name: Hardcoded Plaid Credentials
+    severity: error
+    description: Credentials must use environment variables
+    pattern: |
+      (PLAID_CLIENT_ID|PLAID_SECRET)\s*[:=]\s*['"][a-f0-9]{20,}['"]
+    message: "Hardcoded Plaid credentials. Use environment variables."
+    autofix: false
+
+  - id: missing-webhook-verification
+    name: Missing Webhook Signature Verification
+    severity: error
+    description: Plaid webhooks must verify JWT signature
+    pattern: |
+      (webhooks?|plaid).*\.(post|action)
+    anti_pattern: |
+      (plaid-verification|jwt\.verify|verifyWebhook)
+    message: "Webhook handler without signature verification. Verify Plaid-Verification header."
+    autofix: false
+
+  # API Usage Checks
+  - id: cached-balance-for-payment
+    name: Using Cached Balance for Payment Decision
+    severity: error
+    description: Use real-time balance for payment validation
+    pattern: |
+      accountsGet.*payment|transfer|withdraw
+    message: "Using accountsGet (cached) for payment. Use accountsBalanceGet for real-time balance."
+    autofix: false
+
+  - id: missing-item-error-handling
+    name: Missing Item Error State Handling
+    severity: warning
+    description: API calls should handle ITEM_LOGIN_REQUIRED
+    pattern: |
+      (transactionsSync|accountsGet|authGet)
+    anti_pattern: |
+      (ITEM_LOGIN_REQUIRED|item.*error|update.*mode)
+    message: "API call without ITEM_LOGIN_REQUIRED handling. Handle item error states."
+    autofix: false
+
+  - id: polling-instead-of-webhooks
+    name: Polling for Transactions Instead of Webhooks
+    severity: warning
+    description: Use webhooks for transaction updates
+    pattern: |
+      (setInterval|setTimeout).*transactionsSync
+    message: "Polling for transactions. Configure webhooks for SYNC_UPDATES_AVAILABLE."
+    autofix: false
+
+  # Token Handling Checks
+  - id: cached-link-token
+    name: Link Token Cached or Reused
+    severity: warning
+    description: Link tokens are single-use and expire in 4 hours
+    pattern: |
+      (linkToken|link_token).*(cache|global|static)
+    message: "Link tokens should not be cached. Create fresh token for each session."
+    autofix: false
+
+  - id: deprecated-public-key
+    name: Using Deprecated Public Key
+    severity: error
+    description: Public key integration ended January 2025
+    pattern: |
+      (publicKey|public_key|PLAID_PUBLIC_KEY)
+    message: "Public key is deprecated. Use Link tokens instead."
+    autofix: false
+
+  # Sync Pattern Checks
+  - id: missing-cursor-storage
+    name: Transaction Sync Without Cursor Storage
+    severity: warning
+    description: Store cursor for incremental syncs
+    pattern: |
+      transactionsSync.*cursor
+    anti_pattern: |
+      (save|store|update).*cursor
+    message: "Transaction sync without cursor persistence. Store cursor for incremental sync."
+    autofix: false
+
+  - id: missing-mutation-handling
+    name: Missing Sync Mutation Error Handling
+    severity: warning
+    description: Handle TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION
+    pattern: |
+      transactionsSync.*while
+    anti_pattern: |
+      MUTATION_DURING_PAGINATION
+    message: "Pagination without mutation handling. Restart sync on mutation error."
+    autofix: false
+
+  # Webhook Handling Checks
+  - id: non-idempotent-webhook
+    name: Non-Idempotent Webhook Handler
+    severity: warning
+    description: Webhooks may be duplicated, handlers must be idempotent
+    pattern: |
+      webhook.*\{.*await
+    anti_pattern: |
+      (idempoten|duplicate|already.*processed|webhookLog)
+    message: "Webhook handler may not be idempotent. Check for duplicate processing."
+    autofix: false
+
+code_smells:
+  - id: insufficient-history
+    name: Insufficient Transaction History for Recurring
+    description: Recurring transactions need 180+ days
+    pattern: |
+      days_requested.*90
+    suggestion: "90 days may not be enough for recurring transactions. Consider 180+ days."
+
+  - id: logging-access-token
+    name: Access Token in Logs
+    description: Access tokens should never be logged
+    pattern: |
+      (console\.|log\.|logger\.).*access_token
+    suggestion: "Access token in logs. Remove sensitive data from logging."
+
+  - id: missing-link-exit-handler
+    name: Missing Link Exit Handler
+    description: Handle Link exit for user abandonment
+    pattern: |
+      usePlaidLink.*onSuccess
+    anti_pattern: |
+      onExit
+    suggestion: "Handle onExit for Link abandonment and errors."
+
+  - id: sandbox-in-production
+    name: Sandbox Environment in Production Code
+    description: Ensure production uses correct environment
+    pattern: |
+      PlaidEnvironments\.sandbox(?!.*test)
+    suggestion: "Sandbox environment detected. Verify environment configuration for production."
+
+best_practices:
+  - id: encrypt-access-tokens
+    name: Encrypt Access Tokens at Rest
+    check: |
+      All access tokens are encrypted before storage.
+    recommendation: |
+      import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
+
+      const ALGORITHM = 'aes-256-gcm';
+      const KEY = Buffer.from(process.env.ENCRYPTION_KEY, 'hex');
+
+      export function encryptToken(plaintext: string): string {
+        const iv = randomBytes(16);
+        const cipher = createCipheriv(ALGORITHM, KEY, iv);
+
+        let encrypted = cipher.update(plaintext, 'utf8', 'hex');
+        encrypted += cipher.final('hex');
+        const authTag = cipher.getAuthTag();
+
+        return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted}`;
+      }
+
+      export function decryptToken(encrypted: string): string {
+        const [ivHex, authTagHex, ciphertext] = encrypted.split(':');
+        const decipher = createDecipheriv(
+          ALGORITHM, KEY, Buffer.from(ivHex, 'hex')
+        );
+        decipher.setAuthTag(Buffer.from(authTagHex, 'hex'));
+
+        let decrypted = decipher.update(ciphertext, 'hex', 'utf8');
+        decrypted += decipher.final('utf8');
+        return decrypted;
+      }
+
+  - id: verify-webhooks
+    name: Verify Webhook Signatures
+    check: |
+      All webhook endpoints verify Plaid-Verification JWT.
+    recommendation: |
+      import jwt from 'jsonwebtoken';
+      import jwksClient from 'jwks-rsa';
+
+      const client = jwksClient({
+        jwksUri: 'https://production.plaid.com/.well-known/jwks.json',
+        cache: true,
+      });
+
+      async function verifyPlaidWebhook(req: Request): Promise<boolean> {
+        const token = req.headers['plaid-verification'] as string;
+        if (!token) return false;
+
+        const decoded = jwt.decode(token, { complete: true });
+        const key = await client.getSigningKey(decoded.header.kid);
+
+        const verified = jwt.verify(token, key.getPublicKey(), {
+          algorithms: ['ES256'],
+        }) as any;
+
+        // Verify body hash
+        const bodyHash = crypto
+          .createHash('sha256')
+          .update(JSON.stringify(req.body))
+          .digest('hex');
+
+        return verified.request_body_sha256 === bodyHash;
+      }
+
+  - id: handle-item-errors
+    name: Handle Item Error States
+    check: |
+      All API calls handle ITEM_LOGIN_REQUIRED and notify users.
+    recommendation: |
+      async function safeApiCall<T>(
+        fn: () => Promise<T>,
+        itemId: string
+      ): Promise<T | null> {
+        try {
+          return await fn();
+        } catch (error) {
+          const errorCode = error.response?.data?.error_code;
+
+          if (errorCode === 'ITEM_LOGIN_REQUIRED') {
+            await db.plaidItem.update({
+              where: { itemId },
+              data: { status: 'NEEDS_RECONNECT' },
+            });
+            await notifyUser(itemId, 'Please reconnect your bank account');
+            return null;
+          }
+
+          throw error;
+        }
+      }
+
+  - id: use-transactions-sync
+    name: Use Transactions Sync (Not Get)
+    check: |
+      Transaction fetching uses /transactions/sync, not /transactions/get.
+    recommendation: |
+      // Use sync for incremental updates
+      async function syncTransactions(accessToken: string, cursor?: string) {
+        const response = await plaidClient.transactionsSync({
+          access_token: accessToken,
+          cursor,
+          count: 500,
+        });
+
+        return {
+          added: response.data.added,
+          modified: response.data.modified,
+          removed: response.data.removed,
+          nextCursor: response.data.next_cursor,
+          hasMore: response.data.has_more,
+        };
+      }
+
+      // Don't use transactions/get - it's deprecated for sync
+      // await plaidClient.transactionsGet({...});  // Don't use
+
+  - id: idempotent-webhooks
+    name: Implement Idempotent Webhook Handlers
+    check: |
+      Webhook handlers track processed events to prevent duplicates.
+    recommendation: |
+      app.post('/api/plaid/webhooks', async (req, res) => {
+        // Create hash of webhook content
+        const webhookId = crypto
+          .createHash('sha256')
+          .update(JSON.stringify(req.body))
+          .digest('hex');
+
+        // Check if processed
+        const existing = await db.webhookLog.findUnique({
+          where: { id: webhookId },
+        });
+
+        if (existing) {
+          return res.sendStatus(200);  // Already processed
+        }
+
+        // Record before processing
+        await db.webhookLog.create({
+          data: { id: webhookId, payload: req.body },
+        });
+
+        // Process async
+        processWebhook(req.body).catch(console.error);
+
+        res.sendStatus(200);
+      });
+
+testing_checklist:
+  sandbox:
+    - "Link flow completes successfully"
+    - "Token exchange works"
+    - "Transaction sync returns data"
+    - "Webhook endpoint responds 200"
+    - "Error states trigger update mode"
+
+  security:
+    - "Access tokens encrypted at rest"
+    - "Secrets not exposed to client"
+    - "Webhook signatures verified"
+    - "No credentials in logs"
+
+  error_handling:
+    - "ITEM_LOGIN_REQUIRED handled gracefully"
+    - "Mutation during pagination restarts sync"
+    - "Rate limits handled with backoff"
+    - "Network errors retried"
+
+  production:
+    - "Real institution tested"
+    - "Edge cases with real data handled"
+    - "Webhook verification working"
+    - "Error monitoring configured"
