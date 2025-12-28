@@ -1,0 +1,185 @@
+# Database Schema Design Validations
+# Automated checks to catch schema design mistakes before they reach production
+
+validations:
+  - id: schema-float-for-money
+    name: Float Type for Financial Data
+    severity: error
+    type: regex
+    pattern:
+      - 'Float.*price'
+      - 'Float.*amount'
+      - 'Float.*balance'
+      - 'Float.*cost'
+      - 'Float.*total'
+      - 'Float.*fee'
+      - 'Float.*payment'
+      - 'DOUBLE.*price'
+      - 'REAL.*amount'
+    message: "Float/Double for money causes rounding errors. Use Decimal or integer cents."
+    fix_action: "Change to Decimal @db.Decimal(10, 2) or store as integer cents"
+    applies_to:
+      - "*.prisma"
+      - "schema.prisma"
+      - "*.sql"
+
+  - id: schema-missing-fk-index
+    name: Foreign Key Without Index
+    severity: warning
+    type: regex
+    pattern:
+      - '@relation\\(fields:\\s*\\[[^\\]]+\\][^}]*\\)(?![^}]*@@index)'
+    message: "Foreign key without index causes slow JOINs and DELETE locks."
+    fix_action: "Add @@index([foreignKeyColumn]) to the model"
+    applies_to:
+      - "*.prisma"
+      - "schema.prisma"
+
+  - id: schema-cascade-delete
+    name: Cascade Delete on Relation
+    severity: warning
+    type: regex
+    pattern:
+      - 'onDelete:\\s*Cascade'
+      - 'ON DELETE CASCADE'
+    message: "Cascade delete can lock tables for extended time on large datasets."
+    fix_action: "Consider soft delete or background job for cleanup instead"
+    applies_to:
+      - "*.prisma"
+      - "schema.prisma"
+      - "*.sql"
+
+  - id: schema-uuid-no-version
+    name: UUID Without Version Specification
+    severity: info
+    type: regex
+    pattern:
+      - '@default\\(uuid\\(\\)\\)'
+      - "gen_random_uuid\\(\\)(?!.*v7)"
+    message: "Consider UUID v7 for better index performance (time-ordered)."
+    fix_action: "For distributed systems, use UUID v7 via middleware or dbgenerated"
+    applies_to:
+      - "*.prisma"
+      - "schema.prisma"
+      - "*.sql"
+
+  - id: schema-timestamp-no-tz
+    name: Timestamp Without Timezone
+    severity: warning
+    type: regex
+    pattern:
+      - 'DateTime(?!.*@db\\.Timestamptz)'
+      - 'TIMESTAMP(?!TZ| WITH TIME ZONE)'
+    message: "Timestamp without timezone causes confusion in multi-region systems."
+    fix_action: "Use DateTime @db.Timestamptz for PostgreSQL, always store UTC"
+    applies_to:
+      - "*.prisma"
+      - "schema.prisma"
+      - "*.sql"
+
+  - id: schema-varchar-no-limit
+    name: String Without Length Limit
+    severity: warning
+    type: regex
+    pattern:
+      - 'String(?!.*@db\\.VarChar)'
+      - 'VARCHAR(?!\\s*\\()'
+      - 'TEXT.*name|TEXT.*title|TEXT.*email'
+    message: "String without length limit allows unexpectedly large values."
+    fix_action: "Add @db.VarChar(n) with reasonable max length"
+    applies_to:
+      - "*.prisma"
+      - "schema.prisma"
+      - "*.sql"
+
+  - id: schema-no-updated-at
+    name: Missing updatedAt Timestamp
+    severity: info
+    type: regex
+    pattern:
+      - 'model\\s+\\w+\\s*\\{[^}]*createdAt[^}]*(?!updatedAt)[^}]*\\}'
+    message: "Model has createdAt but no updatedAt - common pattern for tracking changes."
+    fix_action: "Add updatedAt DateTime @updatedAt"
+    applies_to:
+      - "*.prisma"
+      - "schema.prisma"
+
+  - id: schema-polymorphic-discriminator
+    name: Type Discriminator Pattern
+    severity: warning
+    type: regex
+    pattern:
+      - 'Type\\s+String.*Id\\s+String'
+      - 'commentableType|parentType|ownerType'
+      - "able_type.*able_id"
+    message: "Type discriminator polymorphism prevents foreign key enforcement."
+    fix_action: "Use exclusive arc pattern with separate nullable FKs and CHECK constraint"
+    applies_to:
+      - "*.prisma"
+      - "schema.prisma"
+      - "*.ts"
+      - "*.js"
+
+  - id: schema-enum-migration-same-tx
+    name: Enum ADD VALUE with Usage in Same Migration
+    severity: error
+    type: regex
+    pattern:
+      - "ALTER TYPE.*ADD VALUE[^;]*;[^;]*INSERT"
+      - "ALTER TYPE.*ADD VALUE[^;]*;[^;]*UPDATE"
+    message: "New enum value cannot be used in same transaction as ALTER TYPE ADD VALUE."
+    fix_action: "Split into two separate migrations - add value first, then use it"
+    applies_to:
+      - "*.sql"
+
+  - id: schema-drop-column-no-backup
+    name: DROP COLUMN Without Safety Check
+    severity: warning
+    type: regex
+    pattern:
+      - 'DROP COLUMN(?! IF EXISTS)'
+      - 'DROP TABLE(?! IF EXISTS)'
+    message: "Destructive migration without IF EXISTS. Ensure rollback plan exists."
+    fix_action: "Add IF EXISTS, verify rollback script, backup data before running"
+    applies_to:
+      - "*.sql"
+
+  - id: schema-migration-loop-update
+    name: Migration with Await in Loop
+    severity: warning
+    type: regex
+    pattern:
+      - 'for\\s*\\([^)]*\\)\\s*\\{[^}]*await[^}]*update'
+      - '\\.forEach\\([^)]*async[^}]*await[^}]*update'
+      - '\\.map\\([^)]*async[^}]*await[^}]*update'
+    message: "Migration loops with await run N queries. Use single UPDATE statement."
+    fix_action: "Replace loop with single SQL UPDATE or use executeRaw with batching"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: schema-missing-unique-constraint
+    name: Email/Username Without Unique Constraint
+    severity: warning
+    type: regex
+    pattern:
+      - 'email\\s+String(?!.*@unique)'
+      - 'username\\s+String(?!.*@unique)'
+      - 'slug\\s+String(?!.*@unique)'
+    message: "Email/username/slug columns typically need unique constraints."
+    fix_action: "Add @unique or @@unique([column, deletedAt]) for soft delete"
+    applies_to:
+      - "*.prisma"
+      - "schema.prisma"
+
+  - id: schema-soft-delete-no-index
+    name: Soft Delete Column Without Index
+    severity: info
+    type: regex
+    pattern:
+      - 'deletedAt\\s+DateTime\\?(?![^}]*@@index.*deletedAt)'
+    message: "deletedAt column without index makes filtering deleted records slow."
+    fix_action: "Add @@index([deletedAt]) or partial index WHERE deletedAt IS NULL"
+    applies_to:
+      - "*.prisma"
+      - "schema.prisma"
