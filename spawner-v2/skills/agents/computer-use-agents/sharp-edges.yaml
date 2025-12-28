@@ -1,0 +1,738 @@
+# Sharp Edges - Computer Use Agents
+# The gotchas that cause computer use failures
+
+version: 1.0.0
+skill_id: computer-use-agents
+
+sharp_edges:
+  - id: prompt-injection-via-web
+    severity: critical
+    title: Web Content Can Hijack Your Agent
+    situation: Computer use agent browsing the web
+    symptom: |
+      Agent suddenly performs unexpected actions. Clicks malicious links.
+      Enters credentials on phishing sites. Downloads files it shouldn't.
+      Ignores your instructions and follows embedded commands instead.
+    why: |
+      "While all agents that process untrusted content are subject to prompt
+      injection risks, browser use amplifies this risk in two ways. First,
+      the attack surface is vast: every webpage, embedded document, advertisement,
+      and dynamically loaded script represents a potential vector for malicious
+      instructions. Second, browser agents can take many different actions—
+      navigating to URLs, filling forms, clicking buttons, downloading files—
+      that attackers can exploit."
+
+      Real attacks have already happened:
+      - "Microsoft Copilot agents were hijacked with emails containing malicious
+        instructions, which allowed attackers to extract entire CRM databases."
+      - "Google's Workspace services were manipulated—hidden prompts inside
+        calendar invites and emails tricked Gemini agents into deleting events
+        and exposing sensitive messages."
+
+      Even a 1% attack success rate represents meaningful risk at scale.
+    solution: |
+      ## Defense in depth - no single solution works
+
+      1. Sandboxing (most effective):
+         ```python
+         # Docker with strict isolation
+         docker run \
+             --security-opt no-new-privileges \
+             --cap-drop ALL \
+             --network none \  # No internet!
+             --read-only \
+             computer-use-agent
+         ```
+
+      2. Classifier-based detection:
+         ```python
+         def scan_for_injection(content: str) -> bool:
+             """Detect prompt injection attempts."""
+             patterns = [
+                 r"ignore.*instructions",
+                 r"disregard.*previous",
+                 r"new.*instructions",
+                 r"you are now",
+                 r"act as if",
+                 r"pretend to be",
+             ]
+             return any(re.search(p, content.lower()) for p in patterns)
+
+         # Check page content before processing
+         page_text = await page.text_content("body")
+         if scan_for_injection(page_text):
+             return {"error": "Potential injection detected"}
+         ```
+
+      3. User confirmation for sensitive actions:
+         ```python
+         SENSITIVE_ACTIONS = {"download", "submit", "login", "purchase"}
+
+         if action_type in SENSITIVE_ACTIONS:
+             if not await get_user_confirmation(action):
+                 return {"error": "User rejected action"}
+         ```
+
+      4. Scoped credentials:
+         - Never give agent access to all credentials
+         - Use temporary, limited tokens
+         - Revoke after task completion
+    detection_pattern:
+      - "browse"
+      - "web"
+      - "navigate"
+      - "url"
+
+  - id: coordinate-precision-detection
+    severity: medium
+    title: Vision Agents Click Exact Centers
+    situation: Agent clicking on UI elements
+    symptom: |
+      Agent's clicks are detectable as non-human. Websites may block or
+      CAPTCHA the agent. Anti-bot systems flag the interaction.
+    why: |
+      "When a vision model identifies a button, it calculates the center.
+      Click coordinates land at mathematically precise positions—often exact
+      element centers or grid-aligned pixel values. Humans don't click centers;
+      their click distributions follow a Gaussian pattern around targets."
+
+      The screenshot loop also creates detectable patterns:
+      "Predictable pauses. Vision agents are completely still during their
+      'thinking' phase. The pattern looks like: Action → Complete stillness
+      (1-5 seconds) → Action → Complete stillness → Action."
+
+      Sophisticated anti-bot systems detect:
+      - Perfect center clicks
+      - No mouse movement during "thinking"
+      - Consistent timing between actions
+      - Lack of micro-movements and hesitation
+    solution: |
+      ## Add human-like variance to actions
+
+      ```python
+      import random
+      import time
+
+      def humanized_click(x: int, y: int) -> tuple[int, int]:
+          """Add human-like variance to click coordinates."""
+          # Gaussian distribution around target
+          # Humans typically land within ~10px of target
+          x_offset = int(random.gauss(0, 5))
+          y_offset = int(random.gauss(0, 5))
+
+          return (x + x_offset, y + y_offset)
+
+      def humanized_delay():
+          """Add human-like delay between actions."""
+          # Humans have variable reaction times
+          base_delay = random.uniform(0.3, 0.8)
+          # Occasionally longer pauses (reading, thinking)
+          if random.random() < 0.2:
+              base_delay += random.uniform(0.5, 2.0)
+          time.sleep(base_delay)
+
+      def humanized_movement(from_pos: tuple, to_pos: tuple):
+          """Move mouse in curved path like human."""
+          # Bezier curve or similar
+          # Humans don't move in straight lines
+          steps = random.randint(10, 20)
+          for i in range(steps):
+              t = i / steps
+              # Simple curve approximation
+              x = from_pos[0] + (to_pos[0] - from_pos[0]) * t
+              y = from_pos[1] + (to_pos[1] - from_pos[1]) * t
+              # Add wobble
+              x += random.gauss(0, 2)
+              y += random.gauss(0, 2)
+              pyautogui.moveTo(int(x), int(y))
+              time.sleep(0.01)
+      ```
+
+      ## Rotate user agents and fingerprints
+
+      ```python
+      USER_AGENTS = [
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120...",
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/...",
+          # ... more realistic agents
+      ]
+
+      await page.set_extra_http_headers({
+          "User-Agent": random.choice(USER_AGENTS)
+      })
+      ```
+    detection_pattern:
+      - "click"
+      - "bot"
+      - "captcha"
+      - "detect"
+
+  - id: tricky-ui-elements
+    severity: high
+    title: Dropdowns, Scrollbars, and Drags Are Unreliable
+    situation: Agent interacting with complex UI elements
+    symptom: |
+      Agent fails to select dropdown options. Scroll doesn't work as expected.
+      Drag and drop completely fails. Hover menus disappear before clicking.
+    why: |
+      "Computer Use currently struggles with certain interface interactions,
+      particularly scrolling, dragging, and zooming operations. Some UI elements
+      (like dropdowns and scrollbars) might be tricky for Claude to manipulate."
+      - Anthropic documentation
+
+      Why these are hard:
+      1. Dropdowns: Options appear after click, need second click to select
+      2. Scrollbars: Small targets, need precise positioning
+      3. Drag: Requires coordinated mouse down, move, mouse up
+      4. Hover menus: Disappear when mouse moves away
+      5. Canvas elements: No semantic information visible
+
+      Vision models see pixels, not DOM structure. They don't "know" that
+      a dropdown is a dropdown - they have to infer from visual cues.
+    solution: |
+      ## Use keyboard alternatives when possible
+
+      ```python
+      # Instead of clicking dropdown, use keyboard
+      async def select_dropdown_option(page, dropdown_selector, option_text):
+          # Focus the dropdown
+          await page.click(dropdown_selector)
+          await asyncio.sleep(0.3)
+
+          # Use keyboard to find option
+          await page.keyboard.type(option_text[:3])  # Type first letters
+          await asyncio.sleep(0.2)
+          await page.keyboard.press("Enter")
+      ```
+
+      ## Break complex actions into steps
+
+      ```python
+      # Instead of drag-and-drop
+      async def reliable_drag(page, source, target):
+          # Step 1: Click and hold
+          await page.mouse.move(source["x"], source["y"])
+          await page.mouse.down()
+          await asyncio.sleep(0.2)
+
+          # Step 2: Move in steps
+          steps = 10
+          for i in range(steps):
+              x = source["x"] + (target["x"] - source["x"]) * i / steps
+              y = source["y"] + (target["y"] - source["y"]) * i / steps
+              await page.mouse.move(x, y)
+              await asyncio.sleep(0.05)
+
+          # Step 3: Release
+          await page.mouse.move(target["x"], target["y"])
+          await asyncio.sleep(0.1)
+          await page.mouse.up()
+      ```
+
+      ## Fall back to DOM access for web
+
+      ```python
+      # If vision fails, try direct DOM manipulation
+      async def robust_select(page, select_selector, value):
+          try:
+              # Try vision approach first
+              await vision_agent.select(select_selector, value)
+          except Exception:
+              # Fall back to direct DOM
+              await page.select_option(select_selector, value=value)
+      ```
+
+      ## Add verification after action
+
+      ```python
+      async def verified_scroll(page, direction):
+          # Get current scroll position
+          before = await page.evaluate("window.scrollY")
+
+          # Attempt scroll
+          await page.mouse.wheel(0, 500 if direction == "down" else -500)
+          await asyncio.sleep(0.3)
+
+          # Verify it worked
+          after = await page.evaluate("window.scrollY")
+          if before == after:
+              # Try alternative method
+              await page.keyboard.press("PageDown" if direction == "down" else "PageUp")
+      ```
+    detection_pattern:
+      - "dropdown"
+      - "scroll"
+      - "drag"
+      - "hover"
+      - "select"
+
+  - id: slow-compared-to-humans
+    severity: medium
+    title: Agents Are 2-5x Slower Than Humans
+    situation: Automating any computer task
+    symptom: |
+      Task that takes human 1 minute takes agent 3-5 minutes.
+      Users complain about speed. Timeouts occur.
+    why: |
+      "The technology can be slow compared to human operators, often requiring
+      multiple screenshots and analysis cycles."
+
+      Why so slow:
+      1. Screenshot capture: 100-500ms
+      2. Vision model inference: 1-5 seconds per screenshot
+      3. Action execution: 200-500ms
+      4. Wait for UI update: 500-1000ms
+      5. Total per action: 2-7 seconds
+
+      A task requiring 20 actions takes 40-140 seconds minimum.
+      Humans do the same actions in 20-30 seconds.
+    solution: |
+      ## Accept the tradeoff
+
+      Computer use is for:
+      - Tasks humans don't want to do (repetitive)
+      - Tasks that can run in background
+      - Tasks where accuracy > speed
+
+      ## Optimize where possible
+
+      ```python
+      # 1. Reduce screenshot resolution
+      SCREEN_SIZE = (1280, 800)  # Not 4K
+
+      # 2. Batch similar actions
+      # Instead of: type "hello", wait, type " world"
+      await page.type("hello world")
+
+      # 3. Parallelize independent tasks
+      # Run multiple sandboxed agents concurrently
+
+      # 4. Cache repeated computations
+      # If same screenshot, reuse analysis
+
+      # 5. Use smaller models for simple decisions
+      simple_model = "claude-haiku-..."  # For "is task done?"
+      complex_model = "claude-sonnet-..."  # For complex reasoning
+      ```
+
+      ## Set realistic expectations
+
+      ```python
+      # Estimate task duration
+      def estimate_duration(task_complexity: str) -> int:
+          """Estimate task duration in seconds."""
+          estimates = {
+              "simple": 30,    # Single page, few actions
+              "medium": 120,   # Multi-page, moderate actions
+              "complex": 300,  # Many pages, complex interactions
+          }
+          return estimates.get(task_complexity, 120)
+
+      # Inform users
+      estimated = estimate_duration("medium")
+      print(f"Estimated completion: {estimated // 60}m {estimated % 60}s")
+      ```
+    detection_pattern:
+      - "slow"
+      - "fast"
+      - "speed"
+      - "performance"
+
+  - id: context-window-exhaustion
+    severity: high
+    title: Screenshots Fill Up Context Window Fast
+    situation: Long-running computer use tasks
+    symptom: |
+      Agent forgets earlier steps. Starts repeating actions.
+      Errors increase as task progresses. Costs explode.
+    why: |
+      Each screenshot is ~1500-3000 tokens. A task with 30 screenshots
+      uses 45,000-90,000 tokens just for images - before any text.
+
+      Claude's context window is finite. When full:
+      - Older context gets dropped
+      - Agent loses memory of earlier steps
+      - Task coherence decreases
+
+      "Getting agents to make consistent progress across multiple context
+      windows remains an open problem. The core challenge is that they must
+      work in discrete sessions, and each new session begins with no memory
+      of what came before." - Anthropic engineering blog
+    solution: |
+      ## Implement context management
+
+      ```python
+      class ContextManager:
+          """Manage context window usage for computer use."""
+
+          MAX_SCREENSHOTS = 10  # Keep only recent screenshots
+          MAX_TOKENS = 100000
+
+          def __init__(self):
+              self.messages = []
+              self.screenshot_count = 0
+
+          def add_screenshot(self, screenshot_b64: str, description: str):
+              """Add screenshot with automatic pruning."""
+              self.screenshot_count += 1
+
+              # Keep only recent screenshots
+              if self.screenshot_count > self.MAX_SCREENSHOTS:
+                  self._prune_old_screenshots()
+
+              # Store with description for context
+              self.messages.append({
+                  "role": "user",
+                  "content": [
+                      {"type": "text", "text": description},
+                      {"type": "image", "source": {...}}
+                  ]
+              })
+
+          def _prune_old_screenshots(self):
+              """Remove old screenshots, keep text summaries."""
+              new_messages = []
+              screenshots_kept = 0
+
+              for msg in reversed(self.messages):
+                  if self._has_image(msg):
+                      if screenshots_kept < self.MAX_SCREENSHOTS:
+                          new_messages.insert(0, msg)
+                          screenshots_kept += 1
+                      else:
+                          # Convert to text summary
+                          summary = self._summarize_screenshot(msg)
+                          new_messages.insert(0, {
+                              "role": msg["role"],
+                              "content": summary
+                          })
+                  else:
+                      new_messages.insert(0, msg)
+
+              self.messages = new_messages
+
+          def _summarize_screenshot(self, msg) -> str:
+              """Summarize screenshot to text."""
+              # Extract any text description
+              for content in msg.get("content", []):
+                  if content.get("type") == "text":
+                      return f"[Previous screenshot: {content['text']}]"
+              return "[Previous screenshot - details pruned]"
+
+          def add_checkpoint(self):
+              """Create a checkpoint summary."""
+              summary = self._create_progress_summary()
+              self.messages.append({
+                  "role": "user",
+                  "content": f"CHECKPOINT: {summary}"
+              })
+      ```
+
+      ## Use checkpointing for long tasks
+
+      ```python
+      async def run_with_checkpoints(task: str, checkpoint_every: int = 10):
+          """Run task with periodic checkpoints."""
+          context = ContextManager()
+          step = 0
+
+          while not task_complete:
+              step += 1
+
+              # Take action...
+
+              if step % checkpoint_every == 0:
+                  # Create checkpoint
+                  context.add_checkpoint()
+
+                  # Optional: persist to disk
+                  save_checkpoint(context, step)
+      ```
+
+      ## Break into subtasks
+
+      ```python
+      # Instead of one 50-step task:
+      subtasks = [
+          "Navigate to the website and login",
+          "Find the settings page",
+          "Update the email address to ...",
+          "Save and verify the change"
+      ]
+
+      for subtask in subtasks:
+          result = await agent.run(subtask)
+          if not result["success"]:
+              handle_error(subtask, result)
+              break
+      ```
+    detection_pattern:
+      - "context"
+      - "memory"
+      - "forget"
+      - "long"
+      - "steps"
+
+  - id: cost-explosion
+    severity: high
+    title: Costs Can Explode Quickly
+    situation: Running computer use at scale
+    symptom: |
+      API bill is 10x higher than expected. Single task costs $5+ instead of $0.50.
+      Monthly costs reach thousands of dollars quickly.
+    why: |
+      Vision tokens are expensive. Each screenshot:
+      - ~2000-3000 tokens per image
+      - At $10/million tokens, that's $0.02-0.03 per screenshot
+      - Task with 30 screenshots = $0.60-0.90 just for images
+
+      But it compounds:
+      - Screenshots accumulate in context
+      - Model sees ALL previous screenshots each turn
+      - Turn 10 processes 10 screenshots = $0.20-0.30
+      - Turn 20 processes 20 screenshots = $0.40-0.60
+      - Quadratic growth!
+
+      Complex task: 50 turns × average 25 images in context = 1250 image tokens
+      Plus text = could easily hit $5-10 per task.
+    solution: |
+      ## Monitor and limit costs
+
+      ```python
+      class CostTracker:
+          """Track and limit computer use costs."""
+
+          # Anthropic pricing (approximate)
+          INPUT_COST_PER_1K = 0.003   # Text
+          OUTPUT_COST_PER_1K = 0.015
+          IMAGE_COST_PER_1K = 0.01    # Roughly
+
+          def __init__(self, max_cost_per_task: float = 1.0):
+              self.max_cost = max_cost_per_task
+              self.current_cost = 0.0
+              self.total_tokens = 0
+
+          def add_turn(
+              self,
+              input_tokens: int,
+              output_tokens: int,
+              image_tokens: int
+          ):
+              """Track cost of a single turn."""
+              cost = (
+                  input_tokens / 1000 * self.INPUT_COST_PER_1K +
+                  output_tokens / 1000 * self.OUTPUT_COST_PER_1K +
+                  image_tokens / 1000 * self.IMAGE_COST_PER_1K
+              )
+              self.current_cost += cost
+              self.total_tokens += input_tokens + output_tokens + image_tokens
+
+              if self.current_cost > self.max_cost:
+                  raise CostLimitExceeded(
+                      f"Cost limit exceeded: ${self.current_cost:.2f} > ${self.max_cost:.2f}"
+                  )
+
+              return cost
+
+      class CostLimitExceeded(Exception):
+          pass
+
+      # Usage
+      tracker = CostTracker(max_cost_per_task=2.0)
+
+      try:
+          for turn in turns:
+              tracker.add_turn(turn.input, turn.output, turn.images)
+      except CostLimitExceeded:
+          print("Task aborted due to cost limit")
+      ```
+
+      ## Reduce image costs
+
+      ```python
+      # 1. Lower resolution
+      SCREEN_SIZE = (1024, 768)  # Smaller = fewer tokens
+
+      # 2. JPEG instead of PNG (when quality ok)
+      screenshot.save(buffer, format="JPEG", quality=70)
+
+      # 3. Crop to relevant region
+      def crop_relevant(screenshot: Image, focus_area: tuple):
+          """Crop to area of interest."""
+          return screenshot.crop(focus_area)
+
+      # 4. Don't include screenshot every turn
+      if not needs_visual_update:
+          # Text-only turn
+          messages.append({"role": "user", "content": "Continue..."})
+      ```
+
+      ## Use cheaper models strategically
+
+      ```python
+      async def tiered_model_selection(task_complexity: str):
+          """Use appropriate model for task."""
+          if task_complexity == "simple":
+              return "claude-haiku-..."  # Cheapest
+          elif task_complexity == "medium":
+              return "claude-sonnet-4-20250514"  # Balanced
+          else:
+              return "claude-opus-4-5-..."  # Best but expensive
+      ```
+    detection_pattern:
+      - "cost"
+      - "price"
+      - "expensive"
+      - "bill"
+
+  - id: no-sandboxing
+    severity: critical
+    title: Running Agent on Your Actual Computer
+    situation: Testing or deploying computer use
+    symptom: |
+      Agent deletes important files. Sends emails from your account.
+      Posts on social media. Accesses sensitive documents.
+    why: |
+      Computer use agents make mistakes. They can:
+      - Misinterpret instructions
+      - Click wrong buttons
+      - Type in wrong fields
+      - Follow prompt injection attacks
+
+      Without sandboxing, these mistakes happen on your real system.
+      There's no undo for "agent sent email to all contacts" or
+      "agent deleted project folder."
+
+      "Autonomous agents that can access external systems and APIs
+      introduce new security risks. They may be vulnerable to prompt
+      injection attacks, unauthorized access to sensitive data, or
+      manipulation by malicious actors."
+    solution: |
+      ## ALWAYS use sandboxing
+
+      ```python
+      # Minimum viable sandbox: Docker with restrictions
+
+      docker run -it --rm \
+          --security-opt no-new-privileges \
+          --cap-drop ALL \
+          --network none \
+          --read-only \
+          --tmpfs /tmp \
+          --memory 2g \
+          --cpus 1 \
+          computer-use-sandbox
+      ```
+
+      ## Layer your defenses
+
+      ```python
+      # Defense 1: Docker isolation
+      # Defense 2: Non-root user
+      # Defense 3: Network restrictions
+      # Defense 4: Filesystem restrictions
+      # Defense 5: Resource limits
+      # Defense 6: Action confirmation
+      # Defense 7: Action logging
+
+      @dataclass
+      class SandboxConfig:
+          docker_image: str = "computer-use-sandbox:latest"
+          network: str = "none"  # or specific allowlist
+          readonly_root: bool = True
+          max_memory_mb: int = 2048
+          max_cpu: float = 1.0
+          max_runtime_seconds: int = 300
+          require_confirmation: list = field(default_factory=lambda: [
+              "download", "submit", "login", "delete"
+          ])
+          log_all_actions: bool = True
+      ```
+
+      ## Test in isolated environment first
+
+      ```python
+      class SandboxedTestRunner:
+          """Run tests in throwaway containers."""
+
+          async def run_test(self, test_task: str) -> dict:
+              # Spin up fresh container
+              container_id = await self.create_container()
+
+              try:
+                  # Run task
+                  result = await self.execute_in_container(container_id, test_task)
+
+                  # Capture state for verification
+                  state = await self.capture_container_state(container_id)
+
+                  return {
+                      "result": result,
+                      "final_state": state,
+                      "logs": await self.get_logs(container_id)
+                  }
+              finally:
+                  # Always destroy container
+                  await self.destroy_container(container_id)
+      ```
+    detection_pattern:
+      - "local"
+      - "my computer"
+      - "host"
+      - "direct"
+
+common_mistakes:
+  - mistake: "Running agent with full system access"
+    frequency: very_common
+    impact: "Data loss, security breach, embarrassing mistakes"
+    fix: "Always use Docker sandbox with restrictions"
+
+  - mistake: "No cost limits"
+    frequency: very_common
+    impact: "Unexpected $100+ API bills"
+    fix: "Set max_cost_per_task, monitor and alert"
+
+  - mistake: "Not handling UI failures"
+    frequency: common
+    impact: "Agent gets stuck, wastes time/money"
+    fix: "Add retries, alternative approaches, human escalation"
+
+  - mistake: "Ignoring prompt injection risk"
+    frequency: common
+    impact: "Agent compromised by malicious websites"
+    fix: "Network isolation, classifiers, confirmation gates"
+
+  - mistake: "No action logging"
+    frequency: common
+    impact: "Can't debug failures, no audit trail"
+    fix: "Log all actions with timestamps and screenshots"
+
+  - mistake: "Testing in production"
+    frequency: common
+    impact: "Mistakes affect real systems"
+    fix: "Use staging/sandbox environments for development"
+
+platform_gotchas:
+  anthropic_computer_use:
+    - "Beta flag required: betas=['computer-use-2024-10-22']"
+    - "Dropdowns and scrollbars are tricky"
+    - "Slower than humans, factor into UX"
+    - "High token usage from screenshots"
+
+  openai_operator:
+    - "$200/month tier currently required"
+    - "Browser-only, no desktop apps"
+    - "API access planned but not available yet"
+    - "Different action format than Anthropic"
+
+  playwright_mcp:
+    - "Requires MCP server running"
+    - "Works with structured DOM, not pixels"
+    - "Faster but less flexible than vision"
+    - "Web only, no native apps"
+
+  screenagent:
+    - "Requires significant setup"
+    - "Quality depends on VLM choice"
+    - "Self-hosted, needs infrastructure"
+    - "Less reliable than commercial options"

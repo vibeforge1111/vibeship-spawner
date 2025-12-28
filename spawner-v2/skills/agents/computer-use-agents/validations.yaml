@@ -1,0 +1,412 @@
+# Validations - Computer Use Agents
+# Quality checks for computer use implementations
+
+version: 1.0.0
+skill_id: computer-use-agents
+
+validations:
+  # Security Checks (Critical)
+  - id: no-sandboxing
+    name: Computer Use Without Sandbox
+    severity: error
+    description: Computer use agents MUST run in sandboxed environments
+    pattern: |
+      (pyautogui|xdotool|computer_use|ComputerUse)
+    anti_pattern: |
+      (docker|container|sandbox|isolated|virtualized)
+    message: "Computer use without sandboxing detected. Use Docker containers with restrictions."
+    autofix: false
+
+  - id: unrestricted-network
+    name: Sandbox With Full Network Access
+    severity: error
+    description: Sandboxed agents should have restricted network access
+    pattern: |
+      docker run.*--network\s+host
+    message: "Sandbox has full network access. Use --network=none or specific allowlist."
+    autofix: false
+
+  - id: root-in-container
+    name: Running as Root in Container
+    severity: error
+    description: Container agents should run as non-root user
+    pattern: |
+      docker run(?!.*--user).*computer
+    anti_pattern: |
+      (--user|USER\s+\w+)
+    message: "Container running as root. Add --user flag or USER directive in Dockerfile."
+    autofix: false
+
+  - id: no-capability-drops
+    name: Container Without Capability Drops
+    severity: warning
+    description: Containers should drop unnecessary capabilities
+    pattern: |
+      docker run(?!.*--cap-drop).*computer
+    message: "Container has full capabilities. Add --cap-drop ALL."
+    autofix: false
+
+  - id: no-seccomp
+    name: Container Without Seccomp Profile
+    severity: warning
+    description: Containers should use seccomp profiles for syscall filtering
+    pattern: |
+      docker run(?!.*--security-opt).*computer
+    message: "No security options set. Consider --security-opt seccomp:profile.json"
+    autofix: false
+
+  # Resource Limits
+  - id: no-step-limit
+    name: No Maximum Step Limit
+    severity: warning
+    description: Computer use loops should have maximum step limits
+    pattern: |
+      while\s+(True|not\s+done)
+    anti_pattern: |
+      (max_steps|step_limit|step\s*<|step\s*<=)
+    message: "Infinite loop risk. Add max_steps limit (recommended: 50)."
+    autofix: false
+
+  - id: no-timeout
+    name: No Execution Timeout
+    severity: warning
+    description: Computer use should have timeout limits
+    pattern: |
+      (agent\.run|execute_task|run_task)
+    anti_pattern: |
+      (timeout|max_runtime|time_limit)
+    message: "No timeout on execution. Add timeout (recommended: 5-10 minutes)."
+    autofix: false
+
+  - id: no-memory-limit
+    name: Container Without Memory Limit
+    severity: warning
+    description: Containers should have memory limits to prevent DoS
+    pattern: |
+      docker run(?!.*--memory).*computer
+    message: "No memory limit on container. Add --memory 2g or similar."
+    autofix: false
+
+  # Cost Controls
+  - id: no-cost-tracking
+    name: No Cost Tracking
+    severity: warning
+    description: Computer use should track API costs
+    pattern: |
+      (computer_use|ComputerUse|screenshot)
+    anti_pattern: |
+      (cost|token|usage|billing|budget)
+    message: "No cost tracking. Monitor token usage to prevent bill surprises."
+    autofix: false
+
+  - id: no-cost-limit
+    name: No Maximum Cost Limit
+    severity: info
+    description: Consider adding cost limits per task
+    pattern: |
+      (run_task|execute_task|agent\.run)
+    anti_pattern: |
+      (max_cost|cost_limit|budget)
+    message: "Consider adding max_cost_per_task to prevent expensive runaway tasks."
+    autofix: false
+
+  # Action Safety
+  - id: no-confirmation-gate
+    name: No User Confirmation for Sensitive Actions
+    severity: warning
+    description: Sensitive actions should require user confirmation
+    pattern: |
+      (purchase|payment|login|delete|submit|download)
+    anti_pattern: |
+      (confirm|approval|user_approve|require_confirmation)
+    message: "Sensitive actions without confirmation. Add confirmation gates."
+    autofix: false
+
+  - id: no-action-logging
+    name: No Action Logging
+    severity: warning
+    description: All agent actions should be logged
+    pattern: |
+      (execute_action|perform_action|click|type|key_press)
+    anti_pattern: |
+      (log|audit|record|track)
+    message: "Actions not logged. Add logging for debugging and auditing."
+    autofix: false
+
+  - id: dangerous-bash-commands
+    name: Dangerous Bash Commands Not Blocked
+    severity: error
+    description: Dangerous shell commands should be blocked
+    pattern: |
+      subprocess\.run\(.*shell=True
+    anti_pattern: |
+      (sanitize|validate|blocklist|dangerous_patterns)
+    message: "Shell execution without command validation. Block dangerous commands."
+    autofix: false
+
+  # Vision/Screenshot Handling
+  - id: full-resolution-screenshots
+    name: Full Resolution Screenshots
+    severity: info
+    description: Consider reducing screenshot resolution for token efficiency
+    pattern: |
+      screenshot\(\)
+    anti_pattern: |
+      (resize|scale|thumbnail|resolution|1280|1024)
+    message: "Consider resizing screenshots (1280x800) to reduce token usage."
+    autofix: false
+
+  - id: no-screenshot-pruning
+    name: No Screenshot Pruning in Context
+    severity: warning
+    description: Old screenshots should be pruned to manage context window
+    pattern: |
+      messages\.append.*image
+    anti_pattern: |
+      (prune|trim|limit|max_screenshots|remove_old)
+    message: "Screenshots accumulating in context. Implement pruning strategy."
+    autofix: false
+
+  # Error Handling
+  - id: no-action-recovery
+    name: No Recovery From Failed Actions
+    severity: warning
+    description: Agents should recover from failed UI interactions
+    pattern: |
+      (click|type|scroll)
+    anti_pattern: |
+      (retry|recover|fallback|try.*except|error.*handling)
+    message: "No error recovery for UI actions. Add retry logic and fallbacks."
+    autofix: false
+
+  - id: no-task-failure-handling
+    name: No Task Failure Handling
+    severity: warning
+    description: Tasks should handle overall failure gracefully
+    pattern: |
+      (run_task|execute_task)
+    anti_pattern: |
+      (finally|cleanup|on_failure|error_handler)
+    message: "No failure handling. Add cleanup and error reporting."
+    autofix: false
+
+code_smells:
+  - id: hardcoded-coordinates
+    name: Hardcoded Screen Coordinates
+    description: Coordinates should come from vision model, not hardcoded
+    pattern: |
+      click\(\d+,\s*\d+\)
+    suggestion: "Use vision model to find elements dynamically"
+
+  - id: no-wait-after-action
+    name: No Wait After UI Action
+    description: UI needs time to update after actions
+    pattern: |
+      click\(.*\)\s*\n\s*[^#\n]*click
+    suggestion: "Add delay or wait_for_load_state after actions"
+
+  - id: live-credentials-in-code
+    name: Credentials in Agent Code
+    description: Never hardcode credentials in agent code
+    pattern: |
+      (password|api_key|secret)\s*=\s*["']
+    suggestion: "Use environment variables or secrets manager"
+
+  - id: no-verification-after-action
+    name: No Verification After Action
+    description: Verify that actions had intended effect
+    pattern: |
+      click\(.*\)\s*\n\s*(?!.*screenshot|.*verify|.*assert)
+    suggestion: "Take screenshot and verify action succeeded"
+
+best_practices:
+  - id: sandbox-first
+    name: Always Start With Sandbox
+    check: |
+      Computer use must run in isolated environments.
+    recommendation: |
+      # Minimum viable sandbox
+      docker run -it --rm \
+          --security-opt no-new-privileges \
+          --cap-drop ALL \
+          --network none \
+          --read-only \
+          --tmpfs /tmp \
+          --memory 2g \
+          --cpus 1 \
+          --user 1000:1000 \
+          computer-use-agent:latest
+
+  - id: tiered-security
+    name: Implement Tiered Security Model
+    check: |
+      Different actions need different security levels.
+    recommendation: |
+      class ActionSecurity:
+          # Severity levels
+          AUTO_APPROVE = {"navigate", "scroll", "screenshot"}
+          LOG_ONLY = {"click", "type"}
+          CONFIRM_REQUIRED = {"download", "submit", "login"}
+          BLOCK_UNLESS_EXPLICIT = {"purchase", "delete", "send"}
+
+          def check(self, action_type: str, context: dict) -> tuple[bool, str]:
+              if action_type in self.BLOCK_UNLESS_EXPLICIT:
+                  if not context.get("explicitly_allowed"):
+                      return False, "Blocked by policy"
+              elif action_type in self.CONFIRM_REQUIRED:
+                  if not self.get_user_confirmation(action_type, context):
+                      return False, "User rejected"
+              # Log everything
+              self.log_action(action_type, context)
+              return True, "approved"
+
+  - id: comprehensive-logging
+    name: Log Everything
+    check: |
+      All actions should be logged for debugging and auditing.
+    recommendation: |
+      @dataclass
+      class ActionLog:
+          timestamp: datetime
+          action_type: str
+          parameters: dict
+          screenshot_before: Optional[str]  # Path
+          screenshot_after: Optional[str]
+          success: bool
+          error: Optional[str]
+          duration_ms: int
+
+      class ActionLogger:
+          def log(self, log_entry: ActionLog):
+              # 1. Write to disk (append JSONL)
+              with open(self.log_file, "a") as f:
+                  f.write(json.dumps(log_entry.to_dict()) + "\n")
+
+              # 2. Alert on failures
+              if not log_entry.success:
+                  self.alert_on_failure(log_entry)
+
+              # 3. Track metrics
+              self.metrics.record(log_entry)
+
+  - id: cost-budget
+    name: Implement Cost Budgets
+    check: |
+      Prevent runaway costs with per-task limits.
+    recommendation: |
+      class CostBudget:
+          def __init__(self, max_per_task: float = 1.0, max_daily: float = 50.0):
+              self.max_per_task = max_per_task
+              self.max_daily = max_daily
+              self.task_cost = 0.0
+              self.daily_cost = self.load_daily_cost()
+
+          def add_cost(self, tokens: int, is_image: bool = False):
+              cost = self.calculate_cost(tokens, is_image)
+              self.task_cost += cost
+              self.daily_cost += cost
+
+              if self.task_cost > self.max_per_task:
+                  raise CostLimitExceeded(f"Task limit: ${self.task_cost:.2f}")
+
+              if self.daily_cost > self.max_daily:
+                  raise CostLimitExceeded(f"Daily limit: ${self.daily_cost:.2f}")
+
+  - id: graceful-degradation
+    name: Implement Graceful Degradation
+    check: |
+      When vision fails, have fallback strategies.
+    recommendation: |
+      class RobustActionExecutor:
+          async def execute(self, action: Action) -> Result:
+              strategies = [
+                  self.vision_based_execute,
+                  self.dom_based_execute,     # Fallback for web
+                  self.keyboard_based_execute, # Fallback using shortcuts
+                  self.request_human_help,     # Ultimate fallback
+              ]
+
+              for strategy in strategies:
+                  try:
+                      result = await strategy(action)
+                      if result.success:
+                          return result
+                  except Exception as e:
+                      self.log_strategy_failure(strategy.__name__, e)
+                      continue
+
+              return Result(success=False, error="All strategies failed")
+
+  - id: context-management
+    name: Manage Context Window Carefully
+    check: |
+      Screenshots fill context fast. Manage actively.
+    recommendation: |
+      class ContextManager:
+          MAX_SCREENSHOTS = 10
+
+          def add_message(self, message: dict):
+              self.messages.append(message)
+
+              # Count screenshots
+              screenshot_count = sum(
+                  1 for m in self.messages
+                  for c in m.get("content", [])
+                  if isinstance(c, dict) and c.get("type") == "image"
+              )
+
+              # Prune if too many
+              if screenshot_count > self.MAX_SCREENSHOTS:
+                  self.prune_old_screenshots()
+
+          def prune_old_screenshots(self):
+              """Replace old screenshots with text summaries."""
+              kept = 0
+              for i, msg in enumerate(self.messages):
+                  if self.has_image(msg):
+                      if kept < self.MAX_SCREENSHOTS:
+                          kept += 1
+                      else:
+                          # Convert to summary
+                          self.messages[i] = self.summarize_message(msg)
+
+security_checklist:
+  pre_deployment:
+    - "Agent runs in Docker container with restrictions"
+    - "Network access limited to necessary domains"
+    - "Running as non-root user"
+    - "Capabilities dropped (--cap-drop ALL)"
+    - "Seccomp profile applied"
+    - "Resource limits set (memory, CPU, time)"
+    - "Dangerous commands blocked"
+
+  runtime:
+    - "All actions logged with timestamps"
+    - "Sensitive actions require confirmation"
+    - "Cost tracking enabled with limits"
+    - "Error handling and recovery in place"
+    - "Timeout on all operations"
+
+  post_task:
+    - "Logs reviewed for anomalies"
+    - "Cost within budget"
+    - "No unauthorized actions"
+    - "Container destroyed after use"
+
+cost_guidelines:
+  per_task_limits:
+    simple: "$0.50"
+    medium: "$2.00"
+    complex: "$5.00"
+
+  daily_limits:
+    development: "$20"
+    staging: "$50"
+    production: "$200"
+
+  optimization_tips:
+    - "Resize screenshots to 1280x800 or smaller"
+    - "Prune old screenshots from context"
+    - "Use cheaper models for simple decisions"
+    - "Cache repeated vision analyses"
+    - "Batch similar operations"
