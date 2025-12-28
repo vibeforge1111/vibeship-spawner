@@ -1,0 +1,344 @@
+# Security Hardening Validations
+# Automated checks to catch security vulnerabilities before they ship
+
+validations:
+  - id: sec-hardcoded-secret
+    name: Hardcoded Secret in Code
+    severity: error
+    type: regex
+    pattern:
+      - "password\\s*[=:]\\s*['\"][^$\\{][^'\"]{4,}['\"]"
+      - "api_key\\s*[=:]\\s*['\"][^$\\{][^'\"]{8,}['\"]"
+      - "secret\\s*[=:]\\s*['\"][^$\\{][^'\"]{8,}['\"]"
+      - "token\\s*[=:]\\s*['\"][^$\\{][^'\"]{8,}['\"]"
+      - 'AWS_SECRET_ACCESS_KEY\s*[=:]\s*["\'][A-Za-z0-9/+=]{20,}'
+      - 'PRIVATE_KEY\s*[=:]\s*["\'][A-Za-z0-9/+=]{20,}'
+    message: "Hardcoded secret detected. Will be visible in version control."
+    fix_action: "Move to environment variable and use process.env"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.py"
+      - "**/*.go"
+
+  - id: sec-sql-template-literal
+    name: SQL with Template Literal
+    severity: error
+    type: regex
+    pattern:
+      - '`SELECT.*\\$\\{'
+      - '`INSERT.*\\$\\{'
+      - '`UPDATE.*\\$\\{'
+      - '`DELETE.*\\$\\{'
+      - '"SELECT.*" \\+ '
+      - '"INSERT.*" \\+ '
+      - '"UPDATE.*" \\+ '
+      - 'f"SELECT.*\\{'
+      - "f'SELECT.*\\{"
+    message: "SQL query using string interpolation. Potential SQL injection vulnerability."
+    fix_action: "Use parameterized queries ($1, ?, etc.) instead of string interpolation"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.py"
+
+  - id: sec-eval-usage
+    name: Eval Function Usage
+    severity: error
+    type: regex
+    pattern:
+      - 'eval\s*\('
+      - 'new\s+Function\s*\('
+      - 'setTimeout\s*\(\s*["\']'
+      - 'setInterval\s*\(\s*["\']'
+      - 'exec\s*\(\s*[`"\'].*\\$'
+    message: "eval() or similar dynamic code execution detected. High risk of code injection."
+    fix_action: "Replace with safe alternatives (JSON.parse, mathjs, explicit logic)"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: sec-dangerous-html
+    name: Dangerous HTML Insertion
+    severity: error
+    type: regex
+    pattern:
+      - '\\.innerHTML\\s*='
+      - 'dangerouslySetInnerHTML'
+      - 'v-html\\s*='
+      - '\\.outerHTML\\s*='
+      - 'document\\.write'
+    message: "Direct HTML insertion may cause XSS vulnerability."
+    fix_action: "Use textContent, sanitize with DOMPurify, or use framework's safe methods"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.tsx"
+      - "**/*.jsx"
+      - "**/*.vue"
+
+  - id: sec-weak-password-hash
+    name: Weak Password Hashing
+    severity: error
+    type: regex
+    pattern:
+      - "createHash\\s*\\(\\s*['\"]md5['\"]\\)"
+      - "createHash\\s*\\(\\s*['\"]sha1['\"]\\)"
+      - "createHash\\s*\\(\\s*['\"]sha256['\"]\\).*password"
+      - 'hashlib\\.md5\\('
+      - 'hashlib\\.sha1\\('
+      - 'hashlib\\.sha256\\(.*password'
+    message: "Using weak or fast hash for passwords. Use bcrypt or argon2 instead."
+    fix_action: "Replace with bcrypt.hash() or argon2.hash() for password hashing"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.py"
+
+  - id: sec-cors-wildcard
+    name: CORS Wildcard with Credentials
+    severity: error
+    type: regex
+    pattern:
+      - "origin:\\s*['\"]\\*['\"].*credentials:\\s*true"
+      - "credentials:\\s*true.*origin:\\s*['\"]\\*['\"]"
+      - "Access-Control-Allow-Origin.*\\*.*credentials"
+    message: "CORS wildcard with credentials allows any site to steal user data."
+    fix_action: "Specify exact allowed origins instead of wildcard when using credentials"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: sec-jwt-weak-secret
+    name: JWT with Weak Secret
+    severity: error
+    type: regex
+    pattern:
+      - "jwt\\.sign.*['\"][a-zA-Z0-9]{1,20}['\"]"
+      - "JWT_SECRET.*\\|\\|.*['\"]"
+      - "secret.*['\"]password['\"]"
+      - "secret.*['\"]secret['\"]"
+    message: "JWT signed with weak or hardcoded secret."
+    fix_action: "Use a strong (32+ char) secret from environment variable"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: sec-console-sensitive
+    name: Console Logging Sensitive Data
+    severity: warning
+    type: regex
+    pattern:
+      - 'console\\.log.*password'
+      - 'console\\.log.*token'
+      - 'console\\.log.*secret'
+      - 'console\\.log.*apiKey'
+      - 'console\\.log.*credentials'
+      - 'print\\(.*password'
+    message: "Potentially logging sensitive data. Remove before production."
+    fix_action: "Remove console.log with sensitive data or redact values"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.py"
+
+  - id: sec-no-csrf-protection
+    name: Form Without CSRF Protection
+    severity: warning
+    type: regex
+    pattern:
+      - '<form.*method=["\']post["\'](?![^>]*csrf)'
+      - '<form.*method=["\']POST["\'](?![^>]*csrf)'
+    message: "Form POST without CSRF token. Vulnerable to cross-site request forgery."
+    fix_action: "Add CSRF token to form or use SameSite cookies"
+    applies_to:
+      - "**/*.html"
+      - "**/*.jsx"
+      - "**/*.tsx"
+      - "**/*.vue"
+
+  - id: sec-http-not-https
+    name: HTTP URL in Security Context
+    severity: warning
+    type: regex
+    pattern:
+      - 'http://(?!localhost|127\\.0\\.0\\.1)'
+      - "fetch\\s*\\(['\"]http://"
+      - "axios\\s*\\.[a-z]+\\s*\\(['\"]http://"
+    message: "Using HTTP instead of HTTPS. Data transmitted in plain text."
+    fix_action: "Use HTTPS for all external URLs"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: sec-mass-assignment
+    name: Mass Assignment Vulnerability
+    severity: warning
+    type: regex
+    pattern:
+      - 'data:\\s*\\{\\s*\\.\\.\\.req\\.body'
+      - 'update\\(.*\\.\\.\\.req\\.body'
+      - 'create\\(.*\\.\\.\\.req\\.body'
+      - 'Object\\.assign.*req\\.body'
+    message: "Spreading request body directly into database operation. Mass assignment risk."
+    fix_action: "Explicitly whitelist allowed fields or use Zod schema validation"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: sec-path-traversal
+    name: Path Traversal Vulnerability
+    severity: error
+    type: regex
+    pattern:
+      - 'readFile.*\\$\\{.*\\}'
+      - 'readFileSync.*\\$\\{.*\\}'
+      - 'path\\.join.*req\\.'
+      - 'fs\\..*\\(.*req\\.'
+      - 'open\\(.*req\\.'
+    message: "User input used in file path. Path traversal vulnerability risk."
+    fix_action: "Validate and sanitize paths, use path.basename(), check for .."
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.py"
+
+  - id: sec-command-injection
+    name: Command Injection
+    severity: error
+    type: regex
+    pattern:
+      - 'exec\\s*\\(.*\\$\\{.*\\}'
+      - 'execSync.*\\$\\{.*\\}'
+      - 'spawn.*\\$\\{.*\\}'
+      - 'child_process.*\\$\\{'
+      - 'subprocess\\..*\\(.*f"'
+      - 'os\\.system\\('
+    message: "User input in shell command. Command injection vulnerability."
+    fix_action: "Use spawn with array args, sanitize input, or avoid shell commands"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.py"
+
+  - id: sec-insecure-cookie
+    name: Insecure Cookie Settings
+    severity: warning
+    type: regex
+    pattern:
+      - 'cookie.*secure:\\s*false'
+      - 'cookie.*httpOnly:\\s*false'
+      - 'set-cookie(?!.*Secure)(?!.*HttpOnly)'
+    message: "Cookie missing secure flags. May be vulnerable to theft."
+    fix_action: "Set secure: true, httpOnly: true, sameSite: 'strict'"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: sec-open-redirect
+    name: Open Redirect Vulnerability
+    severity: warning
+    type: regex
+    pattern:
+      - 'redirect\\(.*req\\.'
+      - 'location\\s*=.*req\\.'
+      - 'window\\.location.*\\$\\{'
+      - 'res\\.redirect\\(.*query\\.'
+    message: "Redirect URL from user input. Open redirect vulnerability."
+    fix_action: "Validate redirect URL against allowlist of domains"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: sec-debug-enabled
+    name: Debug Mode in Production Code
+    severity: warning
+    type: regex
+    pattern:
+      - 'DEBUG\\s*=\\s*True'
+      - 'DEBUG\\s*=\\s*true'
+      - "app\\.debug\\s*=\\s*True"
+      - "FLASK_DEBUG\\s*=\\s*1"
+    message: "Debug mode may be enabled. Exposes sensitive information."
+    fix_action: "Ensure debug mode is disabled in production configuration"
+    applies_to:
+      - "**/*.py"
+      - "**/*.js"
+      - "**/*.ts"
+
+  - id: sec-no-rate-limit
+    name: Authentication Without Rate Limiting
+    severity: info
+    type: regex
+    pattern:
+      - 'login(?!.*rateLimit|Limit|throttle)'
+      - 'authenticate(?!.*rateLimit|Limit|throttle)'
+      - '/auth/(?!.*rateLimit|Limit|throttle)'
+    message: "Authentication endpoint may lack rate limiting. Brute force risk."
+    fix_action: "Add rate limiting middleware to authentication endpoints"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: sec-no-authorization-check
+    name: Resource Access Without Authorization
+    severity: warning
+    type: regex
+    pattern:
+      - 'findUnique.*id.*params(?!.*userId|ownerId|user)'
+      - 'findFirst.*id.*params(?!.*userId|ownerId|user)'
+      - 'deleteOne.*id.*params(?!.*userId|ownerId|user)'
+    message: "Resource fetched by ID without ownership check. IDOR vulnerability risk."
+    fix_action: "Add user ownership filter to query (where: { userId: req.user.id })"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: sec-weak-random
+    name: Weak Random Number Generation
+    severity: warning
+    type: regex
+    pattern:
+      - 'Math\\.random\\(\\).*token'
+      - 'Math\\.random\\(\\).*secret'
+      - 'Math\\.random\\(\\).*password'
+      - 'Math\\.random\\(\\).*id'
+    message: "Math.random() is not cryptographically secure for tokens/secrets."
+    fix_action: "Use crypto.randomBytes() or crypto.randomUUID()"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: sec-sensitive-url-param
+    name: Sensitive Data in URL Parameter
+    severity: warning
+    type: regex
+    pattern:
+      - '\\?.*password='
+      - '\\?.*token='
+      - '\\?.*api_key='
+      - '\\?.*secret='
+      - 'query\\.password'
+      - 'query\\.token'
+    message: "Sensitive data in URL query parameter. Visible in logs and history."
+    fix_action: "Use POST body or headers for sensitive data instead of URL parameters"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: sec-xxe-vulnerability
+    name: XML Parser Without Protection
+    severity: warning
+    type: regex
+    pattern:
+      - 'parseXML(?!.*disableEntities)'
+      - 'xml2js(?!.*explicitCharkey)'
+      - 'DOMParser.*parseFromString(?!.*text/html)'
+      - 'etree\\.parse\\('
+    message: "XML parser may be vulnerable to XXE attacks."
+    fix_action: "Disable external entities and DTD processing in XML parser"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.py"
+

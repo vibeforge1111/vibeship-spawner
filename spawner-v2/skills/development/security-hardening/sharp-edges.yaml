@@ -1,0 +1,626 @@
+# Security Hardening Sharp Edges
+# Real production gotchas that cause breaches, data leaks, and security incidents
+
+sharp_edges:
+  - id: jwt-secret-in-code
+    summary: JWT secret hardcoded or weak - any attacker can forge tokens
+    severity: critical
+    situation: Using JWT for authentication with secret in source code
+    why: |
+      Developer copies JWT example: `jwt.sign(payload, 'secret123')`.
+      Secret in git. Anyone with repo access (employees, contractors, leaked dumps)
+      can forge any JWT. Become admin. Access any account. No logs show compromise.
+      Changing secret logs out all users. Incident response nightmare.
+    solution: |
+      // WRONG: Hardcoded or weak secret
+      const token = jwt.sign(payload, 'secret123');
+      const token = jwt.sign(payload, 'my-super-secret-key');
+      const token = jwt.sign(payload, process.env.JWT_SECRET || 'fallback');
+
+      // RIGHT: Strong, environment-sourced secret
+      import crypto from 'crypto';
+
+      // Generate a strong secret (run once, store in environment)
+      // node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+
+      // Load with validation
+      const JWT_SECRET = process.env.JWT_SECRET;
+      if (!JWT_SECRET || JWT_SECRET.length < 32) {
+        throw new Error('JWT_SECRET must be at least 32 characters');
+      }
+
+      const token = jwt.sign(payload, JWT_SECRET, {
+        algorithm: 'HS256',
+        expiresIn: '1h',
+      });
+
+      // BETTER: Use asymmetric keys (RS256)
+      // Private key signs, public key verifies
+      // Compromised public key can't forge tokens
+      const privateKey = fs.readFileSync('./private.pem');
+      const token = jwt.sign(payload, privateKey, { algorithm: 'RS256' });
+
+      // Rotate secrets: Support multiple secrets during rotation
+      const secrets = [process.env.JWT_SECRET_NEW, process.env.JWT_SECRET_OLD].filter(Boolean);
+    symptoms:
+      - JWT secret in source code
+      - Same secret across environments
+      - Short or dictionary-word secret
+      - 'secret' or 'password' as secret
+    detection_pattern: "jwt\\.sign.*['\"][a-zA-Z0-9]{4,30}['\"]|JWT_SECRET.*\\|\\|"
+
+  - id: sql-injection-template-literals
+    summary: Template literals in SQL queries enable SQL injection
+    severity: critical
+    situation: Using JavaScript template strings to build SQL queries
+    why: |
+      Developer thinks: "I'm using backticks, it's modern!"
+      `SELECT * FROM users WHERE id = ${userId}`.
+      userId from user input. Attacker sends: `1; DROP TABLE users;--`.
+      Entire table gone. Or: `1 UNION SELECT password FROM users--`.
+      Dumps all passwords. Backticks are just string formatting, not protection.
+    solution: |
+      // WRONG: Template literals with user input
+      const query = `SELECT * FROM users WHERE email = '${email}'`;
+      const query = `DELETE FROM posts WHERE id = ${postId}`;
+      db.raw(`SELECT * FROM ${tableName}`);  // Even table name!
+
+      // RIGHT: Parameterized queries - ALWAYS
+      // PostgreSQL (pg)
+      const result = await client.query(
+        'SELECT * FROM users WHERE email = $1',
+        [email]
+      );
+
+      // MySQL
+      const [rows] = await connection.execute(
+        'SELECT * FROM users WHERE email = ?',
+        [email]
+      );
+
+      // Prisma - automatically safe
+      const user = await prisma.user.findUnique({
+        where: { email },  // email is parameterized
+      });
+
+      // Prisma raw - use template tag
+      const users = await prisma.$queryRaw`
+        SELECT * FROM users WHERE email = ${email}
+      `;  // This IS safe - Prisma's template tag parameterizes
+
+      // Knex - safe by default
+      const user = await knex('users').where({ email }).first();
+
+      // For dynamic column/table names (rare legitimate need):
+      const allowedColumns = ['name', 'email', 'created_at'];
+      const column = allowedColumns.includes(sortBy) ? sortBy : 'created_at';
+      const query = `SELECT * FROM users ORDER BY ${column}`;  // Allowlist validated
+    symptoms:
+      - Template literals in SQL
+      - String concatenation in queries
+      - User input in table/column names
+      - Raw SQL without parameters
+    detection_pattern: '`SELECT.*\\$\\{|`INSERT.*\\$\\{|`UPDATE.*\\$\\{|`DELETE.*\\$\\{'
+
+  - id: password-plain-text-storage
+    summary: Passwords stored in plain text or reversible encryption
+    severity: critical
+    situation: Storing user passwords without proper hashing
+    why: |
+      Database breached. All passwords readable. Users reuse passwords.
+      Attackers try credentials on other sites. Mass account takeovers.
+      Or: Passwords "encrypted" with AES. Key in environment. Key leaked.
+      All passwords decrypted. Encryption is reversible. Hashing isn't.
+    solution: |
+      // WRONG: Plain text
+      await db.user.create({ data: { email, password } });
+
+      // WRONG: Reversible encryption
+      const encrypted = encrypt(password);  // Can be decrypted!
+      await db.user.create({ data: { email, password: encrypted } });
+
+      // WRONG: Weak hashing
+      const hashed = crypto.createHash('md5').update(password).digest('hex');
+      const hashed = crypto.createHash('sha256').update(password).digest('hex');
+      // Fast hashes enable billions of guesses per second
+
+      // RIGHT: bcrypt (or argon2)
+      import bcrypt from 'bcrypt';
+
+      const SALT_ROUNDS = 12;  // ~250ms on modern hardware
+
+      async function hashPassword(password: string): Promise<string> {
+        return bcrypt.hash(password, SALT_ROUNDS);
+      }
+
+      async function verifyPassword(password: string, hash: string): Promise<boolean> {
+        return bcrypt.compare(password, hash);
+      }
+
+      // Registration
+      const hashedPassword = await hashPassword(password);
+      await db.user.create({ data: { email, password: hashedPassword } });
+
+      // Login
+      const user = await db.user.findUnique({ where: { email } });
+      const isValid = user && await verifyPassword(password, user.password);
+
+      // RIGHT: Argon2 (newer, recommended)
+      import argon2 from 'argon2';
+
+      const hash = await argon2.hash(password, {
+        type: argon2.argon2id,
+        memoryCost: 65536,  // 64 MB
+        timeCost: 3,
+        parallelism: 4,
+      });
+
+      const isValid = await argon2.verify(hash, password);
+    symptoms:
+      - Password column is VARCHAR without hash prefix
+      - Using MD5 or SHA for passwords
+      - Encrypt/decrypt functions for passwords
+      - Passwords recoverable by support
+    detection_pattern: 'createHash.*password|password.*=.*password|encrypt.*password'
+
+  - id: insecure-direct-object-reference
+    summary: User can access any resource by guessing/changing ID
+    severity: high
+    situation: API returns resource by ID without checking ownership
+    why: |
+      API: GET /api/invoices/123. Returns invoice 123.
+      User changes to /api/invoices/124. Gets someone else's invoice.
+      Sequential IDs make enumeration trivial. Attacker downloads entire database.
+      "But they'd have to guess the ID" - UUIDs don't fix this either if no auth check.
+    solution: |
+      // WRONG: Fetch by ID without authorization
+      app.get('/api/invoices/:id', async (req, res) => {
+        const invoice = await db.invoice.findUnique({
+          where: { id: req.params.id },
+        });
+        return res.json(invoice);  // Anyone can access any invoice!
+      });
+
+      // WRONG: UUID doesn't fix it
+      // Attacker finds one UUID in email, API response, logs
+      // Or brute forces - UUIDs are guessable with enough requests
+
+      // RIGHT: Always verify ownership/access
+      app.get('/api/invoices/:id', authenticate, async (req, res) => {
+        const invoice = await db.invoice.findFirst({
+          where: {
+            id: req.params.id,
+            // CRITICAL: Filter by user
+            userId: req.user.id,
+          },
+        });
+
+        if (!invoice) {
+          // Don't reveal if it exists but unauthorized
+          throw new NotFoundError('Invoice not found');
+        }
+
+        return res.json(invoice);
+      });
+
+      // For shared resources, check permissions
+      app.get('/api/documents/:id', authenticate, async (req, res) => {
+        const document = await db.document.findFirst({
+          where: {
+            id: req.params.id,
+            OR: [
+              { ownerId: req.user.id },
+              { sharedWith: { has: req.user.id } },
+              { visibility: 'public' },
+            ],
+          },
+        });
+
+        if (!document) {
+          throw new NotFoundError('Document not found');
+        }
+
+        return res.json(document);
+      });
+
+      // For admin access, explicit role check
+      if (!hasRole(req.user, 'admin')) {
+        query.where.userId = req.user.id;  // Non-admins see only their data
+      }
+    symptoms:
+      - Fetch by ID without user filter
+      - Sequential numeric IDs in URLs
+      - Different responses for "not found" vs "forbidden"
+      - No authorization middleware
+    detection_pattern: 'findUnique.*id.*(?!.*userId|ownerId|user\\.id)'
+
+  - id: mass-assignment-vulnerability
+    summary: User can modify fields they shouldn't by sending extra data
+    severity: high
+    situation: Spreading user input directly into database operations
+    why: |
+      API accepts { name: "John" } to update user. Developer: `update({ ...req.body })`.
+      Attacker sends { name: "John", isAdmin: true }. Now they're admin.
+      Or { name: "John", emailVerified: true }. Bypass email verification.
+      Request body has fields you didn't expect.
+    solution: |
+      // WRONG: Spread all input into query
+      app.put('/api/user', async (req, res) => {
+        await db.user.update({
+          where: { id: req.user.id },
+          data: req.body,  // Attacker adds: { isAdmin: true }
+        });
+      });
+
+      // WRONG: Destructuring without validation
+      const { name, email, isAdmin } = req.body;  // isAdmin came from attacker!
+      await db.user.update({
+        where: { id: req.user.id },
+        data: { name, email, isAdmin },
+      });
+
+      // RIGHT: Explicit field allowlist
+      app.put('/api/user', async (req, res) => {
+        const allowedFields = ['name', 'email', 'avatar'];
+        const data = {};
+
+        for (const field of allowedFields) {
+          if (req.body[field] !== undefined) {
+            data[field] = req.body[field];
+          }
+        }
+
+        await db.user.update({
+          where: { id: req.user.id },
+          data,
+        });
+      });
+
+      // RIGHT: Schema validation with explicit fields
+      import { z } from 'zod';
+
+      const UpdateUserSchema = z.object({
+        name: z.string().min(1).max(100).optional(),
+        email: z.string().email().optional(),
+        avatar: z.string().url().optional(),
+      });
+      // isAdmin, emailVerified NOT in schema - can't be set
+
+      app.put('/api/user', async (req, res) => {
+        const data = UpdateUserSchema.parse(req.body);
+        await db.user.update({
+          where: { id: req.user.id },
+          data,  // Only validated fields
+        });
+      });
+
+      // RIGHT: Different schemas for different roles
+      const UserUpdateSchema = z.object({ name: z.string() });
+      const AdminUserUpdateSchema = UserUpdateSchema.extend({
+        isAdmin: z.boolean(),
+        emailVerified: z.boolean(),
+      });
+
+      const schema = req.user.isAdmin ? AdminUserUpdateSchema : UserUpdateSchema;
+      const data = schema.parse(req.body);
+    symptoms:
+      - Spread operator with request body
+      - No input validation
+      - Admin fields in user-facing schemas
+      - Object.assign with user input
+    detection_pattern: 'data:\\s*\\{\\s*\\.\\.\\.req\\.body|update\\(.*\\.\\.\\.'
+
+  - id: sensitive-data-in-error
+    summary: Error messages reveal sensitive information to attackers
+    severity: medium
+    situation: Exposing stack traces, SQL queries, or system details in errors
+    why: |
+      Production error: "Column 'password_hash' doesn't exist".
+      Attacker now knows database schema. Or: Stack trace with file paths.
+      Attacker knows framework, versions, file structure. Targeted attack.
+      "PostgresError: relation 'users' doesn't exist" - table enumeration.
+    solution: |
+      // WRONG: Send raw errors to client
+      app.get('/api/data', async (req, res) => {
+        try {
+          const data = await fetchData();
+          res.json(data);
+        } catch (error) {
+          res.status(500).json({
+            error: error.message,  // "Invalid column 'users.secret_key'"
+            stack: error.stack,    // Full file paths!
+          });
+        }
+      });
+
+      // RIGHT: Generic client errors, detailed server logs
+      class AppError extends Error {
+        constructor(
+          public statusCode: number,
+          public message: string,
+          public internalMessage?: string,
+        ) {
+          super(message);
+        }
+      }
+
+      // Error handler middleware
+      app.use((error, req, res, next) => {
+        // Log full details for debugging
+        console.error({
+          error: error.message,
+          stack: error.stack,
+          userId: req.user?.id,
+          path: req.path,
+          correlationId: req.correlationId,
+        });
+
+        // Generic response to client
+        if (error instanceof AppError) {
+          return res.status(error.statusCode).json({
+            error: error.message,
+            correlationId: req.correlationId,
+          });
+        }
+
+        // Unknown errors get generic message
+        res.status(500).json({
+          error: 'An unexpected error occurred',
+          correlationId: req.correlationId,  // For support lookup
+        });
+      });
+
+      // RIGHT: Different behavior per environment
+      if (process.env.NODE_ENV === 'development') {
+        res.json({ error: error.message, stack: error.stack });
+      } else {
+        res.json({ error: 'Internal server error', correlationId });
+      }
+    symptoms:
+      - Stack traces in API responses
+      - SQL errors visible to users
+      - File paths in error messages
+      - Package versions in errors
+    detection_pattern: 'error\\.stack|error\\.message.*json|catch.*res\\.json.*error'
+
+  - id: timing-attack-auth
+    summary: Authentication timing reveals valid usernames
+    severity: medium
+    situation: Login response time differs for valid vs invalid emails
+    why: |
+      User doesn't exist: Return immediately with "Invalid credentials" (fast).
+      User exists, wrong password: Hash password, compare, return "Invalid credentials" (slow).
+      Attacker measures response times. 50ms vs 200ms reveals valid emails.
+      Enumerate all valid accounts. Targeted phishing, credential stuffing.
+    solution: |
+      // WRONG: Early return reveals user existence
+      async function login(email: string, password: string) {
+        const user = await db.user.findUnique({ where: { email } });
+
+        if (!user) {
+          return { error: 'Invalid credentials' };  // Fast path!
+        }
+
+        const valid = await bcrypt.compare(password, user.password);  // Slow
+        if (!valid) {
+          return { error: 'Invalid credentials' };
+        }
+
+        return { token: createToken(user) };
+      }
+
+      // RIGHT: Constant-time response
+      async function login(email: string, password: string) {
+        const user = await db.user.findUnique({ where: { email } });
+
+        // Always run bcrypt, even if user doesn't exist
+        // Use a pre-computed hash that matches nothing
+        const hashToCompare = user?.password ?? DUMMY_HASH;
+        const valid = await bcrypt.compare(password, hashToCompare);
+
+        // Only succeed if both user exists AND password valid
+        if (!user || !valid) {
+          return { error: 'Invalid credentials' };
+        }
+
+        return { token: createToken(user) };
+      }
+
+      // Pre-compute a valid bcrypt hash for timing consistency
+      const DUMMY_HASH = await bcrypt.hash('never-matches', 12);
+
+      // RIGHT: Rate limiting also helps
+      // Attacker can't make enough requests for timing analysis
+      import rateLimit from 'express-rate-limit';
+
+      const loginLimiter = rateLimit({
+        windowMs: 15 * 60 * 1000,  // 15 minutes
+        max: 5,  // 5 attempts per IP
+      });
+    symptoms:
+      - Early return for invalid user
+      - No hash comparison for non-existent user
+      - Login time varies significantly
+      - No rate limiting on login
+    detection_pattern: 'if.*!user.*return|findUnique.*!.*bcrypt'
+
+  - id: cors-wildcard-credentials
+    summary: CORS with wildcard origin and credentials allows any site to steal data
+    severity: high
+    situation: Misconfigured CORS allowing credential-bearing requests from anywhere
+    why: |
+      API sets: `Access-Control-Allow-Origin: *` and `credentials: true`.
+      Any website can make requests with user's cookies. Attacker's site
+      calls your API, browser sends session cookie, attacker gets response.
+      Entire session hijacked from evil.com. User just had to visit.
+    solution: |
+      // WRONG: Wildcard with credentials
+      app.use(cors({
+        origin: '*',  // Any origin
+        credentials: true,  // But also send cookies
+        // This doesn't actually work (browser blocks), but signals misconfiguration
+      }));
+
+      // WRONG: Reflecting origin without validation
+      app.use((req, res, next) => {
+        res.header('Access-Control-Allow-Origin', req.headers.origin);  // Trust all!
+        res.header('Access-Control-Allow-Credentials', 'true');
+        next();
+      });
+
+      // RIGHT: Explicit allowed origins
+      const allowedOrigins = [
+        'https://myapp.com',
+        'https://www.myapp.com',
+        process.env.NODE_ENV === 'development' && 'http://localhost:3000',
+      ].filter(Boolean);
+
+      app.use(cors({
+        origin: (origin, callback) => {
+          // Allow requests with no origin (mobile apps, curl)
+          if (!origin) return callback(null, true);
+
+          if (allowedOrigins.includes(origin)) {
+            callback(null, true);
+          } else {
+            callback(new Error('Not allowed by CORS'));
+          }
+        },
+        credentials: true,
+      }));
+
+      // RIGHT: For public APIs, no credentials
+      app.use(cors({
+        origin: '*',
+        credentials: false,  // No cookies sent
+      }));
+      // Fine for public read-only APIs
+
+      // RIGHT: Different CORS for different routes
+      // Public API
+      app.use('/api/public', cors({ origin: '*' }));
+
+      // Private API
+      app.use('/api/private', cors({
+        origin: allowedOrigins,
+        credentials: true,
+      }));
+    symptoms:
+      - Origin wildcard with credentials
+      - Reflecting request origin
+      - No origin validation
+      - Same CORS for all endpoints
+    detection_pattern: 'origin.*\\*.*credentials.*true|req\\.headers\\.origin.*allow'
+
+  - id: eval-user-input
+    summary: eval() or similar on user input enables code execution
+    severity: critical
+    situation: Using eval, new Function, or vm.runInContext with user data
+    why: |
+      Developer builds dynamic calculation: `eval("price * " + quantity)`.
+      Attacker sends quantity: `1; process.exit()` or worse.
+      Full code execution. Read files, access database, pivot to other systems.
+      Same for: new Function(), vm.runInContext(), child_process with user input.
+    solution: |
+      // WRONG: eval with user input
+      const result = eval(`${expression}`);  // Attacker: process.exit()
+
+      // WRONG: new Function with user input
+      const calc = new Function('x', `return ${userFormula}`);
+
+      // WRONG: Template rendering with code
+      const template = `Hello ${eval(nameVar)}`;
+
+      // RIGHT: For math, use a safe parser
+      import { evaluate } from 'mathjs';
+
+      // mathjs evaluates math expressions safely
+      const result = evaluate('2 * price + tax', { price: 100, tax: 10 });
+
+      // RIGHT: For dynamic logic, use configuration
+      const CALCULATIONS = {
+        discount: (price, percent) => price * (1 - percent / 100),
+        tax: (price, rate) => price * (1 + rate),
+      };
+
+      const fn = CALCULATIONS[req.body.type];
+      if (!fn) throw new ValidationError('Invalid calculation type');
+      const result = fn(req.body.price, req.body.value);
+
+      // RIGHT: For templates, use safe templating
+      import Handlebars from 'handlebars';
+
+      const template = Handlebars.compile('Hello {{name}}');
+      const result = template({ name: userInput });
+      // No code execution possible
+
+      // RIGHT: If truly dynamic, sandbox heavily
+      // But prefer not to at all - rethink the design
+    symptoms:
+      - eval() in codebase
+      - new Function() with variables
+      - User input in template evaluation
+      - Dynamic code execution
+    detection_pattern: 'eval\\(|new Function\\(|vm\\.run'
+
+  - id: session-fixation
+    summary: Session ID not regenerated after login allows hijacking
+    severity: high
+    situation: Same session ID used before and after authentication
+    why: |
+      Attacker gets session ID (from URL, predictable generation, sniffing).
+      Sends link to victim: yoursite.com?session=attacker-controlled-id.
+      Victim logs in. Session ID stays the same. Attacker now has authenticated session.
+      Or: Attacker creates session, waits for someone to log in with it.
+    solution: |
+      // WRONG: Keep same session across login
+      app.post('/login', async (req, res) => {
+        const user = await authenticate(req.body);
+        req.session.userId = user.id;  // Same session ID as before login!
+        res.json({ success: true });
+      });
+
+      // RIGHT: Regenerate session on authentication
+      app.post('/login', async (req, res) => {
+        const user = await authenticate(req.body);
+
+        // Destroy old session, create new one
+        req.session.regenerate((err) => {
+          if (err) throw err;
+          req.session.userId = user.id;
+          res.json({ success: true });
+        });
+      });
+
+      // RIGHT: Also regenerate on privilege escalation
+      app.post('/sudo', requireAuth, async (req, res) => {
+        await verifyAdminCredentials(req.body);
+
+        // New session for elevated privileges
+        req.session.regenerate((err) => {
+          req.session.userId = req.user.id;
+          req.session.isAdmin = true;
+          res.json({ success: true });
+        });
+      });
+
+      // RIGHT: Secure session configuration
+      app.use(session({
+        secret: process.env.SESSION_SECRET,
+        resave: false,
+        saveUninitialized: false,  // Don't create session until needed
+        cookie: {
+          secure: true,      // HTTPS only
+          httpOnly: true,    // No JS access
+          sameSite: 'strict',
+          maxAge: 3600000,   // 1 hour
+        },
+        genid: () => crypto.randomUUID(),  // Strong random IDs
+      }));
+    symptoms:
+      - No session.regenerate() on login
+      - Session ID in URLs
+      - Same session before/after login
+      - Predictable session IDs
+    detection_pattern: 'session\\.userId.*=(?!.*regenerate)'
+
