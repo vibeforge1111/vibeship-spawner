@@ -1,0 +1,339 @@
+# Validations - Agent Evaluation
+# Quality checks for evaluation implementations
+
+version: 1.0.0
+skill_id: agent-evaluation
+
+validations:
+  # Eval Coverage Checks
+  - id: no-evals
+    name: Agent Without Evaluation
+    severity: error
+    description: Agents should have evaluation coverage
+    pattern: |
+      (Agent|agent|AgentExecutor|create_react_agent)
+    anti_pattern: |
+      (test|eval|evaluate|benchmark|assert)
+    message: "Agent without tests. Add evaluation for reliability."
+    autofix: false
+
+  - id: single-turn-only
+    name: Only Single-Turn Tests
+    severity: warning
+    description: Multi-turn agents need multi-turn evaluation
+    pattern: |
+      def test.*agent.*invoke\s*\(
+    anti_pattern: |
+      (conversation|multi.?turn|turns|messages.*\[)
+    message: "Only single-turn tests. Add multi-turn conversation tests."
+    autofix: false
+
+  # LLM Judge Checks
+  - id: same-model-judge
+    name: Same Model for Generation and Judgment
+    severity: warning
+    description: Using same model family causes self-enhancement bias
+    pattern: |
+      # Manual check: compare generator and judge models
+    message: "Consider using different model family for LLM judge to reduce bias."
+    autofix: false
+
+  - id: no-judge-prompt-tuning
+    name: Default LLM Judge Prompt
+    severity: info
+    description: Custom prompts improve judgment quality
+    pattern: |
+      load_evaluator\(.*\)
+    anti_pattern: |
+      (prompt|criteria|rubric)
+    message: "Using default evaluator. Consider custom prompt/rubric for your use case."
+    autofix: false
+
+  # Test Quality Checks
+  - id: no-expected-output
+    name: Test Without Expected Output
+    severity: warning
+    description: Tests should have expected outputs or criteria
+    pattern: |
+      agent\.(invoke|run)\s*\([^)]+\)
+    anti_pattern: |
+      (expected|assert|should|must|verify)
+    message: "Agent call without verification. Add expected output or assertion."
+    autofix: false
+
+  - id: hardcoded-test-input
+    name: Only Hardcoded Test Inputs
+    severity: info
+    description: Consider data-driven tests from real usage
+    pattern: |
+      def test.*:.*input.*=.*["']
+    message: "Hardcoded test inputs. Consider loading from dataset for broader coverage."
+    autofix: false
+
+  # Environment Checks
+  - id: no-state-isolation
+    name: Tests Without State Isolation
+    severity: warning
+    description: Tests should have isolated state
+    pattern: |
+      def test.*agent
+    anti_pattern: |
+      (fixture|setup|teardown|mock|patch|isolat)
+    message: "Tests may share state. Add fixtures for isolation."
+    autofix: false
+
+  - id: live-api-in-tests
+    name: Live API Calls in Tests
+    severity: warning
+    description: Tests should mock external APIs for reliability
+    pattern: |
+      def test.*:.*\n.*requests\.(get|post)|aiohttp|httpx
+    anti_pattern: |
+      (mock|patch|vcr|cassette|fixture)
+    message: "Live API in tests causes flakiness. Use mocks or recorded responses."
+    autofix: false
+
+  # Metric Checks
+  - id: single-metric
+    name: Only One Evaluation Metric
+    severity: info
+    description: Use multiple metrics for comprehensive evaluation
+    pattern: |
+      (accuracy|score|result)
+    anti_pattern: |
+      (accuracy.*and|metrics.*\{|latency.*cost)
+    message: "Consider multiple metrics: accuracy, latency, cost, user satisfaction."
+    autofix: false
+
+code_smells:
+  - id: eval-not-in-ci
+    name: Evaluation Not in CI/CD
+    description: Evals should run automatically
+    pattern: |
+      def test_.*eval|def evaluate
+    suggestion: "Add to CI pipeline, block deployment on failure"
+
+  - id: no-regression-tests
+    name: No Regression Test Cases
+    description: Failures should become test cases
+    pattern: |
+      test_cases\s*=
+    suggestion: "Add real failures as regression test cases"
+
+  - id: no-adversarial-tests
+    name: Only Happy Path Tests
+    description: Include edge cases and adversarial inputs
+    pattern: |
+      test_cases.*\[\s*\{.*input
+    suggestion: "Add: empty input, very long input, injection attempts, emoji"
+
+best_practices:
+  - id: tiered-evaluation
+    name: Implement Tiered Evaluation
+    check: |
+      Different stages need different evaluation depth.
+    recommendation: |
+      # Pre-commit: Fast (20 cases, <2 min)
+      FAST_CASES = [
+          {"input": "core case 1", "expected": "..."},
+          # ... 20 essential cases
+      ]
+
+      # PR merge: Standard (100 cases, <10 min)
+      STANDARD_CASES = load_dataset("standard")
+
+      # Nightly: Comprehensive (1000+ cases)
+      FULL_CASES = load_dataset("comprehensive")
+
+      # CI configuration
+      stages:
+        pre_commit:
+          cases: fast
+          threshold: 0.95
+          timeout: 2m
+
+        pr_merge:
+          cases: standard
+          threshold: 0.85
+          timeout: 10m
+
+        nightly:
+          cases: full
+          report: true
+
+  - id: classic-framework
+    name: Use CLASSic Metrics
+    check: |
+      Enterprise agents need comprehensive metrics.
+    recommendation: |
+      @dataclass
+      class CLASSicMetrics:
+          # Cost
+          cost_per_task: float
+
+          # Latency
+          p50_latency: float
+          p95_latency: float
+
+          # Accuracy
+          task_completion: float
+          factual_accuracy: float
+
+          # Stability
+          consistency: float  # Same input → same output
+          error_rate: float
+
+          # Security
+          injection_resistance: float
+
+      def evaluate_agent(agent, test_cases):
+          results = [run_with_metrics(agent, tc) for tc in test_cases]
+          return aggregate_classic(results)
+
+  - id: multi-turn-eval
+    name: Implement Multi-Turn Evaluation
+    check: |
+      Conversational agents need conversation-level testing.
+    recommendation: |
+      multi_turn_cases = [
+          {
+              "id": "booking-happy-path",
+              "turns": [
+                  {"role": "user", "content": "Book a flight to Paris"},
+                  {"role": "user", "content": "Next Tuesday"},
+                  {"role": "user", "content": "Economy class"},
+              ],
+              "expected_outcome": "Flight booked",
+              "max_turns": 6,
+          },
+      ]
+
+      def test_multi_turn(agent, case):
+          conversation = []
+          for turn in case["turns"]:
+              conversation.append(turn)
+              response = agent.chat(conversation)
+              conversation.append(response)
+
+              if len(conversation) > case["max_turns"] * 2:
+                  return {"pass": False, "reason": "Too many turns"}
+
+          # Evaluate final outcome
+          outcome = evaluate_outcome(conversation, case["expected_outcome"])
+          return {"pass": outcome.success, "conversation": conversation}
+
+  - id: robust-llm-judge
+    name: Design Robust LLM Judge
+    check: |
+      LLM judges need bias mitigation.
+    recommendation: |
+      ROBUST_EVAL_PROMPT = '''
+      Evaluate the agent response. Be objective:
+      - Length does not indicate quality
+      - Concise and correct > verbose and padded
+      - Focus on accuracy and helpfulness
+
+      Score using this rubric (0-5 points total):
+      +1: Addresses the user's question
+      +1: Factually correct
+      +1: Appropriate level of detail
+      +1: Actionable or conclusive
+      +1: Professional tone
+
+      Think step-by-step before scoring.
+
+      Question: {question}
+      Response: {response}
+      Reference: {reference}
+
+      Analysis (think step-by-step):
+      '''
+
+      # Use panel of judges
+      judges = [
+          ChatOpenAI(model="gpt-4o"),
+          ChatAnthropic(model="claude-sonnet-4-20250514"),
+      ]
+
+      def robust_evaluate(response):
+          scores = [judge.score(response) for judge in judges]
+          return statistics.median(scores)
+
+  - id: production-sampling
+    name: Sample Production Data for Evals
+    check: |
+      Real user behavior differs from synthetic tests.
+    recommendation: |
+      async def create_production_eval_set():
+          # Sample recent interactions
+          samples = await db.query('''
+              SELECT input, output, feedback_score
+              FROM agent_logs
+              WHERE timestamp > now() - interval '30 days'
+              AND feedback_score IS NOT NULL
+              ORDER BY RANDOM()
+              LIMIT 200
+          ''')
+
+          # Sanitize PII
+          sanitized = []
+          for s in samples:
+              clean = sanitize_pii(s)
+              if is_valid_test_case(clean):
+                  sanitized.append(clean)
+
+          # Categorize
+          test_set = {
+              "high_satisfaction": [s for s in sanitized if s.score >= 4],
+              "low_satisfaction": [s for s in sanitized if s.score <= 2],
+              "edge_cases": [s for s in sanitized if is_unusual(s)],
+          }
+
+          return test_set
+
+metric_targets:
+  accuracy:
+    excellent: ">95%"
+    good: ">85%"
+    acceptable: ">75%"
+    poor: "<75%"
+
+  latency_p95:
+    excellent: "<1s"
+    good: "<3s"
+    acceptable: "<5s"
+    poor: ">5s"
+
+  cost_per_task:
+    excellent: "<$0.05"
+    good: "<$0.10"
+    acceptable: "<$0.25"
+    poor: ">$0.50"
+
+  consistency:
+    excellent: ">95% (same input → same output)"
+    good: ">85%"
+    acceptable: ">75%"
+    poor: "<75%"
+
+testing_checklist:
+  pre_launch:
+    - "20+ core test cases covering happy paths"
+    - "Error case coverage (empty, invalid, adversarial)"
+    - "Multi-turn conversation tests"
+    - "Latency benchmarks"
+    - "Cost estimates"
+    - "Security tests (injection, jailbreak)"
+
+  ci_cd:
+    - "Fast eval suite (<5 min) on every commit"
+    - "Standard suite (<15 min) on PR merge"
+    - "Deployment blocked on threshold failure"
+    - "Regression tests from production failures"
+
+  production:
+    - "Online evaluation on sample of traffic"
+    - "User satisfaction tracking"
+    - "Error rate monitoring"
+    - "Cost tracking per task"
+    - "Automatic alert on metric degradation"

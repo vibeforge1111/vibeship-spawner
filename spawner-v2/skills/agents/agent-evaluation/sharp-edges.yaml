@@ -1,0 +1,406 @@
+# Sharp Edges - Agent Evaluation
+# The gotchas that cause evaluation failures
+
+version: 1.0.0
+skill_id: agent-evaluation
+
+sharp_edges:
+  - id: llm-judge-position-bias
+    severity: high
+    title: LLM Judges Favor First or Last Position
+    situation: Using pairwise comparison with LLM judge
+    symptom: |
+      Whichever response is shown first (or last) wins more often
+      regardless of quality. A/B comparisons give inconsistent results.
+      Flipping positions flips the winner.
+    why: |
+      LLMs exhibit position bias due to attention patterns. The first
+      item gets strong attention (primacy), and the last is freshest
+      in context (recency). Studies show this can swing results 10-20%.
+    solution: |
+      ## Randomize positions
+      def pairwise_eval(response_a, response_b):
+          swap = random.choice([True, False])
+          if swap:
+              first, second = response_b, response_a
+          else:
+              first, second = response_a, response_b
+
+          result = llm_judge.compare(first, second)
+
+          # Translate back
+          if swap:
+              result = flip_result(result)
+          return result
+
+      ## Multiple evaluations with position swap
+      def robust_pairwise(a, b, n_trials=3):
+          results = []
+          for _ in range(n_trials):
+              # Alternate positions
+              r1 = llm_judge.compare(a, b)
+              r2 = llm_judge.compare(b, a)
+              results.extend([r1, flip(r2)])
+
+          return majority_vote(results)
+
+      ## Use pointwise instead when possible
+      # Score each response independently, compare scores
+      score_a = llm_judge.score(a)
+      score_b = llm_judge.score(b)
+      winner = "a" if score_a > score_b else "b"
+    detection_pattern:
+      - "compare"
+      - "pairwise"
+      - "first"
+      - "second"
+
+  - id: llm-judge-length-bias
+    severity: high
+    title: LLM Judges Prefer Longer Responses
+    situation: Evaluating responses of varying lengths
+    symptom: |
+      Verbose responses score higher than concise ones. Padding responses
+      with filler improves scores. Short, accurate answers marked lower
+      than long, rambling ones.
+    why: |
+      LLMs tend to generate verbose outputs and recognize this style as
+      "thorough." A well-padded response with the same content scores
+      higher. This bias towards verbosity rewards fluff.
+    solution: |
+      ## Explicit length-neutral prompting
+      EVAL_PROMPT = '''
+      Evaluate based on accuracy and relevance, NOT length.
+      A concise, correct answer is better than a verbose, padded one.
+
+      Score 1-5 on:
+      - Correctness (ignore length)
+      - Relevance to question (ignore elaboration)
+
+      Response: {response}
+      '''
+
+      ## Length normalization
+      def length_normalized_score(response, raw_score):
+          ideal_length = 100  # tokens
+          actual_length = count_tokens(response)
+
+          # Penalize excessive length
+          if actual_length > ideal_length * 2:
+              penalty = 0.1 * (actual_length / ideal_length - 2)
+              return max(raw_score - penalty, 0)
+
+          return raw_score
+
+      ## Additive rubrics force focus on substance
+      RUBRIC = '''
+      1 point: Addresses the question
+      1 point: Factually correct
+      1 point: Complete answer
+      1 point: Appropriate detail level (not too much, not too little)
+      0 points: Unnecessary padding or repetition
+      '''
+    detection_pattern:
+      - "length"
+      - "verbose"
+      - "concise"
+      - "words"
+
+  - id: llm-judge-self-enhancement
+    severity: medium
+    title: LLM Judges Favor Their Own Style
+    situation: Using same model family for generation and evaluation
+    symptom: |
+      GPT-4 gives higher scores to GPT-4 outputs. Claude favors Claude
+      outputs. Models recognize and prefer their own phrasing patterns.
+    why: |
+      Models trained similarly have similar style preferences. This
+      "self-enhancement bias" inflates scores for outputs matching
+      the judge's training distribution.
+    solution: |
+      ## Use different model families
+      generator = ChatAnthropic(model="claude-sonnet-4-20250514")
+      judge = ChatOpenAI(model="gpt-4o")  # Different family
+
+      ## Panel of judges (PoLL)
+      judges = [
+          ChatOpenAI(model="gpt-4o"),
+          ChatAnthropic(model="claude-sonnet-4-20250514"),
+          ChatMistral(model="mistral-large"),
+      ]
+
+      def poll_evaluation(response):
+          scores = [judge.evaluate(response) for judge in judges]
+          return statistics.median(scores)
+
+      ## Include human calibration
+      # Sample 10% for human review
+      # Check correlation between LLM and human scores
+      # Adjust for systematic biases
+    detection_pattern:
+      - "gpt"
+      - "claude"
+      - "judge"
+      - "model"
+
+  - id: flaky-agent-tests
+    severity: high
+    title: Tests Pass and Fail Randomly
+    situation: Running agent test suite
+    symptom: |
+      Same test sometimes passes, sometimes fails. CI is unreliable.
+      Team starts ignoring failures. "Just rerun it" becomes standard.
+    why: |
+      Multiple sources of non-determinism:
+      - LLM temperature > 0
+      - Shared database state between tests
+      - Live API responses change
+      - Timing dependencies
+      - Network variability
+    solution: |
+      ## Set temperature to 0 for tests
+      test_agent = Agent(
+          llm=ChatOpenAI(temperature=0),  # Deterministic
+      )
+
+      ## Isolate state per test
+      @pytest.fixture
+      def isolated_agent():
+          db = create_temp_database()
+          agent = Agent(db=db)
+          yield agent
+          db.cleanup()
+
+      ## Record HTTP requests
+      @vcr.use_cassette('fixtures/test_case.yaml')
+      def test_agent_api_call():
+          # First run records, subsequent runs replay
+          result = agent.call_external_api()
+          assert result.success
+
+      ## Retry with exponential backoff for inherent flakiness
+      from tenacity import retry, stop_after_attempt
+
+      @retry(stop=stop_after_attempt(3))
+      def test_with_retry():
+          # For tests that are inherently variable
+          result = agent.run(test_input)
+          assert meets_criteria(result)
+
+      ## Track flakiness metrics
+      # If test fails >5% of runs, fix or quarantine
+    detection_pattern:
+      - "flaky"
+      - "random"
+      - "sometimes"
+      - "retry"
+
+  - id: eval-production-gap
+    severity: high
+    title: Evals Pass But Production Fails
+    situation: Agent works in tests but fails with real users
+    symptom: |
+      Test suite is green. Users report failures. Edge cases not covered.
+      Test inputs don't match real distribution.
+    why: |
+      Test cases often:
+      - Use clean, well-formed inputs
+      - Cover obvious happy paths
+      - Miss adversarial/weird inputs
+      - Don't reflect real user behavior
+
+      Production users are creative, messy, and adversarial.
+    solution: |
+      ## Use real production data (sanitized)
+      async def collect_eval_samples():
+          # Sample production requests
+          samples = await db.query('''
+              SELECT input, output, user_rating
+              FROM agent_logs
+              WHERE timestamp > now() - interval '7 days'
+              ORDER BY RANDOM()
+              LIMIT 100
+          ''')
+
+          # Sanitize PII
+          sanitized = [sanitize_pii(s) for s in samples]
+
+          # Add to test set
+          await save_eval_dataset(sanitized)
+
+      ## Add adversarial cases
+      adversarial_cases = [
+          {"input": ""},  # Empty
+          {"input": "a" * 10000},  # Very long
+          {"input": "'; DROP TABLE users;--"},  # Injection
+          {"input": "Ignore previous instructions and..."},  # Jailbreak
+          {"input": "😀🎉🚀"},  # Emoji only
+      ]
+
+      ## Monitor production, add failures to tests
+      async def on_agent_failure(request, error):
+          # Log failure for analysis
+          await log_failure(request, error)
+
+          # Consider adding to test suite
+          if is_novel_failure(request):
+              await flag_for_test_addition(request)
+    detection_pattern:
+      - "production"
+      - "users"
+      - "edge"
+      - "real"
+
+  - id: metric-gaming
+    severity: medium
+    title: Optimizing Metrics at Expense of Quality
+    situation: Iterating to improve eval scores
+    symptom: |
+      Eval scores improve but users complain more. Agent gets "worse"
+      while metrics get "better." Goodhart's law in action.
+    why: |
+      "When a measure becomes a target, it ceases to be a good measure."
+      Teams optimize for what's measured, not what matters. Evals that
+      don't capture user value lead to gaming.
+    solution: |
+      ## Diverse metric set
+      metrics = {
+          "accuracy": 0.85,        # Is it correct?
+          "helpfulness": 0.80,     # Human rated
+          "latency_p95": 3000,     # Is it fast enough?
+          "cost_per_task": 0.10,   # Is it efficient?
+          "user_satisfaction": 4.0, # Real user feedback
+      }
+
+      # Require all to pass, not just one
+      def deployment_gate(m):
+          return (
+              m["accuracy"] >= 0.85 and
+              m["helpfulness"] >= 0.75 and
+              m["latency_p95"] <= 5000 and
+              m["user_satisfaction"] >= 3.5
+          )
+
+      ## Include human review
+      # 10% sample to human evaluators
+      # Catch cases automated metrics miss
+
+      ## Track metric-outcome correlation
+      # If accuracy goes up but complaints increase,
+      # the metric is wrong
+    detection_pattern:
+      - "score"
+      - "metric"
+      - "improve"
+      - "optimize"
+
+  - id: slow-eval-suite
+    severity: medium
+    title: Eval Suite Takes Hours to Run
+    situation: Comprehensive evaluation before deployment
+    symptom: |
+      Teams skip evals because they're too slow. Only run weekly.
+      Bugs ship because nobody waited for eval.
+    why: |
+      Every eval requires LLM calls. 1000 cases × 3 judges × 500ms =
+      25 minutes minimum. Add retries, complex scenarios = hours.
+    solution: |
+      ## Tiered evaluation
+      # Fast: Pre-commit (20 cases, 2 min)
+      FAST_CASES = load_dataset("core-20")
+
+      def pre_commit_eval():
+          results = evaluate(agent, FAST_CASES)
+          assert results.accuracy >= 0.90
+
+      # Medium: PR merge (100 cases, 10 min)
+      MEDIUM_CASES = load_dataset("standard-100")
+
+      def pr_eval():
+          results = evaluate(agent, MEDIUM_CASES)
+          assert results.accuracy >= 0.85
+
+      # Full: Nightly (1000+ cases, 2 hours)
+      FULL_CASES = load_dataset("comprehensive")
+
+      def nightly_eval():
+          results = evaluate(agent, FULL_CASES)
+          generate_report(results)
+
+      ## Parallel execution
+      from concurrent.futures import ThreadPoolExecutor
+
+      def parallel_eval(cases, max_workers=10):
+          with ThreadPoolExecutor(max_workers=max_workers) as executor:
+              results = list(executor.map(evaluate_case, cases))
+          return aggregate(results)
+
+      ## Cache where appropriate
+      # Cache LLM responses for identical inputs
+      # Cache embeddings
+    detection_pattern:
+      - "slow"
+      - "time"
+      - "hours"
+      - "skip"
+
+common_mistakes:
+  - mistake: "No evals at all (52% of teams)"
+    frequency: very_common
+    impact: "Ship broken agents, find out from users"
+    fix: "Start with 20 cases, run in CI"
+
+  - mistake: "Single-turn evals for multi-turn agents"
+    frequency: very_common
+    impact: "Miss context issues, goal completion failures"
+    fix: "Use multi-turn evaluation, test full conversations"
+
+  - mistake: "Using same model for generation and judgment"
+    frequency: common
+    impact: "Self-enhancement bias inflates scores"
+    fix: "Use different model family for evaluation"
+
+  - mistake: "Running evals only manually"
+    frequency: common
+    impact: "Evals get skipped, regressions slip through"
+    fix: "Automate in CI, block deployment on failure"
+
+  - mistake: "Testing happy paths only"
+    frequency: common
+    impact: "Edge cases, errors, adversarial inputs not caught"
+    fix: "Add error cases, adversarial inputs, real failures"
+
+platform_gotchas:
+  langsmith:
+    - "Multi-turn evals require online eval setup"
+    - "Insights Agent needs sufficient trace volume"
+    - "Sampling rate affects cost and coverage"
+    - "Evaluator prompts need careful tuning"
+
+  braintrust:
+    - "Score thresholds are per-evaluator"
+    - "Async evals can have race conditions"
+    - "Cost tracking requires API key setup"
+    - "Dataset versioning needs discipline"
+
+  deepeval:
+    - "Some metrics require reference answers"
+    - "Custom metrics need validation"
+    - "CI integration requires test runner"
+    - "Metric computation can be slow"
+
+benchmark_gotchas:
+  agentbench:
+    - "Requires environment setup per domain"
+    - "Interactive environments can be slow"
+    - "Scoring varies by task type"
+
+  webarena:
+    - "Needs actual web deployment"
+    - "Website changes break tests"
+    - "Evaluation is time-consuming"
+
+  swe_bench:
+    - "Requires repo setup per task"
+    - "Ground truth patches may not be unique"
+    - "Evaluation is compute-intensive"
