@@ -1,0 +1,404 @@
+# Collaboration - AWS Serverless
+# How this skill works with other skills
+
+version: 1.0.0
+skill_id: aws-serverless
+
+prerequisites:
+  required: []
+
+  recommended:
+    - skill: backend
+      reason: "API design and error handling patterns"
+      what_to_know:
+        - "REST API design"
+        - "Error handling strategies"
+        - "Database patterns"
+
+    - skill: devops
+      reason: "CI/CD, monitoring, infrastructure"
+      what_to_know:
+        - "CloudFormation/CDK"
+        - "CI/CD pipelines"
+        - "Monitoring and alerting"
+
+delegation_triggers:
+  - trigger: "user needs GCP serverless"
+    delegate_to: gcp-cloud-run
+    context: "Cloud Run for containers, Cloud Functions for events"
+
+  - trigger: "user needs Azure serverless"
+    delegate_to: azure-functions
+    context: "Azure Functions, Logic Apps"
+
+  - trigger: "user needs database design"
+    delegate_to: postgres-wizard
+    context: "RDS design, or use DynamoDB patterns"
+
+  - trigger: "user needs authentication"
+    delegate_to: auth-specialist
+    context: "Cognito, API Gateway authorizers"
+
+  - trigger: "user needs complex workflows"
+    delegate_to: workflow-automation
+    context: "Step Functions, EventBridge"
+
+  - trigger: "user needs AI integration"
+    delegate_to: llm-architect
+    context: "Lambda calling Bedrock or external LLMs"
+
+receives_context_from:
+  - skill: backend
+    receives:
+      - "API design patterns"
+      - "Error handling strategies"
+      - "Data modeling"
+
+  - skill: devops
+    receives:
+      - "Infrastructure as code patterns"
+      - "CI/CD best practices"
+      - "Monitoring setup"
+
+  - skill: auth-specialist
+    receives:
+      - "Cognito integration"
+      - "JWT validation"
+      - "Authorization patterns"
+
+provides_context_to:
+  - skill: gcp-cloud-run
+    provides:
+      - "Serverless patterns"
+      - "Event-driven architecture"
+      - "Cold start strategies"
+
+  - skill: azure-functions
+    provides:
+      - "Function handler patterns"
+      - "Trigger configurations"
+      - "Scaling strategies"
+
+  - skill: workflow-automation
+    provides:
+      - "Event sources"
+      - "Lambda integration points"
+      - "Step Functions patterns"
+
+escalation_paths:
+  - situation: "Complex infrastructure beyond Lambda"
+    escalate_to: devops
+    context: "Full AWS architecture, networking, security"
+
+  - situation: "Database design for serverless"
+    escalate_to: postgres-wizard
+    context: "RDS Proxy, connection pooling, or DynamoDB modeling"
+
+  - situation: "Multi-cloud requirements"
+    escalate_to: gcp-cloud-run
+    context: "Cross-cloud patterns, vendor abstraction"
+
+  - situation: "AI/ML workloads"
+    escalate_to: llm-architect
+    context: "Bedrock integration, model hosting"
+
+workflow_integration:
+  typical_sequence:
+    1:
+      step: "Initialize SAM project"
+      skills: [aws-serverless]
+      output: "SAM template, project structure"
+
+    2:
+      step: "Define Lambda functions"
+      skills: [aws-serverless, backend]
+      output: "Handlers with proper patterns"
+
+    3:
+      step: "Configure API Gateway"
+      skills: [aws-serverless]
+      output: "REST or HTTP API"
+
+    4:
+      step: "Add DynamoDB or RDS"
+      skills: [aws-serverless, postgres-wizard]
+      output: "Database configuration"
+
+    5:
+      step: "Configure event sources"
+      skills: [aws-serverless]
+      output: "SQS, SNS, EventBridge triggers"
+
+    6:
+      step: "Add authentication"
+      skills: [aws-serverless, auth-specialist]
+      output: "Cognito, API authorizers"
+
+    7:
+      step: "Set up CI/CD"
+      skills: [aws-serverless, devops]
+      output: "GitHub Actions, CodePipeline"
+
+    8:
+      step: "Configure monitoring"
+      skills: [aws-serverless, devops]
+      output: "CloudWatch, X-Ray, alarms"
+
+  decision_points:
+    - question: "SAM or CDK?"
+      guidance: |
+        AWS SAM:
+        - Purpose-built for serverless
+        - Simpler YAML syntax
+        - Built-in local testing
+        - Best for: Pure serverless apps
+
+        AWS CDK:
+        - Full infrastructure as code
+        - Use programming languages
+        - Better for complex infrastructure
+        - Best for: Multi-resource, hybrid apps
+
+        Tip: They work together - SAM CLI can test CDK apps
+
+    - question: "REST API or HTTP API?"
+      guidance: |
+        HTTP API (newer):
+        - 70% cheaper
+        - Lower latency (~10ms)
+        - Simpler configuration
+        - JWT authorizers built-in
+        - Best for: Most APIs
+
+        REST API (classic):
+        - Request validation
+        - Caching
+        - WAF integration
+        - Usage plans, API keys
+        - Best for: Enterprise features
+
+    - question: "DynamoDB or RDS?"
+      guidance: |
+        DynamoDB:
+        - Truly serverless
+        - Scale to millions of requests
+        - Single-digit ms latency
+        - Best for: Simple access patterns, key-value
+
+        RDS (with Proxy):
+        - SQL, complex queries
+        - Joins, transactions
+        - Familiar relational model
+        - Best for: Complex data relationships
+
+collaboration_patterns:
+  with_step_functions:
+    when: "Complex orchestration beyond single Lambda"
+    approach: |
+      Use Step Functions for multi-step workflows:
+
+      ```yaml
+      # template.yaml
+      Resources:
+        OrderWorkflow:
+          Type: AWS::Serverless::StateMachine
+          Properties:
+            DefinitionUri: statemachine/order.asl.json
+            Policies:
+              - LambdaInvokePolicy:
+                  FunctionName: !Ref ValidateOrderFunction
+              - LambdaInvokePolicy:
+                  FunctionName: !Ref ProcessPaymentFunction
+
+        ValidateOrderFunction:
+          Type: AWS::Serverless::Function
+          Properties:
+            Handler: src/handlers/validate.handler
+
+        ProcessPaymentFunction:
+          Type: AWS::Serverless::Function
+          Properties:
+            Handler: src/handlers/payment.handler
+      ```
+
+      ```json
+      // statemachine/order.asl.json
+      {
+        "StartAt": "ValidateOrder",
+        "States": {
+          "ValidateOrder": {
+            "Type": "Task",
+            "Resource": "${ValidateOrderFunction}",
+            "Next": "ProcessPayment",
+            "Catch": [{
+              "ErrorEquals": ["States.ALL"],
+              "Next": "OrderFailed"
+            }]
+          },
+          "ProcessPayment": {
+            "Type": "Task",
+            "Resource": "${ProcessPaymentFunction}",
+            "End": true
+          },
+          "OrderFailed": {
+            "Type": "Fail",
+            "Error": "OrderProcessingFailed"
+          }
+        }
+      }
+      ```
+
+  with_eventbridge:
+    when: "Event-driven architecture, cross-service communication"
+    approach: |
+      EventBridge for decoupled event routing:
+
+      ```yaml
+      Resources:
+        OrderCreatedRule:
+          Type: AWS::Events::Rule
+          Properties:
+            EventBusName: !Ref OrderEventBus
+            EventPattern:
+              source:
+                - "orders"
+              detail-type:
+                - "OrderCreated"
+            Targets:
+              - Arn: !GetAtt NotifyFunction.Arn
+                Id: notify
+              - Arn: !GetAtt AnalyticsFunction.Arn
+                Id: analytics
+
+        OrderEventBus:
+          Type: AWS::Events::EventBus
+          Properties:
+            Name: orders
+
+        CreateOrderFunction:
+          Type: AWS::Serverless::Function
+          Properties:
+            Handler: src/handlers/createOrder.handler
+            Policies:
+              - EventBridgePutEventsPolicy:
+                  EventBusName: !Ref OrderEventBus
+      ```
+
+      ```javascript
+      // src/handlers/createOrder.js
+      const { EventBridgeClient, PutEventsCommand } = require('@aws-sdk/client-eventbridge');
+
+      const client = new EventBridgeClient({});
+
+      exports.handler = async (event) => {
+        const order = await createOrder(event.body);
+
+        // Publish event
+        await client.send(new PutEventsCommand({
+          Entries: [{
+            Source: 'orders',
+            DetailType: 'OrderCreated',
+            Detail: JSON.stringify(order),
+            EventBusName: process.env.EVENT_BUS_NAME
+          }]
+        }));
+
+        return { statusCode: 201, body: JSON.stringify(order) };
+      };
+      ```
+
+  with_cognito:
+    when: "Need user authentication for APIs"
+    approach: |
+      Cognito User Pools with API Gateway:
+
+      ```yaml
+      Resources:
+        HttpApi:
+          Type: AWS::Serverless::HttpApi
+          Properties:
+            Auth:
+              Authorizers:
+                CognitoAuthorizer:
+                  AuthorizationScopes:
+                    - email
+                  IdentitySource: $request.header.Authorization
+                  JwtConfiguration:
+                    issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}
+                    audience:
+                      - !Ref UserPoolClient
+              DefaultAuthorizer: CognitoAuthorizer
+
+        UserPool:
+          Type: AWS::Cognito::UserPool
+          Properties:
+            UserPoolName: !Sub ${AWS::StackName}-users
+            AutoVerifiedAttributes:
+              - email
+            UsernameAttributes:
+              - email
+
+        UserPoolClient:
+          Type: AWS::Cognito::UserPoolClient
+          Properties:
+            UserPoolId: !Ref UserPool
+            GenerateSecret: false
+            ExplicitAuthFlows:
+              - ALLOW_USER_SRP_AUTH
+              - ALLOW_REFRESH_TOKEN_AUTH
+      ```
+
+platform_integration:
+  github_actions:
+    setup: |
+      # .github/workflows/deploy.yml
+      name: Deploy
+      on:
+        push:
+          branches: [main]
+
+      jobs:
+        deploy:
+          runs-on: ubuntu-latest
+          steps:
+            - uses: actions/checkout@v4
+
+            - uses: aws-actions/configure-aws-credentials@v4
+              with:
+                aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+                aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+                aws-region: us-east-1
+
+            - uses: aws-actions/setup-sam@v2
+
+            - run: sam build
+
+            - run: sam deploy --no-confirm-changeset --no-fail-on-empty-changeset
+
+  codepipeline:
+    setup: |
+      # Use SAM pipelines
+      sam pipeline init --bootstrap
+
+      # Creates:
+      # - CodePipeline pipeline
+      # - CodeBuild projects
+      # - IAM roles
+      # - S3 artifact bucket
+
+cost_optimization:
+  - "Use HTTP API instead of REST API (70% cheaper)"
+  - "Right-size memory with Lambda Power Tuning"
+  - "Use ARM64 architecture (20% cheaper, faster)"
+  - "Enable provisioned concurrency only when needed"
+  - "Use reserved concurrency to limit costs"
+  - "Set appropriate DynamoDB capacity mode"
+
+security_checklist:
+  - "No hardcoded credentials"
+  - "IAM roles with least privilege"
+  - "Secrets in Secrets Manager"
+  - "VPC only when necessary"
+  - "API Gateway authorization configured"
+  - "CloudTrail logging enabled"
+  - "X-Ray tracing for visibility"

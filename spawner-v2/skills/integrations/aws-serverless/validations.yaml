@@ -1,0 +1,320 @@
+# Validations - AWS Serverless
+# Quality checks for AWS Lambda implementations
+
+version: 1.0.0
+skill_id: aws-serverless
+
+validations:
+  # Security Checks
+  - id: hardcoded-credentials
+    name: Hardcoded AWS Credentials
+    severity: error
+    description: AWS credentials must never be hardcoded
+    pattern: |
+      (AKIA[0-9A-Z]{16}|aws_access_key_id\s*=\s*["'][A-Z0-9]{20}["'])
+    message: "Hardcoded AWS access key detected. Use IAM roles or environment variables."
+    autofix: false
+
+  - id: secret-key-in-code
+    name: AWS Secret Key in Source Code
+    severity: error
+    description: Secret keys should use Secrets Manager or environment variables
+    pattern: |
+      aws_secret_access_key\s*=\s*["'][A-Za-z0-9/+=]{40}["']
+    message: "Hardcoded AWS secret key. Use IAM roles or Secrets Manager."
+    autofix: false
+
+  - id: overly-permissive-policy
+    name: Overly Permissive IAM Policy
+    severity: warning
+    description: Avoid wildcard permissions in Lambda IAM roles
+    pattern: |
+      (Action.*:\s*\*|Resource.*:\s*\*).*Effect.*Allow
+    message: "Overly permissive IAM policy. Use least privilege principle."
+    autofix: false
+
+  # Handler Checks
+  - id: no-error-handling
+    name: Lambda Handler Without Error Handling
+    severity: warning
+    description: Lambda handlers should have try/catch for graceful errors
+    pattern: |
+      exports\.handler\s*=\s*async.*\{[^}]*await
+    anti_pattern: |
+      (try\s*\{|catch\s*\()
+    message: "Lambda handler without error handling. Add try/catch."
+    autofix: false
+
+  - id: missing-callback-wait
+    name: Missing callbackWaitsForEmptyEventLoop
+    severity: info
+    description: Node.js handlers should set callbackWaitsForEmptyEventLoop
+    pattern: |
+      exports\.handler\s*=\s*async
+    anti_pattern: |
+      callbackWaitsForEmptyEventLoop
+    message: "Consider setting context.callbackWaitsForEmptyEventLoop = false"
+    autofix: false
+
+  # Configuration Checks
+  - id: default-memory
+    name: Default Memory Configuration
+    severity: info
+    description: Default 128MB may be too low for many workloads
+    pattern: |
+      MemorySize:\s*128
+    message: "Using default 128MB memory. Consider increasing for better performance."
+    autofix: false
+
+  - id: low-timeout
+    name: Low Timeout Configuration
+    severity: warning
+    description: Very low timeout may cause unexpected failures
+    pattern: |
+      Timeout:\s*[1-3]\s*$
+    message: "Timeout of 1-3 seconds may be too low. Increase if making external calls."
+    autofix: false
+
+  - id: no-dlq
+    name: No Dead Letter Queue Configuration
+    severity: warning
+    description: Async functions should have DLQ for failed invocations
+    pattern: |
+      Type:\s*AWS::Serverless::Function
+    anti_pattern: |
+      (DeadLetterQueue|DeadLetterConfig|DestinationConfig)
+    message: "No DLQ configured. Add for async invocations."
+    autofix: false
+
+  # Package Size
+  - id: full-aws-sdk-import
+    name: Importing Full AWS SDK v2
+    severity: warning
+    description: Import specific clients from AWS SDK v3 for smaller packages
+    pattern: |
+      require\(['"]aws-sdk['"]\)
+    message: "Importing full AWS SDK. Use modular SDK v3 imports for smaller packages."
+    autofix: false
+
+  # Environment Variables
+  - id: hardcoded-table-name
+    name: Hardcoded DynamoDB Table Name
+    severity: warning
+    description: Table names should come from environment variables
+    pattern: |
+      TableName:\s*["'][A-Za-z][A-Za-z0-9-_]+["']
+    anti_pattern: |
+      (process\.env|os\.environ|!Ref|!GetAtt)
+    message: "Hardcoded table name. Use environment variable for portability."
+    autofix: false
+
+  - id: hardcoded-bucket-name
+    name: Hardcoded S3 Bucket Name
+    severity: warning
+    description: Bucket names should come from environment variables
+    pattern: |
+      Bucket:\s*["'][a-z0-9.-]+["']
+    anti_pattern: |
+      (process\.env|os\.environ|!Ref|!GetAtt)
+    message: "Hardcoded bucket name. Use environment variable."
+    autofix: false
+
+code_smells:
+  - id: sync-file-operations
+    name: Synchronous File Operations
+    description: Blocks event loop, slows function
+    pattern: |
+      (readFileSync|writeFileSync|existsSync)
+    suggestion: "Use async versions with await"
+
+  - id: no-timeout-on-http
+    name: HTTP Call Without Timeout
+    description: Can cause Lambda to hit timeout
+    pattern: |
+      (axios\.get|axios\.post|fetch)\([^)]+\)
+    suggestion: "Add timeout option to HTTP calls"
+
+  - id: console-log-objects
+    name: Unstructured Console Logging
+    description: Makes CloudWatch Insights queries difficult
+    pattern: |
+      console\.log\([^)]+\)
+    suggestion: "Use JSON.stringify for structured logging"
+
+  - id: synchronous-sdk-calls
+    name: SDK Calls Without Await
+    description: May cause unexpected behavior
+    pattern: |
+      (\.send\(|\.execute\(|\.query\()(?!.*await)
+    suggestion: "Use await with SDK calls"
+
+best_practices:
+  - id: use-environment-variables
+    name: Use Environment Variables
+    check: |
+      Configuration should come from environment, not hardcoded.
+    recommendation: |
+      # template.yaml
+      Globals:
+        Function:
+          Environment:
+            Variables:
+              TABLE_NAME: !Ref ItemsTable
+              STAGE: !Ref Stage
+
+      # In code
+      const tableName = process.env.TABLE_NAME;
+
+  - id: structured-logging
+    name: Use Structured Logging
+    check: |
+      Log in JSON format for CloudWatch Insights queries.
+    recommendation: |
+      // Use structured JSON logging
+      console.log(JSON.stringify({
+        level: 'info',
+        message: 'Processing request',
+        requestId: context.awsRequestId,
+        userId: event.userId,
+        timestamp: new Date().toISOString()
+      }));
+
+      // Or use Powertools Logger
+      const { Logger } = require('@aws-lambda-powertools/logger');
+      const logger = new Logger();
+
+      logger.info('Processing request', { userId: event.userId });
+
+  - id: proper-error-handling
+    name: Implement Proper Error Handling
+    check: |
+      All handlers should catch and log errors gracefully.
+    recommendation: |
+      exports.handler = async (event, context) => {
+        try {
+          const result = await processRequest(event);
+
+          return {
+            statusCode: 200,
+            body: JSON.stringify(result)
+          };
+        } catch (error) {
+          console.error(JSON.stringify({
+            level: 'error',
+            message: error.message,
+            stack: error.stack,
+            requestId: context.awsRequestId
+          }));
+
+          // Return appropriate error response
+          const statusCode = error.statusCode || 500;
+          return {
+            statusCode,
+            body: JSON.stringify({
+              error: statusCode === 500
+                ? 'Internal server error'
+                : error.message
+            })
+          };
+        }
+      };
+
+  - id: use-sdk-v3
+    name: Use AWS SDK v3 Modular Imports
+    check: |
+      Import only needed SDK clients for smaller packages.
+    recommendation: |
+      // GOOD - modular imports
+      const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+      const { DynamoDBDocumentClient, GetCommand } = require('@aws-sdk/lib-dynamodb');
+
+      const client = new DynamoDBClient({});
+      const docClient = DynamoDBDocumentClient.from(client);
+
+      // Send commands
+      const result = await docClient.send(new GetCommand({
+        TableName: process.env.TABLE_NAME,
+        Key: { id: '123' }
+      }));
+
+  - id: configure-dlq
+    name: Configure Dead Letter Queue
+    check: |
+      Async invocations should have DLQ for failed messages.
+    recommendation: |
+      Resources:
+        ProcessorFunction:
+          Type: AWS::Serverless::Function
+          Properties:
+            # For async invocations
+            EventInvokeConfig:
+              DestinationConfig:
+                OnFailure:
+                  Type: SQS
+                  Destination: !GetAtt DeadLetterQueue.Arn
+
+            # For SQS triggers
+            Events:
+              SQSEvent:
+                Type: SQS
+                Properties:
+                  Queue: !GetAtt ProcessingQueue.Arn
+
+        ProcessingQueue:
+          Type: AWS::SQS::Queue
+          Properties:
+            RedrivePolicy:
+              deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+              maxReceiveCount: 3
+
+        DeadLetterQueue:
+          Type: AWS::SQS::Queue
+
+  - id: set-reserved-concurrency
+    name: Set Reserved Concurrency Limits
+    check: |
+      Critical functions should have concurrency limits.
+    recommendation: |
+      Resources:
+        CriticalFunction:
+          Type: AWS::Serverless::Function
+          Properties:
+            # Limit concurrent executions
+            ReservedConcurrentExecutions: 100
+
+            # For provisioned concurrency
+            AutoPublishAlias: live
+
+        ProvisionedConcurrency:
+          Type: AWS::Lambda::ProvisionedConcurrencyConfig
+          Properties:
+            FunctionName: !Ref CriticalFunction
+            Qualifier: live
+            ProvisionedConcurrentExecutions: 5
+
+testing_checklist:
+  local_development:
+    - "SAM local invoke works"
+    - "SAM local start-api runs"
+    - "Environment variables set in template"
+    - "Test events match production format"
+
+  security:
+    - "No hardcoded credentials"
+    - "IAM roles use least privilege"
+    - "Secrets in Secrets Manager or Parameter Store"
+    - "VPC security groups properly configured"
+
+  production_readiness:
+    - "Memory sized appropriately"
+    - "Timeout set with buffer"
+    - "DLQ configured for async"
+    - "X-Ray tracing enabled"
+    - "Structured logging implemented"
+    - "CloudWatch alarms configured"
+
+  performance:
+    - "Package size optimized (<50MB ideal)"
+    - "SDK v3 modular imports"
+    - "Cold start measured and acceptable"
+    - "Provisioned concurrency if needed"
