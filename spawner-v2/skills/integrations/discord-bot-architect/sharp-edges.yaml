@@ -1,0 +1,592 @@
+# Sharp Edges - Discord Bot Architect
+# The gotchas that cause Discord bot failures
+
+version: 1.0.0
+skill_id: discord-bot-architect
+
+sharp_edges:
+  - id: 3-second-interaction-timeout
+    severity: critical
+    title: Interaction Timeout (3 Second Rule)
+    situation: Handling slash commands, buttons, select menus, or modals
+    symptom: |
+      User sees "This interaction failed" or "The application did not respond."
+      Command works locally but fails in production.
+      Slow operations never complete.
+    why: |
+      Discord requires ALL interactions to be acknowledged within 3 seconds:
+      - Slash commands
+      - Button clicks
+      - Select menu selections
+      - Context menu commands
+
+      If you do ANY slow operation (database, API, file I/O) before responding,
+      you'll miss the window. Discord shows an error even if your bot processes
+      the request correctly afterward.
+
+      After acknowledgment, you have 15 minutes for follow-up responses.
+    solution: |
+      ## Acknowledge immediately, process later
+
+      ```javascript
+      // Discord.js - Defer for slow operations
+      module.exports = {
+        async execute(interaction) {
+          // DEFER IMMEDIATELY - before any slow operation
+          await interaction.deferReply();
+          // For ephemeral: await interaction.deferReply({ ephemeral: true });
+
+          // Now you have 15 minutes
+          const result = await slowDatabaseQuery();
+          const aiResponse = await callLLM(result);
+
+          // Edit the deferred reply
+          await interaction.editReply(`Result: ${aiResponse}`);
+        }
+      };
+      ```
+
+      ```python
+      # Pycord
+      @bot.slash_command()
+      async def slow_command(ctx):
+          await ctx.defer()  # Acknowledge immediately
+          # await ctx.defer(ephemeral=True)  # For private response
+
+          result = await slow_operation()
+          await ctx.followup.send(f"Result: {result}")
+      ```
+
+      ## For components (buttons, menus)
+
+      ```javascript
+      // If you're updating the message
+      await interaction.deferUpdate();
+
+      // If you're sending a new response
+      await interaction.deferReply({ ephemeral: true });
+      ```
+    detection_pattern:
+      - "interaction failed"
+      - "application did not respond"
+      - "timeout"
+      - "3 second"
+
+  - id: privileged-intents-missing
+    severity: critical
+    title: Missing Privileged Intent Configuration
+    situation: Bot needs member data, presences, or message content
+    symptom: |
+      Members intent: member lists empty, on_member_join doesn't fire
+      Presences intent: statuses always unknown/offline
+      Message content intent: message.content is empty string
+    why: |
+      Discord has 3 privileged intents that require manual enablement:
+      1. **GUILD_MEMBERS** - Member join/leave, member lists
+      2. **GUILD_PRESENCES** - Online status, activities
+      3. **MESSAGE_CONTENT** - Read message text (deprecated for commands)
+
+      These must be:
+      1. Enabled in Discord Developer Portal > Bot > Privileged Gateway Intents
+      2. Requested in your bot code
+
+      At 100+ servers, you need Discord verification to keep using them.
+    solution: |
+      ## Step 1: Enable in Developer Portal
+
+      ```
+      1. Go to https://discord.com/developers/applications
+      2. Select your application
+      3. Go to Bot section
+      4. Scroll to Privileged Gateway Intents
+      5. Toggle ON the intents you need
+      ```
+
+      ## Step 2: Request in code
+
+      ```javascript
+      // Discord.js
+      const { Client, GatewayIntentBits } = require('discord.js');
+
+      const client = new Client({
+        intents: [
+          GatewayIntentBits.Guilds,
+          GatewayIntentBits.GuildMembers,       // PRIVILEGED
+          // GatewayIntentBits.GuildPresences,  // PRIVILEGED
+          // GatewayIntentBits.MessageContent,  // PRIVILEGED - avoid!
+        ]
+      });
+      ```
+
+      ```python
+      # Pycord
+      intents = discord.Intents.default()
+      intents.members = True       # PRIVILEGED
+      # intents.presences = True   # PRIVILEGED
+      # intents.message_content = True  # PRIVILEGED - avoid!
+
+      bot = commands.Bot(intents=intents)
+      ```
+
+      ## Avoid Message Content Intent if possible
+
+      Use slash commands, buttons, and modals instead of message parsing.
+      These don't require the Message Content intent.
+    detection_pattern:
+      - "intent"
+      - "members"
+      - "message_content"
+      - "privileged"
+      - "empty"
+
+  - id: command-registration-rate-limit
+    severity: high
+    title: Command Registration Rate Limited
+    situation: Registering slash commands
+    symptom: |
+      Commands not appearing. 429 errors when deploying.
+      "You are being rate limited" messages.
+      Commands appear for some guilds but not others.
+    why: |
+      Command registration is rate limited:
+      - Global commands: 200 creates/day, updates take up to 1 hour to propagate
+      - Guild commands: 200 creates/day per guild, instant update
+
+      Common mistakes:
+      - Registering commands on every bot startup
+      - Registering in every guild separately
+      - Making changes in a loop without delays
+    solution: |
+      ## Use a separate deploy script (not on startup)
+
+      ```javascript
+      // deploy-commands.js - Run manually, not on bot start
+      const { REST, Routes } = require('discord.js');
+
+      const rest = new REST().setToken(process.env.DISCORD_TOKEN);
+
+      async function deploy() {
+        // For development: Guild commands (instant)
+        if (process.env.GUILD_ID) {
+          await rest.put(
+            Routes.applicationGuildCommands(
+              process.env.CLIENT_ID,
+              process.env.GUILD_ID
+            ),
+            { body: commands }
+          );
+          console.log('Guild commands deployed instantly');
+        }
+
+        // For production: Global commands (up to 1 hour)
+        else {
+          await rest.put(
+            Routes.applicationCommands(process.env.CLIENT_ID),
+            { body: commands }
+          );
+          console.log('Global commands deployed (may take up to 1 hour)');
+        }
+      }
+
+      deploy();
+      ```
+
+      ```python
+      # Pycord - Don't sync on every startup
+      @bot.event
+      async def on_ready():
+          # DON'T DO THIS:
+          # await bot.sync_commands()
+
+          print(f"Ready! Commands should already be registered.")
+
+      # Instead, sync manually or use a flag
+      if __name__ == "__main__":
+          if "--sync" in sys.argv:
+              # Only sync when explicitly requested
+              bot.sync_commands_on_start = True
+          bot.run(token)
+      ```
+
+      ## Testing workflow
+
+      1. Use guild commands during development (instant updates)
+      2. Only deploy global commands when ready for production
+      3. Run deploy script manually, not on every restart
+    detection_pattern:
+      - "rate limit"
+      - "429"
+      - "command"
+      - "register"
+
+  - id: token-exposure
+    severity: critical
+    title: Bot Token Exposed
+    situation: Storing or sharing bot token
+    symptom: |
+      Unauthorized actions from your bot.
+      Bot joins random servers.
+      Bot sends spam or malicious content.
+      "Invalid token" after Discord invalidates it.
+    why: |
+      Your bot token provides FULL control over your bot. Attackers can:
+      - Send messages as your bot
+      - Join servers, create invites
+      - Access all data your bot can access
+      - Potentially take over servers where bot has admin
+
+      Discord actively scans GitHub for exposed tokens and invalidates them.
+      Common exposure points:
+      - Committed to Git
+      - Shared in Discord itself
+      - In client-side code
+      - In public screenshots
+    solution: |
+      ## Never hardcode tokens
+
+      ```javascript
+      // BAD - never do this
+      const token = 'MTIzNDU2Nzg5MDEyMzQ1Njc4.ABCDEF.xyz...';
+
+      // GOOD - environment variables
+      require('dotenv').config();
+      client.login(process.env.DISCORD_TOKEN);
+      ```
+
+      ## Use .gitignore
+
+      ```
+      # .gitignore
+      .env
+      .env.local
+      config.json
+      ```
+
+      ## If token is exposed
+
+      1. Go to Developer Portal immediately
+      2. Regenerate the token
+      3. Update all deployments
+      4. Review bot activity for unauthorized actions
+      5. Check git history and force push to remove if needed
+
+      ## Use environment variables properly
+
+      ```bash
+      # .env (never commit)
+      DISCORD_TOKEN=your_token_here
+      CLIENT_ID=your_client_id
+      ```
+
+      ```javascript
+      // Load with dotenv
+      require('dotenv').config();
+      const token = process.env.DISCORD_TOKEN;
+      ```
+    detection_pattern:
+      - "token"
+      - "MTI"  # Token prefix
+      - "exposed"
+      - "leaked"
+
+  - id: missing-application-commands-scope
+    severity: high
+    title: Bot Missing applications.commands Scope
+    situation: Slash commands not appearing for users
+    symptom: |
+      Bot is in server but slash commands don't show up.
+      Typing / shows no commands from your bot.
+      Commands worked in development server but not others.
+    why: |
+      Discord has two important OAuth scopes:
+      - `bot` - Traditional bot permissions (messages, reactions, etc.)
+      - `applications.commands` - Slash command permissions
+
+      Many bots were invited with only the `bot` scope before slash commands
+      existed. They need to be re-invited with both scopes.
+    solution: |
+      ## Generate correct invite URL
+
+      ```
+      https://discord.com/api/oauth2/authorize
+        ?client_id=YOUR_CLIENT_ID
+        &permissions=0
+        &scope=bot%20applications.commands
+      ```
+
+      ## In Discord Developer Portal
+
+      1. Go to OAuth2 > URL Generator
+      2. Select BOTH:
+         - `bot`
+         - `applications.commands`
+      3. Select required bot permissions
+      4. Use generated URL
+
+      ## Re-invite without kicking
+
+      Users can use the new invite URL even if bot is already in server.
+      This adds the new scope without removing the bot.
+
+      ```javascript
+      // Generate invite URL in code
+      const inviteUrl = client.generateInvite({
+        scopes: ['bot', 'applications.commands'],
+        permissions: [
+          'SendMessages',
+          'EmbedLinks',
+          // Add other needed permissions
+        ]
+      });
+      ```
+    detection_pattern:
+      - "commands not showing"
+      - "slash commands missing"
+      - "scope"
+      - "applications.commands"
+
+  - id: global-command-delay
+    severity: medium
+    title: Global Commands Not Appearing Immediately
+    situation: Deploying global slash commands
+    symptom: |
+      Commands don't appear after deployment.
+      Guild commands work but global commands don't.
+      Commands appear after an hour.
+    why: |
+      Global commands can take up to 1 hour to propagate to all Discord servers.
+      This is by design for Discord's caching and CDN.
+
+      Guild commands are instant but only work in that specific guild.
+    solution: |
+      ## Development: Use guild commands
+
+      ```javascript
+      // Instant updates for testing
+      await rest.put(
+        Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+        { body: commands }
+      );
+      ```
+
+      ## Production: Deploy global commands during off-peak
+
+      ```javascript
+      // Takes up to 1 hour to propagate
+      await rest.put(
+        Routes.applicationCommands(CLIENT_ID),
+        { body: commands }
+      );
+      ```
+
+      ## Workflow
+
+      1. Develop and test with guild commands (instant)
+      2. When ready, deploy global commands
+      3. Wait up to 1 hour for propagation
+      4. Don't deploy global commands frequently
+    detection_pattern:
+      - "commands not appearing"
+      - "global"
+      - "propagate"
+      - "hour"
+
+  - id: gateway-disconnect
+    severity: medium
+    title: Frequent Gateway Disconnections
+    situation: Bot randomly goes offline or misses events
+    symptom: |
+      Bot shows as offline intermittently.
+      Events are missed (member joins, messages).
+      Reconnection messages in logs.
+    why: |
+      Discord gateway requires regular heartbeats. Issues:
+      - Blocking operations prevent heartbeat
+      - Network instability
+      - Memory pressure causing GC pauses
+      - Too many guilds without sharding (2500+ requires sharding)
+    solution: |
+      ## Never block the event loop
+
+      ```javascript
+      // BAD - blocks event loop
+      const data = fs.readFileSync('file.json');
+
+      // GOOD - async
+      const data = await fs.promises.readFile('file.json');
+      ```
+
+      ## Handle reconnections gracefully
+
+      ```javascript
+      client.on('shardResume', (id, replayedEvents) => {
+        console.log(`Shard ${id} resumed, replayed ${replayedEvents} events`);
+      });
+
+      client.on('shardDisconnect', (event, id) => {
+        console.log(`Shard ${id} disconnected`);
+      });
+
+      client.on('shardReconnecting', (id) => {
+        console.log(`Shard ${id} reconnecting...`);
+      });
+      ```
+
+      ## Implement sharding at scale
+
+      ```javascript
+      // Required at 2500+ guilds
+      const manager = new ShardingManager('./bot.js', {
+        token: process.env.DISCORD_TOKEN,
+        totalShards: 'auto'
+      });
+      manager.spawn();
+      ```
+    detection_pattern:
+      - "disconnect"
+      - "offline"
+      - "heartbeat"
+      - "reconnect"
+
+  - id: modal-must-be-first
+    severity: medium
+    title: Modal Must Be First Response
+    situation: Showing a modal from a slash command or button
+    symptom: |
+      "Interaction has already been acknowledged" error.
+      Modal doesn't appear.
+      Works sometimes but not others.
+    why: |
+      Modals have a special requirement: showing a modal MUST be the first
+      response to an interaction. You cannot:
+      - defer() then showModal()
+      - reply() then showModal()
+      - Think for more than 3 seconds then showModal()
+    solution: |
+      ## Show modal immediately
+
+      ```javascript
+      // CORRECT - modal is first response
+      async execute(interaction) {
+        const modal = new ModalBuilder()
+          .setCustomId('my-modal')
+          .setTitle('Input Form');
+
+        // Show immediately - no defer, no reply first
+        await interaction.showModal(modal);
+      }
+      ```
+
+      ```javascript
+      // WRONG - deferred first
+      async execute(interaction) {
+        await interaction.deferReply();  // CAN'T DO THIS
+        await interaction.showModal(modal);  // Will fail
+      }
+      ```
+
+      ## If you need to check something first
+
+      ```javascript
+      async execute(interaction) {
+        // Quick sync check is OK (under 3 seconds)
+        if (!hasPermission(interaction.user.id)) {
+          return interaction.reply({
+            content: 'No permission',
+            ephemeral: true
+          });
+        }
+
+        // Show modal (still first interaction response for this path)
+        await interaction.showModal(modal);
+      }
+      ```
+    detection_pattern:
+      - "modal"
+      - "already acknowledged"
+      - "showModal"
+
+common_mistakes:
+  - mistake: "Not deferring slow interactions"
+    frequency: very_common
+    impact: "Timeout errors, poor UX"
+    fix: "Always defer if operation might take >3 seconds"
+
+  - mistake: "Registering commands on every startup"
+    frequency: very_common
+    impact: "Rate limits, slow startup"
+    fix: "Use separate deploy script, run manually"
+
+  - mistake: "Hardcoding bot token"
+    frequency: common
+    impact: "Token exposure, account compromise"
+    fix: "Use environment variables"
+
+  - mistake: "Missing applications.commands scope"
+    frequency: common
+    impact: "Slash commands don't appear"
+    fix: "Re-invite with both bot and applications.commands scopes"
+
+  - mistake: "Using Message Content for commands"
+    frequency: common
+    impact: "Requires privileged intent, won't work at scale"
+    fix: "Use slash commands"
+
+  - mistake: "Blocking event loop"
+    frequency: common
+    impact: "Gateway disconnections"
+    fix: "Use async/await for all I/O"
+
+  - mistake: "Not handling rate limits"
+    frequency: common
+    impact: "429 errors, failed operations"
+    fix: "Queue operations, respect Retry-After"
+
+  - mistake: "Not implementing sharding at scale"
+    frequency: medium
+    impact: "Can't join new servers at 2500+"
+    fix: "Implement sharding before reaching limit"
+
+error_code_reference:
+  interaction_errors:
+    INTERACTION_ALREADY_REPLIED: "Tried to reply to already-responded interaction"
+    UNKNOWN_INTERACTION: "Interaction expired (>15 min) or invalid"
+    INTERACTION_NOT_REPLIED: "Tried to edit reply without initial response"
+
+  permission_errors:
+    MISSING_ACCESS: "Bot lacks channel access"
+    MISSING_PERMISSIONS: "Bot lacks required permission"
+    BOT_PROHIBITED_ENDPOINT: "Endpoint not available to bots"
+
+  rate_limit_errors:
+    RATE_LIMITED: "Too many requests, check Retry-After"
+    GLOBAL_RATE_LIMIT: "Global rate limit hit (50/s)"
+
+  gateway_errors:
+    DISALLOWED_INTENTS: "Requested intent not enabled in portal"
+    SHARDING_REQUIRED: "Bot in 2500+ guilds, must use sharding"
+    INVALID_INTENTS: "Invalid intent bit provided"
+
+intent_reference:
+  non_privileged:
+    - GUILDS: "Guild events, channels, roles"
+    - GUILD_MODERATION: "Bans, audit log"
+    - GUILD_EMOJIS_AND_STICKERS: "Emoji/sticker updates"
+    - GUILD_INTEGRATIONS: "Integration updates"
+    - GUILD_WEBHOOKS: "Webhook updates"
+    - GUILD_INVITES: "Invite create/delete"
+    - GUILD_VOICE_STATES: "Voice state updates"
+    - GUILD_MESSAGES: "Message events (not content)"
+    - GUILD_MESSAGE_REACTIONS: "Reaction add/remove"
+    - GUILD_MESSAGE_TYPING: "Typing indicator"
+    - DIRECT_MESSAGES: "DM events"
+    - DIRECT_MESSAGE_REACTIONS: "DM reaction events"
+    - DIRECT_MESSAGE_TYPING: "DM typing indicator"
+    - GUILD_SCHEDULED_EVENTS: "Scheduled event updates"
+    - AUTO_MODERATION_CONFIGURATION: "AutoMod rule updates"
+    - AUTO_MODERATION_EXECUTION: "AutoMod action taken"
+
+  privileged:
+    - GUILD_MEMBERS: "Member join/leave, list"
+    - GUILD_PRESENCES: "Online status, activities"
+    - MESSAGE_CONTENT: "Message text (avoid - use slash commands)"

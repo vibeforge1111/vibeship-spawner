@@ -1,0 +1,328 @@
+# Validations - Discord Bot Architect
+# Quality checks for Discord bot implementations
+
+version: 1.0.0
+skill_id: discord-bot-architect
+
+validations:
+  # Security Checks
+  - id: hardcoded-token
+    name: Hardcoded Discord Token
+    severity: error
+    description: Discord tokens must never be hardcoded
+    pattern: |
+      (MTI|MTM|MTQ|NTI|NjI|NjM|NzI|NzM|ODI|ODM|OTI|OTM)[A-Za-z0-9_-]{23,27}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{38}
+    message: "Hardcoded Discord token detected. Use environment variables."
+    autofix: false
+
+  - id: token-in-code
+    name: Token Variable Assignment
+    severity: error
+    description: Tokens should come from environment, not strings
+    pattern: |
+      (token|TOKEN)\s*=\s*["'][A-Za-z0-9_.-]+["']
+    anti_pattern: |
+      (process\.env|os\.environ|getenv|dotenv)
+    message: "Token assigned from string literal. Use environment variable."
+    autofix: false
+
+  - id: token-in-client
+    name: Token in Client-Side Code
+    severity: error
+    description: Never expose Discord tokens to browsers
+    pattern: |
+      (window\.|document\.|localStorage\.|NEXT_PUBLIC_).*DISCORD.*(TOKEN|SECRET)
+    message: "Discord credentials exposed client-side. Only use server-side."
+    autofix: false
+
+  # Interaction Handling
+  - id: missing-defer
+    name: Slow Operation Without Defer
+    severity: warning
+    description: Slow operations should be deferred to avoid timeout
+    pattern: |
+      async\s+(execute|run)\s*\([^)]*interaction[^)]*\)\s*\{[^}]*(await\s+fetch|axios|prisma|database|openai|anthropic)
+    anti_pattern: |
+      (deferReply|deferUpdate|defer\()
+    message: "Slow operation without defer. Interaction may timeout."
+    autofix: false
+
+  - id: missing-error-handling
+    name: Interaction Without Error Handling
+    severity: warning
+    description: Interactions should have try/catch for graceful errors
+    pattern: |
+      async\s+execute\s*\([^)]*interaction[^)]*\)\s*\{[^}]*await\s+interaction
+    anti_pattern: |
+      (try\s*\{|catch\s*\()
+    message: "Interaction without error handling. Add try/catch."
+    autofix: false
+
+  # Intent Configuration
+  - id: message-content-intent
+    name: Using Message Content Intent
+    severity: warning
+    description: Message Content is privileged, prefer slash commands
+    pattern: |
+      (GatewayIntentBits\.MessageContent|intents\.message_content\s*=\s*True|MessageContent)
+    message: "Using Message Content intent. Consider slash commands instead."
+    autofix: false
+
+  - id: all-intents
+    name: Requesting All Intents
+    severity: warning
+    description: Only request intents you actually need
+    pattern: |
+      (Intents\.all\(\)|\.all\(\))
+    message: "Requesting all intents. Only enable what you need."
+    autofix: false
+
+  # Command Registration
+  - id: sync-on-ready
+    name: Syncing Commands on Ready Event
+    severity: warning
+    description: Don't sync commands on every bot startup
+    pattern: |
+      on_ready.*sync_commands|ready.*application\.commands\.set
+    message: "Syncing commands on startup. Use separate deploy script."
+    autofix: false
+
+  - id: command-registration-loop
+    name: Registering Commands in Loop
+    severity: warning
+    description: Use bulk registration, not individual calls
+    pattern: |
+      for.*\.(commands\.create|put.*applicationGuildCommands)
+    message: "Registering commands in loop. Use bulk registration."
+    autofix: false
+
+  # Rate Limiting
+  - id: no-rate-limit-handling
+    name: No Rate Limit Handling
+    severity: info
+    description: Consider handling rate limits for bulk operations
+    pattern: |
+      for\s*\([^)]+\)\s*\{[^}]*(send|edit|delete|create)[^}]+\}
+    anti_pattern: |
+      (setTimeout|sleep|delay|queue|throttle)
+    message: "Bulk operation without rate limit handling."
+    autofix: false
+
+  # Sharding
+  - id: no-sharding-consideration
+    name: No Sharding Implementation
+    severity: info
+    description: Consider sharding for large bots (2500+ guilds required)
+    pattern: |
+      new\s+Client\s*\(
+    anti_pattern: |
+      (ShardingManager|AutoShardedBot|AutoShardedClient)
+    message: "No sharding implementation. Required at 2500+ guilds."
+    autofix: false
+
+code_smells:
+  - id: sync-file-operations
+    name: Synchronous File Operations
+    description: Can block event loop and cause gateway disconnection
+    pattern: |
+      (readFileSync|writeFileSync|existsSync)
+    suggestion: "Use async versions: readFile, writeFile with await"
+
+  - id: message-parsing-commands
+    name: Message Content Command Parsing
+    description: Deprecated approach, use slash commands
+    pattern: |
+      message\.content\.startsWith\(["']!
+    suggestion: "Migrate to slash commands"
+
+  - id: hardcoded-ids
+    name: Hardcoded Discord IDs
+    description: Use configuration for IDs
+    pattern: |
+      (guild_id|channel_id|role_id)\s*=\s*["']\d{17,19}["']
+    suggestion: "Move IDs to configuration or environment"
+
+  - id: no-ephemeral-errors
+    name: Error Messages Not Ephemeral
+    description: Error messages should usually be ephemeral
+    pattern: |
+      catch.*reply\(\s*\{[^}]*content.*error
+    suggestion: "Add ephemeral: true for error messages"
+
+best_practices:
+  - id: use-environment-variables
+    name: Use Environment Variables
+    check: |
+      All tokens and secrets must come from environment.
+    recommendation: |
+      // .env (never commit)
+      DISCORD_TOKEN=your_bot_token
+      CLIENT_ID=your_application_id
+      GUILD_ID=your_test_guild_id (for development)
+
+      // Load in code
+      require('dotenv').config();
+      client.login(process.env.DISCORD_TOKEN);
+
+  - id: minimal-intents
+    name: Request Minimal Intents
+    check: |
+      Only request intents your bot actually uses.
+    recommendation: |
+      const { Client, GatewayIntentBits } = require('discord.js');
+
+      const client = new Client({
+        intents: [
+          GatewayIntentBits.Guilds,        // Required for most bots
+          // Only add what you need:
+          // GatewayIntentBits.GuildMessages,      // Message events
+          // GatewayIntentBits.GuildVoiceStates,   // Voice features
+          // AVOID unless necessary:
+          // GatewayIntentBits.GuildMembers,       // PRIVILEGED
+          // GatewayIntentBits.GuildPresences,     // PRIVILEGED
+          // GatewayIntentBits.MessageContent,     // PRIVILEGED
+        ]
+      });
+
+  - id: defer-slow-operations
+    name: Defer Slow Operations
+    check: |
+      Operations taking >3 seconds must be deferred.
+    recommendation: |
+      module.exports = {
+        async execute(interaction) {
+          // Defer BEFORE slow operation
+          await interaction.deferReply();
+
+          try {
+            const result = await slowDatabaseQuery();
+            const aiResponse = await callOpenAI(result);
+
+            await interaction.editReply({ content: result });
+          } catch (error) {
+            await interaction.editReply({
+              content: 'An error occurred.'
+            });
+          }
+        }
+      };
+
+  - id: separate-deploy-script
+    name: Use Separate Command Deploy Script
+    check: |
+      Commands should be registered via separate script, not on startup.
+    recommendation: |
+      // deploy-commands.js - Run manually
+      const { REST, Routes } = require('discord.js');
+      require('dotenv').config();
+
+      const rest = new REST().setToken(process.env.DISCORD_TOKEN);
+
+      async function deploy() {
+        // Development: Guild commands (instant)
+        if (process.env.NODE_ENV === 'development') {
+          await rest.put(
+            Routes.applicationGuildCommands(
+              process.env.CLIENT_ID,
+              process.env.GUILD_ID
+            ),
+            { body: commands }
+          );
+        }
+        // Production: Global commands
+        else {
+          await rest.put(
+            Routes.applicationCommands(process.env.CLIENT_ID),
+            { body: commands }
+          );
+        }
+      }
+
+      deploy();
+
+      // Run with: node deploy-commands.js
+
+  - id: handle-all-interactions
+    name: Handle All Interaction Types
+    check: |
+      interactionCreate handler should handle all types gracefully.
+    recommendation: |
+      client.on(Events.InteractionCreate, async interaction => {
+        try {
+          if (interaction.isChatInputCommand()) {
+            const command = client.commands.get(interaction.commandName);
+            if (!command) return;
+            await command.execute(interaction);
+          }
+          else if (interaction.isButton()) {
+            // Handle buttons
+          }
+          else if (interaction.isStringSelectMenu()) {
+            // Handle select menus
+          }
+          else if (interaction.isModalSubmit()) {
+            // Handle modal submissions
+          }
+          else if (interaction.isAutocomplete()) {
+            // Handle autocomplete
+          }
+        } catch (error) {
+          console.error(error);
+          const reply = { content: 'An error occurred!', ephemeral: true };
+
+          if (interaction.replied || interaction.deferred) {
+            await interaction.followUp(reply);
+          } else {
+            await interaction.reply(reply);
+          }
+        }
+      });
+
+  - id: implement-sharding
+    name: Implement Sharding for Scale
+    check: |
+      Bots approaching 2500 guilds must implement sharding.
+    recommendation: |
+      // shard.js (main entry point)
+      const { ShardingManager } = require('discord.js');
+
+      const manager = new ShardingManager('./bot.js', {
+        token: process.env.DISCORD_TOKEN,
+        totalShards: 'auto'  // Discord determines count
+      });
+
+      manager.on('shardCreate', shard => {
+        console.log(`Launched shard ${shard.id}`);
+      });
+
+      manager.spawn();
+
+      // Start with: node shard.js
+
+testing_checklist:
+  development:
+    - "Bot connects successfully"
+    - "Slash commands appear in test guild"
+    - "Commands respond within 3 seconds"
+    - "Deferred commands complete correctly"
+    - "Buttons and select menus work"
+    - "Modals open and submit correctly"
+
+  security:
+    - "No tokens in source code"
+    - "Environment variables used for secrets"
+    - ".env in .gitignore"
+    - "Minimal required intents"
+    - "Error messages don't expose internals"
+
+  production:
+    - "Global commands deployed"
+    - "Rate limit handling for bulk operations"
+    - "Error handling in all commands"
+    - "Graceful shutdown handling"
+    - "Sharding if 2500+ guilds"
+
+  permissions:
+    - "Bot invited with applications.commands scope"
+    - "Minimal required permissions"
+    - "Permission checks in sensitive commands"
