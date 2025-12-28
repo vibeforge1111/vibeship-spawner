@@ -1,0 +1,296 @@
+# DeFi Architect Sharp Edges
+# Production gotchas for DeFi protocols
+
+sharp_edges:
+  - id: impermanent-loss
+    summary: LP positions lose value compared to holding
+    severity: high
+    situation: Providing liquidity to AMMs
+    why: |
+      Deposit 1 ETH + 2000 USDC when ETH = $2000.
+      ETH goes to $4000. Pool rebalances to 0.707 ETH + 2828 USDC.
+      Value: $5656. If you just held: $6000.
+      Lost $344 (5.7%) to impermanent loss.
+      It's only "impermanent" if price returns. Usually it doesn't.
+    solution: |
+      1. Calculate IL before providing:
+         // IL = 2 * sqrt(priceRatio) / (1 + priceRatio) - 1
+         // 2x price move = -5.7%
+         // 5x price move = -25.5%
+
+      2. Only LP when fees compensate:
+         // Daily fees * 365 > Expected IL
+         // High volume, stable pairs = good
+         // Low volume, volatile pairs = bad
+
+      3. Use concentrated liquidity wisely:
+         // Uniswap V3: Higher capital efficiency
+         // But IL is amplified if price moves out of range
+
+      4. Consider single-sided staking:
+         // Many protocols offer staking without IL
+         // Lower yield but no IL risk
+
+      5. Hedge with options if available
+    symptoms:
+      - LP position worth less than initial deposit
+      - "I would have made more just holding"
+      - Losses during volatile periods
+    detection_pattern: 'addLiquidity|deposit.*pair|LP.*token'
+
+  - id: oracle-latency-exploit
+    summary: Stale oracle prices enable arbitrage
+    severity: critical
+    situation: Protocols depending on price feeds
+    why: |
+      Chainlink updates every X% price movement or heartbeat.
+      During volatile moves, on-chain price lags real price.
+      Attacker sees real price moved 10%, oracle shows old price.
+      Borrows at old (favorable) price, sells at real price, profits.
+    solution: |
+      1. Check oracle freshness:
+         (, , , uint256 updatedAt, ) = priceFeed.latestRoundData();
+         require(block.timestamp - updatedAt < MAX_DELAY, "Stale price");
+
+      2. Use circuit breakers:
+         uint256 lastPrice = previousPrices[token];
+         require(
+             newPrice > lastPrice * 95 / 100 &&
+             newPrice < lastPrice * 105 / 100,
+             "Price deviation too large"
+         );
+
+      3. Multiple oracle sources:
+         // Only proceed if sources agree within tolerance
+
+      4. Pause protocol during extreme volatility:
+         if (volatility > threshold) {
+             _pause();
+         }
+
+      5. Use TWAP for large operations
+    symptoms:
+      - Arbitrageurs profiting from protocol
+      - Bad debt accumulating
+      - Unexpected liquidations/mints
+    detection_pattern: 'latestRoundData|getPrice(?!.*staleness|.*freshness)'
+
+  - id: flash-loan-attack
+    summary: Attacker uses flash loan to manipulate protocol
+    severity: critical
+    situation: Any protocol with external price dependencies
+    why: |
+      Flash loan $100M → Manipulate DEX price → Exploit your protocol
+      at manipulated price → Repay loan → Profit.
+      All in one transaction. Zero capital required.
+      Hundreds of millions stolen via flash loans.
+    solution: |
+      1. Use TWAP instead of spot price:
+         // 30-minute TWAP can't be manipulated in one block
+         uint256 price = twapOracle.consult(token, 1800);
+
+      2. Block same-transaction dependencies:
+         mapping(address => uint256) lastInteraction;
+
+         modifier noFlashLoan() {
+             require(lastInteraction[msg.sender] < block.number);
+             lastInteraction[msg.sender] = block.number;
+             _;
+         }
+
+      3. Use external oracles (Chainlink):
+         // Decentralized, not manipulable by on-chain activity
+
+      4. Delay sensitive operations:
+         // Commit-reveal or time delays
+
+      5. Limit single-transaction impact:
+         require(amount < maxPerTransaction);
+    symptoms:
+      - Massive loss in single transaction
+      - Protocol drained
+      - Price spike then immediate reversal
+    detection_pattern: 'getReserves|balanceOf.*this.*price'
+
+  - id: governance-attack
+    summary: Attacker accumulates votes to pass malicious proposal
+    severity: critical
+    situation: On-chain governance
+    why: |
+      Flash loan governance tokens → Vote for malicious proposal →
+      Execute (drain treasury) → Repay tokens.
+      Or: Buy tokens, pass proposal, sell tokens.
+      Beanstalk lost $180M this way.
+    solution: |
+      1. Time-lock all proposals:
+         uint256 public constant TIMELOCK = 2 days;
+         require(block.timestamp > proposal.createdAt + TIMELOCK);
+
+      2. Snapshot voting at proposal creation:
+         // Votes counted from snapshot BEFORE proposal
+         // Flash loans don't help
+
+      3. Quorum requirements:
+         require(votes > totalSupply * 4 / 100);  // 4% quorum
+
+      4. Vote delegation requirements:
+         // Must delegate before proposal
+         // Prevents buying votes
+
+      5. Emergency pause capability:
+         // Multisig can pause malicious proposals
+    symptoms:
+      - Large token movements before vote
+      - Unusual proposals passing
+      - Treasury/parameter changes
+    detection_pattern: 'propose|vote|execute|governance'
+
+  - id: insufficient-liquidity
+    summary: Liquidations fail during market stress
+    severity: critical
+    situation: Lending protocol liquidations
+    why: |
+      Normal times: Liquidators compete, bad debt cleared.
+      Market crash: Everyone underwater, DEXs drained, no liquidity.
+      Liquidators can't sell collateral → Don't liquidate.
+      Bad debt accumulates, protocol becomes insolvent.
+    solution: |
+      1. Over-collateralization buffer:
+         // 150% collateral ratio with 125% liquidation threshold
+         // 25% buffer for price moves during liquidation
+
+      2. Partial liquidations:
+         // Liquidate 50% at a time
+         // Reduces market impact
+
+      3. Liquidation incentives:
+         // Higher bonus during stress
+         uint256 bonus = baseBonus + stressMultiplier;
+
+      4. Protocol-owned liquidity:
+         // Treasury can liquidate as backstop
+
+      5. Insurance fund:
+         // Cover bad debt from reserves
+
+      6. Circuit breakers:
+         // Pause new borrows in extreme conditions
+    symptoms:
+      - Bad debt accumulating
+      - Liquidations not happening
+      - Protocol token price crashing
+    detection_pattern: 'liquidate|collateral|healthFactor'
+
+  - id: reward-gaming
+    summary: Users game reward mechanics for outsized returns
+    severity: high
+    situation: Liquidity mining, yield farming
+    why: |
+      Protocol: "Earn 100% APY for providing liquidity!"
+      Whale: Deposit $100M right before snapshot, collect rewards,
+      withdraw after. Dilutes rewards for real users.
+      Or: Create many wallets to maximize per-wallet rewards.
+    solution: |
+      1. Time-weighted rewards:
+         // reward = balance * time_held / total_weighted
+         uint256 timeWeight = block.timestamp - depositTime;
+         uint256 reward = balance * timeWeight * rewardRate;
+
+      2. Vesting periods:
+         // Rewards vest over 90 days
+         // Early exit = forfeit unvested
+
+      3. Lock-up requirements:
+         // Must lock for X days to earn rewards
+         require(block.timestamp > depositTime + lockPeriod);
+
+      4. Decay function:
+         // Rewards decrease over time
+         // Early LPs rewarded more
+
+      5. Merkle drops based on historical behavior:
+         // Reward past genuine usage, not new gaming
+    symptoms:
+      - Whale deposits/withdrawals around snapshots
+      - Many small identical wallets
+      - APY much lower than advertised
+    detection_pattern: 'claimReward|harvest|pendingReward'
+
+  - id: cross-chain-bridge-exploit
+    summary: Bridge verification flaws allow fake deposits
+    severity: critical
+    situation: Multi-chain protocols with bridges
+    why: |
+      Bridge verifies deposits on Chain A to mint on Chain B.
+      Flaw in verification: Attacker fakes deposit proof.
+      Mints unlimited tokens on Chain B. Sells, drains liquidity.
+      Billions lost in bridge hacks (Ronin, Wormhole, Nomad).
+    solution: |
+      1. Multi-sig verification:
+         // Require N of M validators to confirm deposit
+         require(confirmations >= threshold);
+
+      2. Finality requirements:
+         // Wait for source chain finality
+         require(sourceBlocksConfirmed >= finalityBlocks);
+
+      3. Amount limits:
+         // Max transfer per transaction
+         // Max transfer per hour/day
+         require(dailyTransferred + amount <= dailyLimit);
+
+      4. Delay for large transfers:
+         // Large transfers have 24h delay
+         if (amount > largeThreshold) {
+             require(block.timestamp > submitTime + delay);
+         }
+
+      5. Emergency pause:
+         // Guardian can freeze bridge
+
+      6. Proof verification:
+         // Multiple independent verifiers
+         // Formal verification of bridge logic
+    symptoms:
+      - Tokens minted without deposits
+      - Imbalance between chains
+      - Large unexplained mints
+    detection_pattern: 'bridge|crossChain|mint.*verify'
+
+  - id: composability-risk
+    summary: Integrating protocols creates unexpected attack vectors
+    severity: high
+    situation: DeFi protocols integrated with other protocols
+    why: |
+      Your protocol integrates Aave, Compound, Uniswap.
+      Aave upgrades: Your integration breaks.
+      Uniswap pool manipulated: Your collateral valuation wrong.
+      Each integration adds risk surface. Composition multiplies risks.
+    solution: |
+      1. Interface abstraction:
+         // Don't hardcode external protocol logic
+         interface ILending {
+             function deposit(uint256 amount) external;
+         }
+
+      2. Integration circuit breakers:
+         // Pause specific integrations if issues
+         mapping(address => bool) public pausedIntegrations;
+
+      3. Conservative assumptions:
+         // Assume external protocols can be manipulated
+         // Don't trust their spot prices
+
+      4. Regular integration audits:
+         // Check for upstream changes
+
+      5. Graceful degradation:
+         // Protocol works (reduced functionality) if integration fails
+
+      6. Position limits:
+         // Max exposure to any single integration
+    symptoms:
+      - Unexpected behavior after external upgrades
+      - Losses from external protocol exploits
+      - Integration timeouts/failures
+    detection_pattern: 'external.*contract|integration|compound|aave|uniswap'

@@ -1,0 +1,139 @@
+# DeFi Architect Validations
+# Automated checks for DeFi patterns
+
+validations:
+  - id: spot-price-usage
+    name: Using Spot Price
+    severity: error
+    type: regex
+    pattern:
+      - 'getReserves\(\)'
+      - 'reserve0.*reserve1'
+      - 'spotPrice'
+    message: "Spot prices can be manipulated via flash loans."
+    fix_action: "Use TWAP oracles or Chainlink price feeds"
+    applies_to:
+      - "**/*.sol"
+
+  - id: single-oracle
+    name: Single Oracle Source
+    severity: warning
+    type: regex
+    pattern:
+      - 'latestRoundData\(\)(?!.*backup|.*secondary)'
+      - 'getPrice\((?!.*aggregate)'
+    message: "Single oracle source is risky - can fail or be stale."
+    fix_action: "Use multiple oracle sources with deviation checks"
+    applies_to:
+      - "**/*.sol"
+
+  - id: no-staleness-check
+    name: Oracle Without Staleness Check
+    severity: error
+    type: regex
+    pattern:
+      - 'latestRoundData\(\)(?!.*updatedAt)'
+      - 'getPrice\((?!.*timestamp)'
+    message: "Oracle price may be stale without timestamp check."
+    fix_action: "Check updatedAt and reject stale prices"
+    applies_to:
+      - "**/*.sol"
+
+  - id: no-slippage-protection
+    name: Swap Without Slippage Protection
+    severity: error
+    type: regex
+    pattern:
+      - 'swap\((?!.*minAmount)'
+      - 'exchange\((?!.*minimum)'
+    message: "Swap without slippage protection allows sandwich attacks."
+    fix_action: "Add minAmountOut parameter and check"
+    applies_to:
+      - "**/*.sol"
+
+  - id: flash-loan-vulnerable
+    name: Flash Loan Vulnerable Pattern
+    severity: warning
+    type: regex
+    pattern:
+      - 'balanceOf\(.*\).*price'
+      - 'getReserves.*mint'
+    message: "Pattern may be vulnerable to flash loan manipulation."
+    fix_action: "Use TWAP, commit-reveal, or block-based checks"
+    applies_to:
+      - "**/*.sol"
+
+  - id: no-circuit-breaker
+    name: Missing Circuit Breaker
+    severity: info
+    type: regex
+    pattern:
+      - 'liquidate(?!.*paused)'
+      - 'withdraw(?!.*circuit)'
+    message: "Critical function without pause/circuit breaker."
+    fix_action: "Add Pausable or circuit breaker for emergencies"
+    applies_to:
+      - "**/*.sol"
+
+  - id: unlimited-approval
+    name: Unlimited Token Approval
+    severity: warning
+    type: regex
+    pattern:
+      - 'approve.*type\(uint256\)\.max'
+      - 'approve.*2\*\*256'
+      - 'approve.*MAX_UINT'
+    message: "Unlimited approval is risky if approved contract is compromised."
+    fix_action: "Use exact approval amounts or approval management"
+    applies_to:
+      - "**/*.sol"
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: no-withdrawal-limit
+    name: No Withdrawal Rate Limit
+    severity: info
+    type: regex
+    pattern:
+      - 'withdraw(?!.*limit|.*cooldown)'
+    message: "Large withdrawals without limits can drain protocol."
+    fix_action: "Add withdrawal limits or cooldown periods"
+    applies_to:
+      - "**/*.sol"
+
+  - id: governance-no-timelock
+    name: Governance Without Timelock
+    severity: warning
+    type: regex
+    pattern:
+      - 'execute.*proposal(?!.*timelock)'
+      - 'vote.*execute(?!.*delay)'
+    message: "Governance without timelock allows immediate malicious changes."
+    fix_action: "Add timelock delay between voting and execution"
+    applies_to:
+      - "**/*.sol"
+
+  - id: no-reentrancy-guard
+    name: Missing Reentrancy Guard
+    severity: error
+    type: regex
+    pattern:
+      - 'call\{value(?!.*nonReentrant)'
+      - 'transfer\((?!.*nonReentrant)'
+    message: "External call without reentrancy protection."
+    fix_action: "Use ReentrancyGuard modifier or checks-effects-interactions"
+    applies_to:
+      - "**/*.sol"
+
+  - id: unsafe-cast
+    name: Unsafe Downcast
+    severity: warning
+    type: regex
+    pattern:
+      - 'uint128\(uint256'
+      - 'uint96\(uint256'
+      - 'int128\(int256'
+    message: "Downcast may truncate value silently."
+    fix_action: "Use SafeCast or check bounds before casting"
+    applies_to:
+      - "**/*.sol"

@@ -1,0 +1,174 @@
+# Drizzle ORM Validations
+# Automated checks that run on code to catch issues
+
+validations:
+  - id: drizzle-sql-injection
+    name: SQL Injection in Template Literal
+    severity: error
+    type: regex
+    pattern:
+      - "sql`[^`]*'\\$\\{[^}]+\\}'[^`]*`"
+      - 'sql`[^`]*"\\$\\{[^}]+\\}"[^`]*`'
+    message: "Potential SQL injection: user input interpolated with quotes. Use parameterized queries or remove quotes around ${}"
+    fix_action: "Remove quotes around ${variable} - Drizzle will parameterize it automatically"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+
+  - id: drizzle-missing-schema
+    name: Drizzle Init Without Schema
+    severity: warning
+    type: regex
+    pattern:
+      - 'drizzle\(\s*\w+\s*\)(?!\s*\.)'
+      - "from 'drizzle-orm/[^']+';[\\s\\S]{0,100}drizzle\\([^,)]+\\)[^{]*$"
+    message: "drizzle() called without schema. db.query (relational queries) won't work."
+    fix_action: "Pass schema to drizzle(): drizzle(client, { schema })"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+
+  - id: drizzle-serial-deprecated
+    name: Using serial() Instead of Identity
+    severity: info
+    type: regex
+    pattern:
+      - 'serial\s*\([^)]*\)'
+    message: "serial() is legacy. PostgreSQL recommends identity columns or UUIDs."
+    fix_action: "Use integer().generatedAlwaysAsIdentity() or uuid().defaultRandom()"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+
+  - id: drizzle-n-plus-one
+    name: Potential N+1 Query in Loop
+    severity: warning
+    type: regex
+    pattern:
+      - 'for\s*\([^)]*\)\s*\{[^}]*await\s+db\.(select|insert|update|delete)'
+      - 'forEach\([^)]*=>[^}]*await\s+db\.'
+      - '\.map\([^)]*=>[^}]*await\s+db\.'
+    message: "Database query inside loop creates N+1 problem. Consider relational queries or batch operations."
+    fix_action: "Use db.query with 'with' for related data, or batch the query outside the loop"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+
+  - id: drizzle-missing-references
+    name: Foreign Key Column Without .references()
+    severity: warning
+    type: regex
+    pattern:
+      - "\\w+Id:\\s*(?:uuid|integer|text)\\([^)]*\\)(?!\\.references)"
+      - "_id'\\)(?:\\.[^.]+)*(?!\\.references)"
+    message: "Column looks like a foreign key but missing .references(). Relations alone don't create DB constraints."
+    fix_action: "Add .references(() => otherTable.id) for database-level foreign key"
+    applies_to:
+      - "**/schema.ts"
+      - "**/schema/*.ts"
+
+  - id: drizzle-select-star
+    name: Select All Columns (No Column Selection)
+    severity: info
+    type: regex
+    pattern:
+      - '\\.select\\(\\)\\.from\\('
+    message: "Selecting all columns. Consider specifying only needed columns for better performance."
+    fix_action: "Use .select({ col1: table.col1, col2: table.col2 }) to select specific columns"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+
+  - id: drizzle-beta-version
+    name: Using Beta Version of Drizzle
+    severity: warning
+    type: regex
+    pattern:
+      - '"drizzle-orm":\\s*"[^"]*beta'
+      - '"drizzle-kit":\\s*"[^"]*beta'
+    message: "Using beta version of Drizzle. May have breaking changes and ecosystem incompatibility."
+    fix_action: "Consider using stable version unless testing beta features"
+    applies_to:
+      - "package.json"
+
+  - id: drizzle-limit-one-access
+    name: Accessing Properties on limit(1) Result
+    severity: warning
+    type: regex
+    pattern:
+      - '\\.limit\\(1\\)[^;]*;\\s*\\n[^\\[]*result\\.'
+      - '\\.limit\\(1\\)\\s*;?\\s*$[\\s\\S]{0,50}\\w+\\.(id|name|email|title)'
+    message: "limit(1) returns an array, not single object. Use destructuring [result] or findFirst()."
+    fix_action: "Use const [item] = await query.limit(1) or db.query.table.findFirst()"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+
+  - id: drizzle-jsonb-default
+    name: JSONB Column with Default (Push Bug)
+    severity: warning
+    type: regex
+    pattern:
+      - 'jsonb\\([^)]*\\)\\.default\\('
+      - 'json\\([^)]*\\)\\.default\\('
+    message: "jsonb/json with default may fail with drizzle-kit push. Use generate instead."
+    fix_action: "Use drizzle-kit generate instead of push, or set default in application code"
+    applies_to:
+      - "**/schema.ts"
+      - "**/schema/*.ts"
+
+  - id: drizzle-missing-ondelete
+    name: Foreign Key Without onDelete Behavior
+    severity: info
+    type: regex
+    pattern:
+      - '\\.references\\(\\(\\)\\s*=>\\s*\\w+\\.\\w+\\)(?![^)]*onDelete)'
+    message: "Foreign key without onDelete behavior. Consider adding { onDelete: 'cascade' } or similar."
+    fix_action: "Add onDelete behavior: .references(() => table.id, { onDelete: 'cascade' })"
+    applies_to:
+      - "**/schema.ts"
+      - "**/schema/*.ts"
+
+  - id: drizzle-raw-execute
+    name: Raw SQL Execution
+    severity: info
+    type: regex
+    pattern:
+      - 'db\\.execute\\(\\s*sql'
+      - '\\.execute\\(\\s*`'
+    message: "Using raw SQL execution. Ensure proper parameterization to prevent injection."
+    fix_action: "Prefer query builder methods. If using raw SQL, use sql placeholder: sql`...${param}...` without quotes"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+
+  - id: drizzle-missing-index
+    name: Foreign Key Column Without Index
+    severity: info
+    type: regex
+    pattern:
+      - '\\.references\\([^)]+\\)(?![\\s\\S]{0,200}index\\([^)]*\\))'
+    message: "Foreign key column might benefit from an index for JOIN performance."
+    fix_action: "Consider adding an index: export const idx = index('idx_name').on(table.column)"
+    applies_to:
+      - "**/schema.ts"
+      - "**/schema/*.ts"
+
+  - id: drizzle-transaction-no-await
+    name: Transaction Without Await
+    severity: error
+    type: regex
+    pattern:
+      - 'db\\.transaction\\([^)]+\\)(?!\\s*;?\\s*$)(?![\\s\\S]{0,10}await)'
+    message: "Transaction should be awaited. Without await, operations may not complete before continuing."
+    fix_action: "Add await: await db.transaction(async (tx) => { ... })"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"

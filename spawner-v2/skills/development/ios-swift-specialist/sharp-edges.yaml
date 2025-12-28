@@ -1,0 +1,341 @@
+# iOS/Swift Specialist Sharp Edges
+# Production gotchas for iOS development
+
+sharp_edges:
+  - id: force-unwrap-crash
+    summary: Force unwrap crashes in production when value is nil
+    severity: critical
+    situation: Accessing optional values
+    why: |
+      let name = user!.name crashes instantly if user is nil. In development,
+      data is often complete. In production, partial data, race conditions,
+      and API changes cause nils you didn't expect. App crashes, 1-star reviews.
+    solution: |
+      1. Use guard-let for early return:
+         guard let user = user else {
+             logger.error("User was nil")
+             return
+         }
+         // user is now non-optional
+
+      2. Use if-let for optional handling:
+         if let name = user?.name {
+             label.text = name
+         } else {
+             label.text = "Guest"
+         }
+
+      3. Use nil coalescing for defaults:
+         let name = user?.name ?? "Unknown"
+
+      4. Use optional chaining:
+         let city = user?.address?.city  // nil if any is nil
+
+      5. Reserve ! only for:
+         - IBOutlets (after viewDidLoad)
+         - Truly programmer errors that should crash
+    symptoms:
+      - EXC_BAD_INSTRUCTION crashes
+      - Crash logs with "unexpectedly found nil"
+      - Works in testing, crashes in production
+    detection_pattern: '(?<!!)\!(?![=!])|\.unwrap\(\)'
+
+  - id: retain-cycle-closure
+    summary: Strong self in closure causes memory leak
+    severity: high
+    situation: Closures stored on objects
+    why: |
+      self.completion = { self.doSomething() } creates a cycle: object owns
+      closure, closure owns object. Neither can deallocate. Memory grows,
+      resources stay open, app eventually crashes.
+    solution: |
+      1. Use [weak self] for most cases:
+         self.completion = { [weak self] in
+             guard let self = self else { return }
+             self.doSomething()
+         }
+
+      2. Use [unowned self] when lifecycle is guaranteed:
+         // Only when you KNOW self will outlive closure
+         self.shortLivedClosure = { [unowned self] in
+             self.quickOperation()
+         }
+
+      3. For Combine, use .sink with store:
+         cancellable = publisher
+             .sink { [weak self] value in
+                 self?.handle(value)
+             }
+             .store(in: &cancellables)
+
+      4. For async/await, check task cancellation:
+         Task { [weak self] in
+             guard let self = self else { return }
+             await self.asyncOperation()
+         }
+    symptoms:
+      - ViewControllers not deallocated
+      - Memory grows when navigating
+      - deinit never called
+    detection_pattern: '\{ self\.|completion = \{(?!.*weak)'
+
+  - id: main-thread-ui
+    summary: UI updates from background thread cause crashes or corruption
+    severity: critical
+    situation: Updating UI after async operation
+    why: |
+      UIKit is not thread-safe. Updating UI from background thread causes
+      undefined behavior: crashes, visual glitches, or silent corruption.
+      The symptoms may appear unrelated to the actual cause.
+    solution: |
+      1. Use @MainActor for UI-related code:
+         @MainActor
+         class ViewController: UIViewController {
+             // All methods run on main thread
+         }
+
+      2. Explicitly dispatch to main:
+         Task {
+             let data = await fetchData()
+             await MainActor.run {
+                 self.updateUI(with: data)
+             }
+         }
+
+      3. For completion handlers:
+         fetchData { [weak self] result in
+             DispatchQueue.main.async {
+                 self?.updateUI(result)
+             }
+         }
+
+      4. Use Main Thread Checker in Xcode:
+         Edit Scheme > Run > Diagnostics > Main Thread Checker
+    symptoms:
+      - Random UI crashes
+      - Visual glitches
+      - "UI API called from background thread" warning
+    detection_pattern: 'DispatchQueue\.global.*self\.|async.*self\.view'
+
+  - id: swiftui-body-side-effects
+    summary: Side effects in SwiftUI body cause infinite loops
+    severity: high
+    situation: SwiftUI view code
+    why: |
+      SwiftUI calls body whenever state changes. If body triggers state
+      change (setState, modify @Published), it creates infinite loop.
+      View keeps re-rendering, UI freezes, 100% CPU.
+    solution: |
+      1. Never modify state in body:
+         // BAD - triggers re-render loop
+         var body: some View {
+             viewModel.loadData()  // DON'T!
+             Text("Hello")
+         }
+
+         // GOOD - use onAppear
+         var body: some View {
+             Text("Hello")
+                 .onAppear { viewModel.loadData() }
+         }
+
+      2. Use .task for async:
+         var body: some View {
+             Text(data)
+                 .task { await viewModel.loadData() }
+         }
+
+      3. Derive values, don't compute with side effects:
+         // GOOD - pure computation
+         var displayName: String {
+             user.firstName + " " + user.lastName
+         }
+
+      4. Use onChange for reactions:
+         .onChange(of: selection) { newValue in
+             // React to change here
+         }
+    symptoms:
+      - UI freezes
+      - 100% CPU usage
+      - "Maximum update depth exceeded" (React analog)
+    detection_pattern: 'var body.*View.*@State|body.*ViewModel.*load'
+
+  - id: keychain-not-encrypted
+    summary: Storing sensitive data in UserDefaults instead of Keychain
+    severity: critical
+    situation: Storing tokens, passwords, sensitive data
+    why: |
+      UserDefaults is a plist file - readable by anyone with device access.
+      Jailbroken devices, backups, device sharing - all expose the data.
+      Tokens in UserDefaults = compromised accounts.
+    solution: |
+      1. Use Keychain for sensitive data:
+         import Security
+
+         func saveToken(_ token: String) throws {
+             let data = Data(token.utf8)
+             let query: [String: Any] = [
+                 kSecClass as String: kSecClassGenericPassword,
+                 kSecAttrAccount as String: "auth_token",
+                 kSecValueData as String: data,
+                 kSecAttrAccessible as String:
+                     kSecAttrAccessibleAfterFirstUnlock,
+             ]
+             SecItemDelete(query as CFDictionary)
+             let status = SecItemAdd(query as CFDictionary, nil)
+             guard status == errSecSuccess else {
+                 throw KeychainError.saveFailed(status)
+             }
+         }
+
+      2. Use a Keychain wrapper library:
+         import KeychainAccess
+
+         let keychain = Keychain(service: "com.myapp")
+         keychain["token"] = authToken
+
+      3. Set appropriate accessibility:
+         - kSecAttrAccessibleAfterFirstUnlock (most cases)
+         - kSecAttrAccessibleWhenUnlocked (higher security)
+         - kSecAttrAccessibleAlways (avoid - low security)
+
+      4. Consider biometric protection for high-value data
+    symptoms:
+      - Security audit failures
+      - App store rejection
+      - Account compromises
+    detection_pattern: 'UserDefaults.*token|UserDefaults.*password|UserDefaults.*secret'
+
+  - id: async-task-cancellation
+    summary: Async tasks continue after view dismissed
+    severity: medium
+    situation: Swift async/await in views
+    why: |
+      Task { await longOperation() } continues even if view is dismissed.
+      This wastes resources, may update deallocated state, or show stale
+      data on return. SwiftUI .task modifier handles this; manual Tasks don't.
+    solution: |
+      1. Use SwiftUI .task modifier (auto-cancels):
+         Text("Data")
+             .task {
+                 await loadData()  // Cancelled when view disappears
+             }
+
+      2. For UIKit, manage Task lifecycle:
+         class ViewController: UIViewController {
+             private var loadTask: Task<Void, Never>?
+
+             override func viewWillAppear(_ animated: Bool) {
+                 super.viewWillAppear(animated)
+                 loadTask = Task { await loadData() }
+             }
+
+             override func viewWillDisappear(_ animated: Bool) {
+                 super.viewWillDisappear(animated)
+                 loadTask?.cancel()
+             }
+         }
+
+      3. Check for cancellation in long operations:
+         func loadData() async {
+             for item in items {
+                 if Task.isCancelled { return }
+                 await process(item)
+             }
+         }
+
+      4. Use withTaskCancellationHandler:
+         await withTaskCancellationHandler {
+             await longRunningOperation()
+         } onCancel: {
+             cleanup()
+         }
+    symptoms:
+      - Network requests after view dismissed
+      - Updates to stale state
+      - Resource leaks
+    detection_pattern: 'Task \{(?!.*cancel)|Task\.init'
+
+  - id: app-transport-security
+    summary: ATS blocks HTTP requests, app appears broken
+    severity: medium
+    situation: Network requests to non-HTTPS endpoints
+    why: |
+      App Transport Security blocks cleartext HTTP by default. If your
+      API or third-party service uses HTTP, requests silently fail.
+      App appears broken with no obvious error.
+    solution: |
+      1. Prefer HTTPS always (real fix)
+
+      2. For development, allow localhost:
+         <key>NSAppTransportSecurity</key>
+         <dict>
+             <key>NSAllowsLocalNetworking</key>
+             <true/>
+         </dict>
+
+      3. For specific domains (avoid in production):
+         <key>NSAppTransportSecurity</key>
+         <dict>
+             <key>NSExceptionDomains</key>
+             <dict>
+                 <key>legacy-api.example.com</key>
+                 <dict>
+                     <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                     <true/>
+                 </dict>
+             </dict>
+         </dict>
+
+      4. Check ATS errors:
+         - Error: "The resource could not be loaded because the ATS policy..."
+         - Fix: Update to HTTPS or add exception
+    symptoms:
+      - Network requests fail silently
+      - Works in simulator (local), fails on device
+      - Works with some URLs, not others
+    detection_pattern: 'http://(?!localhost)|NSAllowsArbitraryLoads.*true'
+
+  - id: core-data-threading
+    summary: Core Data context accessed from wrong thread crashes
+    severity: critical
+    situation: Using Core Data in multi-threaded app
+    why: |
+      NSManagedObjectContext is not thread-safe. Accessing a context or
+      its objects from a different thread causes crashes, data corruption,
+      or silent errors. Core Data threading bugs are notoriously hard to debug.
+    solution: |
+      1. Always use context's perform/performAndWait:
+         context.perform {
+             let user = context.object(with: objectID)
+             user.name = "New Name"
+             try? context.save()
+         }
+
+      2. Use background context for heavy work:
+         let bgContext = persistentContainer.newBackgroundContext()
+         bgContext.perform {
+             // Heavy work here
+             try? bgContext.save()
+         }
+
+      3. Pass object IDs, not objects, between threads:
+         // BAD
+         let user = mainContext.fetch(...)
+         Task { updateBackground(user) }  // Wrong thread!
+
+         // GOOD
+         let userID = user.objectID
+         Task {
+             let bgContext = container.newBackgroundContext()
+             let bgUser = bgContext.object(with: userID)
+             // Safe to use bgUser here
+         }
+
+      4. Use -com.apple.CoreData.ConcurrencyDebug 1 in launch args
+    symptoms:
+      - Random Core Data crashes
+      - Data corruption
+      - _PFArray mutated while being enumerated
+    detection_pattern: 'NSManagedObjectContext(?!.*perform)|\.objects\.first'

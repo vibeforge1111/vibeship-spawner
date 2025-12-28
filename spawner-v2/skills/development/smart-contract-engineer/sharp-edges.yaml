@@ -1,0 +1,328 @@
+# Smart Contract Engineer Sharp Edges
+# Production gotchas for blockchain development
+
+sharp_edges:
+  - id: reentrancy-attack
+    summary: External calls allow attacker to re-enter your function
+    severity: critical
+    situation: Any function making external calls
+    why: |
+      function withdraw() {
+          msg.sender.call{value: balances[msg.sender]}("");
+          balances[msg.sender] = 0;
+      }
+
+      Attacker's receive() calls withdraw() again before balance is zeroed.
+      Loop drains entire contract. This is how the DAO hack happened.
+      $60 million stolen.
+    solution: |
+      1. Checks-Effects-Interactions pattern:
+         function withdraw() external {
+             // CHECKS
+             uint256 amount = balances[msg.sender];
+             require(amount > 0);
+
+             // EFFECTS (before external call!)
+             balances[msg.sender] = 0;
+
+             // INTERACTIONS (last!)
+             (bool success, ) = msg.sender.call{value: amount}("");
+             require(success);
+         }
+
+      2. Use ReentrancyGuard:
+         import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+
+         function withdraw() external nonReentrant {
+             // Safe now
+         }
+
+      3. Use pull over push:
+         // Instead of sending, let users withdraw
+         function claimRewards() external {
+             uint256 reward = pendingRewards[msg.sender];
+             pendingRewards[msg.sender] = 0;
+             token.transfer(msg.sender, reward);
+         }
+
+      4. Never trust external contracts
+    symptoms:
+      - Contract drained of ETH/tokens
+      - Same event emitted multiple times
+      - Balance inconsistencies
+    detection_pattern: 'call\{value.*balances|transfer.*amount.*=\s*0'
+
+  - id: oracle-manipulation
+    summary: Price oracle can be manipulated in same block
+    severity: critical
+    situation: Using DEX spot price for logic
+    why: |
+      price = uniswapPair.getReserves();  // Current price
+      Flash loan: Borrow huge amount, swap to move price, exploit your
+      contract at manipulated price, swap back, repay loan. All in one
+      transaction. No capital required. Millions stolen this way.
+    solution: |
+      1. Use TWAP (time-weighted average price):
+         // Uniswap V3 Oracle
+         (int24 arithmeticMeanTick, ) = oracle.consult(pool, 1800); // 30 min TWAP
+
+      2. Use Chainlink (decentralized, resistant):
+         AggregatorV3Interface priceFeed = AggregatorV3Interface(chainlinkAddress);
+         (, int256 price, , , ) = priceFeed.latestRoundData();
+
+      3. Multiple oracle sources:
+         uint256 chainlinkPrice = getChainlinkPrice();
+         uint256 twapPrice = getTWAP();
+         require(deviation(chainlinkPrice, twapPrice) < 5%, "Price deviation");
+
+      4. Never use spot price for:
+         - Collateral valuation
+         - Liquidation decisions
+         - Large swaps
+
+      5. Add price bounds:
+         require(price >= minPrice && price <= maxPrice);
+    symptoms:
+      - Large losses in single transaction
+      - Unusual liquidations
+      - Price spikes then reversals
+    detection_pattern: 'getReserves\(\)|reserve0.*reserve1|spot.*price'
+
+  - id: integer-overflow
+    summary: Arithmetic overflow wraps around, enabling exploits
+    severity: critical
+    situation: Mathematical operations in Solidity < 0.8
+    why: |
+      uint8 balance = 255;
+      balance += 1;  // balance is now 0!
+
+      In Solidity < 0.8, integers silently overflow. Attacker sends 1 token,
+      balance wraps to max uint256, they can withdraw everything.
+    solution: |
+      1. Use Solidity 0.8+ (built-in overflow checks):
+         pragma solidity ^0.8.0;
+         // Reverts on overflow automatically
+
+      2. For 0.7 and below, use SafeMath:
+         using SafeMath for uint256;
+         balance = balance.add(1);  // Reverts on overflow
+
+      3. Use unchecked only when you're sure:
+         unchecked {
+             // Only when you KNOW it can't overflow
+             for (uint i = 0; i < len; ++i) {
+                 // i can't overflow if len < max uint256
+             }
+         }
+
+      4. Be careful with casting:
+         uint256 big = 2**250;
+         uint8 small = uint8(big);  // Data loss!
+    symptoms:
+      - Balances suddenly become huge
+      - Impossible token amounts
+      - Math doesn't add up
+    detection_pattern: 'pragma solidity.*0\.[0-7]|uint.*\+|uint.*\*'
+
+  - id: access-control-missing
+    summary: Critical functions callable by anyone
+    severity: critical
+    situation: Admin or privileged functions
+    why: |
+      function withdraw() external {
+          payable(owner).transfer(address(this).balance);
+      }
+
+      Anyone can call. "But owner gets the money!" - Attacker front-runs
+      with transaction that changes owner, then calls withdraw.
+      Or this function was meant to be onlyOwner and you forgot.
+    solution: |
+      1. Use OpenZeppelin Ownable:
+         import "@openzeppelin/contracts/access/Ownable.sol";
+
+         function withdraw() external onlyOwner {
+             // Only owner can call
+         }
+
+      2. Use AccessControl for multiple roles:
+         bytes32 public constant ADMIN_ROLE = keccak256("ADMIN");
+         bytes32 public constant MINTER_ROLE = keccak256("MINTER");
+
+         function mint() external onlyRole(MINTER_ROLE) {
+             // Only minters
+         }
+
+      3. Use two-step ownership transfer:
+         import "@openzeppelin/contracts/access/Ownable2Step.sol";
+         // New owner must accept ownership
+
+      4. Timelock critical operations:
+         require(block.timestamp > proposalTime + delay);
+    symptoms:
+      - Unauthorized parameter changes
+      - Funds drained by attacker
+      - Contract takeover
+    detection_pattern: 'function.*external(?!.*onlyOwner|.*onlyRole|.*require\(msg.sender)'
+
+  - id: gas-griefing
+    summary: Attacker can make your function run out of gas
+    severity: high
+    situation: Loops over user-controlled data
+    why: |
+      function distribute() external {
+          for (uint i = 0; i < holders.length; i++) {
+              payable(holders[i]).transfer(rewards[i]);
+          }
+      }
+
+      Attacker adds 10,000 addresses. Gas exceeds block limit.
+      Function becomes uncallable. Funds stuck forever.
+    solution: |
+      1. Use pull over push:
+         // Users claim individually
+         function claim() external {
+             uint256 reward = pendingRewards[msg.sender];
+             pendingRewards[msg.sender] = 0;
+             payable(msg.sender).transfer(reward);
+         }
+
+      2. Limit loop iterations:
+         function distribute(uint256 start, uint256 count) external {
+             uint256 end = min(start + count, holders.length);
+             for (uint i = start; i < end; i++) {
+                 // Process batch
+             }
+         }
+
+      3. Use merkle trees for large distributions:
+         function claim(bytes32[] proof, uint256 amount) external {
+             require(verify(proof, leaf(msg.sender, amount)));
+             // One verification instead of N transfers
+         }
+
+      4. Don't store unbounded arrays:
+         mapping(address => uint256) public balances;
+         // Not: address[] public holders;
+    symptoms:
+      - Function reverts with out of gas
+      - Function becomes uncallable
+      - Funds stuck in contract
+    detection_pattern: 'for.*length\)|while.*length|\.push\('
+
+  - id: signature-replay
+    summary: Same signature can be used multiple times
+    severity: high
+    situation: Any off-chain signature verification
+    why: |
+      User signs "transfer 100 tokens to Alice". Transaction succeeds.
+      Attacker (or Alice) replays same signature. Transfer happens again.
+      And again. Until balance is drained.
+    solution: |
+      1. Include nonce in signed message:
+         bytes32 hash = keccak256(abi.encodePacked(
+             to,
+             amount,
+             nonces[signer]++,  // Increment after use
+             address(this),     // Contract address
+             block.chainid      // Chain ID
+         ));
+
+      2. Use EIP-712 structured data:
+         bytes32 DOMAIN_SEPARATOR = keccak256(abi.encode(
+             DOMAIN_TYPEHASH,
+             keccak256("MyContract"),
+             block.chainid,
+             address(this)
+         ));
+
+      3. Mark signatures as used:
+         mapping(bytes32 => bool) public usedSignatures;
+         require(!usedSignatures[sigHash]);
+         usedSignatures[sigHash] = true;
+
+      4. Use deadline for expiration:
+         require(block.timestamp <= deadline);
+    symptoms:
+      - Same transaction executed multiple times
+      - Funds drained after valid transaction
+      - Signatures valid on wrong chain
+    detection_pattern: 'ecrecover(?!.*nonce)|verify.*signature(?!.*nonce)'
+
+  - id: storage-collision
+    summary: Upgradeable contract storage corrupted on upgrade
+    severity: critical
+    situation: Upgrading proxy contracts
+    why: |
+      V1: slot 0 = owner, slot 1 = balance
+      V2: slot 0 = admin, slot 1 = owner, slot 2 = balance
+
+      After upgrade, old balance is now owner address. New balance
+      reads garbage. Contract is bricked. No recovery possible.
+    solution: |
+      1. Never change storage order:
+         // V1
+         uint256 public balance;  // slot 0
+         address public owner;    // slot 1
+
+         // V2 - ONLY add at end
+         uint256 public balance;  // slot 0
+         address public owner;    // slot 1
+         uint256 public newVar;   // slot 2 (NEW)
+
+      2. Use storage gaps:
+         uint256[50] private __gap;  // Reserve slots for future
+
+         // V2: Use gap slots
+         uint256[49] private __gap;  // Reduce by 1
+         uint256 public newVar;
+
+      3. Use OpenZeppelin Upgrades plugin:
+         npx hardhat run --network mainnet scripts/upgrade.js
+         // Plugin checks storage compatibility
+
+      4. Test upgrades thoroughly:
+         // Deploy V1, write state, upgrade to V2, verify state
+    symptoms:
+      - Random values in storage
+      - Contract unusable after upgrade
+      - Loss of all state
+    detection_pattern: 'upgrade|proxy|delegatecall'
+
+  - id: front-running
+    summary: Pending transactions visible, exploitable by miners/bots
+    severity: high
+    situation: Any valuable transaction in mempool
+    why: |
+      User submits: swap 100 ETH for tokens at current price.
+      Bot sees mempool, front-runs: buys tokens first (price up).
+      User's swap executes at worse price.
+      Bot back-runs: sells tokens (profits from user's loss).
+    solution: |
+      1. Use commit-reveal scheme:
+         // Phase 1: Submit hash of action
+         function commit(bytes32 hash) external {
+             commits[msg.sender] = hash;
+         }
+
+         // Phase 2: Reveal and execute
+         function reveal(uint256 amount, bytes32 secret) external {
+             require(keccak256(abi.encode(amount, secret)) == commits[msg.sender]);
+             // Execute action
+         }
+
+      2. Use private mempools (Flashbots):
+         // Submit via Flashbots Protect
+         // Transaction not visible until included
+
+      3. Set slippage tolerance:
+         // User accepts up to 1% price movement
+         require(amountOut >= minAmountOut);
+
+      4. Use batch auctions:
+         // All orders in batch get same price
+         // No advantage to seeing others' orders
+    symptoms:
+      - Worse execution than expected
+      - Sandwich transactions around user's
+      - MEV bots profiting from users
+    detection_pattern: 'swap|trade|buy|sell(?!.*deadline|.*minAmount)'

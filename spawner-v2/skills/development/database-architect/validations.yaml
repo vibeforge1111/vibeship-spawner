@@ -1,0 +1,156 @@
+# Database Architect Validations
+# Automated checks for database patterns
+
+validations:
+  - id: select-star
+    name: SELECT * Query
+    severity: warning
+    type: regex
+    pattern:
+      - 'SELECT \*'
+      - 'findMany\(\)'
+      - '\.all\(\)'
+    message: "SELECT * fetches unnecessary columns."
+    fix_action: "Select only needed columns explicitly"
+    applies_to:
+      - "**/*.sql"
+      - "**/*.ts"
+      - "**/*.py"
+
+  - id: no-pagination
+    name: Query Without Pagination
+    severity: warning
+    type: regex
+    pattern:
+      - 'SELECT.*(?<!LIMIT)'
+      - 'findMany\(\)(?!.*take)'
+      - 'find\(\)(?!.*limit)'
+    message: "Query without pagination may return too many rows."
+    fix_action: "Add LIMIT or pagination parameters"
+    applies_to:
+      - "**/*.sql"
+      - "**/repositories/**/*.ts"
+
+  - id: missing-index-hint
+    name: Query on Likely Unindexed Column
+    severity: info
+    type: regex
+    pattern:
+      - 'WHERE.*created_at'
+      - 'WHERE.*updated_at'
+      - 'ORDER BY.*created_at(?!.*DESC)'
+    message: "Query may benefit from index on this column."
+    fix_action: "Verify index exists: CREATE INDEX idx_table_column ON table(column)"
+    applies_to:
+      - "**/*.sql"
+      - "**/queries/**/*.ts"
+
+  - id: no-foreign-key
+    name: Reference Column Without Foreign Key
+    severity: warning
+    type: regex
+    pattern:
+      - 'user_id.*INT(?!.*REFERENCES)'
+      - 'organization_id.*UUID(?!.*REFERENCES)'
+      - '_id.*(?<!REFERENCES.*)'
+    message: "Reference column may be missing foreign key constraint."
+    fix_action: "Add FOREIGN KEY REFERENCES for referential integrity"
+    applies_to:
+      - "**/*.sql"
+      - "**/migrations/**/*.sql"
+
+  - id: json-structured-data
+    name: Structured Data in JSON Column
+    severity: info
+    type: regex
+    pattern:
+      - 'JSONB.*user_id'
+      - 'JSON.*status'
+      - 'JSONB.*email'
+    message: "Structured data in JSON loses query optimization."
+    fix_action: "Extract frequently queried fields to columns"
+    applies_to:
+      - "**/*.sql"
+      - "**/schema/**/*.ts"
+
+  - id: n-plus-one-pattern
+    name: N+1 Query Pattern
+    severity: error
+    type: regex
+    pattern:
+      - 'for.*in.*:.*find'
+      - '\.forEach.*findOne'
+      - 'map.*prisma\.'
+    message: "Loop with query inside causes N+1 problem."
+    fix_action: "Use eager loading, joins, or batch queries"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.py"
+      - "**/*.js"
+
+  - id: cascade-delete-missing
+    name: Foreign Key Without ON DELETE
+    severity: info
+    type: regex
+    pattern:
+      - 'REFERENCES.*\)(?!.*ON DELETE)'
+    message: "Foreign key without ON DELETE may cause issues."
+    fix_action: "Specify ON DELETE CASCADE, RESTRICT, or SET NULL"
+    applies_to:
+      - "**/*.sql"
+      - "**/migrations/**/*.sql"
+
+  - id: uuid-random
+    name: Random UUID Primary Key
+    severity: info
+    type: regex
+    pattern:
+      - 'gen_random_uuid\(\)'
+      - 'uuid_generate_v4\(\)'
+      - 'UUID DEFAULT uuid'
+    message: "Random UUIDs cause index fragmentation on high-write tables."
+    fix_action: "Consider UUIDv7, ULID, or BIGSERIAL for high-write tables"
+    applies_to:
+      - "**/*.sql"
+      - "**/schema/**/*.ts"
+
+  - id: long-transaction
+    name: Long Transaction Pattern
+    severity: warning
+    type: regex
+    pattern:
+      - 'BEGIN.*for'
+      - 'transaction.*while'
+      - '\.transaction\(.*for'
+    message: "Long transactions hold locks and block others."
+    fix_action: "Break into smaller transactions or batches"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.py"
+      - "**/*.sql"
+
+  - id: raw-sql-injection
+    name: SQL Injection Risk
+    severity: error
+    type: regex
+    pattern:
+      - 'query.*\$\{'
+      - 'execute.*\+.*\+'
+      - 'raw.*f"'
+    message: "String interpolation in SQL is injection risk."
+    fix_action: "Use parameterized queries"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.py"
+      - "**/*.js"
+
+  - id: index-on-create
+    name: CREATE INDEX Without CONCURRENTLY
+    severity: warning
+    type: regex
+    pattern:
+      - 'CREATE INDEX(?!.*CONCURRENTLY)'
+    message: "CREATE INDEX locks table. Use CONCURRENTLY in production."
+    fix_action: "Use CREATE INDEX CONCURRENTLY for production"
+    applies_to:
+      - "**/migrations/**/*.sql"

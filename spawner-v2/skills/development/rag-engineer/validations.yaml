@@ -1,0 +1,138 @@
+# RAG Engineer Validations
+# Automated checks for RAG patterns
+
+validations:
+  - id: fixed-chunk-size
+    name: Fixed Chunk Size
+    severity: warning
+    type: regex
+    pattern:
+      - 'chunk_size\s*=\s*\d{3,4}'
+      - 'split_by_tokens\(\d+'
+      - 'textwrap\.wrap'
+    message: "Fixed-size chunking may split sentences and context."
+    fix_action: "Use semantic or sentence-aware chunking"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: no-overlap
+    name: Chunks Without Overlap
+    severity: warning
+    type: regex
+    pattern:
+      - 'overlap\s*=\s*0'
+      - 'chunk_overlap\s*=\s*0'
+      - 'split(?!.*overlap)'
+    message: "Chunks without overlap may lose context at boundaries."
+    fix_action: "Add 10-20% overlap between chunks"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: naive-top-k
+    name: Naive Top-K Without Reranking
+    severity: info
+    type: regex
+    pattern:
+      - 'top_k\s*=\s*[1-9](?!.*rerank)'
+      - '\.similarity_search\([^)]*\)(?!.*rerank)'
+      - 'limit\s*=\s*\d+(?!.*cross_encoder)'
+    message: "Using top-K without reranking may miss relevant results."
+    fix_action: "Add cross-encoder reranking for better precision"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: no-metadata-filter
+    name: No Metadata Filtering
+    severity: info
+    type: regex
+    pattern:
+      - '\.search\(\s*query\s*\)'
+      - 'similarity_search\([^,]+\)$'
+      - 'vector_search(?!.*filter)'
+    message: "Pure semantic search without metadata filtering."
+    fix_action: "Add metadata filters for date, source, or category"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: context-stuffing
+    name: Context Stuffing
+    severity: warning
+    type: regex
+    pattern:
+      - 'context\s*=\s*["\']\\s*["\']\\.join'
+      - '\\n\\.join\(.*chunks\)'
+      - 'all_chunks|all_documents'
+    message: "Stuffing all context may exceed window or confuse LLM."
+    fix_action: "Use relevance threshold or compression"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: hardcoded-embedding
+    name: Hardcoded Embedding Model
+    severity: info
+    type: regex
+    pattern:
+      - 'text-embedding-ada-002'
+      - 'all-MiniLM-L6-v2'
+      - 'embedding_model\s*=\s*["\'][^"\']+["\']'
+    message: "Hardcoded embedding model - consider making configurable."
+    fix_action: "Make embedding model configurable for evaluation"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.js"
+    excludes:
+      - "**/config.*"
+      - "**/.env*"
+
+  - id: no-similarity-threshold
+    name: No Similarity Threshold
+    severity: warning
+    type: regex
+    pattern:
+      - 'search\([^)]*\)(?!.*threshold|.*score)'
+      - 'retrieve(?!.*min_score)'
+    message: "No minimum similarity threshold - may return irrelevant results."
+    fix_action: "Add minimum similarity score cutoff"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: sync-embedding
+    name: Synchronous Embedding
+    severity: info
+    type: regex
+    pattern:
+      - 'for.*in.*documents.*embed\('
+      - 'embed_query\([^)]+\)\s*$'
+    message: "Synchronous embedding may be slow for large batches."
+    fix_action: "Use batch embedding or async for performance"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: missing-retrieval-eval
+    name: Missing Retrieval Evaluation
+    severity: info
+    type: regex
+    pattern:
+      - 'def test_rag|test_retrieval(?!.*recall|.*mrr|.*ndcg)'
+      - 'assert.*response(?!.*retrieved)'
+    message: "Testing RAG without separate retrieval evaluation."
+    fix_action: "Add retrieval-specific metrics (MRR, NDCG, Recall@K)"
+    applies_to:
+      - "**/test*.py"
+      - "**/*.test.ts"
+      - "**/*.spec.ts"

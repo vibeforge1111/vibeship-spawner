@@ -1,0 +1,141 @@
+# Docker Specialist Validations
+# Automated checks for Docker patterns
+
+validations:
+  - id: latest-tag
+    name: Using :latest Tag
+    severity: error
+    type: regex
+    pattern:
+      - 'FROM.*:latest'
+      - 'image:.*:latest'
+      - 'FROM.*:$'
+    message: "Using :latest tag breaks reproducibility."
+    fix_action: "Pin to specific version (e.g., node:20.10.0-alpine)"
+    applies_to:
+      - "**/Dockerfile*"
+      - "**/docker-compose*.yml"
+      - "**/docker-compose*.yaml"
+
+  - id: running-as-root
+    name: Running as Root User
+    severity: error
+    type: regex
+    pattern:
+      - 'USER root'
+      - 'Dockerfile(?!.*USER [^r])'
+    message: "Container running as root is security risk."
+    fix_action: "Add non-root user and USER directive"
+    applies_to:
+      - "**/Dockerfile*"
+
+  - id: secrets-in-dockerfile
+    name: Secrets in Dockerfile
+    severity: error
+    type: regex
+    pattern:
+      - 'ARG.*KEY'
+      - 'ARG.*SECRET'
+      - 'ARG.*PASSWORD'
+      - 'ARG.*TOKEN'
+      - 'ENV.*=.*password'
+    message: "Secrets in Dockerfile are visible in image layers."
+    fix_action: "Use Docker secrets or runtime environment variables"
+    applies_to:
+      - "**/Dockerfile*"
+
+  - id: no-healthcheck
+    name: Missing HEALTHCHECK
+    severity: warning
+    type: regex
+    pattern:
+      - 'Dockerfile(?!.*HEALTHCHECK)'
+    message: "No HEALTHCHECK - dead containers appear healthy."
+    fix_action: "Add HEALTHCHECK instruction"
+    applies_to:
+      - "**/Dockerfile*"
+
+  - id: cache-busting-copy
+    name: COPY Before Package Install
+    severity: warning
+    type: regex
+    pattern:
+      - 'COPY \. \.\s*\n.*RUN.*install'
+      - 'COPY.*\n.*npm install'
+      - 'COPY.*\n.*pip install'
+    message: "COPY all files before install busts cache on every change."
+    fix_action: "Copy package files first, install, then copy source"
+    applies_to:
+      - "**/Dockerfile*"
+
+  - id: no-ignore-file
+    name: Missing .dockerignore
+    severity: info
+    type: regex
+    pattern:
+      - 'Dockerfile'
+    message: ".dockerignore file recommended to reduce context size."
+    fix_action: "Create .dockerignore with node_modules, .git, etc."
+    applies_to:
+      - "**/Dockerfile*"
+
+  - id: add-instead-of-copy
+    name: Using ADD Instead of COPY
+    severity: info
+    type: regex
+    pattern:
+      - 'ADD(?!.*http)'
+    message: "ADD has extra features. Use COPY for local files."
+    fix_action: "Use COPY unless you need ADD's URL/tar features"
+    applies_to:
+      - "**/Dockerfile*"
+
+  - id: no-signal-handling
+    name: No Init Process
+    severity: warning
+    type: regex
+    pattern:
+      - 'CMD \[(?!.*tini)(?!.*dumb-init)'
+      - 'ENTRYPOINT \[(?!.*tini)(?!.*dumb-init)'
+    message: "No init process may cause zombie processes."
+    fix_action: "Use tini or dumb-init as entrypoint"
+    applies_to:
+      - "**/Dockerfile*"
+
+  - id: privileged-container
+    name: Privileged Container
+    severity: error
+    type: regex
+    pattern:
+      - 'privileged.*true'
+      - '--privileged'
+    message: "Privileged mode gives full host access - security risk."
+    fix_action: "Remove privileged mode, use specific capabilities"
+    applies_to:
+      - "**/docker-compose*.yml"
+      - "**/docker-compose*.yaml"
+      - "**/*.sh"
+
+  - id: hardcoded-port
+    name: Hardcoded Host Port
+    severity: info
+    type: regex
+    pattern:
+      - 'ports:.*"[0-9]+:[0-9]+"'
+    message: "Hardcoded host port may conflict in different environments."
+    fix_action: "Use environment variables for ports"
+    applies_to:
+      - "**/docker-compose*.yml"
+      - "**/docker-compose*.yaml"
+
+  - id: no-restart-policy
+    name: Missing Restart Policy
+    severity: info
+    type: regex
+    pattern:
+      - 'services:(?!.*restart)'
+    message: "No restart policy - containers won't recover from crashes."
+    fix_action: "Add restart: unless-stopped or restart: always"
+    applies_to:
+      - "**/docker-compose*.yml"
+      - "**/docker-compose*.yaml"

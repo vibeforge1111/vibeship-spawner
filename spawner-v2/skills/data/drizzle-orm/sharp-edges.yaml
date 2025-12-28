@@ -1,0 +1,379 @@
+# Drizzle ORM Sharp Edges
+# These are the gotchas that catch developers off guard
+
+sharp_edges:
+  - id: drizzle-relations-not-fk
+    summary: Relations don't create foreign key constraints
+    severity: critical
+    situation: |
+      You define relations() for your tables expecting database-level foreign keys.
+      You delete a user and expect cascade to delete their posts. Posts remain orphaned.
+    why: |
+      Drizzle separates concerns: schema defines database structure, relations define
+      query patterns. Relations are for db.query API only - they're TypeScript metadata,
+      not SQL constraints. Without .references() in your schema, there's no foreign key,
+      no ON DELETE CASCADE, and no referential integrity.
+    solution: |
+      # WRONG: Relation without foreign key
+      export const posts = pgTable('posts', {
+        authorId: uuid('author_id').notNull(), // No FK!
+      });
+      export const postsRelations = relations(posts, ({ one }) => ({
+        author: one(users, { fields: [posts.authorId], references: [users.id] }),
+      }));
+
+      # RIGHT: Foreign key AND relation
+      export const posts = pgTable('posts', {
+        authorId: uuid('author_id')
+          .notNull()
+          .references(() => users.id, { onDelete: 'cascade' }), // FK!
+      });
+      // Then define relation separately for query API
+    symptoms:
+      - Orphaned records after deletion
+      - No cascade behavior
+      - Data integrity violations
+      - "constraint violation" errors missing when expected
+    detection_pattern: 'relations\([^)]+,\s*\(\{[^}]*\}\)\s*=>\s*\(\{[^}]*one\([^)]+\)[^}]*\}\)\)'
+    version_range: ">=0.20.0"
+
+  - id: drizzle-limit-array-type
+    summary: limit(1) still returns an array, not a single object
+    severity: high
+    situation: |
+      You use .limit(1) expecting a single object. You access result.name and get
+      undefined because result is still an array.
+    why: |
+      Drizzle's type system infers arrays for all select queries regardless of limit.
+      This is a known limitation - TypeScript can't narrow based on runtime values.
+      The team is aware (GitHub issue #5173) but it's a fundamental type inference
+      limitation.
+    solution: |
+      // WRONG: Assumes single object
+      const user = await db.select().from(users).where(eq(users.id, id)).limit(1);
+      console.log(user.name); // Error! user is an array
+
+      // RIGHT: Destructure or use findFirst
+      const [user] = await db.select().from(users).where(eq(users.id, id)).limit(1);
+      console.log(user?.name); // Works!
+
+      // BETTER: Use relational query findFirst
+      const user = await db.query.users.findFirst({
+        where: eq(users.id, id),
+      });
+      console.log(user?.name); // Returns single object or undefined
+    symptoms:
+      - "Cannot read property of undefined"
+      - TypeScript errors about arrays vs objects
+      - Accessing .property on array
+    detection_pattern: '\.limit\(1\)\s*;?\s*\n[^[]*\.\w+'
+    version_range: ">=0.20.0"
+
+  - id: drizzle-push-production
+    summary: Using drizzle-kit push in production
+    severity: critical
+    situation: |
+      You run `drizzle-kit push` against your production database because it's
+      faster than generating migrations. Schema changes apply but there's no
+      record of what changed.
+    why: |
+      push applies changes directly without migration history. When something breaks,
+      you can't rollback. Team members don't know what changed. CI/CD has no
+      reproducible migration to run. It's convenient for local dev, dangerous for prod.
+    solution: |
+      # Development workflow
+      npx drizzle-kit push  # Fast iteration, no files
+
+      # Production workflow
+      npx drizzle-kit generate  # Creates SQL migration file
+      # Review the SQL in drizzle/ folder
+      npx drizzle-kit migrate   # Apply with history
+
+      # In CI/CD
+      npx drizzle-kit migrate   # Always use migrate, never push
+    symptoms:
+      - No migration history
+      - Can't rollback changes
+      - "What changed?" confusion
+      - Schema drift between environments
+    detection_pattern: null
+    version_range: ">=0.20.0"
+
+  - id: drizzle-missing-schema-import
+    summary: db.query fails without schema passed to drizzle()
+    severity: high
+    situation: |
+      You initialize drizzle() without the schema parameter. db.select works fine.
+      Then you try db.query.users.findMany() and get a runtime error.
+    why: |
+      The relational query API (db.query) requires schema metadata to build queries.
+      The basic CRUD API (db.select/insert/update/delete) doesn't need it. If you
+      forget to pass schema, db.query silently fails or throws at runtime.
+    solution: |
+      // WRONG: No schema, db.query won't work
+      import { drizzle } from 'drizzle-orm/postgres-js';
+      const db = drizzle(client);
+      await db.query.users.findMany(); // Runtime error!
+
+      // RIGHT: Pass schema for relational queries
+      import { drizzle } from 'drizzle-orm/postgres-js';
+      import * as schema from './schema';
+      const db = drizzle(client, { schema });
+      await db.query.users.findMany(); // Works!
+    symptoms:
+      - "Cannot read property 'users' of undefined"
+      - db.query returns undefined
+      - "db.query.tableName is not a function"
+    detection_pattern: 'drizzle\([^,)]+\)(?!\s*,\s*\{[^}]*schema)'
+    version_range: ">=0.20.0"
+
+  - id: drizzle-jsonb-default-push
+    summary: drizzle-kit push fails with jsonb default values
+    severity: high
+    situation: |
+      You have a PostgreSQL jsonb column with a default value. Running drizzle-kit
+      push fails with an obscure error.
+    why: |
+      Known bug in drizzle-kit (as of early 2025). The push command doesn't handle
+      jsonb columns with default values correctly. The generate command works fine.
+    solution: |
+      # WORKAROUND: Use generate instead of push
+      npx drizzle-kit generate
+      npx drizzle-kit migrate
+
+      # Or define without default, set in application code
+      export const settings = pgTable('settings', {
+        data: jsonb('data').notNull(), // No default
+      });
+
+      // Set default in insert
+      await db.insert(settings).values({
+        data: { theme: 'dark', lang: 'en' }, // Default here
+      });
+    symptoms:
+      - push command fails
+      - Error messages about jsonb parsing
+      - Works with generate but not push
+    detection_pattern: "jsonb\\([^)]+\\)\\.default\\("
+    version_range: ">=0.20.0"
+
+  - id: drizzle-planetscale-lateral
+    summary: Relational queries don't work on PlanetScale
+    severity: high
+    situation: |
+      You use db.query with PlanetScale (Vitess-based MySQL). Queries fail with
+      SQL syntax errors.
+    why: |
+      Drizzle's relational queries use lateral joins (subqueries in FROM clause).
+      PlanetScale's Vitess-based MySQL doesn't support lateral joins. This is a
+      fundamental limitation of the database, not Drizzle.
+    solution: |
+      // CAN'T USE: Relational queries on PlanetScale
+      const result = await db.query.users.findMany({
+        with: { posts: true }, // Uses lateral joins - fails!
+      });
+
+      // MUST USE: Manual joins
+      const result = await db
+        .select()
+        .from(users)
+        .leftJoin(posts, eq(posts.authorId, users.id));
+
+      // Or switch to Neon/Supabase (real PostgreSQL with lateral join support)
+    symptoms:
+      - SQL syntax errors
+      - "Unsupported query" from PlanetScale
+      - Works locally but fails in production
+    detection_pattern: null
+    version_range: ">=0.20.0"
+
+  - id: drizzle-n-plus-one-manual
+    summary: Manual N+1 queries instead of using relational API
+    severity: medium
+    situation: |
+      You fetch users, then loop through to fetch each user's posts separately.
+      100 users = 101 database queries.
+    why: |
+      Each db.select() is a round trip to the database. With nested loops, query
+      count explodes. Drizzle's relational queries (db.query) use lateral joins
+      to fetch everything in a single SQL query.
+    solution: |
+      // WRONG: N+1 queries
+      const users = await db.select().from(usersTable);
+      for (const user of users) {
+        const posts = await db.select().from(postsTable)
+          .where(eq(postsTable.authorId, user.id));
+        user.posts = posts; // 101 queries for 100 users!
+      }
+
+      // RIGHT: Single query with relations
+      const usersWithPosts = await db.query.users.findMany({
+        with: { posts: true },
+      });
+      // 1 query total, lateral joins handle the rest
+    symptoms:
+      - Slow page loads
+      - Database connection exhaustion
+      - Query count grows with data size
+    detection_pattern: 'for\s*\([^)]+of[^)]+\)\s*\{[^}]*await\s+db\.'
+    version_range: ">=0.20.0"
+
+  - id: drizzle-sql-injection
+    summary: Raw SQL interpolation creates injection vulnerabilities
+    severity: critical
+    situation: |
+      You use sql`` template literal with user input interpolated directly.
+      Attacker sends malicious input, executes arbitrary SQL.
+    why: |
+      sql`` is a template literal - JavaScript string interpolation happens before
+      Drizzle sees it. User input becomes part of the SQL string, not a parameter.
+      Classic SQL injection, even in a "modern" ORM.
+    solution: |
+      // WRONG: SQL injection!
+      const name = req.query.name; // Could be "'; DROP TABLE users; --"
+      const result = await db.execute(
+        sql`SELECT * FROM users WHERE name = '${name}'`
+      );
+
+      // RIGHT: Use Drizzle's query builder (auto-escapes)
+      const result = await db
+        .select()
+        .from(users)
+        .where(eq(users.name, name));
+
+      // RIGHT: Use sql.placeholder for dynamic values
+      const result = await db.execute(
+        sql`SELECT * FROM users WHERE name = ${name}`
+      );
+      // No quotes around ${name} - Drizzle parameterizes it
+    symptoms:
+      - Security audit findings
+      - Unexpected query results
+      - Database manipulation
+    detection_pattern: "sql`[^`]*'\\$\\{[^}]+\\}'[^`]*`"
+    version_range: ">=0.20.0"
+
+  - id: drizzle-migration-rename-drop
+    summary: Column rename generates DROP + CREATE, losing data
+    severity: high
+    situation: |
+      You rename a column in your schema. drizzle-kit generate creates a migration
+      that drops the old column and creates a new one. All data in that column is lost.
+    why: |
+      Drizzle can't automatically detect renames - it sees a removed column and a
+      new column. Unlike Prisma, Drizzle doesn't have rename detection by default.
+      The migration file will DROP then CREATE.
+    solution: |
+      # After running drizzle-kit generate, REVIEW the SQL!
+
+      # WRONG (auto-generated):
+      ALTER TABLE users DROP COLUMN old_name;
+      ALTER TABLE users ADD COLUMN new_name text;
+
+      # RIGHT (manually edit migration):
+      ALTER TABLE users RENAME COLUMN old_name TO new_name;
+
+      # Or use drizzle-kit interactive mode
+      npx drizzle-kit generate
+      # When prompted about potential rename, choose "rename" not "drop+create"
+    symptoms:
+      - Data loss after migration
+      - Column values are NULL after rename
+      - "Wait, where did my data go?"
+    detection_pattern: null
+    version_range: ">=0.20.0"
+
+  - id: drizzle-serial-vs-identity
+    summary: Using serial instead of identity for PostgreSQL
+    severity: medium
+    situation: |
+      You use serial() for auto-incrementing IDs in PostgreSQL. Everything works,
+      but you're using a legacy approach.
+    why: |
+      PostgreSQL recommends identity columns over serial types (since PostgreSQL 10).
+      Drizzle has embraced this in 2025. identity() is more standard SQL, works
+      better with COPY, and is the modern approach.
+    solution: |
+      // OLD (still works, but legacy):
+      export const users = pgTable('users', {
+        id: serial('id').primaryKey(),
+      });
+
+      // MODERN (PostgreSQL 10+ recommendation):
+      export const users = pgTable('users', {
+        id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+      });
+
+      // Or use UUIDs (best for distributed systems):
+      export const users = pgTable('users', {
+        id: uuid('id').primaryKey().defaultRandom(),
+      });
+    symptoms:
+      - Works but not following best practices
+      - Issues with COPY operations
+      - Sequence ownership complications
+    detection_pattern: 'serial\s*\('
+    version_range: ">=0.30.0"
+
+  - id: drizzle-beta-breaking
+    summary: Beta version has breaking changes from stable
+    severity: medium
+    situation: |
+      You upgrade to drizzle-orm@beta or 1.0.0-beta.x. Your queries break,
+      especially if using db.query or other libraries that depend on Drizzle.
+    why: |
+      The v1.0.0 beta introduced breaking changes: db.query moved to db._query,
+      new relation syntax, API changes. Libraries like better-auth haven't updated
+      yet. The beta is not production-ready.
+    solution: |
+      # SAFE: Stay on stable
+      npm install drizzle-orm@latest  # Gets 0.x stable version
+
+      # RISKY: Beta for testing only
+      npm install drizzle-orm@beta
+
+      # If on beta and having issues:
+      npm install drizzle-orm@0.44.7  # Last stable
+
+      # Check ecosystem compatibility before upgrading
+    symptoms:
+      - "db.query is not a function" (moved to db._query)
+      - Type errors after upgrade
+      - Third-party library incompatibility
+    detection_pattern: '"drizzle-orm":\s*"[^"]*beta'
+    version_range: ">=1.0.0-beta.1"
+
+  - id: drizzle-many-to-many-mapping
+    summary: Many-to-many through tables require manual mapping
+    severity: medium
+    situation: |
+      You have a many-to-many relation with a junction table. You want to get
+      users with their tags directly, but the query returns the junction table.
+    why: |
+      Drizzle's relational queries can't "skip" the junction table. You get the
+      through table in your results and must map to the related table yourself.
+      This is a known limitation.
+    solution: |
+      // Schema with junction table
+      export const usersToTags = pgTable('users_to_tags', {
+        userId: uuid('user_id').references(() => users.id),
+        tagId: uuid('tag_id').references(() => tags.id),
+      });
+
+      // Query returns junction table
+      const result = await db.query.users.findFirst({
+        with: { usersToTags: { with: { tag: true } } },
+      });
+      // result.usersToTags is array of { tag: { name: '...' } }
+
+      // Map to clean structure
+      const userWithTags = {
+        ...result,
+        tags: result.usersToTags.map((ut) => ut.tag),
+      };
+    symptoms:
+      - Extra nesting in query results
+      - Can't get clean many-to-many
+      - Junction table in response
+    detection_pattern: null
+    version_range: ">=0.20.0"

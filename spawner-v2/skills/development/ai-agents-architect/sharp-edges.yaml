@@ -1,0 +1,181 @@
+# AI Agents Architect Sharp Edges
+# Gotchas and pitfalls in agent system design
+
+sharp_edges:
+  - id: unlimited-loops
+    summary: "Agent loops without iteration limits"
+    severity: critical
+    situation: "Agent runs until 'done' without max iterations"
+    why: |
+      Agents can get stuck in loops, repeating the same actions, or spiral
+      into endless tool calls. Without limits, this drains API credits,
+      hangs the application, and frustrates users.
+    solution: |
+      Always set limits:
+      - max_iterations on agent loops
+      - max_tokens per turn
+      - timeout on agent runs
+      - cost caps for API usage
+      - Circuit breakers for tool failures
+    symptoms:
+      - "Agent runs forever"
+      - "Unexplained high API costs"
+      - "Application hangs"
+    detection_pattern:
+      language: generic
+      pattern: "while.*True|loop.*agent|run\\((?!.*max|.*limit)"
+
+  - id: poor-tool-descriptions
+    summary: "Vague or incomplete tool descriptions"
+    severity: high
+    situation: "Tool descriptions don't explain when/how to use"
+    why: |
+      Agents choose tools based on descriptions. Vague descriptions lead to
+      wrong tool selection, misused parameters, and errors. The agent
+      literally can't know what it doesn't see in the description.
+    solution: |
+      Write complete tool specs:
+      - Clear one-sentence purpose
+      - When to use (and when not to)
+      - Parameter descriptions with types
+      - Example inputs and outputs
+      - Error cases to expect
+    symptoms:
+      - "Agent picks wrong tools"
+      - "Parameter errors"
+      - "Agent says it can't do things it can"
+    detection_pattern:
+      language: generic
+      pattern: "description.*=.*\"\\w+\"|tool_description.*<.*20"
+
+  - id: no-error-handling
+    summary: "Tool errors not surfaced to agent"
+    severity: high
+    situation: "Catching tool exceptions silently"
+    why: |
+      When tool errors are swallowed, the agent continues with bad or missing
+      data, compounding errors. The agent can't recover from what it can't
+      see. Silent failures become loud failures later.
+    solution: |
+      Explicit error handling:
+      - Return error messages to agent
+      - Include error type and recovery hints
+      - Let agent retry or choose alternative
+      - Log errors for debugging
+    symptoms:
+      - "Agent continues with wrong data"
+      - "Final answers are wrong"
+      - "Hard to debug failures"
+    detection_pattern:
+      language: generic
+      pattern: "except.*pass|except.*continue|catch.*\\{\\s*\\}"
+
+  - id: memory-hoarding
+    summary: "Storing everything in agent memory"
+    severity: medium
+    situation: "Appending all observations to memory without filtering"
+    why: |
+      Memory fills with irrelevant details, old information, and noise.
+      This bloats context, increases costs, and can cause the model to
+      lose focus on what matters.
+    solution: |
+      Selective memory:
+      - Summarize rather than store verbatim
+      - Filter by relevance before storing
+      - Use RAG for long-term memory
+      - Clear working memory between tasks
+    symptoms:
+      - "Context window exceeded"
+      - "Agent references outdated info"
+      - "High token costs"
+    detection_pattern:
+      language: generic
+      pattern: "memory\\.append|add_to_memory\\(.*\\)|history.*\\+=|messages\\.extend"
+
+  - id: tool-overload
+    summary: "Agent has too many tools"
+    severity: medium
+    situation: "Giving agent 20+ tools for flexibility"
+    why: |
+      More tools means more confusion. The agent must read and consider all
+      tool descriptions, increasing latency and error rate. Long tool lists
+      get cut off or poorly understood.
+    solution: |
+      Curate tools per task:
+      - 5-10 tools maximum per agent
+      - Use tool selection layer for large tool sets
+      - Specialized agents with focused tools
+      - Dynamic tool loading based on task
+    symptoms:
+      - "Wrong tool selection"
+      - "Agent overwhelmed by options"
+      - "Slow responses"
+    detection_pattern:
+      language: generic
+      pattern: "tools.*=.*\\[.{500,}\\]|len\\(tools\\).*>.*15"
+
+  - id: premature-multi-agent
+    summary: "Using multiple agents when one would work"
+    severity: medium
+    situation: "Starting with multi-agent architecture for simple tasks"
+    why: |
+      Multi-agent adds coordination overhead, communication failures,
+      debugging complexity, and cost. Each agent handoff is a potential
+      failure point. Start simple, add agents only when proven necessary.
+    solution: |
+      Justify multi-agent:
+      - Can one agent with good tools solve this?
+      - Is the coordination overhead worth it?
+      - Are the agents truly independent?
+      - Start with single agent, measure limits
+    symptoms:
+      - "Agents duplicating work"
+      - "Communication overhead"
+      - "Hard to debug failures"
+    detection_pattern:
+      language: generic
+      pattern: "multi.*agent|agent.*team|create_agent.*create_agent|supervisor.*worker"
+
+  - id: no-observability
+    summary: "Agent internals not logged or traceable"
+    severity: medium
+    situation: "Running agents without logging thoughts/actions"
+    why: |
+      When agents fail, you need to see what they were thinking, which
+      tools they tried, and where they went wrong. Without observability,
+      debugging is guesswork.
+    solution: |
+      Implement tracing:
+      - Log each thought/action/observation
+      - Track tool calls with inputs/outputs
+      - Trace token usage and latency
+      - Use structured logging for analysis
+    symptoms:
+      - "Can't explain agent failures"
+      - "No visibility into agent reasoning"
+      - "Debugging takes hours"
+    detection_pattern:
+      language: generic
+      pattern: "agent\\.run\\((?!.*trace|.*callback|.*verbose)"
+
+  - id: brittle-output-parsing
+    summary: "Fragile parsing of agent outputs"
+    severity: medium
+    situation: "Regex or exact string matching on LLM output"
+    why: |
+      LLMs don't produce perfectly consistent output. Minor format variations
+      break brittle parsers. This causes agent crashes or incorrect behavior
+      from parsing errors.
+    solution: |
+      Robust output handling:
+      - Use structured output (JSON mode, function calling)
+      - Fuzzy matching for actions
+      - Retry with format instructions on parse failure
+      - Handle multiple output formats
+    symptoms:
+      - "Parse errors in agent loop"
+      - "Works sometimes, fails sometimes"
+      - "Small prompt changes break parsing"
+    detection_pattern:
+      language: generic
+      pattern: "output\\.split|re\\.match.*output|parse.*text|eval\\(output"

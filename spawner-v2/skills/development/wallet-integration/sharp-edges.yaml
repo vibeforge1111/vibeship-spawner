@@ -1,0 +1,179 @@
+# Wallet Integration Sharp Edges
+# Gotchas and pitfalls in Web3 wallet integration
+
+sharp_edges:
+  - id: single-wallet-support
+    summary: "Only supporting MetaMask or single wallet"
+    severity: high
+    situation: "Hardcoding MetaMask detection or connection"
+    why: |
+      Users have different wallets (Coinbase Wallet, WalletConnect, Rainbow,
+      etc.). Supporting only MetaMask excludes a significant portion of users.
+      Mobile users especially use non-MetaMask wallets.
+    solution: |
+      Use wallet aggregators:
+      - RainbowKit or Web3Modal for wallet selection
+      - wagmi for standardized connection hooks
+      - Support WalletConnect for mobile
+      - Detect and list available wallets
+    symptoms:
+      - "Users can't connect their wallet"
+      - "Mobile users report issues"
+      - "Low wallet connection rates"
+    detection_pattern:
+      language: generic
+      pattern: "window\\.ethereum(?!.*providers)|ethereum\\.isMetaMask|detectMetaMask"
+
+  - id: unhandled-rejection
+    summary: "Not handling user wallet rejection"
+    severity: high
+    situation: "Wallet prompts can be rejected by user"
+    why: |
+      Users reject wallet prompts for many reasons - wrong account, changed
+      mind, accidental click. Unhandled rejections leave UI in broken state
+      or show cryptic errors.
+    solution: |
+      Handle all rejection cases:
+      - Connection rejection → clear UI state, show retry
+      - Transaction rejection → revert optimistic updates
+      - Signature rejection → allow retry without restart
+      - Show user-friendly messages
+    symptoms:
+      - "UI stuck after user cancels"
+      - "Cryptic error messages"
+      - "Users confused about state"
+    detection_pattern:
+      language: generic
+      pattern: "await.*connect\\(\\)(?!.*catch)|await.*sendTransaction(?!.*catch)"
+
+  - id: wrong-chain-blindness
+    summary: "Not checking or handling wrong chain"
+    severity: critical
+    situation: "User on different chain than app expects"
+    why: |
+      Users submit transactions to wrong network and can't understand why
+      things don't work. Worse, they might send tokens to wrong chain
+      addresses, losing funds.
+    solution: |
+      Chain awareness:
+      - Check chainId on connection
+      - Prompt switch to correct chain
+      - Block transactions on wrong chain
+      - Show clear chain indicator in UI
+    symptoms:
+      - "Transactions fail with unclear errors"
+      - "Users confused about which chain"
+      - "Support tickets about lost funds"
+    detection_pattern:
+      language: generic
+      pattern: "sendTransaction(?!.*chainId)|contract\\.(?!.*verifyChain)"
+
+  - id: no-transaction-preview
+    summary: "Signing transactions without preview"
+    severity: high
+    situation: "Direct transaction submission without showing details"
+    why: |
+      Users sign transactions they don't understand. This erodes trust and
+      can lead to accidental high-value transfers or approval of malicious
+      contracts. Users deserve to know what they're signing.
+    solution: |
+      Transaction preview:
+      - Decode function call to human-readable
+      - Show token amounts and recipients
+      - Display gas estimate and total cost
+      - Simulate transaction before submission
+    symptoms:
+      - "Users unsure what they signed"
+      - "Unexpected transaction results"
+      - "Low user trust"
+    detection_pattern:
+      language: generic
+      pattern: "sendTransaction\\(|contract\\.write(?!.*preview|.*simulate)"
+
+  - id: raw-error-display
+    summary: "Showing raw RPC/wallet errors to users"
+    severity: medium
+    situation: "Displaying error.message directly"
+    why: |
+      Wallet and RPC errors are technical and unhelpful to users. Messages
+      like "insufficient funds for gas * price + value" or "nonce too low"
+      confuse users and look unprofessional.
+    solution: |
+      Error translation:
+      - Parse common error codes
+      - Map to user-friendly messages
+      - Include actionable next steps
+      - Log technical details for debugging
+    symptoms:
+      - "Confused users"
+      - "Support requests about errors"
+      - "Unprofessional appearance"
+    detection_pattern:
+      language: generic
+      pattern: "alert\\(error|toast.*error\\.message|setError\\(e\\.message"
+
+  - id: unlimited-approval
+    summary: "Requesting unlimited token approval"
+    severity: high
+    situation: "Approving type(uint256).max for convenience"
+    why: |
+      Unlimited approval means if the approved contract is compromised, all
+      tokens can be drained. Users are increasingly aware of this risk and
+      distrust DApps that request unlimited approvals.
+    solution: |
+      Exact approvals:
+      - Approve only the amount needed
+      - Or use permit signatures (EIP-2612)
+      - Explain approval amounts to users
+      - Show current approvals and allow revocation
+    symptoms:
+      - "Security-conscious users refuse"
+      - "Risk of total loss if contract hacked"
+      - "Bad security reputation"
+    detection_pattern:
+      language: generic
+      pattern: "approve.*MAX_UINT|approve.*2\\*\\*256|approve.*type\\(uint256\\)\\.max"
+
+  - id: connection-spam
+    summary: "Repeatedly prompting for wallet connection"
+    severity: medium
+    situation: "Showing connect prompt on every page/action"
+    why: |
+      Constant connection prompts are annoying and desperate-looking. Users
+      should connect once and stay connected. Aggressive prompting drives
+      users away.
+    solution: |
+      Respectful connection flow:
+      - Persist connection state
+      - Single, clear connect button
+      - Remember user preference
+      - Don't block content behind wallet
+    symptoms:
+      - "Users annoyed by prompts"
+      - "High bounce rate"
+      - "Users report aggressive UX"
+    detection_pattern:
+      language: generic
+      pattern: "useEffect.*connect\\(|componentDidMount.*connect|autoConnect.*true"
+
+  - id: no-pending-state
+    summary: "Not showing transaction pending state"
+    severity: medium
+    situation: "UI unchanged while transaction confirms"
+    why: |
+      Blockchain transactions take time. Without pending state, users think
+      the action failed or click again, potentially submitting duplicate
+      transactions.
+    solution: |
+      Clear pending UX:
+      - Show pending state immediately
+      - Link to block explorer
+      - Disable repeat actions
+      - Update on confirmation
+    symptoms:
+      - "Users submit duplicate transactions"
+      - "Confusion about transaction status"
+      - "Support requests about 'stuck' transactions"
+    detection_pattern:
+      language: generic
+      pattern: "await.*sendTransaction(?!.*setPending|.*setLoading)"

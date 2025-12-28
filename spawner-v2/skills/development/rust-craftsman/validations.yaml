@@ -1,0 +1,194 @@
+# Rust Craftsman Validations
+# Automated checks for Rust patterns
+
+validations:
+  - id: unwrap-in-production
+    name: Unwrap/Expect in Production Code
+    severity: error
+    type: regex
+    pattern:
+      - '\.unwrap\(\)'
+      - '\.expect\('
+    message: "Using unwrap/expect in production code. Will panic on None/Err."
+    fix_action: "Use ? operator or match/if-let for proper error handling"
+    applies_to:
+      - "**/*.rs"
+    excludes:
+      - "**/tests/**"
+      - "**/test_*.rs"
+      - "**/benches/**"
+
+  - id: sync-io-in-async
+    name: Sync I/O in Async Context
+    severity: error
+    type: regex
+    pattern:
+      - 'std::fs::'
+      - 'std::io::BufReader'
+      - 'std::net::'
+      - 'thread::sleep'
+    message: "Sync I/O in async context blocks the executor."
+    fix_action: "Use tokio::fs, tokio::io, tokio::net, or tokio::time::sleep"
+    applies_to:
+      - "**/*.rs"
+
+  - id: unbounded-channel
+    name: Unbounded Channel
+    severity: warning
+    type: regex
+    pattern:
+      - 'unbounded_channel'
+      - 'crossbeam.*unbounded'
+    message: "Unbounded channels can cause OOM under load."
+    fix_action: "Use bounded channel with explicit capacity"
+    applies_to:
+      - "**/*.rs"
+
+  - id: lock-across-await
+    name: Lock Held Across Await
+    severity: error
+    type: regex
+    pattern:
+      - 'lock\(\)\.await[^;]*\.await'
+      - 'read\(\)\.await[^;]*\.await'
+      - 'write\(\)\.await[^;]*\.await'
+    message: "Holding lock across await point can cause deadlock."
+    fix_action: "Clone data from lock, release lock, then await"
+    applies_to:
+      - "**/*.rs"
+
+  - id: clone-in-loop
+    name: Clone in Hot Loop
+    severity: warning
+    type: regex
+    pattern:
+      - 'for.*\.clone\(\)'
+      - 'loop.*\.clone\(\)'
+      - 'while.*\.clone\(\)'
+    message: "Cloning in loop may cause unnecessary allocations."
+    fix_action: "Consider borrowing or moving data instead"
+    applies_to:
+      - "**/*.rs"
+
+  - id: format-in-loop
+    name: Format String in Loop
+    severity: info
+    type: regex
+    pattern:
+      - 'for.*format!'
+      - 'loop.*format!'
+      - 'while.*format!'
+    message: "format! allocates on each iteration. Consider reusing buffer."
+    fix_action: "Use write! with reusable String buffer"
+    applies_to:
+      - "**/*.rs"
+
+  - id: panic-in-library
+    name: Panic in Library Code
+    severity: error
+    type: regex
+    pattern:
+      - 'panic!\('
+      - 'todo!\('
+      - 'unimplemented!\('
+    message: "Library code should not panic. Return Result instead."
+    fix_action: "Replace with Result<T, Error> return type"
+    applies_to:
+      - "**/lib.rs"
+      - "**/lib/**/*.rs"
+    excludes:
+      - "**/tests/**"
+
+  - id: box-dyn-error
+    name: Box<dyn Error> Return Type
+    severity: info
+    type: regex
+    pattern:
+      - 'Box<dyn.*Error>'
+      - 'Box<dyn.*std::error::Error>'
+    message: "Box<dyn Error> loses type information. Consider custom error type."
+    fix_action: "Use thiserror for custom error types with proper variants"
+    applies_to:
+      - "**/*.rs"
+
+  - id: missing-send-bound
+    name: Async Function Without Send Bound
+    severity: info
+    type: regex
+    pattern:
+      - 'pub async fn.*<T>(?!.*Send)'
+      - 'async fn.*<T>(?!.*Send).*\{'
+    message: "Generic async function may need Send bound for spawn compatibility."
+    fix_action: "Add T: Send + 'static bound if function will be spawned"
+    applies_to:
+      - "**/*.rs"
+
+  - id: spawn-without-await
+    name: Spawned Task Not Awaited
+    severity: warning
+    type: regex
+    pattern:
+      - 'tokio::spawn\([^)]+\);$'
+      - 'spawn\([^)]+\);$'
+    message: "Spawned task JoinHandle is ignored. Errors/panics will be lost."
+    fix_action: "Store and await JoinHandle, or use TaskTracker"
+    applies_to:
+      - "**/*.rs"
+
+  - id: refcell-borrow-mut
+    name: RefCell Borrow Pattern
+    severity: info
+    type: regex
+    pattern:
+      - 'RefCell.*borrow_mut'
+    message: "RefCell borrow_mut panics if already borrowed. Use try_borrow_mut."
+    fix_action: "Consider try_borrow_mut or redesign to avoid RefCell"
+    applies_to:
+      - "**/*.rs"
+
+  - id: unsafe-without-comment
+    name: Unsafe Block Without Safety Comment
+    severity: warning
+    type: regex
+    pattern:
+      - 'unsafe\s*\{(?!/)'
+    message: "Unsafe block without SAFETY comment explaining invariants."
+    fix_action: "Add // SAFETY: comment explaining why this is safe"
+    applies_to:
+      - "**/*.rs"
+
+  - id: string-allocation-api
+    name: String in Public API
+    severity: info
+    type: regex
+    pattern:
+      - 'pub fn.*\(.*: String\)'
+      - 'pub async fn.*\(.*: String\)'
+    message: "Taking String forces callers to allocate. Consider &str or impl Into<String>."
+    fix_action: "Use &str for read-only, impl Into<String> for flexibility"
+    applies_to:
+      - "**/*.rs"
+
+  - id: collect-then-iterate
+    name: Collect Then Iterate
+    severity: info
+    type: regex
+    pattern:
+      - 'collect::<Vec<.*>>.*\.iter\(\)'
+      - 'collect::<Vec<.*>>.*\.find\('
+      - 'collect::<Vec<.*>>.*\.filter\('
+    message: "Collecting then iterating wastes allocation. Use iterator directly."
+    fix_action: "Remove .collect() and use iterator methods directly"
+    applies_to:
+      - "**/*.rs"
+
+  - id: arc-clone-in-closure
+    name: Arc Clone Pattern in Closure
+    severity: info
+    type: regex
+    pattern:
+      - 'let.*= Arc::clone\(&'
+    message: "Arc::clone in closure - ensure this is intentional for sharing."
+    fix_action: "Verify Arc is needed, consider borrowing for short-lived uses"
+    applies_to:
+      - "**/*.rs"

@@ -1,0 +1,316 @@
+# React Native Specialist Sharp Edges
+# Production gotchas for React Native development
+
+sharp_edges:
+  - id: inline-style-objects
+    summary: Inline styles create new objects every render
+    severity: high
+    situation: Styling components
+    why: |
+      <View style={{ flex: 1, padding: 10 }} /> creates a new object every
+      render. This defeats memo() and causes unnecessary re-renders. In lists
+      with hundreds of items, this causes visible jank.
+    solution: |
+      1. Use StyleSheet.create() outside component:
+         const styles = StyleSheet.create({
+           container: { flex: 1, padding: 10 }
+         });
+
+         // In component
+         <View style={styles.container} />
+
+      2. For dynamic styles, memoize:
+         const dynamicStyle = useMemo(
+           () => ({ backgroundColor: isActive ? 'blue' : 'gray' }),
+           [isActive]
+         );
+
+      3. Use style arrays for composition:
+         <View style={[styles.base, isActive && styles.active]} />
+    symptoms:
+      - Slow scrolling in lists
+      - UI jank during animations
+      - High JS thread usage in profiler
+    detection_pattern: 'style=\{\{|style=\{[^}]+\}'
+
+  - id: bridge-bottleneck
+    summary: Heavy bridge traffic causes performance issues
+    severity: critical
+    situation: Animations, frequent updates, large data
+    why: |
+      React Native's bridge serializes all data between JS and native.
+      Sending 60 updates/second for animations means 60 serialization
+      cycles/second. Large objects (images, long lists) block the bridge.
+      Result: dropped frames, unresponsive UI.
+    solution: |
+      1. Use Reanimated for animations (runs on UI thread):
+         import Animated, {
+           useAnimatedStyle,
+           withSpring
+         } from 'react-native-reanimated';
+
+         const animatedStyle = useAnimatedStyle(() => ({
+           transform: [{ translateX: withSpring(offset.value) }],
+         }));
+
+      2. Batch state updates:
+         // BAD - 3 bridge crossings
+         setA(1); setB(2); setC(3);
+
+         // GOOD - 1 bridge crossing
+         setState({ a: 1, b: 2, c: 3 });
+
+      3. Use FlashList for large lists (minimizes bridge traffic)
+
+      4. For image-heavy apps, use FastImage with caching
+    symptoms:
+      - Animations drop frames
+      - UI freezes during data updates
+      - "Slow bridge" warnings in profiler
+    detection_pattern: 'Animated\.timing|setInterval.*setState'
+
+  - id: memory-leak-listeners
+    summary: Event listeners not cleaned up cause memory leaks
+    severity: high
+    situation: Adding listeners in components
+    why: |
+      Keyboard.addListener, DeviceEventEmitter, navigation listeners -
+      all must be removed. If you add in useEffect without cleanup,
+      listeners accumulate. Eventually app crashes or becomes unresponsive.
+    solution: |
+      1. Always return cleanup from useEffect:
+         useEffect(() => {
+           const subscription = Keyboard.addListener('keyboardDidShow', onShow);
+           return () => subscription.remove();  // Cleanup!
+         }, []);
+
+      2. Use hook versions when available:
+         import { useKeyboard } from '@react-native-community/hooks';
+         const { keyboardShown } = useKeyboard();
+
+      3. For navigation:
+         useEffect(() => {
+           const unsubscribe = navigation.addListener('focus', onFocus);
+           return unsubscribe;  // Returns cleanup function
+         }, [navigation]);
+
+      4. For AppState:
+         useEffect(() => {
+           const sub = AppState.addEventListener('change', handleChange);
+           return () => sub.remove();
+         }, []);
+    symptoms:
+      - Memory grows over time
+      - Multiple handler calls for single event
+      - App becomes sluggish after navigation
+    detection_pattern: 'addListener|addEventListener(?!.*remove)'
+
+  - id: async-storage-misuse
+    summary: AsyncStorage is slow and has size limits
+    severity: medium
+    situation: Storing data locally
+    why: |
+      AsyncStorage is key-value, serializes to JSON, and has a 6MB limit
+      on Android. Storing large objects or frequent reads/writes causes
+      performance issues. It's for preferences, not databases.
+    solution: |
+      1. For large data, use proper storage:
+         // MMKV - fast, encrypted
+         import { MMKV } from 'react-native-mmkv';
+         const storage = new MMKV();
+         storage.set('user', JSON.stringify(user));
+
+      2. For complex queries, use SQLite:
+         import * as SQLite from 'expo-sqlite';
+
+      3. For AsyncStorage, keep entries small:
+         // BAD - storing full app state
+         AsyncStorage.setItem('state', JSON.stringify(hugeState));
+
+         // GOOD - store minimal data
+         AsyncStorage.setItem('userId', userId);
+         AsyncStorage.setItem('theme', theme);
+
+      4. Batch operations:
+         AsyncStorage.multiSet([
+           ['key1', 'value1'],
+           ['key2', 'value2'],
+         ]);
+    symptoms:
+      - Slow app startup
+      - "6MB limit exceeded" errors on Android
+      - UI freezes on storage operations
+    detection_pattern: 'AsyncStorage\.setItem.*JSON\.stringify.*large'
+
+  - id: hermes-not-enabled
+    summary: Hermes engine disabled, using JSC with worse performance
+    severity: medium
+    situation: Production builds
+    why: |
+      Hermes is Meta's JS engine optimized for React Native. It has faster
+      startup (bytecode precompilation), lower memory usage, and better
+      performance. Many older tutorials don't enable it.
+    solution: |
+      1. Enable in app.json (Expo):
+         {
+           "expo": {
+             "jsEngine": "hermes"
+           }
+         }
+
+      2. Verify it's enabled:
+         const isHermes = () => !!global.HermesInternal;
+         console.log('Using Hermes:', isHermes());
+
+      3. For bare React Native, enable in gradle/Podfile
+
+      4. Note Hermes limitations:
+         - Some older libraries may not be compatible
+         - Debugging requires Hermes debugger
+    symptoms:
+      - Slow cold start
+      - High memory usage
+      - JSC-specific performance issues
+    detection_pattern: 'jsEngine.*jsc|HermesInternal.*undefined'
+
+  - id: expo-dev-client-missing
+    summary: Using Expo Go with custom native code fails
+    severity: high
+    situation: Adding native modules to Expo project
+    why: |
+      Expo Go contains a fixed set of native modules. If you add a library
+      with native code, it won't work in Expo Go. You need a development
+      build with expo-dev-client.
+    solution: |
+      1. Install expo-dev-client:
+         npx expo install expo-dev-client
+
+      2. Create development build:
+         npx expo prebuild
+         npx expo run:ios  # or run:android
+
+      3. Or use EAS Build:
+         eas build --profile development --platform ios
+
+      4. Structure for native modules:
+         modules/
+         └── my-module/
+             ├── index.ts
+             ├── ios/
+             │   └── MyModule.swift
+             └── android/
+                 └── MyModule.kt
+
+      5. Add to app.json:
+         {
+           "expo": {
+             "plugins": ["./modules/my-module"]
+           }
+         }
+    symptoms:
+      - "Native module not found" errors
+      - Library works in simulator but not Expo Go
+      - Need features not in Expo Go
+    detection_pattern: 'requireNativeComponent|NativeModules\.'
+
+  - id: platform-specific-bugs
+    summary: Code works on iOS but breaks on Android (or vice versa)
+    severity: medium
+    situation: Cross-platform development
+    why: |
+      iOS and Android have different behaviors: shadows, touch handling,
+      text rendering, keyboard, permissions. Testing only on one platform
+      means shipping bugs on the other.
+    solution: |
+      1. Use Platform-specific code:
+         import { Platform } from 'react-native';
+
+         const styles = StyleSheet.create({
+           shadow: Platform.select({
+             ios: {
+               shadowColor: '#000',
+               shadowOffset: { width: 0, height: 2 },
+               shadowOpacity: 0.25,
+             },
+             android: {
+               elevation: 4,
+             },
+           }),
+         });
+
+      2. Platform-specific files:
+         // Button.ios.tsx
+         // Button.android.tsx
+         // Import as 'Button' - bundler picks correct one
+
+      3. Test on both platforms regularly:
+         - iOS Simulator + Android Emulator
+         - Real devices for accurate testing
+
+      4. Common differences to watch:
+         - Shadows (iOS: shadow*, Android: elevation)
+         - Fonts (different defaults)
+         - Touch feedback (iOS: opacity, Android: ripple)
+         - StatusBar behavior
+    symptoms:
+      - UI looks different on platforms
+      - Features work on one platform only
+      - Crashes on one platform
+    detection_pattern: 'shadowColor|elevation(?!.*Platform)'
+
+  - id: navigation-state-loss
+    summary: Navigation state lost on app restart or deep link
+    severity: medium
+    situation: Complex navigation with deep linking
+    why: |
+      By default, navigation state is in memory. App kill = back to home.
+      Deep links may not work if screen isn't mounted. State restoration
+      and proper deep link handling need explicit implementation.
+    solution: |
+      1. Persist navigation state:
+         import { NavigationContainer } from '@react-navigation/native';
+         import AsyncStorage from '@react-native-async-storage/async-storage';
+
+         const PERSISTENCE_KEY = 'NAVIGATION_STATE';
+
+         function App() {
+           const [isReady, setIsReady] = useState(false);
+           const [initialState, setInitialState] = useState();
+
+           useEffect(() => {
+             AsyncStorage.getItem(PERSISTENCE_KEY).then((state) => {
+               if (state) setInitialState(JSON.parse(state));
+               setIsReady(true);
+             });
+           }, []);
+
+           if (!isReady) return null;
+
+           return (
+             <NavigationContainer
+               initialState={initialState}
+               onStateChange={(state) =>
+                 AsyncStorage.setItem(PERSISTENCE_KEY, JSON.stringify(state))
+               }
+             >
+               {/* ... */}
+             </NavigationContainer>
+           );
+         }
+
+      2. Configure deep links properly:
+         const linking = {
+           prefixes: ['myapp://', 'https://myapp.com'],
+           config: {
+             screens: {
+               Home: '',
+               Profile: 'user/:id',
+               Settings: 'settings',
+             },
+           },
+         };
+    symptoms:
+      - App always starts at home screen
+      - Deep links don't navigate correctly
+      - Back button behavior unexpected
+    detection_pattern: 'NavigationContainer(?!.*initialState)'
