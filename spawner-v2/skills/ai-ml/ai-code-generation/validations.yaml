@@ -1,0 +1,415 @@
+# Validations - AI Code Generation
+# Quality checks for AI code generation implementations
+
+version: 1.0.0
+skill_id: ai-code-generation
+
+validations:
+  # Output Validation
+  - id: no-schema-validation
+    name: Missing Schema Validation on Output
+    severity: warning
+    description: Generated code/JSON should be validated against schema
+    pattern: |
+      JSON\.parse\(.*response(?!.*Schema\.parse|validate|safeParse)
+    message: "Parsing LLM response without schema validation. Use Zod."
+    autofix: false
+
+  - id: no-type-checking
+    name: Missing Type Checking on Generated Code
+    severity: warning
+    description: Generated code should be type-checked before use
+    pattern: |
+      generate.*code.*write.*file(?!.*typecheck|tsc|validate)
+    message: "Writing generated code without type checking."
+    autofix: false
+
+  # Security
+  - id: no-security-scan
+    name: Missing Security Scan on Generated Code
+    severity: warning
+    description: Generated code should be scanned for vulnerabilities
+    pattern: |
+      generate.*code(?!.*security|semgrep|snyk|scan)
+    message: "No security scanning on generated code."
+    autofix: false
+
+  - id: unsafe-eval
+    name: Eval on Generated Code
+    severity: error
+    description: Never eval generated code without sandboxing
+    pattern: |
+      eval\(.*generate|generate.*eval
+    message: "Never use eval() on AI-generated code. Use sandboxed execution."
+    autofix: false
+
+  - id: unvalidated-tool-calls
+    name: Tool Calls Without Validation
+    severity: error
+    description: Tool/function calls should be validated before execution
+    pattern: |
+      toolHandlers\[.*\]\((?!.*validate|check|allowed)
+    message: "Executing tool calls without validation. Check permissions."
+    autofix: false
+
+  # Cost Management
+  - id: no-token-budget
+    name: Missing Token Budget
+    severity: warning
+    description: Code generation should have token/cost limits
+    pattern: |
+      while.*generate|for.*agent(?!.*budget|max.*cost|token.*limit)
+    message: "Agent loop without cost limits. Add token budget."
+    autofix: false
+
+  - id: unbounded-iterations
+    name: Unbounded Agent Iterations
+    severity: error
+    description: Agent loops must have maximum iteration limits
+    pattern: |
+      while\s*\(\s*true\s*\)|while\s*\(\s*!done\s*\)(?!.*max|limit|i\s*<)
+    message: "Unbounded agent loop. Add maximum iterations."
+    autofix: false
+
+  # Error Handling
+  - id: no-json-error-handling
+    name: No Error Handling for JSON Parsing
+    severity: warning
+    description: JSON parsing should handle malformed responses
+    pattern: |
+      JSON\.parse\((?!.*try.*catch)
+    message: "JSON.parse without try/catch. LLMs may return invalid JSON."
+    autofix: false
+
+  - id: no-generation-retry
+    name: Missing Retry for Failed Generations
+    severity: info
+    description: Code generation should retry on failure
+    pattern: |
+      await.*generate(?!.*retry|attempt|tries)
+    message: "Consider adding retry logic for transient failures."
+    autofix: false
+
+code_smells:
+  - id: hardcoded-model
+    name: Hardcoded Model Name
+    description: Model should be configurable
+    pattern: |
+      model:\s*["']gpt-4|model:\s*["']claude
+    suggestion: "Use environment variable or config for model selection."
+
+  - id: large-context-prompt
+    name: Very Large Context in Prompt
+    description: Large contexts increase cost and reduce accuracy
+    pattern: |
+      content:.*\.length\s*>\s*50000|maxTokens.*100000
+    suggestion: "Consider using RAG or selective context instead of full codebase."
+
+  - id: sync-code-generation
+    name: Synchronous Code Generation in API
+    description: Code generation should be async for long operations
+    pattern: |
+      app\.(get|post).*await.*generate.*res\.json
+    suggestion: "Queue long code generation for async processing."
+
+  - id: no-caching
+    name: No Caching of Generated Code
+    description: Cache common generations to reduce API calls
+    pattern: |
+      generate.*(?!.*cache)
+    suggestion: "Consider caching for repeated/similar prompts."
+
+best_practices:
+  - id: validate-generated-code
+    name: Validate All Generated Code
+    check: |
+      Generated code is validated before use.
+    recommendation: |
+      import ts from "typescript";
+      import { ESLint } from "eslint";
+      import { z } from "zod";
+
+      const CodeOutputSchema = z.object({
+        code: z.string(),
+        language: z.string(),
+        imports: z.array(z.string()).optional(),
+      });
+
+      async function validateGeneratedCode(output: unknown): Promise<{
+        valid: boolean;
+        parsed?: z.infer<typeof CodeOutputSchema>;
+        errors: string[];
+      }> {
+        const errors: string[] = [];
+
+        // 1. Schema validation
+        const parseResult = CodeOutputSchema.safeParse(output);
+        if (!parseResult.success) {
+          return {
+            valid: false,
+            errors: parseResult.error.errors.map((e) => e.message),
+          };
+        }
+
+        const { code, language } = parseResult.data;
+
+        // 2. Syntax validation (TypeScript)
+        if (language === "typescript" || language === "javascript") {
+          const result = ts.transpileModule(code, {
+            compilerOptions: { module: ts.ModuleKind.ESNext },
+            reportDiagnostics: true,
+          });
+
+          if (result.diagnostics?.length) {
+            errors.push(...result.diagnostics.map(
+              (d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")
+            ));
+          }
+        }
+
+        // 3. Lint check
+        const eslint = new ESLint();
+        const lintResults = await eslint.lintText(code, {
+          filePath: `temp.${language === "typescript" ? "ts" : "js"}`,
+        });
+
+        for (const result of lintResults) {
+          for (const msg of result.messages) {
+            if (msg.severity === 2) {
+              errors.push(`${msg.line}:${msg.column} ${msg.message}`);
+            }
+          }
+        }
+
+        return {
+          valid: errors.length === 0,
+          parsed: parseResult.data,
+          errors,
+        };
+      }
+
+  - id: implement-token-budgets
+    name: Implement Token Budgets for Agents
+    check: |
+      Agent loops have cost limits and tracking.
+    recommendation: |
+      interface TokenUsage {
+        input: number;
+        output: number;
+        cost: number;
+      }
+
+      class AgentBudget {
+        private usage: TokenUsage = { input: 0, output: 0, cost: 0 };
+
+        constructor(
+          private maxCost: number,
+          private model: string,
+        ) {}
+
+        private calculateCost(input: number, output: number): number {
+          const rates: Record<string, { input: number; output: number }> = {
+            "gpt-4o": { input: 5, output: 15 },
+            "gpt-4o-mini": { input: 0.15, output: 0.6 },
+            "claude-sonnet-4-20250514": { input: 3, output: 15 },
+          };
+
+          const rate = rates[this.model] || rates["gpt-4o"];
+          return (
+            (input / 1_000_000) * rate.input +
+            (output / 1_000_000) * rate.output
+          );
+        }
+
+        record(inputTokens: number, outputTokens: number) {
+          this.usage.input += inputTokens;
+          this.usage.output += outputTokens;
+          this.usage.cost = this.calculateCost(this.usage.input, this.usage.output);
+        }
+
+        canContinue(): boolean {
+          return this.usage.cost < this.maxCost;
+        }
+
+        getSummary() {
+          return { ...this.usage, remaining: this.maxCost - this.usage.cost };
+        }
+      }
+
+      async function runBudgetedAgent(task: string, maxCost: number = 1.0) {
+        const budget = new AgentBudget(maxCost, "gpt-4o");
+
+        for (let i = 0; i < 20; i++) {
+          if (!budget.canContinue()) {
+            return {
+              status: "budget_exhausted",
+              summary: budget.getSummary(),
+            };
+          }
+
+          const response = await completion({...});
+
+          budget.record(
+            response.usage?.prompt_tokens || 0,
+            response.usage?.completion_tokens || 0
+          );
+
+          if (response.done) {
+            return { status: "completed", summary: budget.getSummary() };
+          }
+        }
+
+        return { status: "max_iterations", summary: budget.getSummary() };
+      }
+
+  - id: secure-tool-execution
+    name: Secure Tool/Function Execution
+    check: |
+      Tool calls are validated before execution.
+    recommendation: |
+      type ToolPermission = "read" | "write" | "execute" | "admin";
+
+      interface ToolConfig {
+        name: string;
+        requiredPermissions: ToolPermission[];
+        validator?: (args: unknown) => { valid: boolean; error?: string };
+      }
+
+      const toolConfigs: Record<string, ToolConfig> = {
+        read_file: {
+          name: "read_file",
+          requiredPermissions: ["read"],
+          validator: (args: any) => {
+            if (args.path.includes("..")) {
+              return { valid: false, error: "Path traversal not allowed" };
+            }
+            if (args.path.match(/\.(env|pem|key)$/)) {
+              return { valid: false, error: "Sensitive file types blocked" };
+            }
+            return { valid: true };
+          },
+        },
+        write_file: {
+          name: "write_file",
+          requiredPermissions: ["write"],
+          validator: (args: any) => {
+            if (args.path.includes("..")) {
+              return { valid: false, error: "Path traversal not allowed" };
+            }
+            if (args.path.startsWith("/")) {
+              return { valid: false, error: "Absolute paths not allowed" };
+            }
+            return { valid: true };
+          },
+        },
+        run_command: {
+          name: "run_command",
+          requiredPermissions: ["execute", "admin"],
+          validator: (args: any) => {
+            const blocked = ["rm -rf", "sudo", "chmod 777", "curl | sh"];
+            if (blocked.some((b) => args.command.includes(b))) {
+              return { valid: false, error: "Dangerous command blocked" };
+            }
+            return { valid: true };
+          },
+        },
+      };
+
+      function canExecuteTool(
+        toolName: string,
+        args: unknown,
+        userPermissions: ToolPermission[]
+      ): { allowed: boolean; error?: string } {
+        const config = toolConfigs[toolName];
+        if (!config) {
+          return { allowed: false, error: "Unknown tool" };
+        }
+
+        // Check permissions
+        const hasPermissions = config.requiredPermissions.every(
+          (p) => userPermissions.includes(p)
+        );
+        if (!hasPermissions) {
+          return { allowed: false, error: "Insufficient permissions" };
+        }
+
+        // Run validator
+        if (config.validator) {
+          return config.validator(args);
+        }
+
+        return { allowed: true };
+      }
+
+  - id: extract-json-safely
+    name: Extract JSON from LLM Responses Safely
+    check: |
+      JSON extraction handles common LLM response formats.
+    recommendation: |
+      function extractJSON<T>(
+        text: string,
+        schema?: z.ZodSchema<T>
+      ): T {
+        // Common patterns for JSON in LLM responses
+        const patterns = [
+          /```json\s*([\s\S]*?)\s*```/,
+          /```\s*([\s\S]*?)\s*```/,
+          /(\{[\s\S]*\})/,
+          /(\[[\s\S]*\])/,
+        ];
+
+        for (const pattern of patterns) {
+          const match = text.match(pattern);
+          if (!match) continue;
+
+          try {
+            let jsonStr = match[1];
+
+            // Clean common issues
+            jsonStr = jsonStr
+              .replace(/,\s*([}\]])/g, "$1")      // Trailing commas
+              .replace(/\/\/[^\n]*/g, "")          // // comments
+              .replace(/\/\*[\s\S]*?\*\//g, "")    // /* */ comments
+              .replace(/\n/g, " ")                 // Newlines
+              .replace(/\r/g, "")                  // Carriage returns
+              .trim();
+
+            const parsed = JSON.parse(jsonStr);
+
+            if (schema) {
+              return schema.parse(parsed);
+            }
+
+            return parsed as T;
+          } catch {
+            continue;
+          }
+        }
+
+        throw new Error("No valid JSON found in response");
+      }
+
+testing_checklist:
+  output_quality:
+    - "Schema validation on all outputs"
+    - "TypeScript type checking"
+    - "Linting with ESLint"
+    - "Security scanning (semgrep/snyk)"
+
+  agent_safety:
+    - "Token/cost budgets enforced"
+    - "Maximum iterations limit"
+    - "Tool call validation"
+    - "Permission checks"
+
+  error_handling:
+    - "JSON parsing errors caught"
+    - "Retry on transient failures"
+    - "Graceful degradation"
+    - "User-friendly error messages"
+
+  security:
+    - "No eval on generated code"
+    - "Sandboxed execution if needed"
+    - "Path traversal prevention"
+    - "Command injection prevention"

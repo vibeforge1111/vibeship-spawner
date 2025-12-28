@@ -1,0 +1,529 @@
+# Collaboration - AI Code Generation
+# Integration patterns with other skills and services
+
+version: 1.0.0
+skill_id: ai-code-generation
+
+prerequisites:
+  required_knowledge:
+    - "LLM API usage (OpenAI, Anthropic)"
+    - "TypeScript/JavaScript AST and tooling"
+    - "Code quality tools (ESLint, TypeScript)"
+    - "Security scanning concepts"
+
+  environment_setup:
+    - step: "Choose LLM provider"
+      options:
+        - provider: "OpenAI (GPT-4o)"
+          best_for: "Function calling, structured output"
+          setup: |
+            npm install openai
+            # Set OPENAI_API_KEY
+
+        - provider: "Anthropic (Claude)"
+          best_for: "Long context, code understanding"
+          setup: |
+            npm install @anthropic-ai/sdk
+            # Set ANTHROPIC_API_KEY
+
+        - provider: "Local (Ollama)"
+          best_for: "Privacy, cost control"
+          setup: |
+            # Install Ollama, pull codestral or deepseek-coder
+
+    - step: "Set up code quality tools"
+      actions:
+        - "Install TypeScript for type checking"
+        - "Install ESLint for linting"
+        - "Install Prettier for formatting"
+        - "Optional: Semgrep for security scanning"
+
+    - step: "Configure Zod for schema validation"
+      actions:
+        - "npm install zod zod-to-json-schema"
+
+delegation_triggers:
+  delegate_to_others:
+    - condition: "Generated code needs security review"
+      delegate_to: "ai-safety-alignment skill"
+      handoff: |
+        Security review requirements:
+        - Scan for OWASP Top 10 vulnerabilities
+        - Check for hardcoded secrets
+        - Validate input sanitization
+        - Check for injection vulnerabilities
+
+    - condition: "Need to monitor generation quality"
+      delegate_to: "ai-observability skill"
+      handoff: |
+        Observability requirements:
+        - Track generation success/failure rates
+        - Log token usage and costs
+        - Monitor code quality metrics
+        - Alert on quality degradation
+
+    - condition: "Generated code needs tests"
+      delegate_to: "test generation pattern"
+      handoff: |
+        Test generation requirements:
+        - Generate unit tests for new code
+        - Cover edge cases and error paths
+        - Mock external dependencies
+        - Achieve target coverage
+
+    - condition: "Need to store generated code"
+      delegate_to: "backend skill"
+      handoff: |
+        Storage requirements:
+        - Version generated code
+        - Track generation history
+        - Enable rollback
+        - Associate with prompts
+
+  accept_from_others:
+    - from: "frontend skill"
+      when: "User requests code generation"
+      expect: |
+        I'll receive:
+        - Natural language description
+        - Target language/framework
+        - Existing context/codebase
+        I'll provide: Generated code with validation
+
+    - from: "document-ai skill"
+      when: "Need to generate code from specs"
+      expect: |
+        I'll receive:
+        - Extracted requirements/specs
+        - Data models from documents
+        I'll provide: Implementation code
+
+workflow_integration:
+  code_generation_flow:
+    - step: 1
+      action: "Validate request"
+      details: |
+        - Check user permissions
+        - Validate target language/framework
+        - Estimate token cost
+        - Check budget
+
+    - step: 2
+      action: "Build context"
+      details: |
+        - Gather relevant codebase files
+        - Include type definitions
+        - Add framework conventions
+        - Limit context size
+
+    - step: 3
+      action: "Generate code"
+      details: |
+        - Call LLM with structured prompt
+        - Parse response with schema validation
+        - Extract code and metadata
+
+    - step: 4
+      action: "Validate output"
+      details: |
+        - Type check generated code
+        - Run linter
+        - Security scan
+        - Test compilation
+
+    - step: 5
+      action: "Return or retry"
+      details: |
+        - If valid, return to user
+        - If invalid, retry with error feedback
+        - Track metrics
+
+  agent_flow:
+    - step: 1
+      action: "Initialize agent"
+      details: |
+        - Set up tool definitions
+        - Configure budget limits
+        - Set max iterations
+
+    - step: 2
+      action: "Agent loop"
+      details: |
+        - Get LLM response
+        - Validate tool calls
+        - Execute approved tools
+        - Add results to context
+        - Check completion
+
+    - step: 3
+      action: "Finalize"
+      details: |
+        - Compile all changes
+        - Validate final state
+        - Report cost and metrics
+
+  decision_points:
+    - decision: "Single prompt vs agent"
+      options:
+        - name: "Single prompt"
+          when: "Simple, well-defined tasks"
+          pros: "Fast, predictable cost"
+          cons: "Limited capability"
+
+        - name: "Agent with tools"
+          when: "Complex tasks requiring exploration"
+          pros: "Can iterate, use tools"
+          cons: "Higher cost, less predictable"
+
+    - decision: "Model selection"
+      options:
+        - name: "GPT-4o"
+          when: "Function calling, complex reasoning"
+          cost: "~$15/M output tokens"
+
+        - name: "Claude Sonnet"
+          when: "Long context, code understanding"
+          cost: "~$15/M output tokens"
+
+        - name: "GPT-4o-mini / Claude Haiku"
+          when: "Simple tasks, cost-sensitive"
+          cost: "~$0.60/M output tokens"
+
+collaboration_patterns:
+  with_nextjs:
+    pattern: "Code generation API endpoint"
+    implementation: |
+      // app/api/generate/route.ts
+      import { NextRequest, NextResponse } from "next/server";
+      import Anthropic from "@anthropic-ai/sdk";
+      import { z } from "zod";
+      import { auth } from "@/lib/auth";
+
+      const anthropic = new Anthropic();
+
+      const GenerateRequestSchema = z.object({
+        prompt: z.string().min(10).max(2000),
+        language: z.enum(["typescript", "python", "javascript"]),
+        context: z.string().optional(),
+      });
+
+      const CodeOutputSchema = z.object({
+        code: z.string(),
+        explanation: z.string(),
+        dependencies: z.array(z.string()),
+      });
+
+      export async function POST(req: NextRequest) {
+        const session = await auth();
+        if (!session) {
+          return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
+        const body = await req.json();
+        const input = GenerateRequestSchema.parse(body);
+
+        // Check user quota
+        const usage = await getUserTokenUsage(session.user.id);
+        if (usage.remaining < 5000) {
+          return NextResponse.json({ error: "Quota exceeded" }, { status: 402 });
+        }
+
+        const response = await anthropic.messages.create({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 2048,
+          messages: [
+            {
+              role: "user",
+              content: `Generate ${input.language} code for: ${input.prompt}
+
+              ${input.context ? `Context:\n${input.context}` : ""}
+
+              Return JSON:
+              {
+                "code": "the generated code",
+                "explanation": "brief explanation",
+                "dependencies": ["list", "of", "packages"]
+              }`,
+            },
+          ],
+        });
+
+        // Track usage
+        await recordTokenUsage(
+          session.user.id,
+          response.usage.input_tokens,
+          response.usage.output_tokens
+        );
+
+        const text = response.content[0].type === "text" ? response.content[0].text : "";
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+
+        if (!jsonMatch) {
+          return NextResponse.json({ error: "Invalid response" }, { status: 500 });
+        }
+
+        const output = CodeOutputSchema.parse(JSON.parse(jsonMatch[0]));
+        return NextResponse.json(output);
+      }
+
+  with_github_action:
+    pattern: "AI code review in CI"
+    implementation: |
+      # .github/workflows/ai-review.yml
+      name: AI Code Review
+
+      on:
+        pull_request:
+          types: [opened, synchronize]
+
+      jobs:
+        review:
+          runs-on: ubuntu-latest
+          steps:
+            - uses: actions/checkout@v4
+              with:
+                fetch-depth: 0
+
+            - name: Get changed files
+              id: files
+              run: |
+                echo "files=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | tr '\n' ',')" >> $GITHUB_OUTPUT
+
+            - name: Run AI Review
+              uses: actions/github-script@v7
+              env:
+                ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+              with:
+                script: |
+                  const { Anthropic } = require("@anthropic-ai/sdk");
+                  const fs = require("fs");
+
+                  const anthropic = new Anthropic();
+                  const changedFiles = process.env.FILES.split(",").filter(Boolean);
+
+                  for (const file of changedFiles.slice(0, 10)) {
+                    const content = fs.readFileSync(file, "utf-8");
+                    const diff = execSync(`git diff origin/${{ github.base_ref }}...HEAD -- ${file}`).toString();
+
+                    const response = await anthropic.messages.create({
+                      model: "claude-sonnet-4-20250514",
+                      max_tokens: 1024,
+                      messages: [{
+                        role: "user",
+                        content: `Review this code change:\n\nFile: ${file}\n\nDiff:\n${diff}\n\nFull file:\n${content}\n\nProvide 1-3 specific, actionable comments. Return JSON array: [{"line": 123, "comment": "..."}]`
+                      }]
+                    });
+
+                    const comments = JSON.parse(response.content[0].text);
+
+                    for (const comment of comments) {
+                      await github.rest.pulls.createReviewComment({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        pull_number: context.payload.pull_request.number,
+                        body: comment.comment,
+                        path: file,
+                        line: comment.line,
+                        side: "RIGHT"
+                      });
+                    }
+                  }
+
+  with_vscode_extension:
+    pattern: "Code generation in editor"
+    implementation: |
+      // src/extension.ts
+      import * as vscode from "vscode";
+      import Anthropic from "@anthropic-ai/sdk";
+
+      const anthropic = new Anthropic({
+        apiKey: vscode.workspace.getConfiguration("aiCodeGen").get("apiKey"),
+      });
+
+      export function activate(context: vscode.ExtensionContext) {
+        const generateCommand = vscode.commands.registerCommand(
+          "aiCodeGen.generate",
+          async () => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) return;
+
+            const selection = editor.selection;
+            const selectedText = editor.document.getText(selection);
+
+            const prompt = await vscode.window.showInputBox({
+              prompt: "What code do you want to generate?",
+              value: selectedText ? `Based on: ${selectedText.slice(0, 100)}...` : "",
+            });
+
+            if (!prompt) return;
+
+            await vscode.window.withProgress(
+              {
+                location: vscode.ProgressLocation.Notification,
+                title: "Generating code...",
+              },
+              async () => {
+                const response = await anthropic.messages.create({
+                  model: "claude-sonnet-4-20250514",
+                  max_tokens: 2048,
+                  messages: [
+                    {
+                      role: "user",
+                      content: `Generate code for: ${prompt}
+
+                      Language: ${editor.document.languageId}
+                      Context: ${editor.document.getText().slice(0, 2000)}
+
+                      Return ONLY the code, no explanation.`,
+                    },
+                  ],
+                });
+
+                const code = response.content[0].type === "text"
+                  ? response.content[0].text
+                  : "";
+
+                editor.edit((editBuilder) => {
+                  if (selectedText) {
+                    editBuilder.replace(selection, code);
+                  } else {
+                    editBuilder.insert(selection.start, code);
+                  }
+                });
+              }
+            );
+          }
+        );
+
+        context.subscriptions.push(generateCommand);
+      }
+
+  with_langchain:
+    pattern: "Code generation agent"
+    implementation: |
+      // lib/code-agent.ts
+      import { ChatAnthropic } from "@langchain/anthropic";
+      import { StructuredTool } from "@langchain/core/tools";
+      import { AgentExecutor, createToolCallingAgent } from "langchain/agents";
+      import { ChatPromptTemplate } from "@langchain/core/prompts";
+      import { z } from "zod";
+
+      // Define tools
+      class SearchCodebaseTool extends StructuredTool {
+        name = "search_codebase";
+        description = "Search for code patterns in the codebase";
+        schema = z.object({
+          query: z.string().describe("Search query"),
+          fileType: z.string().optional().describe("File extension filter"),
+        });
+
+        async _call({ query, fileType }: z.infer<typeof this.schema>) {
+          // Implement actual search
+          const results = await searchFiles(query, { fileType });
+          return JSON.stringify(results.slice(0, 10));
+        }
+      }
+
+      class ReadFileTool extends StructuredTool {
+        name = "read_file";
+        description = "Read a file from the codebase";
+        schema = z.object({
+          path: z.string().describe("File path"),
+        });
+
+        async _call({ path }: z.infer<typeof this.schema>) {
+          const content = await readFile(path);
+          return content.slice(0, 10000); // Limit size
+        }
+      }
+
+      class WriteFileTool extends StructuredTool {
+        name = "write_file";
+        description = "Write content to a file";
+        schema = z.object({
+          path: z.string().describe("File path"),
+          content: z.string().describe("File content"),
+        });
+
+        async _call({ path, content }: z.infer<typeof this.schema>) {
+          await writeFile(path, content);
+          return `File written: ${path}`;
+        }
+      }
+
+      // Create agent
+      async function createCodeAgent() {
+        const llm = new ChatAnthropic({
+          model: "claude-sonnet-4-20250514",
+        });
+
+        const tools = [
+          new SearchCodebaseTool(),
+          new ReadFileTool(),
+          new WriteFileTool(),
+        ];
+
+        const prompt = ChatPromptTemplate.fromMessages([
+          ["system", `You are a code assistant. You can search, read, and write files.
+            Complete the user's coding task step by step.
+            Always explain what you're doing before taking action.`],
+          ["human", "{input}"],
+          ["placeholder", "{agent_scratchpad}"],
+        ]);
+
+        const agent = createToolCallingAgent({ llm, tools, prompt });
+
+        return new AgentExecutor({
+          agent,
+          tools,
+          maxIterations: 10,
+          returnIntermediateSteps: true,
+        });
+      }
+
+      // Usage
+      const agent = await createCodeAgent();
+      const result = await agent.invoke({
+        input: "Add input validation to the user registration endpoint",
+      });
+
+anti_patterns:
+  - name: "No output validation"
+    why_bad: "LLMs produce invalid code, malformed JSON"
+    example_bad: |
+      const code = await generate(prompt);
+      fs.writeFileSync("output.ts", code);
+    example_good: |
+      const code = await generate(prompt);
+      const validation = await validateCode(code);
+      if (!validation.valid) throw new Error(validation.errors);
+      fs.writeFileSync("output.ts", code);
+
+  - name: "Unlimited token usage"
+    why_bad: "Agents can consume hundreds of dollars"
+    example_bad: |
+      while (!done) { await agent.step(); }
+    example_good: |
+      const budget = new TokenBudget(1.0);
+      while (!done && budget.canContinue()) { ... }
+
+  - name: "Executing unvalidated tools"
+    why_bad: "Prompt injection can trigger malicious actions"
+    example_bad: |
+      for (const call of toolCalls) {
+        await handlers[call.name](call.args);
+      }
+    example_good: |
+      for (const call of toolCalls) {
+        const check = validateTool(call, userPermissions);
+        if (!check.allowed) continue;
+        await handlers[call.name](call.args);
+      }
+
+  - name: "Hardcoded prompts"
+    why_bad: "No flexibility, hard to iterate"
+    example_bad: |
+      messages: [{ role: "user", content: "Generate code for..." }]
+    example_good: |
+      const prompt = await loadPrompt("code-generation", { language, context });
+      messages: [{ role: "user", content: prompt }]
