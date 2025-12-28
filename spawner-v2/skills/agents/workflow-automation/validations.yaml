@@ -1,0 +1,281 @@
+# Validations - Workflow Automation
+# Automated checks for workflow quality
+
+version: 1.0.0
+skill_id: workflow-automation
+
+validations:
+  # Idempotency Checks
+  - id: step-missing-idempotency
+    name: External Calls Without Idempotency Key
+    severity: error
+    description: Stripe/payment calls should use idempotency keys
+    pattern: |
+      stripe\.(paymentIntents|charges|transfers)\.(create|update)\(
+    anti_pattern: |
+      idempotency_key
+    message: "Payment call without idempotency_key. Add idempotency key to prevent duplicate charges on retry."
+    autofix: false
+
+  - id: email-without-dedup
+    name: Email Sending Without Deduplication
+    severity: warning
+    description: Email sends in workflows should check for already-sent
+    pattern: |
+      sendEmail|send_email|postmark\.send|sendgrid\.send
+    anti_pattern: |
+      alreadySent|already_sent|idempotency|checkSent
+    message: "Email sent in workflow without deduplication check. Retries may send duplicate emails."
+    autofix: false
+
+  # Timeout Checks
+  - id: temporal-no-timeout
+    name: Temporal Activities Without Timeout
+    severity: error
+    description: All Temporal activities need timeout configuration
+    pattern: |
+      proxyActivities<
+    anti_pattern: |
+      startToCloseTimeout|scheduleToCloseTimeout
+    message: "proxyActivities without timeout. Add startToCloseTimeout to prevent indefinite hangs."
+    autofix: false
+
+  - id: inngest-step-no-timeout
+    name: Inngest Steps Calling External APIs Without Timeout
+    severity: warning
+    description: External API calls should have timeouts
+    pattern: |
+      step\.run\([^)]+async.*fetch\(|step\.run\([^)]+async.*axios
+    anti_pattern: |
+      timeout|AbortSignal
+    message: "External API call in step without timeout. Add timeout to prevent workflow hangs."
+    autofix: false
+
+  # Determinism Checks
+  - id: random-in-workflow
+    name: Random Values in Workflow Code
+    severity: error
+    description: Random values break determinism on replay
+    pattern: |
+      Math\.random\(\)|crypto\.randomUUID\(\)|uuid\(\)
+    message: "Random value in workflow code. Move to activity/step or use sideEffect."
+    autofix: false
+
+  - id: date-now-in-workflow
+    name: Date.now() in Workflow Code
+    severity: error
+    description: Current time breaks determinism on replay
+    pattern: |
+      Date\.now\(\)|new Date\(\)
+    message: "Current time in workflow code. Use workflow.now() or move to activity/step."
+    autofix: false
+
+  # Error Handling
+  - id: no-onfailure-handler
+    name: Inngest Function Without onFailure Handler
+    severity: warning
+    description: Production functions should have failure handlers
+    pattern: |
+      inngest\.createFunction\(
+    anti_pattern: |
+      onFailure
+    message: "Inngest function without onFailure handler. Add failure handling for production reliability."
+    autofix: false
+
+  - id: no-try-catch-in-step
+    name: Step Without Error Handling
+    severity: warning
+    description: Steps should handle errors gracefully
+    pattern: |
+      step\.run\([^)]+async\s*\(\)\s*=>\s*\{[^}]+\}
+    anti_pattern: |
+      try|catch|NonRetriableError
+    message: "Step without try/catch. Consider handling specific error cases."
+    autofix: false
+
+  # State Management
+  - id: large-step-return
+    name: Potentially Large Data Returned from Step
+    severity: info
+    description: Large data in workflow state slows execution
+    pattern: |
+      return\s+(await\s+)?fetch|return\s+data|return\s+records
+    message: "Returning potentially large data from step. Consider storing in S3/DB and returning reference."
+    autofix: false
+
+  # Retry Configuration
+  - id: retry-no-backoff
+    name: Retry Without Backoff Configuration
+    severity: warning
+    description: Retries should use exponential backoff
+    pattern: |
+      maximumAttempts:\s*\d+
+    anti_pattern: |
+      backoffCoefficient|initialInterval
+    message: "Retry configured without backoff. Add backoffCoefficient and initialInterval."
+    autofix: false
+
+  # n8n Specific
+  - id: n8n-no-error-trigger
+    name: n8n Workflow Without Error Handling
+    severity: warning
+    description: Production workflows need Error Trigger
+    file_pattern: "*.json"
+    pattern: |
+      "type":\s*"n8n-nodes-base\.(webhook|schedule)"
+    anti_pattern: |
+      "type":\s*"n8n-nodes-base\.errorTrigger"
+    message: "n8n workflow without Error Trigger node. Add for production error visibility."
+    autofix: false
+
+  # Heartbeat Checks
+  - id: temporal-long-activity-no-heartbeat
+    name: Long Temporal Activity Without Heartbeat
+    severity: warning
+    description: Activities over 10s should heartbeat
+    pattern: |
+      startToCloseTimeout:\s*['"]([0-9]+\s*)?(minutes?|hours?)['"]
+    anti_pattern: |
+      heartbeatTimeout|heartbeat\(
+    message: "Long-running activity without heartbeat. Add heartbeat for cancellation support."
+    autofix: false
+
+code_smells:
+  - id: monolithic-workflow
+    name: Workflow With Too Many Steps
+    description: More than 15 steps suggests workflow does too much
+    pattern: |
+      step\.run\([^)]+\).*step\.run\([^)]+\).*step\.run\([^)]+\).*step\.run\([^)]+\).*step\.run\([^)]+\)
+    suggestion: "Consider breaking into child workflows or separate functions"
+
+  - id: nested-loops-in-workflow
+    name: Nested Loops in Workflow Code
+    description: Complex iteration logic is error-prone
+    pattern: |
+      for.*\{[^}]*for.*\{
+    suggestion: "Move complex iteration to an activity or simplify workflow logic"
+
+  - id: hardcoded-wait-times
+    name: Hardcoded Wait Durations
+    description: Magic numbers for delays are hard to maintain
+    pattern: |
+      sleep\(['"][0-9]+ (seconds?|minutes?|hours?|days?)['"]
+    suggestion: "Use named constants or configuration for wait times"
+
+best_practices:
+  - id: use-typed-events
+    name: Type Your Events
+    check: |
+      Define TypeScript types for all workflow events.
+    recommendation: |
+      type Events = {
+        "order/created": { data: { orderId: string; total: number } };
+        "user/signed-up": { data: { userId: string; email: string } };
+      };
+
+      // Provides autocomplete and type checking
+
+  - id: step-naming-convention
+    name: Descriptive Step Names
+    check: |
+      Step names should describe the action being performed.
+    recommendation: |
+      # GOOD:
+      step.run("validate-payment-method", ...)
+      step.run("send-confirmation-email", ...)
+      step.run("update-inventory-count", ...)
+
+      # BAD:
+      step.run("step1", ...)
+      step.run("process", ...)
+      step.run("do-thing", ...)
+
+  - id: structured-logging
+    name: Log Workflow Progress
+    check: |
+      Log at step boundaries for debugging.
+    recommendation: |
+      await step.run("process-order", async () => {
+        console.log({ event: "order_processing_started", orderId });
+        const result = await processOrder(orderId);
+        console.log({ event: "order_processing_completed", orderId, result });
+        return result;
+      });
+
+  - id: separate-concerns
+    name: Separate Orchestration from Business Logic
+    check: |
+      Workflow should orchestrate, not contain business logic.
+    recommendation: |
+      # GOOD - workflow orchestrates, activities contain logic:
+      export async function orderWorkflow(order) {
+        const validated = await activities.validateOrder(order);
+        const payment = await activities.processPayment(validated);
+        await activities.sendConfirmation(order, payment);
+      }
+
+      # BAD - business logic in workflow:
+      export async function orderWorkflow(order) {
+        // Don't put validation logic here
+        if (!order.items || order.items.length === 0) {
+          throw new Error("Invalid order");
+        }
+        // This should be in an activity
+      }
+
+  - id: idempotency-by-default
+    name: Design for Idempotency First
+    check: |
+      Every external call should be idempotent from the start.
+    recommendation: |
+      # Pattern: Generate idempotency key from stable inputs
+      const idempotencyKey = `${workflowId}-${stepName}-${hash(input)}`;
+
+      # For payments:
+      idempotency_key: `order-${orderId}-payment`
+
+      # For emails:
+      idempotency_key: `order-${orderId}-confirmation`
+
+      # For API calls:
+      headers: { 'Idempotency-Key': idempotencyKey }
+
+testing_recommendations:
+  - id: test-replay-behavior
+    name: Test Workflow Replay
+    check: |
+      Verify workflows produce same result on replay.
+    approach: |
+      1. Run workflow to completion
+      2. Replay from persisted state
+      3. Verify all step results match
+      4. Check no duplicate side effects
+
+  - id: test-failure-scenarios
+    name: Test Failure Paths
+    check: |
+      Each step failure should be tested.
+    approach: |
+      1. Mock each activity to fail
+      2. Verify retry behavior
+      3. Verify eventual failure handling
+      4. Verify onFailure/dead letter triggered
+
+  - id: test-long-waits
+    name: Test Long Sleep/Wait Behavior
+    check: |
+      Test that sleep-based workflows work correctly.
+    approach: |
+      # Use time skipping in tests:
+      # Temporal: testEnv.sleep
+      # Inngest: Test mode with time advancement
+
+  - id: test-cancellation
+    name: Test Workflow Cancellation
+    check: |
+      Verify clean cancellation behavior.
+    approach: |
+      1. Start workflow
+      2. Cancel mid-execution
+      3. Verify cleanup activities ran
+      4. Verify no orphaned resources

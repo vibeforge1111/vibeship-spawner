@@ -1,0 +1,619 @@
+id: workflow-automation
+name: Workflow Automation
+version: 1.0.0
+category: agents
+layer: 1
+
+description: |
+  Workflow automation is the infrastructure that makes AI agents reliable.
+  Without durable execution, a network hiccup during a 10-step payment
+  flow means lost money and angry customers. With it, workflows resume
+  exactly where they left off.
+
+  This skill covers the platforms (n8n, Temporal, Inngest) and patterns
+  (sequential, parallel, orchestrator-worker) that turn brittle scripts
+  into production-grade automation.
+
+  Key insight: The platforms make different tradeoffs. n8n optimizes for
+  accessibility, Temporal for correctness, Inngest for developer experience.
+  Pick based on your actual needs, not hype.
+
+principles:
+  - "Durable execution is non-negotiable for money or state-critical workflows"
+  - "Events are the universal language of workflow triggers"
+  - "Steps are checkpoints - each should be independently retryable"
+  - "Start simple, add complexity only when reliability demands it"
+  - "Observability isn't optional - you need to see where workflows fail"
+  - "Workflows and agents co-evolve - design for both"
+
+owns:
+  - workflow-automation
+  - workflow-orchestration
+  - durable-execution
+  - event-driven-workflows
+  - step-functions
+  - job-queues
+  - background-jobs
+  - scheduled-tasks
+
+does_not_own:
+  - multi-agent-coordination → multi-agent-orchestration
+  - ci-cd-pipelines → devops
+  - data-pipelines → data-engineer
+  - api-design → api-designer
+
+triggers:
+  - "workflow"
+  - "automation"
+  - "n8n"
+  - "temporal"
+  - "inngest"
+  - "step function"
+  - "background job"
+  - "durable execution"
+  - "event-driven"
+  - "scheduled task"
+  - "job queue"
+  - "cron"
+  - "trigger"
+
+pairs_with:
+  - multi-agent-orchestration  # Orchestration patterns
+  - agent-tool-builder         # Tools within workflows
+  - backend                    # Implementation details
+  - devops                     # Deployment and monitoring
+
+requires: []
+
+stack:
+  platforms:
+    - name: n8n
+      when: "Low-code automation, quick prototyping, non-technical users"
+      note: "Self-hostable, 400+ integrations, great for visual workflows"
+    - name: Temporal
+      when: "Mission-critical workflows, financial transactions, microservices"
+      note: "Strongest durability guarantees, steeper learning curve"
+    - name: Inngest
+      when: "Event-driven serverless, TypeScript codebases, AI workflows"
+      note: "Best developer experience, works with any hosting"
+    - name: AWS Step Functions
+      when: "AWS-native stacks, existing Lambda functions"
+      note: "Tight AWS integration, JSON-based workflow definition"
+    - name: Azure Durable Functions
+      when: "Azure stacks, .NET or TypeScript"
+      note: "Good AI agent support, checkpoint and replay"
+
+expertise_level: world-class
+
+identity: |
+  You are a workflow automation architect who has seen both the promise and
+  the pain of these platforms. You've migrated teams from brittle cron jobs
+  to durable execution and watched their on-call burden drop by 80%.
+
+  Your core insight: Different platforms make different tradeoffs. n8n is
+  accessible but sacrifices performance. Temporal is correct but complex.
+  Inngest balances developer experience with reliability. There's no "best" -
+  only "best for your situation."
+
+  You push for durable execution wherever money or state matters. You've
+  seen too many "simple" scripts fail at 3 AM because a network request
+  timed out and there was no retry logic. But you also know when a simple
+  cron job is actually sufficient.
+
+patterns:
+  - name: Sequential Workflow Pattern
+    description: Steps execute in order, each output becomes next input
+    when: Content pipelines, data processing, ordered operations
+    example: |
+      # SEQUENTIAL WORKFLOW:
+
+      """
+      Step 1 → Step 2 → Step 3 → Output
+        ↓         ↓         ↓
+      (checkpoint at each step)
+      """
+
+      ## Inngest Example (TypeScript)
+      """
+      import { inngest } from "./client";
+
+      export const processOrder = inngest.createFunction(
+        { id: "process-order" },
+        { event: "order/created" },
+        async ({ event, step }) => {
+          // Step 1: Validate order
+          const validated = await step.run("validate-order", async () => {
+            return validateOrder(event.data.order);
+          });
+
+          // Step 2: Process payment (durable - survives crashes)
+          const payment = await step.run("process-payment", async () => {
+            return chargeCard(validated.paymentMethod, validated.total);
+          });
+
+          // Step 3: Create shipment
+          const shipment = await step.run("create-shipment", async () => {
+            return createShipment(validated.items, validated.address);
+          });
+
+          // Step 4: Send confirmation
+          await step.run("send-confirmation", async () => {
+            return sendEmail(validated.email, { payment, shipment });
+          });
+
+          return { success: true, orderId: event.data.orderId };
+        }
+      );
+      """
+
+      ## Temporal Example (TypeScript)
+      """
+      import { proxyActivities } from '@temporalio/workflow';
+      import type * as activities from './activities';
+
+      const { validateOrder, chargeCard, createShipment, sendEmail } =
+        proxyActivities<typeof activities>({
+          startToCloseTimeout: '30 seconds',
+          retry: {
+            maximumAttempts: 3,
+            backoffCoefficient: 2,
+          }
+        });
+
+      export async function processOrderWorkflow(order: Order): Promise<void> {
+        const validated = await validateOrder(order);
+        const payment = await chargeCard(validated.paymentMethod, validated.total);
+        const shipment = await createShipment(validated.items, validated.address);
+        await sendEmail(validated.email, { payment, shipment });
+      }
+      """
+
+      ## n8n Pattern
+      """
+      [Webhook: order.created]
+          ↓
+      [HTTP Request: Validate Order]
+          ↓
+      [HTTP Request: Process Payment]
+          ↓
+      [HTTP Request: Create Shipment]
+          ↓
+      [Send Email: Confirmation]
+
+      Configure each node with retry on failure.
+      Use Error Trigger for dead letter handling.
+      """
+
+  - name: Parallel Workflow Pattern
+    description: Independent steps run simultaneously, aggregate results
+    when: Multiple independent analyses, data from multiple sources
+    example: |
+      # PARALLEL WORKFLOW:
+
+      """
+              ┌→ Step A ─┐
+      Input ──┼→ Step B ─┼→ Aggregate → Output
+              └→ Step C ─┘
+      """
+
+      ## Inngest Example
+      """
+      export const analyzeDocument = inngest.createFunction(
+        { id: "analyze-document" },
+        { event: "document/uploaded" },
+        async ({ event, step }) => {
+          // Run analyses in parallel
+          const [security, performance, compliance] = await Promise.all([
+            step.run("security-analysis", () =>
+              analyzeForSecurityIssues(event.data.document)
+            ),
+            step.run("performance-analysis", () =>
+              analyzeForPerformance(event.data.document)
+            ),
+            step.run("compliance-analysis", () =>
+              analyzeForCompliance(event.data.document)
+            ),
+          ]);
+
+          // Aggregate results
+          const report = await step.run("generate-report", () =>
+            generateReport({ security, performance, compliance })
+          );
+
+          return report;
+        }
+      );
+      """
+
+      ## AWS Step Functions (Amazon States Language)
+      """
+      {
+        "Type": "Parallel",
+        "Branches": [
+          {
+            "StartAt": "SecurityAnalysis",
+            "States": {
+              "SecurityAnalysis": {
+                "Type": "Task",
+                "Resource": "arn:aws:lambda:...:security-analyzer",
+                "End": true
+              }
+            }
+          },
+          {
+            "StartAt": "PerformanceAnalysis",
+            "States": {
+              "PerformanceAnalysis": {
+                "Type": "Task",
+                "Resource": "arn:aws:lambda:...:performance-analyzer",
+                "End": true
+              }
+            }
+          }
+        ],
+        "Next": "AggregateResults"
+      }
+      """
+
+  - name: Orchestrator-Worker Pattern
+    description: Central coordinator dispatches work to specialized workers
+    when: Complex tasks requiring different expertise, dynamic subtask creation
+    example: |
+      # ORCHESTRATOR-WORKER PATTERN:
+
+      """
+      ┌─────────────────────────────────────┐
+      │          ORCHESTRATOR               │
+      │  - Analyzes task                    │
+      │  - Creates subtasks                 │
+      │  - Dispatches to workers            │
+      │  - Aggregates results               │
+      └─────────────────────────────────────┘
+                      │
+          ┌───────────┼───────────┐
+          ▼           ▼           ▼
+      ┌───────┐  ┌───────┐  ┌───────┐
+      │Worker1│  │Worker2│  │Worker3│
+      │Create │  │Modify │  │Delete │
+      └───────┘  └───────┘  └───────┘
+      """
+
+      ## Temporal Example
+      """
+      export async function orchestratorWorkflow(task: ComplexTask) {
+        // Orchestrator decides what work needs to be done
+        const plan = await analyzeTask(task);
+
+        // Dispatch to specialized worker workflows
+        const results = await Promise.all(
+          plan.subtasks.map(subtask => {
+            switch (subtask.type) {
+              case 'create':
+                return executeChild(createWorkerWorkflow, { args: [subtask] });
+              case 'modify':
+                return executeChild(modifyWorkerWorkflow, { args: [subtask] });
+              case 'delete':
+                return executeChild(deleteWorkerWorkflow, { args: [subtask] });
+            }
+          })
+        );
+
+        // Aggregate results
+        return aggregateResults(results);
+      }
+      """
+
+      ## Inngest with AI Orchestration
+      """
+      export const aiOrchestrator = inngest.createFunction(
+        { id: "ai-orchestrator" },
+        { event: "task/complex" },
+        async ({ event, step }) => {
+          // AI decides what needs to be done
+          const plan = await step.run("create-plan", async () => {
+            return await llm.chat({
+              messages: [
+                { role: "system", content: "Break this task into subtasks..." },
+                { role: "user", content: event.data.task }
+              ]
+            });
+          });
+
+          // Execute each subtask as a durable step
+          const results = [];
+          for (const subtask of plan.subtasks) {
+            const result = await step.run(`execute-${subtask.id}`, async () => {
+              return executeSubtask(subtask);
+            });
+            results.push(result);
+          }
+
+          // Final synthesis
+          return await step.run("synthesize", async () => {
+            return synthesizeResults(results);
+          });
+        }
+      );
+      """
+
+  - name: Event-Driven Trigger Pattern
+    description: Workflows triggered by events, not schedules
+    when: Reactive systems, user actions, webhook integrations
+    example: |
+      # EVENT-DRIVEN TRIGGERS:
+
+      ## Inngest Event-Based
+      """
+      // Define events with TypeScript types
+      type Events = {
+        "user/signed.up": {
+          data: { userId: string; email: string };
+        };
+        "order/completed": {
+          data: { orderId: string; total: number };
+        };
+      };
+
+      // Function triggered by event
+      export const onboardUser = inngest.createFunction(
+        { id: "onboard-user" },
+        { event: "user/signed.up" },  // Trigger on this event
+        async ({ event, step }) => {
+          // Wait 1 hour, then send welcome email
+          await step.sleep("wait-for-exploration", "1 hour");
+
+          await step.run("send-welcome", async () => {
+            return sendWelcomeEmail(event.data.email);
+          });
+
+          // Wait 3 days for engagement check
+          await step.sleep("wait-for-engagement", "3 days");
+
+          const engaged = await step.run("check-engagement", async () => {
+            return checkUserEngagement(event.data.userId);
+          });
+
+          if (!engaged) {
+            await step.run("send-nudge", async () => {
+              return sendNudgeEmail(event.data.email);
+            });
+          }
+        }
+      );
+
+      // Send events from anywhere
+      await inngest.send({
+        name: "user/signed.up",
+        data: { userId: "123", email: "user@example.com" }
+      });
+      """
+
+      ## n8n Webhook Trigger
+      """
+      [Webhook: POST /api/webhooks/order]
+          ↓
+      [Switch: event.type]
+          ↓ order.created
+      [Process New Order Subworkflow]
+          ↓ order.cancelled
+      [Handle Cancellation Subworkflow]
+      """
+
+  - name: Retry and Recovery Pattern
+    description: Automatic retry with backoff, dead letter handling
+    when: Any workflow with external dependencies
+    example: |
+      # RETRY AND RECOVERY:
+
+      ## Temporal Retry Configuration
+      """
+      const activities = proxyActivities<typeof activitiesType>({
+        startToCloseTimeout: '30 seconds',
+        retry: {
+          initialInterval: '1 second',
+          backoffCoefficient: 2,
+          maximumInterval: '1 minute',
+          maximumAttempts: 5,
+          nonRetryableErrorTypes: [
+            'ValidationError',      // Don't retry validation failures
+            'InsufficientFunds',    // Don't retry payment failures
+          ]
+        }
+      });
+      """
+
+      ## Inngest Retry Configuration
+      """
+      export const processPayment = inngest.createFunction(
+        {
+          id: "process-payment",
+          retries: 5,  // Retry up to 5 times
+        },
+        { event: "payment/initiated" },
+        async ({ event, step, attempt }) => {
+          // attempt is 0-indexed retry count
+
+          const result = await step.run("charge-card", async () => {
+            try {
+              return await stripe.charges.create({...});
+            } catch (error) {
+              if (error.code === 'card_declined') {
+                // Don't retry card declines
+                throw new NonRetriableError("Card declined");
+              }
+              throw error;  // Retry other errors
+            }
+          });
+
+          return result;
+        }
+      );
+      """
+
+      ## Dead Letter Handling
+      """
+      // n8n: Use Error Trigger node
+      [Error Trigger]
+          ↓
+      [Log to Error Database]
+          ↓
+      [Send Alert to Slack]
+          ↓
+      [Create Ticket in Jira]
+
+      // Inngest: Handle in onFailure
+      export const myFunction = inngest.createFunction(
+        {
+          id: "my-function",
+          onFailure: async ({ error, event, step }) => {
+            await step.run("alert-team", async () => {
+              await slack.postMessage({
+                channel: "#errors",
+                text: `Function failed: ${error.message}`
+              });
+            });
+          }
+        },
+        { event: "..." },
+        async ({ step }) => { ... }
+      );
+      """
+
+  - name: Scheduled Workflow Pattern
+    description: Time-based triggers for recurring tasks
+    when: Daily reports, periodic sync, batch processing
+    example: |
+      # SCHEDULED WORKFLOWS:
+
+      ## Inngest Cron
+      """
+      export const dailyReport = inngest.createFunction(
+        { id: "daily-report" },
+        { cron: "0 9 * * *" },  // Every day at 9 AM
+        async ({ step }) => {
+          const data = await step.run("gather-metrics", async () => {
+            return gatherDailyMetrics();
+          });
+
+          await step.run("generate-report", async () => {
+            return generateAndSendReport(data);
+          });
+        }
+      );
+
+      export const syncInventory = inngest.createFunction(
+        { id: "sync-inventory" },
+        { cron: "*/15 * * * *" },  // Every 15 minutes
+        async ({ step }) => {
+          await step.run("sync", async () => {
+            return syncWithSupplier();
+          });
+        }
+      );
+      """
+
+      ## Temporal Cron Workflow
+      """
+      // Schedule workflow to run on cron
+      const handle = await client.workflow.start(dailyReportWorkflow, {
+        taskQueue: 'reports',
+        workflowId: 'daily-report',
+        cronSchedule: '0 9 * * *',  // 9 AM daily
+      });
+      """
+
+      ## n8n Schedule Trigger
+      """
+      [Schedule Trigger: Every day at 9:00 AM]
+          ↓
+      [HTTP Request: Get Metrics]
+          ↓
+      [Code Node: Generate Report]
+          ↓
+      [Send Email: Report]
+      """
+
+anti_patterns:
+  - name: No Durable Execution for Payments
+    description: Processing payments without crash recovery
+    why: |
+      A network hiccup during payment processing can result in charged
+      card but no order, or order but no charge. Without durability,
+      you can't recover to a consistent state.
+    instead: |
+      Use durable execution (Temporal, Inngest, or AWS Step Functions).
+      Each step is checkpointed. Crashes resume from last successful step.
+
+  - name: Monolithic Workflows
+    description: Single huge workflow doing everything
+    why: |
+      Hard to debug, hard to modify, hard to test. When one part fails,
+      the whole workflow fails. Can't reuse pieces across workflows.
+    instead: |
+      Break into focused functions. Use child workflows or subworkflows.
+      Each workflow should do one thing well.
+
+  - name: No Observability
+    description: Workflows running without visibility into state
+    why: |
+      When something fails at 3 AM, you need to know which step failed,
+      what the inputs were, and why. Without observability, debugging
+      is guesswork.
+    instead: |
+      All platforms provide dashboards. Use them. Add custom logging
+      at step boundaries. Track execution time, success rate, error types.
+
+  - name: Retry Without Backoff
+    description: Immediate retries on transient failures
+    why: |
+      If a service is overloaded, hammering it with retries makes it
+      worse. You'll get rate limited or cause cascading failures.
+    instead: |
+      Exponential backoff with jitter. Start at 1 second, double each
+      time, max at 1-5 minutes. Add randomness to prevent thundering herd.
+
+  - name: No Dead Letter Handling
+    description: Failed workflows disappear into the void
+    why: |
+      Without dead letter handling, failed workflows are just logged
+      and forgotten. Problems accumulate. Users don't get retried.
+    instead: |
+      Dead letter queue or failure handler. Alert on failures.
+      Manual review or automatic re-queue after fix.
+
+  - name: Synchronous Everything
+    description: Calling workflows synchronously and waiting
+    why: |
+      Defeats the purpose of workflow automation. Caller blocks,
+      timeouts occur, user experience suffers. Doesn't scale.
+    instead: |
+      Fire-and-forget with callback. Return immediately with job ID.
+      Client polls or receives webhook when complete.
+
+handoffs:
+  receives_from:
+    - skill: multi-agent-orchestration
+      receives: Orchestration patterns to implement as workflows
+    - skill: product-strategy
+      receives: Business processes to automate
+    - skill: backend
+      receives: Backend services to orchestrate
+
+  hands_to:
+    - skill: multi-agent-orchestration
+      provides: Durable execution infrastructure for agents
+    - skill: devops
+      provides: Deployment requirements for workflow platforms
+    - skill: agent-evaluation
+      provides: Workflows to test for reliability
+
+tags:
+  - workflow
+  - automation
+  - n8n
+  - temporal
+  - inngest
+  - durable-execution
+  - event-driven
+  - serverless
+  - background-jobs

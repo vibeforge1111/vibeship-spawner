@@ -1,0 +1,454 @@
+# Sharp Edges - Workflow Automation
+# The gotchas that cause workflow failures
+
+version: 1.0.0
+skill_id: workflow-automation
+
+sharp_edges:
+  - id: step-not-idempotent
+    severity: critical
+    title: Non-Idempotent Steps in Durable Workflows
+    situation: Writing workflow steps that modify external state
+    symptom: |
+      Customer charged twice. Email sent three times. Database record
+      created multiple times. Workflow retries cause duplicate side effects.
+    why: |
+      Durable execution replays workflows from the beginning on restart.
+      If step 3 crashes and the workflow resumes, steps 1 and 2 run again.
+      Without idempotency keys, external services don't know these are retries.
+    solution: |
+      # ALWAYS use idempotency keys for external calls:
+
+      ## Stripe example:
+      await stripe.paymentIntents.create({
+        amount: 1000,
+        currency: 'usd',
+        idempotency_key: `order-${orderId}-payment`  # Critical!
+      });
+
+      ## Email example:
+      await step.run("send-confirmation", async () => {
+        const alreadySent = await checkEmailSent(orderId);
+        if (alreadySent) return { skipped: true };
+        return sendEmail(customer, orderId);
+      });
+
+      ## Database example:
+      await db.query(`
+        INSERT INTO orders (id, ...) VALUES ($1, ...)
+        ON CONFLICT (id) DO NOTHING
+      `, [orderId]);
+
+      # Generate idempotency key from stable inputs, not random values
+    detection_pattern:
+      - "step.run"
+      - "stripe"
+      - "sendEmail"
+      - "INSERT INTO"
+
+  - id: workflow-too-long
+    severity: high
+    title: Workflow Runs for Hours/Days Without Checkpoints
+    situation: Long-running workflows with infrequent steps
+    symptom: |
+      Memory consumption grows. Worker timeouts. Lost progress after
+      crashes. "Workflow exceeded maximum duration" errors.
+    why: |
+      Workflows hold state in memory until checkpointed. A workflow that
+      runs for 24 hours with one step per hour accumulates state for 24h.
+      Workers have memory limits. Functions have execution time limits.
+    solution: |
+      # Break long workflows into checkpointed steps:
+
+      ## WRONG - one long step:
+      await step.run("process-all", async () => {
+        for (const item of thousandItems) {
+          await processItem(item);  // Hours of work, one checkpoint
+        }
+      });
+
+      ## CORRECT - many small steps:
+      for (const item of thousandItems) {
+        await step.run(`process-${item.id}`, async () => {
+          return processItem(item);  // Checkpoint after each
+        });
+      }
+
+      ## For very long waits, use sleep:
+      await step.sleep("wait-for-trial", "14 days");
+      // Doesn't consume resources while waiting
+
+      ## Consider child workflows for long processes:
+      await step.invoke("process-batch", {
+        function: batchProcessor,
+        data: { items: batch }
+      });
+    detection_pattern:
+      - "for.*step"
+      - "while.*await"
+      - "setTimeout"
+
+  - id: no-timeout-on-activities
+    severity: high
+    title: Activities Without Timeout Configuration
+    situation: Calling external services from workflow activities
+    symptom: |
+      Workflows hang indefinitely. Worker pool exhausted. Dead workflows
+      that never complete or fail. Manual intervention needed to kill stuck
+      workflows.
+    why: |
+      External APIs can hang forever. Without timeout, your workflow waits
+      forever. Unlike HTTP clients, workflow activities don't have default
+      timeouts in most platforms.
+    solution: |
+      # ALWAYS set timeouts on activities:
+
+      ## Temporal:
+      const activities = proxyActivities<typeof activitiesType>({
+        startToCloseTimeout: '30 seconds',  # Required!
+        scheduleToCloseTimeout: '5 minutes',
+        heartbeatTimeout: '10 seconds',  # For long activities
+        retry: {
+          maximumAttempts: 3,
+          initialInterval: '1 second',
+        }
+      });
+
+      ## Inngest:
+      await step.run("call-api", { timeout: "30s" }, async () => {
+        return fetch(url, { signal: AbortSignal.timeout(25000) });
+      });
+
+      ## AWS Step Functions:
+      {
+        "Type": "Task",
+        "TimeoutSeconds": 30,
+        "HeartbeatSeconds": 10,
+        "Resource": "arn:aws:lambda:..."
+      }
+
+      # Rule: Activity timeout < Workflow timeout
+    detection_pattern:
+      - "proxyActivities"
+      - "step.run"
+      - "Task.*Resource"
+
+  - id: side-effects-in-workflow-code
+    severity: critical
+    title: Side Effects Outside Step/Activity Boundaries
+    situation: Writing code that runs during workflow replay
+    symptom: |
+      Random failures on replay. "Workflow corrupted" errors. Different
+      behavior on replay than initial run. Non-determinism errors.
+    why: |
+      Workflow code runs on EVERY replay. If you generate a random ID in
+      workflow code, you get a different ID each replay. If you read the
+      current time, you get a different time. This breaks determinism.
+    solution: |
+      # WRONG - side effects in workflow code:
+      export async function orderWorkflow(order) {
+        const orderId = uuid();  // Different every replay!
+        const now = new Date();  // Different every replay!
+        await activities.process(orderId, now);
+      }
+
+      # CORRECT - side effects in activities:
+      export async function orderWorkflow(order) {
+        const orderId = await activities.generateOrderId();  # Recorded
+        const now = await activities.getCurrentTime();       # Recorded
+        await activities.process(orderId, now);
+      }
+
+      # Also CORRECT - Temporal workflow.now() and sideEffect:
+      import { sideEffect } from '@temporalio/workflow';
+
+      const orderId = await sideEffect(() => uuid());
+      const now = workflow.now();  # Deterministic replay-safe time
+
+      # Side effects that are safe in workflow code:
+      # - Reading function arguments
+      # - Simple calculations (no randomness)
+      # - Logging (usually)
+    detection_pattern:
+      - "Math.random"
+      - "Date.now"
+      - "uuid()"
+      - "new Date()"
+
+  - id: retry-without-backoff
+    severity: medium
+    title: Retry Configuration Without Exponential Backoff
+    situation: Configuring retry behavior for failing steps
+    symptom: |
+      Overwhelming failing services. Rate limiting. Cascading failures.
+      Retry storms causing outages. Being blocked by external APIs.
+    why: |
+      When a service is struggling, immediate retries make it worse.
+      100 workflows retrying instantly = 100 requests hitting a service
+      that's already failing. Backoff gives the service time to recover.
+    solution: |
+      # ALWAYS use exponential backoff:
+
+      ## Temporal:
+      const activities = proxyActivities({
+        retry: {
+          initialInterval: '1 second',
+          backoffCoefficient: 2,       # 1s, 2s, 4s, 8s, 16s...
+          maximumInterval: '1 minute',  # Cap the backoff
+          maximumAttempts: 5,
+        }
+      });
+
+      ## Inngest (built-in backoff):
+      {
+        id: "my-function",
+        retries: 5,  # Uses exponential backoff by default
+      }
+
+      ## Manual backoff:
+      const backoff = (attempt) => {
+        const base = 1000;
+        const max = 60000;
+        const delay = Math.min(base * Math.pow(2, attempt), max);
+        const jitter = delay * 0.1 * Math.random();
+        return delay + jitter;
+      };
+
+      # Add jitter to prevent thundering herd
+    detection_pattern:
+      - "retry"
+      - "maximumAttempts"
+      - "initialInterval"
+
+  - id: workflow-state-too-large
+    severity: high
+    title: Storing Large Data in Workflow State
+    situation: Passing large payloads between workflow steps
+    symptom: |
+      Slow workflow execution. Memory errors. "Payload too large" errors.
+      Expensive storage costs. Slow replays.
+    why: |
+      Workflow state is persisted and replayed. A 10MB payload is stored,
+      serialized, and deserialized on every step. This adds latency and
+      cost. Some platforms have hard limits (e.g., Step Functions 256KB).
+    solution: |
+      # WRONG - large data in workflow:
+      await step.run("fetch-data", async () => {
+        const largeDataset = await fetchAllRecords();  // 100MB!
+        return largeDataset;  // Stored in workflow state
+      });
+
+      # CORRECT - store reference, not data:
+      await step.run("fetch-data", async () => {
+        const largeDataset = await fetchAllRecords();
+        const s3Key = await uploadToS3(largeDataset);
+        return { s3Key };  // Just the reference
+      });
+
+      const processed = await step.run("process-data", async () => {
+        const data = await downloadFromS3(fetchResult.s3Key);
+        return processData(data);
+      });
+
+      # For Step Functions, use S3 for large payloads:
+      {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::s3:putObject",
+        "Parameters": {
+          "Bucket": "my-bucket",
+          "Key.$": "$.outputKey",
+          "Body.$": "$.largeData"
+        }
+      }
+    detection_pattern:
+      - "return.*data"
+      - "step.run"
+      - "workflow"
+
+  - id: no-dead-letter-handling
+    severity: high
+    title: Missing Dead Letter Queue or Failure Handler
+    situation: Workflows that exhaust all retries
+    symptom: |
+      Failed workflows silently disappear. No alerts when things break.
+      Customer issues discovered days later. Manual recovery impossible.
+    why: |
+      Even with retries, some workflows will fail permanently. Without
+      dead letter handling, you don't know they failed. The customer
+      waits forever, you're unaware, and there's no data to debug.
+    solution: |
+      # Inngest onFailure handler:
+      export const myFunction = inngest.createFunction(
+        {
+          id: "process-order",
+          onFailure: async ({ error, event, step }) => {
+            // Log to error tracking
+            await step.run("log-error", () =>
+              sentry.captureException(error, { extra: { event } })
+            );
+
+            // Alert team
+            await step.run("alert", () =>
+              slack.postMessage({
+                channel: "#alerts",
+                text: `Order ${event.data.orderId} failed: ${error.message}`
+              })
+            );
+
+            // Queue for manual review
+            await step.run("queue-review", () =>
+              db.insert(failedOrders, { orderId, error, event })
+            );
+          }
+        },
+        { event: "order/created" },
+        async ({ event, step }) => { ... }
+      );
+
+      # n8n Error Trigger:
+      [Error Trigger]  →  [Log to DB]  →  [Slack Alert]  →  [Create Ticket]
+
+      # Temporal: Use workflow.failed or workflow signals
+    detection_pattern:
+      - "onFailure"
+      - "Error Trigger"
+      - "dead.?letter"
+
+  - id: n8n-missing-error-workflow
+    severity: medium
+    title: n8n Workflow Without Error Trigger
+    situation: Building production n8n workflows
+    symptom: |
+      Workflow fails silently. Errors only visible in execution logs.
+      No alerts, no recovery, no visibility until someone notices.
+    why: |
+      n8n doesn't notify on failure by default. Without an Error Trigger
+      node connected to alerting, failures are only visible in the UI.
+      Production failures go unnoticed.
+    solution: |
+      # Every production n8n workflow needs:
+
+      1. Error Trigger node
+         - Catches any node failure in the workflow
+         - Provides error details and context
+
+      2. Connected error handling:
+         [Error Trigger]
+             ↓
+         [Set: Extract Error Details]
+             ↓
+         [HTTP: Log to Error Service]
+             ↓
+         [Slack/Email: Alert Team]
+
+      3. Consider dead letter pattern:
+         [Error Trigger]
+             ↓
+         [Redis/Postgres: Store Failed Job]
+             ↓
+         [Separate Recovery Workflow]
+
+      # Also use:
+      - Retry on node failures (built-in)
+      - Node timeout settings
+      - Workflow timeout
+    detection_pattern:
+      - "n8n"
+      - "workflow"
+      - "Error Trigger"
+
+  - id: temporal-missing-heartbeat
+    severity: medium
+    title: Long-Running Temporal Activities Without Heartbeat
+    situation: Activities that run for more than a few seconds
+    symptom: |
+      Activity timeouts even when work is progressing. Lost work when
+      workers restart. Can't cancel long-running activities.
+    why: |
+      Temporal detects stuck activities via heartbeat. Without heartbeat,
+      Temporal can't tell if activity is working or stuck. Long activities
+      appear hung, may timeout, and can't be gracefully cancelled.
+    solution: |
+      # For any activity > 10 seconds, add heartbeat:
+
+      import { heartbeat, activityInfo } from '@temporalio/activity';
+
+      export async function processLargeFile(fileUrl: string): Promise<void> {
+        const chunks = await downloadChunks(fileUrl);
+
+        for (let i = 0; i < chunks.length; i++) {
+          // Check for cancellation
+          const { cancelled } = activityInfo();
+          if (cancelled) {
+            throw new CancelledFailure('Activity cancelled');
+          }
+
+          await processChunk(chunks[i]);
+
+          // Report progress
+          heartbeat({ progress: (i + 1) / chunks.length });
+        }
+      }
+
+      # Configure heartbeat timeout:
+      const activities = proxyActivities({
+        startToCloseTimeout: '10 minutes',
+        heartbeatTimeout: '30 seconds',  # Must heartbeat every 30s
+      });
+
+      # If no heartbeat for 30s, activity is considered stuck
+    detection_pattern:
+      - "startToCloseTimeout"
+      - "proxyActivities"
+      - "for.*await"
+
+common_mistakes:
+  - mistake: "Treating workflow code like normal async code"
+    frequency: very_common
+    impact: "Non-determinism errors, corrupted workflow state"
+    fix: "All side effects must be in activities/steps, not workflow code"
+
+  - mistake: "No idempotency on payment/email steps"
+    frequency: very_common
+    impact: "Duplicate charges, multiple emails, angry customers"
+    fix: "Use idempotency keys derived from stable inputs (orderId, etc.)"
+
+  - mistake: "Storing large data in workflow state"
+    frequency: common
+    impact: "Slow execution, memory errors, high costs"
+    fix: "Store references (S3 keys, DB IDs), not data"
+
+  - mistake: "Ignoring failed workflows"
+    frequency: common
+    impact: "Customer issues discovered days later"
+    fix: "Always implement onFailure/Error Trigger with alerting"
+
+  - mistake: "No timeout on external calls"
+    frequency: common
+    impact: "Workflows hang forever"
+    fix: "Set timeout on every activity/step that calls external services"
+
+platform_gotchas:
+  n8n:
+    - "Credentials stored in database - secure your n8n instance"
+    - "No built-in versioning - use git for workflow JSON"
+    - "Error Trigger catches all errors but needs manual setup"
+    - "Large payloads slow down execution - paginate API calls"
+
+  temporal:
+    - "Workflow code must be deterministic - no randomness or time"
+    - "Activities are separate from workflow - different concepts"
+    - "SDK version mismatches cause replay failures"
+    - "Search attributes require manual setup for filtering"
+
+  inngest:
+    - "Step results are cached - same input = same output on replay"
+    - "Events are not guaranteed ordered across functions"
+    - "step.sleep consumes no resources but has minimum 1s granularity"
+    - "Function concurrency defaults are high - may overwhelm backends"
+
+  step_functions:
+    - "256KB payload limit - use S3 for large data"
+    - "JSON Path expressions are finicky - test thoroughly"
+    - "Standard workflows timeout at 1 year"
+    - "Express workflows for high-volume, short-duration only"
