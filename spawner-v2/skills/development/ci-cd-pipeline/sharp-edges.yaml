@@ -1,0 +1,502 @@
+# CI/CD Pipeline Sharp Edges
+# Real production gotchas that cause security breaches, failed deploys, and late-night incidents
+
+sharp_edges:
+  - id: pwn-request-attack
+    summary: pull_request_target with checkout exposes secrets to malicious PRs
+    severity: critical
+    situation: Using pull_request_target trigger to run workflows on fork PRs
+    why: |
+      pull_request_target runs in context of BASE repo with full secrets access.
+      Developer thinks "I need secrets to run tests on PRs from forks."
+      Adds: on: pull_request_target with actions/checkout@v4 ref: ${{ github.event.pull_request.head.sha }}.
+      Attacker opens PR that modifies workflow to exfiltrate secrets.
+      Workflow runs with target repo's secrets. Secrets stolen.
+      GitHub Security Lab reports this as most exploited Actions vulnerability.
+    solution: |
+      # WRONG: Checkout PR code with target secrets
+      on:
+        pull_request_target:
+      jobs:
+        test:
+          runs-on: ubuntu-latest
+          steps:
+            - uses: actions/checkout@v4
+              with:
+                ref: ${{ github.event.pull_request.head.sha }}  # ATTACKER CODE
+            - run: npm test  # Attacker can modify package.json scripts
+            # Secrets are available here!
+
+      # RIGHT: Split into unprivileged and privileged workflows
+      # Workflow 1: Run on PR (no secrets needed)
+      on: pull_request
+      jobs:
+        test:
+          runs-on: ubuntu-latest
+          steps:
+            - uses: actions/checkout@v4  # Safe - PR context
+            - run: npm test  # No secrets available
+
+      # Workflow 2: Only after approval (has secrets)
+      on:
+        pull_request_target:
+          types: [labeled]
+      jobs:
+        deploy-preview:
+          if: github.event.label.name == 'safe-to-test'  # Manual approval
+          runs-on: ubuntu-latest
+          environment: preview  # Additional protection
+          steps:
+            - uses: actions/checkout@v4
+              with:
+                ref: ${{ github.event.pull_request.head.sha }}
+
+      # RIGHT: Never checkout untrusted code with secrets
+      # Use workflow_run for privileged post-PR actions
+    symptoms:
+      - pull_request_target with actions/checkout
+      - PR from fork runs with secrets
+      - Workflow modifiable by PR authors
+    detection_pattern: 'pull_request_target[\s\S]*checkout[\s\S]*head\.sha'
+
+  - id: secrets-in-logs
+    summary: Secrets accidentally printed to workflow logs - visible to anyone with repo access
+    severity: critical
+    situation: Debug mode enabled, echo statements, or error messages containing secrets
+    why: |
+      Developer debugging, adds: echo "Token: ${{ secrets.API_TOKEN }}"
+      Or library prints config on error, including connection string.
+      GitHub masks known secrets but not derived values.
+      Base64 encoded secret? Not masked. URL with secret? Not masked.
+      Logs retained for 90 days by default. Everyone with repo read access can see.
+    solution: |
+      # WRONG: Echo secrets for debugging
+      - run: |
+          echo "Token is: ${{ secrets.API_TOKEN }}"
+          curl -H "Authorization: $TOKEN" https://api.example.com
+
+      # WRONG: Secret in error message
+      - run: |
+          DB_URL="postgres://user:${{ secrets.DB_PASS }}@host/db"
+          psql $DB_URL  # Error messages may contain password
+
+      # RIGHT: Mask any derived values
+      - run: |
+          ENCODED=$(echo "${{ secrets.API_TOKEN }}" | base64)
+          echo "::add-mask::$ENCODED"
+          # Now $ENCODED is masked in logs
+
+      # RIGHT: Redirect output for sensitive commands
+      - run: |
+          curl -sf -H "Authorization: Bearer ${{ secrets.TOKEN }}" \
+            https://api.example.com > /dev/null
+
+      # RIGHT: Use environment files instead of echo
+      - run: |
+          echo "API_TOKEN=${{ secrets.API_TOKEN }}" >> $GITHUB_ENV
+          # Value is masked when set this way
+
+      # RIGHT: Never enable debug logging in production
+      # ACTIONS_STEP_DEBUG=true exposes more than you expect
+    symptoms:
+      - Secrets visible in workflow logs
+      - echo statements with secrets
+      - Error messages containing credentials
+      - Debug mode enabled
+    detection_pattern: 'echo.*\$\{\{\s*secrets\.|ACTIONS_STEP_DEBUG.*true'
+
+  - id: supply-chain-action-attack
+    summary: Third-party action compromised or malicious - runs with your secrets
+    severity: critical
+    situation: Using popular action that gets compromised (like tj-actions/changed-files attack 2024)
+    why: |
+      Action maintainer account compromised. Or malicious update pushed.
+      You use @main or @v1 (mutable tag). Next run pulls malicious version.
+      Action has access to your GITHUB_TOKEN, secrets, code. Exfiltrates everything.
+      Real attack: tj-actions compromised, affecting Coinbase and thousands of repos.
+      Supply chain attacks targeting CI are increasing.
+    solution: |
+      # WRONG: Mutable references
+      - uses: tj-actions/changed-files@main  # Can change anytime
+      - uses: actions/checkout@v4  # Points to latest v4.x
+
+      # RIGHT: Pin to specific SHA
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      # RIGHT: Use Dependabot for safe updates
+      # .github/dependabot.yml
+      version: 2
+      updates:
+        - package-ecosystem: github-actions
+          directory: /
+          schedule:
+            interval: weekly
+
+      # RIGHT: Fork critical actions into your org
+      - uses: my-org/checkout@v4  # You control updates
+
+      # RIGHT: Audit actions before use
+      # - Check maintainer reputation
+      # - Review source code
+      # - Check for security advisories
+      # - Prefer verified creators
+
+      # RIGHT: Use StepSecurity Harden-Runner
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit  # Monitor network calls
+    symptoms:
+      - Actions using @main or @latest
+      - Unpinned action versions
+      - Third-party actions with write permissions
+    detection_pattern: 'uses:.*@main|uses:.*@master|uses:.*@latest'
+
+  - id: workflow-run-privilege-escalation
+    summary: workflow_run triggers with elevated privileges on attacker-controlled completion
+    severity: high
+    situation: Using workflow_run to trigger privileged workflow after PR workflow completes
+    why: |
+      PR workflow runs in fork context (no secrets). On completion, triggers workflow_run.
+      workflow_run runs in target repo context with secrets. Developer thinks: "PR is safe
+      because it can't access secrets." Attacker modifies PR workflow to produce malicious
+      artifacts. workflow_run consumes artifacts with secrets access. Privilege escalation.
+    solution: |
+      # WRONG: Trust artifacts from PR workflows
+      on:
+        workflow_run:
+          workflows: ["PR Tests"]
+          types: [completed]
+      jobs:
+        deploy:
+          runs-on: ubuntu-latest
+          steps:
+            - uses: actions/download-artifact@v4  # Attacker-controlled artifact!
+            - run: ./deploy.sh  # Executing attacker code with secrets
+
+      # RIGHT: Validate artifact source
+      on:
+        workflow_run:
+          workflows: ["PR Tests"]
+          types: [completed]
+      jobs:
+        deploy:
+          if: github.event.workflow_run.conclusion == 'success' &&
+              github.event.workflow_run.head_repository.full_name == github.repository
+              # Only if from same repo, not fork
+          runs-on: ubuntu-latest
+          steps:
+            # Additional validation...
+
+      # RIGHT: Don't use artifacts for sensitive data
+      # Use GitHub API to read PR status instead of trusting artifacts
+
+      # RIGHT: Require environment approval even for automated triggers
+      jobs:
+        deploy:
+          environment: production  # Manual approval gate
+    symptoms:
+      - workflow_run consuming artifacts
+      - Privileged actions after PR completion
+      - No validation of artifact source
+    detection_pattern: 'workflow_run[\s\S]*download-artifact'
+
+  - id: github-token-overreach
+    summary: GITHUB_TOKEN with write-all permissions enables repo takeover
+    severity: high
+    situation: Default permissions not restricted, workflow can modify repo
+    why: |
+      Default GITHUB_TOKEN has write access to contents, packages, issues, PRs.
+      Compromised step (dependency, action, script) can push malicious code.
+      Can modify workflows to persist access. Can create releases with malware.
+      "It's just a CI token" - no, it's the keys to the kingdom.
+    solution: |
+      # WRONG: Default permissions (usually too broad)
+      jobs:
+        build:
+          runs-on: ubuntu-latest
+          steps:
+            - run: npm install  # Dependencies can access GITHUB_TOKEN
+
+      # RIGHT: Explicit minimal permissions at workflow level
+      permissions:
+        contents: read  # Only what's needed
+
+      jobs:
+        build:
+          runs-on: ubuntu-latest
+
+      # RIGHT: Job-level permissions for specific needs
+      jobs:
+        test:
+          permissions:
+            contents: read
+          runs-on: ubuntu-latest
+
+        release:
+          permissions:
+            contents: write  # Only release job can write
+          runs-on: ubuntu-latest
+
+      # RIGHT: Set org-level default to read
+      # Settings -> Actions -> Workflow permissions -> Read repository contents
+
+      # Check what permissions you're granting:
+      # contents: write - can push code, create branches
+      # packages: write - can publish packages
+      # issues: write - can create/modify issues
+      # pull-requests: write - can merge PRs
+    symptoms:
+      - No permissions block in workflow
+      - contents: write when read is enough
+      - Token used by untrusted code
+    detection_pattern: 'permissions:\s*write-all|(?<!permissions:[\s\S]{0,100})GITHUB_TOKEN'
+
+  - id: environment-config-drift
+    summary: Staging and production have different configs - works in staging, fails in prod
+    severity: high
+    situation: Deployment succeeds in staging but fails or behaves differently in production
+    why: |
+      Staging has 2GB RAM, prod has 512MB. Staging connects to test DB, prod to real.
+      Environment variables different. Secrets have different values but same names.
+      "We tested it in staging!" - but staging isn't production. Config drift accumulates.
+      Deploy to prod, instant failure or subtle bugs.
+    solution: |
+      # WRONG: Different configs managed manually
+      # staging.env has DEBUG=true
+      # production.env has DEBUG=false
+      # Someone updates staging, forgets production
+
+      # RIGHT: Environment parity through IaC
+      # Use same Terraform module with different variables
+      module "api" {
+        source = "./modules/api"
+        env    = "production"
+        # All other config derived from environment
+      }
+
+      # RIGHT: Environment-specific secrets in GitHub
+      # Settings -> Environments -> production -> Secrets
+      # CI uses environment: production to get right secrets
+
+      # RIGHT: Validate environment before deploy
+      - name: Validate environment config
+        run: |
+          diff <(terraform output -json staging) <(terraform output -json production) \
+            --ignore-matching-lines='"environment"' || true
+          # Review differences before deploy
+
+      # RIGHT: Same container image across environments
+      # Build once, promote through environments
+      deploy-staging:
+        outputs:
+          image-tag: ${{ steps.build.outputs.tag }}
+      deploy-production:
+        needs: deploy-staging
+        # Uses same image-tag, different env config
+    symptoms:
+      - Works in staging, fails in prod
+      - Different behavior between environments
+      - Manual config updates
+      - "We didn't change anything"
+    detection_pattern: 'staging|production|environment.*different'
+
+  - id: no-rollback-plan
+    summary: Deployment fails and there's no way to quickly revert
+    severity: high
+    situation: Bad deploy goes live, only option is to fix forward
+    why: |
+      Deploy new version. Bug in production. No previous version to revert to.
+      "Let me fix it and redeploy" takes 30 minutes minimum. Users impacted.
+      Database migration can't be rolled back. Previous container image deleted.
+      Fix-forward culture means every deploy is one-way.
+    solution: |
+      # WRONG: No rollback capability
+      - name: Deploy
+        run: |
+          kubectl set image deployment/api api=myapp:latest
+          # Previous image is... gone?
+
+      # RIGHT: Keep previous version ready
+      - name: Deploy with rollback capability
+        run: |
+          # Tag current as rollback target
+          CURRENT=$(kubectl get deployment api -o jsonpath='{.spec.template.spec.containers[0].image}')
+          echo "ROLLBACK_IMAGE=$CURRENT" >> $GITHUB_ENV
+
+          # Deploy new version
+          kubectl set image deployment/api api=myapp:${{ github.sha }}
+
+          # Wait and verify
+          kubectl rollout status deployment/api --timeout=300s || {
+            echo "Deploy failed, rolling back"
+            kubectl set image deployment/api api=$CURRENT
+            exit 1
+          }
+
+      # RIGHT: Blue-green deployment
+      # Keep blue environment running after switching to green
+      # Rollback = switch traffic back to blue
+
+      # RIGHT: Database migrations support rollback
+      # Every migration has corresponding down migration
+      # Test rollback in staging before production
+
+      # RIGHT: Container image retention policy
+      # Keep last N production images for rollback
+      # Don't clean up immediately after deploy
+    symptoms:
+      - No rollback procedure documented
+      - Previous images deleted
+      - Migrations without down scripts
+      - Fix-forward as only option
+    detection_pattern: 'deploy.*latest|rollback|revert'
+
+  - id: flaky-tests-in-ci
+    summary: Tests pass sometimes, fail sometimes - team starts ignoring failures
+    severity: medium
+    situation: CI shows red, team says "just re-run it" or merges anyway
+    why: |
+      Test depends on timing, network, external service, order of execution.
+      Passes 90% of the time. Team re-runs until green. CI becomes meaningless.
+      Real failures get ignored. "The tests are flaky" becomes excuse for everything.
+      Eventually ship real bugs because nobody trusts CI anymore.
+    solution: |
+      # Detect flaky tests
+      - name: Run tests with flaky detection
+        run: |
+          npm test --detectOpenHandles --forceExit
+          # Run 3 times, flag if inconsistent
+
+      # RIGHT: Quarantine flaky tests
+      - name: Run stable tests
+        run: npm test --testPathIgnorePatterns="flaky/"
+
+      - name: Run flaky tests (non-blocking)
+        continue-on-error: true
+        run: npm test --testPathPattern="flaky/"
+
+      # RIGHT: Fix root causes
+      # - Mock external services
+      # - Use test containers for databases
+      # - Avoid timing dependencies
+      # - Ensure test isolation
+
+      # RIGHT: Track flaky test metrics
+      # - Flag tests that fail > 5% of runs
+      # - Auto-create issues for flaky tests
+      # - Set SLO: <1% flaky test rate
+
+      # RIGHT: Don't allow re-runs to hide problems
+      # If re-run is needed, investigate why
+      # Required status checks should be stable
+    symptoms:
+      - "Just re-run CI" as common phrase
+      - Tests pass on retry
+      - Team ignores CI failures
+      - Merges with failing CI
+    detection_pattern: 're-run|flaky|retry.*test'
+
+  - id: slow-pipeline-developer-friction
+    summary: Pipeline takes 30+ minutes - developers stop running it locally
+    severity: medium
+    situation: CI so slow that developers push and pray, get feedback too late
+    why: |
+      All tests run sequentially. No caching. Rebuilds everything every time.
+      Developer pushes, goes to lunch, comes back to failed build.
+      Fixes, pushes again, another 30 minute wait. Productivity destroyed.
+      Team starts skipping tests, merging without CI. Quality degrades.
+    solution: |
+      # WRONG: Sequential, uncached pipeline
+      jobs:
+        build:
+          steps:
+            - run: npm install  # Every time
+            - run: npm run build  # Every time
+            - run: npm test  # All tests, sequential
+
+      # RIGHT: Parallel jobs
+      jobs:
+        lint:
+          runs-on: ubuntu-latest
+          steps: [lint steps]
+        test-unit:
+          runs-on: ubuntu-latest
+          steps: [unit test steps]
+        test-integration:
+          runs-on: ubuntu-latest
+          steps: [integration steps]
+        build:
+          needs: [lint, test-unit]
+          steps: [build steps]
+
+      # RIGHT: Aggressive caching
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+
+      # RIGHT: Only test what changed (monorepo)
+      - run: npx nx affected --target=test
+
+      # RIGHT: Matrix for parallel test shards
+      jobs:
+        test:
+          strategy:
+            matrix:
+              shard: [1, 2, 3, 4]
+          steps:
+            - run: npm test -- --shard=${{ matrix.shard }}/4
+
+      # RIGHT: Faster runners
+      runs-on: ubuntu-latest-16-cores  # Larger runner
+
+      # Target: < 10 min for most pipelines
+    symptoms:
+      - Pipeline takes > 20 minutes
+      - Developers skip local testing
+      - Long queue for CI
+      - Complaints about CI speed
+    detection_pattern: 'timeout.*minutes|slow.*build|cache'
+
+  - id: self-hosted-runner-exposure
+    summary: Self-hosted runner on public repo allows arbitrary code execution
+    severity: critical
+    situation: Public repo configured with self-hosted runners
+    why: |
+      Self-hosted runner is YOUR machine. Public repo accepts PRs from anyone.
+      Attacker opens PR that runs on self-hosted runner. Code executes on your
+      infrastructure. Can access internal network, steal credentials, install
+      backdoors. Runner persists between jobs - previous job's secrets accessible.
+    solution: |
+      # WRONG: Self-hosted runner on public repo
+      runs-on: self-hosted  # In a public repository!
+
+      # RIGHT: Only use self-hosted runners on private repos
+      # Or use organization-level runner groups with restrictions
+
+      # RIGHT: Use ephemeral runners
+      # Runner destroyed after each job
+      # No persistence between runs
+
+      # RIGHT: If you must use self-hosted on public:
+      # 1. Require approval for first-time contributors
+      # 2. Use workflow approval for all fork PRs
+      # 3. Run in isolated environment (container, VM)
+      # 4. Never store secrets on runner
+
+      # RIGHT: Use GitHub-hosted runners for public repos
+      runs-on: ubuntu-latest  # Ephemeral, isolated
+
+      # RIGHT: For private repos, still secure runners
+      # - Don't store secrets on disk
+      # - Use runner groups with repo restrictions
+      # - Enable automatic updates
+      # - Monitor runner activity
+    symptoms:
+      - self-hosted in public repo workflow
+      - Runners accepting fork PRs
+      - Persistent runners (not ephemeral)
+    detection_pattern: 'runs-on:\s*self-hosted'
+

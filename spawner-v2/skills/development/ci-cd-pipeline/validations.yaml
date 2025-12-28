@@ -1,0 +1,233 @@
+# CI/CD Pipeline Validations
+# Automated checks to catch workflow security and configuration issues
+
+validations:
+  - id: cicd-unpinned-actions
+    name: Unpinned GitHub Actions
+    severity: error
+    type: regex
+    pattern:
+      - 'uses:\s*[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+@main'
+      - 'uses:\s*[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+@master'
+      - 'uses:\s*[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+@latest'
+    message: "Action using mutable reference (@main/@master/@latest). Supply chain attack vector."
+    fix_action: "Pin to specific version (@v4) or SHA digest"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+
+  - id: cicd-secrets-in-logs
+    name: Secrets Potentially Logged
+    severity: error
+    type: regex
+    pattern:
+      - 'echo.*\$\{\{\s*secrets\.'
+      - 'echo.*\$SECRET'
+      - 'echo.*\$TOKEN'
+      - 'echo.*\$PASSWORD'
+      - 'echo.*\$API_KEY'
+    message: "Secrets may be logged. GitHub Actions logs are visible to repo collaborators."
+    fix_action: "Remove echo statements with secrets or use ::add-mask:: for derived values"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+      - ".gitlab-ci.yml"
+
+  - id: cicd-pull-request-target-checkout
+    name: Dangerous pull_request_target Usage
+    severity: error
+    type: regex
+    pattern:
+      - 'pull_request_target[\s\S]*?checkout[\s\S]*?head\.sha'
+      - 'pull_request_target[\s\S]*?checkout[\s\S]*?head\.ref'
+    message: "pull_request_target with checkout of PR head. Enables pwn request attacks."
+    fix_action: "Use pull_request trigger or require manual approval label before checkout"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+
+  - id: cicd-no-permissions-block
+    name: Missing Permissions Block
+    severity: warning
+    type: regex
+    pattern:
+      - '^(?!.*permissions:).*on:\s*\n\s*push:'
+    message: "No explicit permissions block. Workflow may have broader access than needed."
+    fix_action: "Add permissions block with minimal required permissions"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+
+  - id: cicd-write-all-permissions
+    name: Overly Broad Permissions
+    severity: error
+    type: regex
+    pattern:
+      - 'permissions:\s*write-all'
+      - 'permissions:\s*\n\s*contents:\s*write\s*\n\s*packages:\s*write\s*\n\s*issues:\s*write'
+    message: "Workflow has overly broad permissions. Compromised workflow can modify repo."
+    fix_action: "Use minimal permissions. contents: read for most jobs, write only when needed."
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+
+  - id: cicd-self-hosted-public
+    name: Self-Hosted Runner Potential Risk
+    severity: warning
+    type: regex
+    pattern:
+      - 'runs-on:\s*self-hosted'
+      - 'runs-on:\s*\[self-hosted'
+    message: "Self-hosted runner detected. Dangerous if used in public repositories."
+    fix_action: "Use GitHub-hosted runners for public repos or implement strict runner groups"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+
+  - id: cicd-hardcoded-secrets
+    name: Hardcoded Secrets in Workflow
+    severity: error
+    type: regex
+    pattern:
+      - 'password:\s*["\'][^$\{]+'
+      - 'api_key:\s*["\'][^$\{]+'
+      - 'token:\s*["\'][^$\{]+'
+      - 'secret:\s*["\'][^$\{]+'
+      - 'AWS_SECRET_ACCESS_KEY:\s*["\'][^$\{]+'
+    message: "Hardcoded secret value in workflow file. Will be visible in version control."
+    fix_action: "Use GitHub Secrets and reference with ${{ secrets.SECRET_NAME }}"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+      - ".gitlab-ci.yml"
+
+  - id: cicd-no-environment-protection
+    name: Production Deploy Without Environment
+    severity: warning
+    type: regex
+    pattern:
+      - '(?i)deploy.*prod(?!.*environment:)'
+      - '(?i)release.*production(?!.*environment:)'
+    message: "Production deployment without environment protection. No approval required."
+    fix_action: "Add environment: production to job and configure required reviewers"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+
+  - id: cicd-workflow-run-artifacts
+    name: Workflow Run Artifact Consumption
+    severity: warning
+    type: regex
+    pattern:
+      - 'workflow_run[\s\S]*?download-artifact'
+    message: "workflow_run consuming artifacts. Validate artifact source to prevent privilege escalation."
+    fix_action: "Check github.event.workflow_run.head_repository.full_name matches base repo"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+
+  - id: cicd-debug-enabled
+    name: Debug Mode Enabled
+    severity: warning
+    type: regex
+    pattern:
+      - 'ACTIONS_STEP_DEBUG:\s*true'
+      - 'ACTIONS_RUNNER_DEBUG:\s*true'
+    message: "Debug mode enabled. May expose sensitive information in logs."
+    fix_action: "Remove debug flags for production workflows"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+
+  - id: cicd-no-timeout
+    name: Job Without Timeout
+    severity: info
+    type: regex
+    pattern:
+      - 'runs-on:(?![\s\S]*?timeout-minutes)'
+    message: "Job without timeout-minutes. Hung jobs will consume runner minutes."
+    fix_action: "Add timeout-minutes appropriate for job (e.g., 30 for most jobs)"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+
+  - id: cicd-no-concurrency-control
+    name: No Concurrency Control
+    severity: info
+    type: regex
+    pattern:
+      - 'on:\s*\n\s*push:(?![\s\S]*?concurrency:)'
+    message: "No concurrency control. Multiple runs may conflict or waste resources."
+    fix_action: "Add concurrency group to cancel in-progress runs on new push"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+
+  - id: cicd-latest-image-tag
+    name: Using Latest Docker Image Tag
+    severity: warning
+    type: regex
+    pattern:
+      - 'image:\s*[a-zA-Z0-9_/-]+:latest'
+      - 'container:\s*[a-zA-Z0-9_/-]+:latest'
+    message: "Using :latest tag for container. Build not reproducible."
+    fix_action: "Pin to specific image version or SHA digest"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+      - ".gitlab-ci.yml"
+
+  - id: cicd-artifact-no-retention
+    name: Artifacts Without Retention Policy
+    severity: info
+    type: regex
+    pattern:
+      - 'upload-artifact(?![\s\S]*?retention-days)'
+    message: "Artifact upload without retention-days. Default is 90 days."
+    fix_action: "Add retention-days to limit storage costs"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+
+  - id: cicd-no-cache
+    name: Dependency Install Without Cache
+    severity: info
+    type: regex
+    pattern:
+      - 'npm install(?![\s\S]{0,200}cache)'
+      - 'npm ci(?![\s\S]{0,200}cache)'
+      - 'pip install(?![\s\S]{0,200}cache)'
+    message: "Package install without caching. Slower builds and higher costs."
+    fix_action: "Add actions/cache or setup-node with cache option"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+
+  - id: cicd-shell-injection
+    name: Potential Shell Injection
+    severity: error
+    type: regex
+    pattern:
+      - 'run:.*\$\{\{\s*github\.event\.issue\.title'
+      - 'run:.*\$\{\{\s*github\.event\.issue\.body'
+      - 'run:.*\$\{\{\s*github\.event\.pull_request\.title'
+      - 'run:.*\$\{\{\s*github\.event\.pull_request\.body'
+      - 'run:.*\$\{\{\s*github\.event\.comment\.body'
+    message: "User-controlled input in run command. Shell injection vulnerability."
+    fix_action: "Use environment variable or escape input: env: TITLE: ${{ github.event.issue.title }}"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+
+  - id: cicd-continue-on-error
+    name: Continue on Error Without Handling
+    severity: warning
+    type: regex
+    pattern:
+      - 'continue-on-error:\s*true(?![\s\S]*?if:.*failure)'
+    message: "continue-on-error without failure handling. Errors may be silently ignored."
+    fix_action: "Add conditional step to handle failures or remove continue-on-error"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+
