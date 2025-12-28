@@ -1,0 +1,292 @@
+# Code Architecture Review Validations
+# Automated checks to catch structural and architectural anti-patterns
+
+validations:
+  # --- CRITICAL: Architectural violations ---
+
+  - id: arch-circular-import
+    name: Potential Circular Import
+    severity: error
+    type: regex
+    pattern:
+      - "import.*from\\s+['\"]\\.\\..*['\"].*\\n[\\s\\S]{0,2000}import.*from\\s+['\"]\\.\\..*['\"]"
+    message: "Complex relative imports may indicate circular dependencies. Check module graph."
+    fix_action: "Use dependency injection or extract shared logic to break cycles"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: arch-god-file-size
+    name: God Module Detection (File Size)
+    severity: warning
+    type: file_size
+    max_lines: 500
+    message: "File exceeds 500 lines. Consider splitting by responsibility."
+    fix_action: "Split into focused modules: auth.ts, profile.ts, billing.ts, etc."
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: arch-god-file-exports
+    name: God Module Detection (Export Count)
+    severity: warning
+    type: regex
+    pattern:
+      - "(export\\s+(const|function|class|type|interface)\\s+\\w+.*\\n){10,}"
+    message: "File has many exports. May be accumulating too many responsibilities."
+    fix_action: "Group related exports into separate modules"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+
+  - id: arch-global-state-mutation
+    name: Global State Mutation
+    severity: error
+    type: regex
+    pattern:
+      - "^let\\s+\\w+\\s*[:=]"
+      - "^var\\s+\\w+\\s*[:=]"
+      - "globalThis\\.\\w+\\s*="
+      - "window\\.\\w+\\s*="
+    message: "Global mutable state creates hidden dependencies. Use dependency injection."
+    fix_action: "Pass state as function parameters or use context/store pattern"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  # --- HIGH: Layer violations ---
+
+  - id: arch-db-in-component
+    name: Database Access in Component
+    severity: error
+    type: regex
+    pattern:
+      - "prisma\\."
+      - "drizzle\\."
+      - "\\$queryRaw"
+      - "\\bSELECT\\s+.+\\s+FROM\\b"
+      - "\\bINSERT\\s+INTO\\b"
+    message: "Database access in component file. Move to data layer/repository."
+    fix_action: "Create repository or data access layer for database operations"
+    applies_to:
+      - "**/*.tsx"
+      - "**/*.jsx"
+      - "**/components/**/*.ts"
+      - "**/components/**/*.js"
+
+  - id: arch-fetch-in-component
+    name: Direct Fetch in Component
+    severity: warning
+    type: regex
+    pattern:
+      - "\\bfetch\\s*\\(['\"]https?://"
+      - "axios\\.(get|post|put|delete)\\s*\\("
+    message: "Direct API calls in component. Use API layer or hooks."
+    fix_action: "Create api/ layer or use data fetching hooks (useSWR, useQuery)"
+    applies_to:
+      - "**/components/**/*.tsx"
+      - "**/components/**/*.jsx"
+
+  - id: arch-business-logic-in-useeffect
+    name: Business Logic in useEffect
+    severity: warning
+    type: regex
+    pattern:
+      - "useEffect\\s*\\([^)]*=>\\s*\\{[^}]{200,}"
+    message: "Complex logic in useEffect. Extract to custom hook or service."
+    fix_action: "Move business logic to dedicated hook or service module"
+    applies_to:
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  # --- MEDIUM: Coupling and cohesion ---
+
+  - id: arch-deep-import-path
+    name: Deep Relative Import Path
+    severity: warning
+    type: regex
+    pattern:
+      - "from\\s+['\"]\\.\\.[\\\\/]\\.\\.[\\\\/]\\.\\.[\\\\/]"
+      - "from\\s+['\"]\\.\\.[\\\\/]\\.\\.[\\\\/]\\.\\.[\\\\/]\\.\\.[\\\\/]"
+    message: "Deep relative imports (../../../). Consider path aliases or restructure."
+    fix_action: "Use path aliases (@/lib, @/components) or move file closer to dependencies"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: arch-utils-dumping-ground
+    name: Utils/Helpers Dumping Ground
+    severity: info
+    type: regex
+    pattern:
+      - "utils\\.(ts|js)$"
+      - "helpers\\.(ts|js)$"
+      - "misc\\.(ts|js)$"
+      - "common\\.(ts|js)$"
+    message: "Generic utils/helpers file. Name files by what they do."
+    fix_action: "Rename to specific purpose: formatDate.ts, validateEmail.ts, parseConfig.ts"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: arch-string-type-discriminator
+    name: String Type Discriminator
+    severity: info
+    type: regex
+    pattern:
+      - "status\\s*===?\\s*['\"][a-z]+"
+      - "type\\s*===?\\s*['\"][a-z]+"
+      - "state\\s*===?\\s*['\"][a-z]+"
+      - "kind\\s*===?\\s*['\"][a-z]+"
+    message: "String comparison for type discrimination. Use union types or enums."
+    fix_action: "Define type Status = 'active' | 'inactive' | 'pending'"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+
+  - id: arch-any-type-usage
+    name: Any Type Usage
+    severity: warning
+    type: regex
+    pattern:
+      - ":\\s*any\\b"
+      - "as\\s+any\\b"
+      - "<any>"
+    message: "Using 'any' type bypasses TypeScript safety. Use specific types."
+    fix_action: "Replace with specific type or use 'unknown' with type guards"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+
+  # --- Abstraction issues ---
+
+  - id: arch-single-implementation-interface
+    name: Interface with Single Implementation
+    severity: info
+    type: regex
+    pattern:
+      - "interface\\s+I[A-Z]\\w+\\s*\\{[^}]+\\}\\s*\\n\\s*class\\s+\\w+\\s+implements\\s+I[A-Z]"
+    message: "Interface with only one implementation. May be premature abstraction."
+    fix_action: "Wait for second implementation before abstracting. Delete interface if not needed."
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+
+  - id: arch-abstract-class-single-child
+    name: Abstract Class with Single Child
+    severity: info
+    type: regex
+    pattern:
+      - "abstract\\s+class\\s+\\w+[^}]+\\}\\s*\\n\\s*class\\s+\\w+\\s+extends"
+    message: "Abstract class with only one implementation. Consider simplifying."
+    fix_action: "Merge into concrete class unless abstraction is planned for soon"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+
+  - id: arch-generic-single-type
+    name: Generic Used with Single Type
+    severity: info
+    type: regex
+    pattern:
+      - "<T>.*<T>(?!.*<(?!T)\\w+>)"
+    message: "Generic used with only one type. May be over-engineering."
+    fix_action: "Use concrete type until you need the generic"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+
+  # --- Dependency direction ---
+
+  - id: arch-domain-imports-infrastructure
+    name: Domain Importing Infrastructure
+    severity: error
+    type: regex
+    pattern:
+      - "domain/.*import.*from.*infrastructure/"
+      - "domain/.*import.*from.*api/"
+      - "domain/.*import.*from.*database/"
+    message: "Domain layer should not import from infrastructure. Dependencies flow inward."
+    fix_action: "Use interfaces in domain, implement in infrastructure"
+    applies_to:
+      - "**/domain/**/*.ts"
+
+  - id: arch-cross-feature-import
+    name: Cross-Feature Direct Import
+    severity: warning
+    type: regex
+    pattern:
+      - "features/\\w+/.*import.*from.*features/(?!\\w+/shared)"
+    message: "Direct import across features. Use shared module or events."
+    fix_action: "Extract shared code to features/shared/ or use event-based communication"
+    applies_to:
+      - "**/features/**/*.ts"
+      - "**/features/**/*.tsx"
+
+  # --- Test architecture ---
+
+  - id: arch-test-implementation-coupling
+    name: Test Coupled to Implementation
+    severity: warning
+    type: regex
+    pattern:
+      - "toHaveBeenCalledWith\\([^)]{100,}"
+      - "mock\\(['\"][\\w./]+['\"]\\)"
+      - "jest\\.mock\\(['\"][\\w./]+['\"]\\)"
+    message: "Tests may be coupled to implementation details. Test behavior instead."
+    fix_action: "Test observable behavior and outputs, not internal method calls"
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.tsx"
+      - "**/*.spec.ts"
+      - "**/*.spec.tsx"
+
+  - id: arch-private-method-test
+    name: Testing Private Methods
+    severity: warning
+    type: regex
+    pattern:
+      - "\\['\\w+'\\]\\s*\\("
+      - "\\(\\w+\\s+as\\s+any\\)\\.\\w+"
+    message: "Testing private methods. Test through public API instead."
+    fix_action: "Test behavior through public methods. If private method needs testing, extract to separate module."
+    applies_to:
+      - "**/*.test.ts"
+      - "**/*.test.tsx"
+      - "**/*.spec.ts"
+      - "**/*.spec.tsx"
+
+  # --- File organization ---
+
+  - id: arch-mixed-concerns-file
+    name: Mixed Concerns in Single File
+    severity: info
+    type: regex
+    pattern:
+      - "(export\\s+function|export\\s+const).*\\n[\\s\\S]{0,500}(export\\s+type|export\\s+interface).*\\n[\\s\\S]{0,500}(export\\s+class)"
+    message: "File mixes functions, types, and classes. Consider separating concerns."
+    fix_action: "Separate into types.ts, utils.ts, and service classes"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+
+  - id: arch-barrel-file-large
+    name: Large Barrel File
+    severity: info
+    type: regex
+    pattern:
+      - "(export\\s+\\*\\s+from\\s+['\"][^'\"]+['\"];?\\s*\\n){10,}"
+    message: "Large barrel file (10+ re-exports). May cause bundle size issues."
+    fix_action: "Use direct imports or tree-shakeable exports"
+    applies_to:
+      - "**/index.ts"
+      - "**/index.js"
+
