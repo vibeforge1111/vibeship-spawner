@@ -1,0 +1,590 @@
+# Collaboration - Clerk Authentication
+# How this skill works with other skills
+
+version: 1.0.0
+skill_id: clerk-auth
+
+prerequisites:
+  required: []
+
+  recommended:
+    - skill: frontend
+      reason: "React component patterns"
+      what_to_know:
+        - "Client/Server Components"
+        - "React hooks"
+        - "Form handling"
+
+    - skill: backend
+      reason: "API route protection"
+      what_to_know:
+        - "Route handlers"
+        - "Middleware patterns"
+        - "Error handling"
+
+    - skill: postgres-wizard
+      reason: "User data storage"
+      what_to_know:
+        - "Prisma ORM"
+        - "User modeling"
+        - "Upsert patterns"
+
+delegation_triggers:
+  - trigger: "user needs database"
+    delegate_to: postgres-wizard
+    context: "User table with clerkId"
+
+  - trigger: "user needs payments"
+    delegate_to: stripe-integration
+    context: "Customer linked to Clerk user"
+
+  - trigger: "user needs search"
+    delegate_to: algolia-search
+    context: "Secured API keys per user"
+
+  - trigger: "user needs analytics"
+    delegate_to: segment-cdp
+    context: "User identification"
+
+  - trigger: "user needs email"
+    delegate_to: resend-email
+    context: "Transactional emails"
+
+receives_context_from:
+  - skill: frontend
+    receives:
+      - "React patterns"
+      - "Component architecture"
+      - "State management"
+
+  - skill: backend
+    receives:
+      - "API patterns"
+      - "Error handling"
+      - "Middleware patterns"
+
+  - skill: postgres-wizard
+    receives:
+      - "Database schema"
+      - "Query patterns"
+      - "Data modeling"
+
+provides_context_to:
+  - skill: stripe-integration
+    provides:
+      - "User ID for customer linking"
+      - "Organization ID for team billing"
+      - "Webhook sync patterns"
+
+  - skill: segment-cdp
+    provides:
+      - "User identity for tracking"
+      - "Organization context"
+      - "Session data"
+
+  - skill: algolia-search
+    provides:
+      - "User ID for secured keys"
+      - "Organization ID for filtering"
+      - "Permission context"
+
+escalation_paths:
+  - situation: "Enterprise SSO setup"
+    escalate_to: security-specialist
+    context: "SAML/OIDC configuration"
+
+  - situation: "Complex RBAC"
+    escalate_to: architecture-specialist
+    context: "Permission system design"
+
+  - situation: "Custom auth flows"
+    escalate_to: auth-specialist
+    context: "MFA, passwordless, magic links"
+
+  - situation: "Compliance requirements"
+    escalate_to: security-specialist
+    context: "SOC 2, GDPR, HIPAA"
+
+workflow_integration:
+  typical_sequence:
+    1:
+      step: "Set up Clerk account and project"
+      skills: [clerk-auth]
+      output: "API keys, project configuration"
+
+    2:
+      step: "Install and configure ClerkProvider"
+      skills: [clerk-auth, frontend]
+      output: "Basic auth UI working"
+
+    3:
+      step: "Set up middleware protection"
+      skills: [clerk-auth]
+      output: "Routes protected"
+
+    4:
+      step: "Create user database sync"
+      skills: [clerk-auth, postgres-wizard]
+      output: "Webhook syncing users"
+
+    5:
+      step: "Add organizations (if B2B)"
+      skills: [clerk-auth]
+      output: "Multi-tenancy working"
+
+    6:
+      step: "Implement RBAC"
+      skills: [clerk-auth]
+      output: "Roles and permissions"
+
+    7:
+      step: "Connect to other services"
+      skills: [clerk-auth, stripe-integration]
+      output: "Integrated user identity"
+
+  decision_points:
+    - question: "Sync users to database?"
+      guidance: |
+        Yes, sync users if:
+        - You need social features (see other users)
+        - You have user-owned data (posts, projects)
+        - You need complex queries on user data
+        - You want offline user lookup
+
+        No database sync if:
+        - Simple auth only (no user data)
+        - All data fetched from Clerk API
+        - Very low user count
+
+        Recommended: Sync with webhooks for most apps.
+
+    - question: "Use organizations?"
+      guidance: |
+        Use organizations for:
+        - B2B SaaS with team features
+        - Multi-tenant applications
+        - Shared resources between users
+        - Team billing with Stripe
+
+        Skip organizations for:
+        - B2C consumer apps
+        - Personal productivity tools
+        - Simple user accounts
+
+    - question: "Middleware vs component protection?"
+      guidance: |
+        Use middleware:
+        - Centralized auth logic
+        - Group routes with matchers
+        - Redirect before page renders
+
+        Add component checks too:
+        - Defense in depth (CVE mitigation)
+        - Role-based UI rendering
+        - Loading states
+
+        Best practice: Use both middleware AND
+        component/route handler checks.
+
+collaboration_patterns:
+  with_prisma:
+    when: "Storing user data with Prisma"
+    approach: |
+      User model with Clerk sync:
+
+      ```prisma
+      // prisma/schema.prisma
+      model User {
+        id          String   @id @default(cuid())
+        clerkId     String   @unique
+        email       String   @unique
+        firstName   String?
+        lastName    String?
+        imageUrl    String?
+        createdAt   DateTime @default(now())
+        updatedAt   DateTime @updatedAt
+
+        // User's data
+        posts       Post[]
+        projects    Project[]
+
+        @@index([clerkId])
+        @@index([email])
+      }
+
+      model Organization {
+        id          String   @id @default(cuid())
+        clerkOrgId  String   @unique
+        name        String
+        slug        String   @unique
+        createdAt   DateTime @default(now())
+        updatedAt   DateTime @updatedAt
+
+        projects    Project[]
+
+        @@index([clerkOrgId])
+      }
+
+      model Project {
+        id              String        @id @default(cuid())
+        name            String
+        userId          String
+        organizationId  String?
+
+        user            User          @relation(fields: [userId], references: [id])
+        organization    Organization? @relation(fields: [organizationId], references: [clerkOrgId])
+
+        @@index([userId])
+        @@index([organizationId])
+      }
+      ```
+
+      ```typescript
+      // lib/db/users.ts
+      import { auth } from '@clerk/nextjs/server';
+      import { prisma } from '@/lib/prisma';
+
+      export async function getCurrentUser() {
+        const { userId } = await auth();
+        if (!userId) return null;
+
+        return prisma.user.findUnique({
+          where: { clerkId: userId },
+        });
+      }
+
+      export async function getOrCreateUser(clerkId: string) {
+        const clerkUser = await clerkClient.users.getUser(clerkId);
+
+        return prisma.user.upsert({
+          where: { clerkId },
+          create: {
+            clerkId,
+            email: clerkUser.emailAddresses[0]?.emailAddress!,
+            firstName: clerkUser.firstName,
+            lastName: clerkUser.lastName,
+            imageUrl: clerkUser.imageUrl,
+          },
+          update: {
+            email: clerkUser.emailAddresses[0]?.emailAddress,
+            firstName: clerkUser.firstName,
+            lastName: clerkUser.lastName,
+            imageUrl: clerkUser.imageUrl,
+          },
+        });
+      }
+      ```
+
+  with_stripe:
+    when: "Connecting payments to users"
+    approach: |
+      Link Stripe customer to Clerk user:
+
+      ```typescript
+      // lib/stripe.ts
+      import Stripe from 'stripe';
+      import { auth, currentUser } from '@clerk/nextjs/server';
+      import { prisma } from '@/lib/prisma';
+
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+
+      export async function getOrCreateCustomer() {
+        const { userId, orgId } = await auth();
+        if (!userId) throw new Error('Unauthorized');
+
+        const user = await currentUser();
+        if (!user) throw new Error('User not found');
+
+        // Check for existing customer
+        const dbUser = await prisma.user.findUnique({
+          where: { clerkId: userId },
+          select: { stripeCustomerId: true },
+        });
+
+        if (dbUser?.stripeCustomerId) {
+          return stripe.customers.retrieve(dbUser.stripeCustomerId);
+        }
+
+        // Create new customer
+        const customer = await stripe.customers.create({
+          email: user.emailAddresses[0]?.emailAddress,
+          name: user.fullName ?? undefined,
+          metadata: {
+            clerkUserId: userId,
+            clerkOrgId: orgId ?? '',
+          },
+        });
+
+        // Save customer ID
+        await prisma.user.update({
+          where: { clerkId: userId },
+          data: { stripeCustomerId: customer.id },
+        });
+
+        return customer;
+      }
+
+      // Organization billing
+      export async function getOrgCustomer(orgId: string) {
+        const org = await prisma.organization.findUnique({
+          where: { clerkOrgId: orgId },
+          select: { stripeCustomerId: true },
+        });
+
+        if (org?.stripeCustomerId) {
+          return stripe.customers.retrieve(org.stripeCustomerId);
+        }
+
+        // Create org customer
+        const clerkOrg = await clerkClient.organizations.getOrganization({
+          organizationId: orgId,
+        });
+
+        const customer = await stripe.customers.create({
+          name: clerkOrg.name,
+          metadata: {
+            clerkOrgId: orgId,
+          },
+        });
+
+        await prisma.organization.update({
+          where: { clerkOrgId: orgId },
+          data: { stripeCustomerId: customer.id },
+        });
+
+        return customer;
+      }
+      ```
+
+  with_segment:
+    when: "Tracking user identity and events"
+    approach: |
+      Identify users in Segment:
+
+      ```typescript
+      // lib/segment.ts
+      import { Analytics } from '@segment/analytics-node';
+
+      const serverAnalytics = new Analytics({
+        writeKey: process.env.SEGMENT_SERVER_KEY!,
+      });
+
+      export function identifyUser(
+        userId: string,
+        traits: Record<string, any>
+      ) {
+        serverAnalytics.identify({
+          userId,
+          traits,
+        });
+      }
+
+      // After user creation webhook
+      // app/api/webhooks/clerk/route.ts
+      if (eventType === 'user.created') {
+        // Sync to database
+        await prisma.user.create({ ... });
+
+        // Identify in Segment
+        identifyUser(evt.data.id, {
+          email: evt.data.email_addresses[0]?.email_address,
+          firstName: evt.data.first_name,
+          lastName: evt.data.last_name,
+          createdAt: evt.data.created_at,
+        });
+      }
+
+      // Client-side identification
+      'use client';
+      import { useUser } from '@clerk/nextjs';
+      import { analytics } from '@/lib/segment';
+      import { useEffect } from 'react';
+
+      export function SegmentIdentify() {
+        const { user, isLoaded, isSignedIn } = useUser();
+
+        useEffect(() => {
+          if (isLoaded && isSignedIn && user) {
+            analytics.identify(user.id, {
+              email: user.emailAddresses[0]?.emailAddress,
+              name: user.fullName,
+            });
+          }
+        }, [isLoaded, isSignedIn, user]);
+
+        return null;
+      }
+      ```
+
+  with_nextjs:
+    when: "Complete Next.js auth setup"
+    approach: |
+      Full Next.js App Router integration:
+
+      ```typescript
+      // app/layout.tsx
+      import { ClerkProvider } from '@clerk/nextjs';
+
+      export default function RootLayout({
+        children,
+      }: {
+        children: React.ReactNode;
+      }) {
+        return (
+          <ClerkProvider>
+            <html lang="en">
+              <body>{children}</body>
+            </html>
+          </ClerkProvider>
+        );
+      }
+
+      // middleware.ts
+      import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
+
+      const isPublicRoute = createRouteMatcher([
+        '/',
+        '/sign-in(.*)',
+        '/sign-up(.*)',
+        '/api/webhooks(.*)',
+      ]);
+
+      export default clerkMiddleware(async (auth, req) => {
+        if (!isPublicRoute(req)) {
+          await auth.protect();
+        }
+      });
+
+      export const config = {
+        matcher: ['/((?!_next|.*\\..*).*)'],
+      };
+
+      // app/dashboard/layout.tsx
+      import { auth } from '@clerk/nextjs/server';
+      import { redirect } from 'next/navigation';
+
+      export default async function DashboardLayout({
+        children,
+      }: {
+        children: React.ReactNode;
+      }) {
+        const { userId, orgId } = await auth();
+
+        if (!userId) {
+          redirect('/sign-in');
+        }
+
+        return <div>{children}</div>;
+      }
+
+      // components/Header.tsx
+      import {
+        SignedIn,
+        SignedOut,
+        SignInButton,
+        UserButton,
+        OrganizationSwitcher,
+      } from '@clerk/nextjs';
+
+      export function Header() {
+        return (
+          <header className="flex justify-between p-4">
+            <SignedIn>
+              <OrganizationSwitcher />
+              <UserButton />
+            </SignedIn>
+            <SignedOut>
+              <SignInButton />
+            </SignedOut>
+          </header>
+        );
+      }
+      ```
+
+platform_integration:
+  vercel:
+    setup: |
+      # Environment variables
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_...
+      CLERK_SECRET_KEY=sk_...
+      CLERK_WEBHOOK_SECRET=whsec_...
+
+      # Optional redirect URLs
+      NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
+      NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+      NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/dashboard
+
+  docker:
+    setup: |
+      # Dockerfile
+      ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+      # Secret key set at runtime, not build time
+
+      # docker-compose.yml
+      environment:
+        - CLERK_SECRET_KEY=${CLERK_SECRET_KEY}
+        - CLERK_WEBHOOK_SECRET=${CLERK_WEBHOOK_SECRET}
+
+security_checklist:
+  - "CLERK_SECRET_KEY server-side only"
+  - "Next.js updated to patched version (CVE-2025-29927)"
+  - "Defense in depth - middleware AND route checks"
+  - "Webhook signature verified with svix"
+  - "Session token under 4KB"
+  - "Organization data scoped by orgId"
+  - "Webhook routes excluded from middleware protection"
+  - "User input validated in Server Actions"
+
+testing_patterns:
+  unit_tests: |
+    // Mock Clerk for testing
+    jest.mock('@clerk/nextjs/server', () => ({
+      auth: jest.fn(() => Promise.resolve({
+        userId: 'user_123',
+        orgId: 'org_456',
+        orgRole: 'org:admin',
+      })),
+      currentUser: jest.fn(() => Promise.resolve({
+        id: 'user_123',
+        emailAddresses: [{ emailAddress: 'test@example.com' }],
+        firstName: 'Test',
+        lastName: 'User',
+      })),
+      clerkClient: {
+        users: {
+          getUser: jest.fn(),
+        },
+      },
+    }));
+
+    describe('Protected API', () => {
+      it('returns data for authenticated user', async () => {
+        const response = await GET();
+        expect(response.status).toBe(200);
+      });
+
+      it('returns 401 for unauthenticated user', async () => {
+        (auth as jest.Mock).mockResolvedValueOnce({ userId: null });
+        const response = await GET();
+        expect(response.status).toBe(401);
+      });
+    });
+
+  e2e_tests: |
+    // Playwright with Clerk testing helpers
+    import { test } from '@playwright/test';
+    import { clerkSetup, clerk } from '@clerk/testing/playwright';
+
+    test.beforeAll(async () => {
+      await clerkSetup();
+    });
+
+    test('authenticated user can access dashboard', async ({ page }) => {
+      await clerk.signIn({
+        strategy: 'email_code',
+        identifier: 'test@example.com',
+      });
+
+      await page.goto('/dashboard');
+      await expect(page.locator('h1')).toContainText('Dashboard');
+    });

@@ -1,0 +1,314 @@
+# Validations - Clerk Authentication
+# Quality checks for auth implementations
+
+version: 1.0.0
+skill_id: clerk-auth
+
+validations:
+  # Security Checks
+  - id: secret-key-exposed
+    name: Clerk Secret Key in Client Code
+    severity: error
+    description: CLERK_SECRET_KEY must only be used server-side
+    pattern: |
+      (NEXT_PUBLIC|REACT_APP|VITE).*CLERK_SECRET
+    message: "Clerk secret key exposed to client. Use CLERK_SECRET_KEY without NEXT_PUBLIC prefix."
+    autofix: false
+
+  - id: missing-middleware-protection
+    name: Protected Route Without Middleware
+    severity: error
+    description: API routes should have middleware protection
+    pattern: |
+      app/api/(?!webhooks).*route\.ts
+    anti_pattern: |
+      clerkMiddleware|auth\(\)
+    message: "API route without auth check. Add middleware protection or auth() check."
+    autofix: false
+
+  - id: hardcoded-clerk-keys
+    name: Hardcoded Clerk API Keys
+    severity: error
+    description: Clerk keys should use environment variables
+    pattern: |
+      (pk_test|pk_live|sk_test|sk_live)_[A-Za-z0-9]+
+    message: "Hardcoded Clerk keys. Use environment variables."
+    autofix: false
+
+  # Middleware Checks
+  - id: missing-await-auth
+    name: Missing Await on auth()
+    severity: error
+    description: auth() is async in App Router and must be awaited
+    pattern: |
+      const.*=\s*auth\(\)(?!\s*await|\s*\.)
+    message: "auth() not awaited. Use 'await auth()' in App Router."
+    autofix: false
+
+  - id: multiple-middleware-files
+    name: Multiple Middleware Files
+    severity: warning
+    description: Only one middleware.ts file should exist
+    pattern: |
+      middleware.*\.ts.*middleware.*\.ts
+    message: "Multiple middleware files detected. Use single middleware.ts."
+    autofix: false
+
+  - id: webhook-not-public
+    name: Webhook Route Not Excluded from Protection
+    severity: warning
+    description: Webhook routes should be public
+    pattern: |
+      api/webhooks
+    anti_pattern: |
+      isPublicRoute.*webhooks|webhooks.*isPublicRoute
+    message: "Webhook route may be blocked by middleware. Add to public routes."
+    autofix: false
+
+  # Auth Pattern Checks
+  - id: not-checking-isloaded
+    name: Accessing Auth Without isLoaded Check
+    severity: warning
+    description: Check isLoaded before accessing user state in client components
+    pattern: |
+      useUser\(\).*user\.(firstName|lastName|email)
+    anti_pattern: |
+      isLoaded
+    message: "Accessing user without isLoaded check. Check isLoaded first."
+    autofix: false
+
+  - id: hooks-in-server-component
+    name: Clerk Hooks in Server Component
+    severity: error
+    description: Clerk hooks only work in Client Components
+    pattern: |
+      use(User|Auth|Session|Organization).*(?!['"]use client['"])
+    message: "Clerk hooks in Server Component. Add 'use client' or use auth()."
+    autofix: false
+
+  - id: missing-org-scope
+    name: Multi-Tenant Query Without orgId
+    severity: warning
+    description: Organization data should be scoped by orgId
+    pattern: |
+      prisma\.(project|team|document)\.findMany
+    anti_pattern: |
+      orgId|organizationId
+    message: "Query without organization scope. Filter by orgId for multi-tenancy."
+    autofix: false
+
+  # Webhook Checks
+  - id: webhook-no-verification
+    name: Webhook Without Signature Verification
+    severity: error
+    description: Clerk webhooks must verify svix signature
+    pattern: |
+      webhooks/clerk.*POST
+    anti_pattern: |
+      svix|Webhook.*verify
+    message: "Webhook without signature verification. Use svix to verify."
+    autofix: false
+
+  - id: webhook-race-condition
+    name: Webhook Using create Instead of upsert
+    severity: warning
+    description: Webhooks can arrive out of order, use upsert
+    pattern: |
+      user\.created.*prisma\..*\.create\(
+    message: "Using create in webhook. Consider upsert for race conditions."
+    autofix: false
+
+code_smells:
+  - id: currentuser-for-checks
+    name: Using currentUser() for Simple Auth Checks
+    description: currentUser() is expensive, use auth() for userId checks
+    pattern: |
+      currentUser\(\).*userId
+    suggestion: "currentUser() counts toward rate limits. Use auth() for simple checks."
+
+  - id: double-redirect
+    name: Redirect in Component with Protected Middleware
+    description: Double redirect when middleware already protects route
+    pattern: |
+      auth\.protect.*redirect.*sign-in
+    suggestion: "Possible double redirect. Let middleware handle or component, not both."
+
+  - id: missing-error-handling
+    name: Missing Error Handling in Auth Calls
+    description: Auth calls should handle errors gracefully
+    pattern: |
+      await auth\(\)(?!.*try|catch)
+    suggestion: "Consider error handling for auth() calls."
+
+  - id: user-id-in-url
+    name: User ID Exposed in URL
+    description: Consider using server-side auth instead of URL params
+    pattern: |
+      params\.userId|searchParams.*userId
+    suggestion: "User ID in URL. Consider using auth() for current user."
+
+best_practices:
+  - id: defense-in-depth
+    name: Defense in Depth Authentication
+    check: |
+      Both middleware and route handlers verify authentication.
+    recommendation: |
+      // middleware.ts - first line of defense
+      export default clerkMiddleware(async (auth, req) => {
+        if (isProtectedRoute(req)) {
+          await auth.protect();
+        }
+      });
+
+      // Route handler - second line (CVE-2025-29927 mitigation)
+      export async function GET() {
+        const { userId } = await auth();
+
+        if (!userId) {
+          return Response.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
+        // Proceed with authenticated request
+      }
+
+  - id: use-route-matchers
+    name: Use createRouteMatcher for Route Groups
+    check: |
+      Route protection uses createRouteMatcher instead of string comparison.
+    recommendation: |
+      import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
+
+      const isProtectedRoute = createRouteMatcher([
+        '/dashboard(.*)',
+        '/settings(.*)',
+        '/api/private(.*)',
+      ]);
+
+      const isPublicRoute = createRouteMatcher([
+        '/',
+        '/sign-in(.*)',
+        '/sign-up(.*)',
+        '/api/webhooks(.*)',
+      ]);
+
+      export default clerkMiddleware(async (auth, req) => {
+        if (!isPublicRoute(req)) {
+          await auth.protect();
+        }
+      });
+
+  - id: upsert-webhook-data
+    name: Use Upsert for Webhook User Sync
+    check: |
+      Webhook handlers use upsert to handle out-of-order events.
+    recommendation: |
+      // Handle both create and update events the same way
+      if (eventType === 'user.created' || eventType === 'user.updated') {
+        await prisma.user.upsert({
+          where: { clerkId: id },
+          create: {
+            clerkId: id,
+            email: email_addresses[0]?.email_address,
+            // ... other fields
+          },
+          update: {
+            email: email_addresses[0]?.email_address,
+            // ... other fields
+          },
+        });
+      }
+
+      if (eventType === 'user.deleted') {
+        await prisma.user.deleteMany({
+          where: { clerkId: id },
+        });
+      }
+
+  - id: org-scoped-queries
+    name: Scope All Queries by Organization
+    check: |
+      Multi-tenant data access always includes orgId filter.
+    recommendation: |
+      // Data access function with org scope
+      async function getProjects() {
+        const { userId, orgId } = await auth();
+
+        if (!userId) throw new Error('Unauthorized');
+
+        return prisma.project.findMany({
+          where: orgId
+            ? { organizationId: orgId }
+            : { userId, organizationId: null },
+        });
+      }
+
+      // Create with org scope
+      async function createProject(name: string) {
+        const { userId, orgId } = await auth();
+
+        return prisma.project.create({
+          data: {
+            name,
+            userId,
+            organizationId: orgId ?? null,
+          },
+        });
+      }
+
+  - id: minimal-session-token
+    name: Keep Session Token Minimal
+    check: |
+      Custom session token claims are minimal to avoid 4KB cookie limit.
+    recommendation: |
+      // Clerk Dashboard > Sessions > Customize session token
+      // Keep it minimal:
+      {
+        "userId": "{{user.id}}",
+        "role": "{{org.role}}"
+      }
+
+      // Fetch additional data via API when needed
+      export async function GET() {
+        const { userId } = await auth();
+
+        // Fetch large data from database
+        const permissions = await prisma.permission.findMany({
+          where: { userId },
+        });
+
+        return Response.json({ permissions });
+      }
+
+testing_checklist:
+  authentication:
+    - "Sign in flow completes successfully"
+    - "Sign up creates new user"
+    - "Sign out clears session"
+    - "Protected routes redirect to sign-in"
+    - "Public routes accessible without auth"
+
+  middleware:
+    - "clerkMiddleware configured correctly"
+    - "Route matchers cover all protected routes"
+    - "Webhook routes excluded from protection"
+    - "No redirect loops occur"
+
+  webhooks:
+    - "Webhook signature verification works"
+    - "user.created syncs to database"
+    - "user.updated updates database"
+    - "user.deleted removes from database"
+    - "Out-of-order events handled gracefully"
+
+  organizations:
+    - "Organization creation works"
+    - "Organization switching works"
+    - "Roles correctly assigned"
+    - "Data scoped by orgId"
+    - "Cross-org access blocked"
+
+  security:
+    - "Secret key not exposed to client"
+    - "auth() checked in route handlers"
+    - "Next.js version >= 15.2.3 (CVE patch)"
+    - "Session token under 4KB"
