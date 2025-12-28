@@ -1,0 +1,497 @@
+# Docker Containerization Sharp Edges
+# Real production gotchas that cause failed deploys, security incidents, and debugging nightmares
+
+sharp_edges:
+  - id: pid1-signal-handling
+    summary: SIGTERM not reaching application - container takes 30 seconds to stop
+    severity: critical
+    situation: Container stop takes exactly 30 seconds (Docker's default timeout), then SIGKILL
+    why: |
+      Shell form CMD runs '/bin/sh -c npm start'. Shell is PID 1, not your application.
+      Docker sends SIGTERM to PID 1 (the shell). Shell doesn't forward signals to child
+      processes. Your application never receives SIGTERM. After 30 seconds, Docker sends
+      SIGKILL. Requests in flight are lost. Database transactions uncommitted. Files
+      corrupted. Graceful shutdown? Never happened.
+    solution: |
+      # WRONG: Shell form - shell is PID 1
+      CMD npm start
+      # or
+      CMD node server.js
+      # Both run: /bin/sh -c "node server.js"
+
+      # RIGHT: Exec form - application is PID 1
+      CMD ["node", "server.js"]
+      # Runs node directly, receives signals
+
+      # RIGHT: Use tini as init process
+      FROM node:20-alpine
+      RUN apk add --no-cache tini
+      ENTRYPOINT ["/sbin/tini", "--"]
+      CMD ["node", "server.js"]
+
+      # RIGHT: If wrapper script needed, use exec
+      #!/bin/sh
+      # entrypoint.sh
+      # Setup code here...
+      exec node server.js  # 'exec' replaces shell with node
+
+      # RIGHT: Docker --init flag
+      docker run --init myimage
+
+      # Also handle signals in your application:
+      process.on('SIGTERM', () => {
+        console.log('SIGTERM received');
+        server.close(() => process.exit(0));
+      });
+    symptoms:
+      - Container stop always takes exactly 10 or 30 seconds
+      - Logs show no "shutting down" message
+      - Requests fail during rolling deploys
+      - Exit code is 137 (128 + 9 = SIGKILL)
+    detection_pattern: 'CMD\s+[a-zA-Z]|ENTRYPOINT\s+[a-zA-Z](?!\[)'
+
+  - id: apt-get-cache-invalidation
+    summary: apt-get update cached but packages fail to install
+    severity: high
+    situation: Docker build fails with "Unable to locate package" even though package exists
+    why: |
+      RUN apt-get update in one layer, RUN apt-get install in another. First build works.
+      Weeks later, second package added. Docker reuses cached apt-get update (stale).
+      apt-get install fails because package lists are outdated. Package moved, renamed,
+      or version changed. Cache says "nothing changed" but reality changed.
+    solution: |
+      # WRONG: Separate layers
+      RUN apt-get update
+      RUN apt-get install -y curl  # Works now
+      # Later add:
+      RUN apt-get install -y wget  # Fails - uses cached update
+
+      # RIGHT: Combine update and install in single layer
+      RUN apt-get update && apt-get install -y \
+          curl \
+          wget \
+          && rm -rf /var/lib/apt/lists/*
+
+      # RIGHT: Pin package versions for reproducibility
+      RUN apt-get update && apt-get install -y \
+          curl=7.88.1-10+deb12u5 \
+          && rm -rf /var/lib/apt/lists/*
+
+      # RIGHT: Use --no-install-recommends to minimize packages
+      RUN apt-get update && apt-get install -y --no-install-recommends \
+          curl \
+          && rm -rf /var/lib/apt/lists/*
+
+      # Clean up apt cache to reduce layer size
+      && rm -rf /var/lib/apt/lists/*
+    symptoms:
+      - Build worked before, now fails
+      - "Unable to locate package X"
+      - Same Dockerfile builds differently on different machines
+      - CI builds fail but local builds work
+    detection_pattern: 'apt-get update\s*$|apt-get update\s*\n\s*RUN'
+
+  - id: secrets-baked-in-image
+    summary: Secrets accidentally included in image layers, visible to anyone who pulls
+    severity: critical
+    situation: API keys, passwords, or credentials accessible via docker history or layer extraction
+    why: |
+      .env copied before .dockerignore check. ARG used for secrets (visible in history).
+      Secret file copied, used, then deleted - but still in layer. Build pushed to
+      public registry. Attacker runs docker history, sees password. Or extracts layer
+      tar files. "I deleted the file" doesn't help - layers are immutable.
+    solution: |
+      # WRONG: ARG for secrets (visible in docker history)
+      ARG API_KEY
+      RUN curl -H "Authorization: Bearer $API_KEY" https://api.example.com
+
+      # WRONG: Copy and delete (still in layer)
+      COPY .env .
+      RUN source .env && do_something
+      RUN rm .env  # Still in previous layer!
+
+      # WRONG: No .dockerignore (secrets copied accidentally)
+      COPY . .  # Copies .env, .aws, credentials.json
+
+      # RIGHT: Use .dockerignore
+      # .dockerignore:
+      .env
+      .env.*
+      *.pem
+      .aws
+      credentials.json
+
+      # RIGHT: Use Docker BuildKit secrets
+      RUN --mount=type=secret,id=api_key \
+          API_KEY=$(cat /run/secrets/api_key) && \
+          curl -H "Authorization: Bearer $API_KEY" https://api.example.com
+      # Build with: docker build --secret id=api_key,src=./api_key.txt .
+
+      # RIGHT: Multi-stage - secrets only in build stage
+      FROM node:20-alpine AS builder
+      ARG NPM_TOKEN
+      RUN echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+      RUN npm install
+      RUN rm ~/.npmrc
+
+      FROM node:20-alpine AS production
+      COPY --from=builder /app/node_modules ./node_modules
+      # Production stage has no secrets
+
+      # RIGHT: Pass secrets at runtime, not build time
+      docker run -e API_KEY=$API_KEY myimage
+    symptoms:
+      - docker history shows secret values
+      - Scanning tools flag secrets in image
+      - Credentials in git history of Dockerfile
+      - .env files in container filesystem
+    detection_pattern: 'ARG.*KEY|ARG.*TOKEN|ARG.*PASSWORD|ARG.*SECRET|COPY.*\.env'
+
+  - id: layer-cache-invalidation
+    summary: Minor code change rebuilds all layers - 20 minute builds
+    severity: high
+    situation: Every build reinstalls dependencies even though they haven't changed
+    why: |
+      COPY . . before npm install. Any source file change invalidates cache. npm install
+      runs every time. 5-minute npm install on every commit. Developer frustration.
+      CI queue backs up. "Just merge to see if it works" because local builds too slow.
+    solution: |
+      # WRONG: Copy everything, then install
+      COPY . .
+      RUN npm install
+      # Any file change -> npm install runs again
+
+      # RIGHT: Copy dependency files first
+      FROM node:20-alpine
+      WORKDIR /app
+
+      # Step 1: Copy only dependency definitions
+      COPY package.json package-lock.json ./
+
+      # Step 2: Install dependencies (cached unless package.json changes)
+      RUN npm ci
+
+      # Step 3: Copy source (changes frequently, doesn't affect npm install)
+      COPY . .
+
+      # Step 4: Build
+      RUN npm run build
+
+      # Python equivalent:
+      COPY requirements.txt ./
+      RUN pip install -r requirements.txt
+      COPY . .
+
+      # Go equivalent:
+      COPY go.mod go.sum ./
+      RUN go mod download
+      COPY . .
+
+      # RIGHT: Use BuildKit cache mounts for even better caching
+      RUN --mount=type=cache,target=/root/.npm \
+          npm ci
+    symptoms:
+      - Builds take 10+ minutes
+      - "Downloading packages" on every build
+      - Same Dockerfile much faster on another machine
+      - Developers skip local testing due to build time
+    detection_pattern: 'COPY\s+\.\s+\.\s*\n.*npm install|COPY\s+\.\s+\.\s*\n.*pip install'
+
+  - id: alpine-musl-compatibility
+    summary: Application crashes or behaves differently on Alpine due to musl libc
+    severity: high
+    situation: Works on Ubuntu/Debian, crashes or hangs on Alpine
+    why: |
+      Alpine uses musl libc instead of glibc. Most libraries compiled against glibc.
+      Subtle differences in DNS resolution, locale handling, thread stack sizes.
+      Node.js native modules fail. Python packages with C extensions crash. Go apps
+      with CGO fail to link. "Works everywhere except production."
+    solution: |
+      # WRONG: Assume Alpine is a drop-in replacement
+      FROM alpine:3.19
+      RUN pip install numpy  # May fail or behave differently
+
+      # RIGHT: Use slim variants for compatibility
+      FROM python:3.12-slim
+      FROM node:20-slim
+      FROM golang:1.22-bookworm
+
+      # RIGHT: If Alpine needed, install compatibility layer
+      FROM alpine:3.19
+      RUN apk add --no-cache libc6-compat
+
+      # RIGHT: For Node.js, rebuild native modules
+      FROM node:20-alpine
+      RUN apk add --no-cache python3 make g++
+      RUN npm rebuild
+
+      # RIGHT: Test on Alpine specifically
+      # Don't assume "works on Ubuntu" means "works on Alpine"
+
+      # RIGHT: Consider distroless for Go/Rust (no libc issues)
+      FROM gcr.io/distroless/static-debian12
+
+      # Common issues:
+      # - DNS resolution hangs (Alpine DNS resolver different)
+      # - Locale errors (musl limited locale support)
+      # - Stack overflow (musl smaller default stack)
+      # - Native module crashes (compiled for glibc)
+    symptoms:
+      - "Error loading shared library"
+      - Segmentation fault on startup
+      - DNS lookups hang or fail
+      - Locale/encoding errors
+      - Works on Debian, fails on Alpine
+    detection_pattern: 'FROM.*alpine'
+
+  - id: build-context-explosion
+    summary: Build context is gigabytes - builds take forever to start
+    severity: medium
+    situation: "Sending build context to Docker daemon" takes minutes, uploading gigabytes
+    why: |
+      Build in project root with node_modules (500MB), .git (200MB), build artifacts,
+      logs, everything. Docker uploads entire context before building. No .dockerignore
+      or incomplete one. Network saturated, builds queued. "Why is CI so slow?"
+    solution: |
+      # Check current context size
+      docker build --no-cache . 2>&1 | head -5
+      # "Sending build context to Docker daemon 2.1GB"
+
+      # Create comprehensive .dockerignore
+      # .dockerignore
+      node_modules
+      .git
+      dist
+      build
+      coverage
+      .nyc_output
+      *.log
+      .env
+      .env.*
+      .DS_Store
+      Thumbs.db
+      tmp
+      temp
+
+      # RIGHT: Build from specific directory
+      docker build -f docker/Dockerfile ./src
+
+      # RIGHT: Use multi-stage to avoid copying unnecessary files
+      FROM node:20-alpine AS deps
+      COPY package*.json ./
+      RUN npm ci
+
+      FROM node:20-alpine
+      COPY --from=deps /app/node_modules ./node_modules
+      COPY src ./src  # Only copy what's needed
+
+      # RIGHT: Check what's being sent
+      docker build . 2>&1 | grep "Sending build context"
+
+      # Also check that .dockerignore is in root of build context
+      # (not in subdirectory)
+    symptoms:
+      - "Sending build context" takes minutes
+      - Context is hundreds of MB or GB
+      - Builds start slowly even when cached
+      - CI runners run out of disk space
+    detection_pattern: 'COPY\s+\.\s+\.'
+
+  - id: zombie-processes
+    summary: Container accumulates zombie processes, eventually hits PID limit
+    severity: medium
+    situation: Container runs for days, then starts failing with "fork: Resource temporarily unavailable"
+    why: |
+      Application spawns child processes but doesn't wait() on them. When children exit,
+      they become zombies. Init process (PID 1) should reap orphaned zombies, but your
+      application isn't init. Zombies accumulate. Eventually hit system PID limit.
+      New processes can't be spawned. Service dies.
+    solution: |
+      # Check for zombies in running container
+      docker exec container_name ps aux | grep Z
+      # or
+      docker exec container_name cat /proc/*/stat | grep " Z "
+
+      # WRONG: Application as PID 1 without zombie reaping
+      CMD ["node", "server.js"]
+      # If server.js spawns children and they become orphans, zombies accumulate
+
+      # RIGHT: Use tini as init (reaps zombies automatically)
+      FROM node:20-alpine
+      RUN apk add --no-cache tini
+      ENTRYPOINT ["/sbin/tini", "--"]
+      CMD ["node", "server.js"]
+
+      # RIGHT: Use Docker --init flag
+      docker run --init myimage
+
+      # RIGHT: Use dumb-init
+      FROM node:20-alpine
+      RUN wget -O /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.5/dumb-init_1.2.5_x86_64
+      RUN chmod +x /usr/local/bin/dumb-init
+      ENTRYPOINT ["/usr/local/bin/dumb-init", "--"]
+      CMD ["node", "server.js"]
+
+      # If you must be PID 1, reap zombies explicitly
+      process.on('SIGCHLD', () => {
+        while (true) {
+          try {
+            const pid = process.wait(-1, WNOHANG);
+            if (pid <= 0) break;
+          } catch (e) { break; }
+        }
+      });
+    symptoms:
+      - Many Z (zombie) processes in ps output
+      - "fork: Resource temporarily unavailable"
+      - Container works initially, fails after days
+      - PID count keeps increasing
+    detection_pattern: 'CMD\s+\[|ENTRYPOINT\s+\[(?!.*tini)(?!.*dumb-init)'
+
+  - id: non-reproducible-builds
+    summary: Same Dockerfile produces different images on different machines
+    severity: medium
+    situation: Build works locally, fails in CI, or vice versa
+    why: |
+      FROM node:latest - pulls different versions. apt-get install curl - different versions
+      on different days. npm install without lockfile - different package versions.
+      Base image updated silently. "Works on my machine" because your cached layers
+      are from last week.
+    solution: |
+      # WRONG: Unpinned versions
+      FROM node:latest
+      RUN apt-get update && apt-get install -y curl
+
+      # RIGHT: Pin base image version
+      FROM node:20.10.0-alpine3.19
+
+      # RIGHT: Pin base image by SHA digest (maximum reproducibility)
+      FROM node@sha256:abcdef1234567890...
+
+      # RIGHT: Pin package versions
+      RUN apt-get update && apt-get install -y \
+          curl=7.88.1-10+deb12u5 \
+          && rm -rf /var/lib/apt/lists/*
+
+      # RIGHT: Use lockfiles and install exactly what's locked
+      COPY package.json package-lock.json ./
+      RUN npm ci  # Uses lockfile, fails if lockfile outdated
+
+      # For Python
+      COPY requirements.txt ./
+      RUN pip install --no-cache-dir -r requirements.txt
+      # Better: use pip-tools or poetry.lock
+
+      # RIGHT: Commit lockfiles to version control
+      git add package-lock.json poetry.lock
+
+      # RIGHT: Use BuildKit --build-arg to pass versions
+      ARG NODE_VERSION=20.10.0
+      FROM node:${NODE_VERSION}-alpine
+    symptoms:
+      - "Works on my machine" but fails in CI
+      - Same commit builds differently
+      - Random test failures after merging
+      - Security scans show different vulnerabilities
+    detection_pattern: ':latest|:lts|:stable|:current'
+
+  - id: healthcheck-ignored
+    summary: Container reports healthy but application is broken
+    severity: medium
+    situation: Load balancer sends traffic to unhealthy container because HEALTHCHECK passed
+    why: |
+      HEALTHCHECK checks wrong endpoint. Or checks that nginx is up but app behind
+      nginx is down. Or uses curl which isn't installed. Or has wrong exit code logic.
+      Container "healthy" according to Docker, but returns 500 errors on every request.
+      Orchestrator thinks everything is fine.
+    solution: |
+      # WRONG: Check infrastructure, not application
+      HEALTHCHECK CMD curl -f http://localhost/ || exit 1
+      # Checks nginx, not your application behind nginx
+
+      # WRONG: Depends on external command that may not exist
+      HEALTHCHECK CMD curl -f http://localhost/health || exit 1
+      # Alpine images don't have curl by default
+
+      # WRONG: Wrong exit code
+      HEALTHCHECK CMD wget http://localhost/health
+      # wget returns 0 even on 404
+
+      # RIGHT: Check application health endpoint
+      HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+        CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+
+      # RIGHT: Use application's native tools
+      HEALTHCHECK CMD node -e "require('http').get('http://localhost:3000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+
+      # RIGHT: Binary healthcheck for compiled apps
+      COPY healthcheck /usr/local/bin/healthcheck
+      HEALTHCHECK CMD ["/usr/local/bin/healthcheck"]
+
+      # Health endpoint best practices:
+      # - Fast (< 1 second)
+      # - Checks application state, not dependencies
+      # - Returns 200 only when ready to serve traffic
+      # - No authentication required
+    symptoms:
+      - Container "healthy" but returning errors
+      - Traffic routed to broken containers
+      - HEALTHCHECK using wrong tool or endpoint
+      - Health check takes too long and times out
+    detection_pattern: 'HEALTHCHECK.*curl|HEALTHCHECK.*wget'
+
+  - id: large-image-size
+    summary: Image is 2GB when it should be 200MB - slow deploys, wasted storage
+    severity: medium
+    situation: Image pull takes 5+ minutes, registry storage explodes, EKS bills spike
+    why: |
+      Single-stage build with build dependencies in production image. Using ubuntu
+      instead of alpine. Installing vim, wget, curl "just in case". Not cleaning
+      apt cache. Copying entire node_modules instead of production only. Layers with
+      temporary files not cleaned in same layer.
+    solution: |
+      # Check image size
+      docker images myimage
+
+      # Analyze layers
+      docker history myimage
+      # or use dive: https://github.com/wagoodman/dive
+      dive myimage
+
+      # WRONG: Build tools in production
+      FROM node:20
+      RUN apt-get update && apt-get install -y python3 make g++
+      COPY . .
+      RUN npm install
+      # Production image has 500MB of build tools
+
+      # RIGHT: Multi-stage build
+      FROM node:20 AS builder
+      RUN apt-get update && apt-get install -y python3 make g++
+      COPY . .
+      RUN npm ci && npm run build
+
+      FROM node:20-alpine
+      COPY --from=builder /app/dist ./dist
+      COPY --from=builder /app/node_modules ./node_modules
+      # No build tools in production
+
+      # RIGHT: Clean apt cache in same layer
+      RUN apt-get update && apt-get install -y curl \
+          && rm -rf /var/lib/apt/lists/*
+
+      # RIGHT: Production-only npm install
+      RUN npm ci --only=production
+
+      # RIGHT: Use smaller base images
+      # node:20           = ~1GB
+      # node:20-slim      = ~200MB
+      # node:20-alpine    = ~130MB
+      # gcr.io/distroless = ~20MB
+    symptoms:
+      - Image size > 500MB for simple apps
+      - Slow image pulls
+      - docker history shows large intermediate layers
+      - Build tools visible in production image
+    detection_pattern: 'FROM.*:latest|FROM ubuntu|FROM debian(?!.*slim)'
+

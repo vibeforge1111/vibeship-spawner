@@ -1,0 +1,258 @@
+# Docker Containerization Validations
+# Automated checks to catch Dockerfile mistakes before they reach production
+
+validations:
+  - id: docker-latest-tag
+    name: Using Latest Tag for Base Image
+    severity: error
+    type: regex
+    pattern:
+      - 'FROM\s+[a-zA-Z0-9_/-]+:latest'
+      - 'FROM\s+[a-zA-Z0-9_/-]+\s*$'
+      - 'FROM\s+[a-zA-Z0-9_/-]+\s+AS'
+    message: "Base image using :latest tag or no tag. Builds become non-deterministic and rollbacks may not work."
+    fix_action: "Pin to specific version (e.g., node:20.10.0-alpine) or use SHA digest"
+    applies_to:
+      - "Dockerfile*"
+      - "*.dockerfile"
+
+  - id: docker-shell-form-cmd
+    name: Shell Form CMD or ENTRYPOINT
+    severity: warning
+    type: regex
+    pattern:
+      - 'CMD\s+[a-zA-Z]+'
+      - 'ENTRYPOINT\s+[a-zA-Z]+'
+      - 'CMD\s+"'
+    message: "Shell form CMD/ENTRYPOINT detected. Signals won't be forwarded to application, causing slow shutdowns."
+    fix_action: "Use exec form: CMD [\"node\", \"server.js\"] or add tini/dumb-init as init process"
+    applies_to:
+      - "Dockerfile*"
+      - "*.dockerfile"
+
+  - id: docker-running-as-root
+    name: No USER Directive
+    severity: warning
+    type: regex
+    pattern:
+      - '(?<!USER\s+)FROM.*\n(?:(?!USER).*\n)*CMD'
+      - 'USER\s+root'
+    message: "Container may run as root. Container escapes become full node compromises."
+    fix_action: "Add USER directive with non-root user before CMD"
+    applies_to:
+      - "Dockerfile*"
+      - "*.dockerfile"
+
+  - id: docker-add-instead-of-copy
+    name: Using ADD Instead of COPY
+    severity: info
+    type: regex
+    pattern:
+      - 'ADD\s+(?!https?://)'
+      - 'ADD\s+\.\s+\.'
+    message: "ADD used for local files. ADD has implicit behaviors (auto-extract, URL fetch) that can be surprising."
+    fix_action: "Use COPY for local files. Use RUN curl/wget for remote URLs."
+    applies_to:
+      - "Dockerfile*"
+      - "*.dockerfile"
+
+  - id: docker-apt-separate-layers
+    name: apt-get update in Separate Layer
+    severity: warning
+    type: regex
+    pattern:
+      - 'RUN\s+apt-get\s+update\s*$'
+      - 'RUN\s+apt-get\s+update\s*\n\s*RUN'
+    message: "apt-get update in separate layer. Cache invalidation causes install failures later."
+    fix_action: "Combine apt-get update && apt-get install in single RUN command"
+    applies_to:
+      - "Dockerfile*"
+      - "*.dockerfile"
+
+  - id: docker-no-apt-cleanup
+    name: No apt Cache Cleanup
+    severity: info
+    type: regex
+    pattern:
+      - 'apt-get install(?!.*rm -rf /var/lib/apt/lists)'
+    message: "apt cache not cleaned after install. Adds unnecessary size to layer."
+    fix_action: "Add && rm -rf /var/lib/apt/lists/* after apt-get install"
+    applies_to:
+      - "Dockerfile*"
+      - "*.dockerfile"
+
+  - id: docker-copy-then-install
+    name: Suboptimal Layer Ordering
+    severity: warning
+    type: regex
+    pattern:
+      - 'COPY\s+\.\s+\.\s*\n.*npm install'
+      - 'COPY\s+\.\s+\.\s*\n.*pip install'
+      - 'COPY\s+\.\s+\.\s*\n.*go mod download'
+    message: "COPY . . before dependency install. Any code change invalidates dependency cache."
+    fix_action: "Copy package.json first, install dependencies, then COPY rest of code"
+    applies_to:
+      - "Dockerfile*"
+      - "*.dockerfile"
+
+  - id: docker-hardcoded-secrets
+    name: Hardcoded Secrets in Dockerfile
+    severity: error
+    type: regex
+    pattern:
+      - 'ENV\s+.*PASSWORD\s*='
+      - 'ENV\s+.*SECRET\s*='
+      - 'ENV\s+.*API_KEY\s*='
+      - 'ENV\s+.*TOKEN\s*=(?!.*\$)'
+      - 'ARG\s+.*PASSWORD\s*='
+    message: "Hardcoded secrets in Dockerfile. Visible in docker history and image layers."
+    fix_action: "Use BuildKit secrets (--mount=type=secret) or pass at runtime via -e"
+    applies_to:
+      - "Dockerfile*"
+      - "*.dockerfile"
+
+  - id: docker-no-healthcheck
+    name: No HEALTHCHECK Instruction
+    severity: info
+    type: regex
+    pattern:
+      - '^(?!.*HEALTHCHECK).*CMD\s+\['
+    message: "No HEALTHCHECK defined. Orchestrators can't detect unhealthy containers."
+    fix_action: "Add HEALTHCHECK instruction with appropriate health endpoint"
+    applies_to:
+      - "Dockerfile*"
+      - "*.dockerfile"
+
+  - id: docker-npm-install-not-ci
+    name: Using npm install Instead of npm ci
+    severity: warning
+    type: regex
+    pattern:
+      - 'npm install(?!\s+--)'
+      - 'RUN npm install\s*$'
+    message: "npm install may ignore lockfile. Use npm ci for reproducible builds."
+    fix_action: "Use npm ci for CI/production builds (uses exact lockfile versions)"
+    applies_to:
+      - "Dockerfile*"
+      - "*.dockerfile"
+
+  - id: docker-expose-without-port
+    name: Missing EXPOSE Instruction
+    severity: info
+    type: regex
+    pattern:
+      - 'CMD.*(?:server|start|run)(?!.*EXPOSE)'
+    message: "Server command without EXPOSE instruction. Port documentation missing."
+    fix_action: "Add EXPOSE instruction to document which ports the container listens on"
+    applies_to:
+      - "Dockerfile*"
+      - "*.dockerfile"
+
+  - id: docker-workdir-relative
+    name: Relative Path in WORKDIR
+    severity: warning
+    type: regex
+    pattern:
+      - 'WORKDIR\s+(?!/)[a-zA-Z]'
+      - 'WORKDIR\s+\.'
+    message: "Relative WORKDIR path. Can cause unexpected directory locations."
+    fix_action: "Use absolute paths in WORKDIR (e.g., WORKDIR /app)"
+    applies_to:
+      - "Dockerfile*"
+      - "*.dockerfile"
+
+  - id: docker-copy-sensitive-files
+    name: Copying Potentially Sensitive Files
+    severity: warning
+    type: regex
+    pattern:
+      - 'COPY.*\.env'
+      - 'COPY.*\.aws'
+      - 'COPY.*\.npmrc'
+      - 'COPY.*credentials'
+      - 'COPY.*\.pem'
+      - 'COPY.*\.key'
+    message: "Copying potentially sensitive files into image. Check .dockerignore."
+    fix_action: "Add sensitive files to .dockerignore or use BuildKit secrets"
+    applies_to:
+      - "Dockerfile*"
+      - "*.dockerfile"
+
+  - id: docker-ubuntu-base
+    name: Using Ubuntu Base Image
+    severity: info
+    type: regex
+    pattern:
+      - 'FROM\s+ubuntu'
+      - 'FROM\s+debian(?!.*slim)'
+    message: "Using large base image. Consider slim or alpine variants for smaller images."
+    fix_action: "Use language-specific slim images (node:20-slim) or alpine variants"
+    applies_to:
+      - "Dockerfile*"
+      - "*.dockerfile"
+
+  - id: docker-single-stage-prod
+    name: Single Stage Build for Production
+    severity: info
+    type: regex
+    pattern:
+      - '^FROM(?!.*AS).*\n(?:(?!FROM).*\n)*RUN.*(npm|pip|go|cargo|maven).*install'
+    message: "Single-stage build may include build tools in production image."
+    fix_action: "Use multi-stage build to separate build dependencies from runtime"
+    applies_to:
+      - "Dockerfile*"
+      - "*.dockerfile"
+
+  - id: docker-sudo-in-dockerfile
+    name: Using sudo in Dockerfile
+    severity: warning
+    type: regex
+    pattern:
+      - 'RUN\s+sudo'
+      - 'sudo\s+apt'
+      - 'sudo\s+yum'
+    message: "sudo used in Dockerfile. Build runs as root by default, sudo is unnecessary."
+    fix_action: "Remove sudo - Dockerfile RUN commands execute as root unless USER is set"
+    applies_to:
+      - "Dockerfile*"
+      - "*.dockerfile"
+
+  - id: docker-pip-no-cache
+    name: pip Without --no-cache-dir
+    severity: info
+    type: regex
+    pattern:
+      - 'pip install(?!.*--no-cache-dir)'
+      - 'pip3 install(?!.*--no-cache-dir)'
+    message: "pip without --no-cache-dir. Cache stored in layer unnecessarily."
+    fix_action: "Add --no-cache-dir to pip install to reduce image size"
+    applies_to:
+      - "Dockerfile*"
+      - "*.dockerfile"
+
+  - id: dockerignore-missing
+    name: No .dockerignore File
+    severity: warning
+    type: file_existence
+    pattern:
+      - "!.dockerignore"
+    message: "No .dockerignore file. Entire directory including secrets may be sent to build context."
+    fix_action: "Create .dockerignore with node_modules, .git, .env, and other unnecessary files"
+    applies_to:
+      - "Dockerfile*"
+
+  - id: docker-arg-secret-usage
+    name: ARG Used for Secrets
+    severity: error
+    type: regex
+    pattern:
+      - 'ARG\s+\w*SECRET'
+      - 'ARG\s+\w*PASSWORD'
+      - 'ARG\s+\w*KEY'
+      - 'ARG\s+\w*TOKEN'
+    message: "ARG used for secrets. Values visible in docker history and image metadata."
+    fix_action: "Use BuildKit --mount=type=secret or pass secrets at runtime"
+    applies_to:
+      - "Dockerfile*"
+      - "*.dockerfile"
+
