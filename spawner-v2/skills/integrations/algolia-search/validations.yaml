@@ -1,0 +1,319 @@
+# Validations - Algolia Search
+# Quality checks for search API implementations
+
+version: 1.0.0
+skill_id: algolia-search
+
+validations:
+  # Security Checks
+  - id: admin-key-client
+    name: Admin API Key in Client Code
+    severity: error
+    description: Admin API key must never be exposed to client-side code
+    pattern: |
+      (NEXT_PUBLIC|REACT_APP|VITE).*ADMIN.*KEY
+    message: "Admin API key exposed to client. Use search-only key."
+    autofix: false
+
+  - id: hardcoded-api-key
+    name: Hardcoded Algolia API Key
+    severity: error
+    description: API keys should use environment variables
+    pattern: |
+      algoliasearch\s*\(\s*['"][A-Z0-9]{8,}['"]
+    message: "Hardcoded Algolia credentials. Use environment variables."
+    autofix: false
+
+  - id: search-key-indexing
+    name: Search Key Used for Indexing
+    severity: error
+    description: Indexing operations require admin key, not search key
+    pattern: |
+      SEARCH_KEY.*saveObject|SEARCH_KEY.*deleteObject
+    message: "Search key used for indexing. Use admin key for write operations."
+    autofix: false
+
+  # Indexing Pattern Checks
+  - id: single-record-indexing
+    name: Single Record Indexing in Loop
+    severity: warning
+    description: Batch records together for efficient indexing
+    pattern: |
+      (for|while|forEach|map).*saveObject\((?!s)
+    message: "Single record indexing in loop. Use saveObjects for batch indexing."
+    autofix: false
+
+  - id: delete-by-usage
+    name: Using deleteBy for Deletion
+    severity: warning
+    description: deleteBy is expensive and rate-limited
+    pattern: |
+      \.deleteBy\s*\(
+    message: "deleteBy is expensive. Prefer deleteObjects with specific IDs."
+    autofix: false
+
+  - id: full-reindex-daily
+    name: Frequent Full Reindex
+    severity: warning
+    description: Full reindex wastes operations on unchanged data
+    pattern: |
+      replaceAllObjects.*cron|schedule.*replaceAllObjects
+    message: "Frequent full reindex. Consider incremental sync for unchanged data."
+    autofix: false
+
+  # Client Configuration Checks
+  - id: no-lite-client
+    name: Full Client Instead of Lite
+    severity: info
+    description: Use lite client for smaller bundle in frontend
+    pattern: |
+      import.*from\s+['"]algoliasearch['"](?!.*lite)
+    anti_pattern: |
+      lite|server|node
+    message: "Full Algolia client imported. Use algoliasearch/lite for frontend."
+    autofix: false
+
+  - id: instantsearch-not-nextjs
+    name: Regular InstantSearch in Next.js
+    severity: warning
+    description: Use react-instantsearch-nextjs for SSR support
+    pattern: |
+      import.*InstantSearch.*from\s+['"]react-instantsearch['"]
+    message: "Using regular InstantSearch. Use InstantSearchNext for Next.js SSR."
+    autofix: false
+
+  # Index Configuration Checks
+  - id: no-searchable-attributes
+    name: Missing Searchable Attributes Configuration
+    severity: warning
+    description: Configure searchableAttributes for better relevance
+    pattern: |
+      setSettings\s*\(\s*\{[^}]*\}
+    anti_pattern: |
+      searchableAttributes
+    message: "No searchableAttributes configured. Set attribute priority for relevance."
+    autofix: false
+
+  - id: no-custom-ranking
+    name: Missing Custom Ranking
+    severity: info
+    description: Custom ranking improves business relevance
+    pattern: |
+      setSettings\s*\(\s*\{[^}]*\}
+    anti_pattern: |
+      customRanking
+    message: "No customRanking configured. Add business metrics (popularity, rating)."
+    autofix: false
+
+  # Search Pattern Checks
+  - id: no-debounce-search
+    name: Search Without Debouncing
+    severity: warning
+    description: Manual search should be debounced to save operations
+    pattern: |
+      (keyup|keydown|onChange).*\.search\s*\(
+    anti_pattern: |
+      debounce|throttle|timeout|InstantSearch
+    message: "Search on keystroke without debouncing. Add debounce to reduce operations."
+    autofix: false
+
+  - id: no-rate-limit-key
+    name: Search Key Without Rate Limiting
+    severity: warning
+    description: Rate limit search keys to prevent abuse
+    pattern: |
+      addApiKey.*acl.*search
+    anti_pattern: |
+      maxQueriesPerIPPerHour|maxHitsPerQuery
+    message: "Search key without rate limits. Add maxQueriesPerIPPerHour."
+    autofix: false
+
+code_smells:
+  - id: large-record-content
+    name: Large Content in Records
+    description: Large content fields can exceed record limits
+    pattern: |
+      (innerHTML|fullContent|rawHtml).*saveObject
+    suggestion: "Large content detected. Truncate or extract searchable text."
+
+  - id: timestamp-string
+    name: Timestamp as String
+    description: Use numeric timestamps for proper sorting
+    pattern: |
+      (createdAt|updatedAt|date).*toISOString
+    suggestion: "String timestamp detected. Use getTime() for numeric sorting."
+
+  - id: pii-index-name
+    name: PII in Index Name
+    description: Index names are visible in network requests
+    pattern: |
+      initIndex\s*\(\s*`[^`]*\$\{
+    suggestion: "Dynamic index name may expose PII. Use filters instead."
+
+  - id: no-facet-config
+    name: Facet Widget Without Configuration
+    description: Facets need attributesForFaceting
+    pattern: |
+      RefinementList|Menu|HierarchicalMenu
+    anti_pattern: |
+      attributesForFaceting
+    suggestion: "Facet widgets need attributesForFaceting in index settings."
+
+best_practices:
+  - id: use-lite-client
+    name: Use Lite Client for Frontend
+    check: |
+      Frontend code uses algoliasearch/lite for smaller bundle.
+    recommendation: |
+      // Import lite client for frontend (smaller bundle)
+      import algoliasearch from 'algoliasearch/lite';
+
+      // Only use full client on server for indexing
+      // lib/algolia-admin.ts (server only)
+      import algoliasearch from 'algoliasearch';
+
+  - id: configure-index-settings
+    name: Configure Index Settings
+    check: |
+      Index has searchableAttributes, customRanking, and faceting configured.
+    recommendation: |
+      // Run this script to configure your index
+      await index.setSettings({
+        // Priority order matters!
+        searchableAttributes: [
+          'title',
+          'brand',
+          'category',
+          'description',
+        ],
+
+        // Business relevance
+        customRanking: [
+          'desc(popularity)',
+          'desc(rating)',
+        ],
+
+        // Faceting
+        attributesForFaceting: [
+          'category',
+          'brand',
+          'filterOnly(inStock)',
+        ],
+
+        // Typo tolerance
+        typoTolerance: true,
+        minWordSizefor1Typo: 4,
+      });
+
+  - id: batch-indexing
+    name: Batch Indexing Operations
+    check: |
+      Records are batched in groups of 1000-5000 for indexing.
+    recommendation: |
+      const BATCH_SIZE = 1000;
+
+      async function batchIndex(records: Record[]) {
+        for (let i = 0; i < records.length; i += BATCH_SIZE) {
+          const batch = records.slice(i, i + BATCH_SIZE);
+          await index.saveObjects(batch);
+
+          // Log progress
+          console.log(`Indexed ${Math.min(i + BATCH_SIZE, records.length)}/${records.length}`);
+        }
+      }
+
+  - id: secured-api-keys
+    name: Use Secured API Keys for User Data
+    check: |
+      User-specific data access uses secured API keys with filters.
+    recommendation: |
+      // Generate secured key per user
+      function getSecuredSearchKey(userId: string) {
+        return adminClient.generateSecuredApiKey(searchKey, {
+          filters: `userId:${userId}`,
+          validUntil: Math.floor(Date.now() / 1000) + 3600,
+          restrictIndices: ['user_documents'],
+        });
+      }
+
+      // API endpoint
+      export async function GET() {
+        const session = await auth();
+        if (!session) return unauthorized();
+
+        return Response.json({
+          key: getSecuredSearchKey(session.user.id),
+        });
+      }
+
+  - id: incremental-sync
+    name: Implement Incremental Sync
+    check: |
+      Data synchronization updates only changed records.
+    recommendation: |
+      async function incrementalSync() {
+        const lastSync = await getLastSyncTime();
+
+        // Get changed records
+        const updated = await db.products.findMany({
+          where: { updatedAt: { gt: lastSync } },
+        });
+
+        // Get deleted records
+        const deleted = await db.deletedProducts.findMany({
+          where: { deletedAt: { gt: lastSync } },
+        });
+
+        // Apply changes
+        if (updated.length) await index.saveObjects(updated);
+        if (deleted.length) await index.deleteObjects(deleted.map(d => d.id));
+
+        await saveLastSyncTime(new Date());
+      }
+
+  - id: handle-errors
+    name: Handle Algolia API Errors
+    check: |
+      Rate limit and API errors are caught and handled with retry logic.
+    recommendation: |
+      async function indexWithRetry(
+        records: Record[],
+        retries = 3
+      ): Promise<void> {
+        try {
+          await index.saveObjects(records);
+        } catch (error) {
+          if (error.status === 429 && retries > 0) {
+            // Rate limited - wait and retry
+            await sleep(5000);
+            return indexWithRetry(records, retries - 1);
+          }
+          throw error;
+        }
+      }
+
+testing_checklist:
+  search:
+    - "Search returns relevant results for common queries"
+    - "Typo tolerance works (searching 'laptpo' finds 'laptop')"
+    - "Facets display correct counts"
+    - "Pagination works correctly"
+    - "Empty state handles no results gracefully"
+
+  indexing:
+    - "Records sync correctly from database"
+    - "Partial updates work for price/stock changes"
+    - "Deleted records are removed from index"
+    - "Batch indexing completes without rate limit errors"
+
+  security:
+    - "Admin key not exposed in frontend bundle"
+    - "Search key has appropriate restrictions"
+    - "User-specific data uses secured API keys"
+    - "Rate limiting prevents abuse"
+
+  performance:
+    - "Search responds under 100ms"
+    - "Bundle size reasonable with lite client"
+    - "SSR works without hydration mismatch"
+    - "Autocomplete is debounced properly"

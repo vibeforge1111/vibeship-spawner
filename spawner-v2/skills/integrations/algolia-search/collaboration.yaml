@@ -1,0 +1,592 @@
+# Collaboration - Algolia Search
+# How this skill works with other skills
+
+version: 1.0.0
+skill_id: algolia-search
+
+prerequisites:
+  required: []
+
+  recommended:
+    - skill: frontend
+      reason: "InstantSearch React integration"
+      what_to_know:
+        - "React component patterns"
+        - "State management"
+        - "Event handling"
+
+    - skill: backend
+      reason: "Indexing API and sync logic"
+      what_to_know:
+        - "API design"
+        - "Background jobs"
+        - "Error handling"
+
+    - skill: postgres-wizard
+      reason: "Source data for search index"
+      what_to_know:
+        - "Query optimization"
+        - "Change detection"
+        - "Data modeling"
+
+delegation_triggers:
+  - trigger: "user needs e-commerce checkout"
+    delegate_to: stripe-integration
+    context: "Product search leading to purchase"
+
+  - trigger: "user needs search analytics"
+    delegate_to: segment-cdp
+    context: "Track search queries and results"
+
+  - trigger: "user needs user authentication"
+    delegate_to: clerk-auth
+    context: "Secured API keys per user"
+
+  - trigger: "user needs database setup"
+    delegate_to: postgres-wizard
+    context: "Source data for indexing"
+
+  - trigger: "user needs serverless deployment"
+    delegate_to: aws-serverless
+    context: "Lambda for indexing jobs"
+
+receives_context_from:
+  - skill: frontend
+    receives:
+      - "React patterns"
+      - "Component architecture"
+      - "Styling approach"
+
+  - skill: backend
+    receives:
+      - "API patterns"
+      - "Queue systems"
+      - "Error handling"
+
+  - skill: postgres-wizard
+    receives:
+      - "Data models"
+      - "Query patterns"
+      - "Change tracking"
+
+provides_context_to:
+  - skill: segment-cdp
+    provides:
+      - "Search events to track"
+      - "Query analytics"
+      - "Result click events"
+
+  - skill: stripe-integration
+    provides:
+      - "Product search results"
+      - "Category filtering"
+      - "Price range data"
+
+  - skill: analytics-specialist
+    provides:
+      - "Search analytics"
+      - "Popular queries"
+      - "Zero results queries"
+
+escalation_paths:
+  - situation: "Complex relevance tuning"
+    escalate_to: data-engineer
+    context: "ML ranking, A/B testing"
+
+  - situation: "Performance optimization"
+    escalate_to: devops
+    context: "CDN, caching strategies"
+
+  - situation: "Enterprise search"
+    escalate_to: architecture-specialist
+    context: "Multi-tenant, federated search"
+
+  - situation: "Search analytics"
+    escalate_to: analytics-specialist
+    context: "Query analysis, conversion tracking"
+
+workflow_integration:
+  typical_sequence:
+    1:
+      step: "Set up Algolia account and indices"
+      skills: [algolia-search]
+      output: "App ID, API keys, index created"
+
+    2:
+      step: "Configure index settings"
+      skills: [algolia-search]
+      output: "Searchable attributes, ranking, facets"
+
+    3:
+      step: "Build indexing pipeline"
+      skills: [algolia-search, backend]
+      output: "Sync from database to Algolia"
+
+    4:
+      step: "Implement search UI"
+      skills: [algolia-search, frontend]
+      output: "InstantSearch components"
+
+    5:
+      step: "Add faceted navigation"
+      skills: [algolia-search, frontend]
+      output: "Filters, refinements, sorting"
+
+    6:
+      step: "Configure API key security"
+      skills: [algolia-search]
+      output: "Secured keys, rate limits"
+
+    7:
+      step: "Add search analytics"
+      skills: [algolia-search, segment-cdp]
+      output: "Event tracking for searches"
+
+  decision_points:
+    - question: "InstantSearch vs custom UI?"
+      guidance: |
+        InstantSearch (recommended):
+        - Pre-built widgets
+        - URL sync built-in
+        - SSR support (with nextjs package)
+        - Faster development
+
+        Custom UI:
+        - Full design control
+        - Complex layouts
+        - Non-standard interactions
+        - More development time
+
+        Use InstantSearch unless you need pixel-perfect
+        custom designs that widgets can't achieve.
+
+    - question: "Full reindex vs incremental sync?"
+      guidance: |
+        Full reindex:
+        - Simple to implement
+        - Good for small datasets (<10K records)
+        - Guaranteed consistency
+        - Higher operation cost
+
+        Incremental sync (recommended):
+        - More complex
+        - Essential for large datasets
+        - Lower operation cost
+        - Requires change tracking
+
+        Start with full reindex, migrate to incremental
+        when you hit operation limits.
+
+    - question: "Which Algolia products?"
+      guidance: |
+        Search (core):
+        - Full-text search
+        - Faceted navigation
+        - Query suggestions
+
+        Recommend (addon):
+        - "Frequently bought together"
+        - Related products
+        - Personalized recommendations
+
+        AI Search (addon):
+        - Natural language queries
+        - Semantic understanding
+        - Neural ranking
+
+        Start with Search only, add features as needed.
+
+collaboration_patterns:
+  with_nextjs:
+    when: "Building search in Next.js app"
+    approach: |
+      Next.js + Algolia InstantSearch:
+
+      ```typescript
+      // lib/algolia.ts
+      import algoliasearch from 'algoliasearch/lite';
+
+      export const searchClient = algoliasearch(
+        process.env.NEXT_PUBLIC_ALGOLIA_APP_ID!,
+        process.env.NEXT_PUBLIC_ALGOLIA_SEARCH_KEY!
+      );
+
+      // app/search/page.tsx
+      import { InstantSearchNext } from 'react-instantsearch-nextjs';
+      import { SearchBox, Hits, RefinementList } from 'react-instantsearch';
+
+      export const dynamic = 'force-dynamic';
+
+      export default function SearchPage() {
+        return (
+          <InstantSearchNext
+            searchClient={searchClient}
+            indexName="products"
+            routing
+          >
+            <div className="flex">
+              <aside className="w-64">
+                <RefinementList attribute="category" />
+              </aside>
+              <main className="flex-1">
+                <SearchBox />
+                <Hits hitComponent={ProductHit} />
+              </main>
+            </div>
+          </InstantSearchNext>
+        );
+      }
+
+      // Server-side indexing
+      // app/api/reindex/route.ts
+      import algoliasearch from 'algoliasearch';
+      import { prisma } from '@/lib/prisma';
+
+      const adminClient = algoliasearch(
+        process.env.ALGOLIA_APP_ID!,
+        process.env.ALGOLIA_ADMIN_KEY!
+      );
+
+      export async function POST() {
+        const products = await prisma.product.findMany();
+        const index = adminClient.initIndex('products');
+
+        await index.saveObjects(
+          products.map(p => ({ objectID: p.id, ...p }))
+        );
+
+        return Response.json({ indexed: products.length });
+      }
+      ```
+
+  with_prisma:
+    when: "Syncing Prisma data to Algolia"
+    approach: |
+      Prisma middleware for automatic sync:
+
+      ```typescript
+      // lib/prisma-algolia.ts
+      import { Prisma, PrismaClient } from '@prisma/client';
+      import algoliasearch from 'algoliasearch';
+
+      const algolia = algoliasearch(
+        process.env.ALGOLIA_APP_ID!,
+        process.env.ALGOLIA_ADMIN_KEY!
+      );
+
+      export function algoliaMiddleware(): Prisma.Middleware {
+        return async (params, next) => {
+          const result = await next(params);
+
+          // Sync products to Algolia
+          if (params.model === 'Product') {
+            const index = algolia.initIndex('products');
+
+            if (params.action === 'create' || params.action === 'update') {
+              await index.saveObject({
+                objectID: result.id,
+                name: result.name,
+                description: result.description,
+                price: result.price,
+                category: result.category,
+              });
+            }
+
+            if (params.action === 'delete') {
+              await index.deleteObject(result.id);
+            }
+          }
+
+          return result;
+        };
+      }
+
+      // lib/prisma.ts
+      import { PrismaClient } from '@prisma/client';
+      import { algoliaMiddleware } from './prisma-algolia';
+
+      const prisma = new PrismaClient();
+      prisma.$use(algoliaMiddleware());
+
+      export { prisma };
+      ```
+
+  with_queues:
+    when: "Background indexing for large datasets"
+    approach: |
+      BullMQ for async Algolia indexing:
+
+      ```typescript
+      // lib/algolia-queue.ts
+      import { Queue, Worker } from 'bullmq';
+      import Redis from 'ioredis';
+      import algoliasearch from 'algoliasearch';
+
+      const connection = new Redis(process.env.REDIS_URL);
+      const algolia = algoliasearch(
+        process.env.ALGOLIA_APP_ID!,
+        process.env.ALGOLIA_ADMIN_KEY!
+      );
+
+      export const indexQueue = new Queue('algolia-index', {
+        connection,
+        defaultJobOptions: {
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 5000 },
+        },
+      });
+
+      // Worker processes indexing jobs
+      const worker = new Worker(
+        'algolia-index',
+        async (job) => {
+          const { action, records, indexName } = job.data;
+          const index = algolia.initIndex(indexName);
+
+          switch (action) {
+            case 'save':
+              await index.saveObjects(records);
+              break;
+            case 'partial':
+              await index.partialUpdateObjects(records);
+              break;
+            case 'delete':
+              await index.deleteObjects(records.map((r: any) => r.objectID));
+              break;
+          }
+
+          return { processed: records.length };
+        },
+        { connection, concurrency: 5 }
+      );
+
+      // Helper to queue indexing
+      export async function queueIndex(
+        action: 'save' | 'partial' | 'delete',
+        records: object[],
+        indexName = 'products'
+      ) {
+        // Batch into chunks
+        const BATCH_SIZE = 1000;
+        for (let i = 0; i < records.length; i += BATCH_SIZE) {
+          await indexQueue.add('index', {
+            action,
+            records: records.slice(i, i + BATCH_SIZE),
+            indexName,
+          });
+        }
+      }
+      ```
+
+  with_segment:
+    when: "Tracking search analytics"
+    approach: |
+      Track search events with Segment:
+
+      ```typescript
+      'use client';
+      import { useInstantSearch, useSearchBox } from 'react-instantsearch';
+      import { useEffect, useRef } from 'react';
+      import { analytics } from '@/lib/segment';
+
+      export function SearchAnalytics() {
+        const { results, status } = useInstantSearch();
+        const { query } = useSearchBox();
+        const lastQuery = useRef('');
+
+        useEffect(() => {
+          // Track when search completes with results
+          if (status === 'idle' && query && query !== lastQuery.current) {
+            lastQuery.current = query;
+
+            analytics.track('Products Searched', {
+              query,
+              results_count: results?.nbHits ?? 0,
+              processing_time_ms: results?.processingTimeMS,
+            });
+
+            // Track zero results
+            if (results?.nbHits === 0) {
+              analytics.track('Search Zero Results', {
+                query,
+              });
+            }
+          }
+        }, [status, query, results]);
+
+        return null;
+      }
+
+      // Track result clicks
+      function ProductHit({ hit }: { hit: ProductHit }) {
+        const handleClick = () => {
+          analytics.track('Product Clicked', {
+            product_id: hit.objectID,
+            product_name: hit.name,
+            position: hit.__position,
+            query: hit.__queryID,
+          });
+        };
+
+        return (
+          <a href={`/products/${hit.objectID}`} onClick={handleClick}>
+            {hit.name}
+          </a>
+        );
+      }
+      ```
+
+  with_auth:
+    when: "User-specific search with secured keys"
+    approach: |
+      Secured API keys with Clerk:
+
+      ```typescript
+      // app/api/search-key/route.ts
+      import { auth } from '@clerk/nextjs';
+      import algoliasearch from 'algoliasearch';
+
+      const adminClient = algoliasearch(
+        process.env.ALGOLIA_APP_ID!,
+        process.env.ALGOLIA_ADMIN_KEY!
+      );
+
+      export async function GET() {
+        const { userId } = auth();
+        if (!userId) {
+          return Response.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
+        // Generate user-specific secured key
+        const securedKey = adminClient.generateSecuredApiKey(
+          process.env.ALGOLIA_SEARCH_KEY!,
+          {
+            filters: `userId:${userId}`,
+            validUntil: Math.floor(Date.now() / 1000) + 3600,
+          }
+        );
+
+        return Response.json({ key: securedKey });
+      }
+
+      // Client-side usage
+      'use client';
+      import { useEffect, useState } from 'react';
+      import algoliasearch from 'algoliasearch/lite';
+
+      export function UserSearch() {
+        const [searchClient, setSearchClient] = useState(null);
+
+        useEffect(() => {
+          fetch('/api/search-key')
+            .then(res => res.json())
+            .then(({ key }) => {
+              setSearchClient(
+                algoliasearch(
+                  process.env.NEXT_PUBLIC_ALGOLIA_APP_ID!,
+                  key
+                )
+              );
+            });
+        }, []);
+
+        if (!searchClient) return <div>Loading...</div>;
+
+        return (
+          <InstantSearch searchClient={searchClient} indexName="user_documents">
+            {/* Search UI */}
+          </InstantSearch>
+        );
+      }
+      ```
+
+platform_integration:
+  vercel:
+    setup: |
+      # Environment variables
+      NEXT_PUBLIC_ALGOLIA_APP_ID=xxx
+      NEXT_PUBLIC_ALGOLIA_SEARCH_KEY=xxx   # Search-only!
+      ALGOLIA_ADMIN_KEY=xxx                 # Server-only
+
+      # Optional: Cron for scheduled sync
+      # vercel.json
+      {
+        "crons": [{
+          "path": "/api/sync-algolia",
+          "schedule": "0 * * * *"
+        }]
+      }
+
+  cloudflare_workers:
+    setup: |
+      # wrangler.toml
+      [vars]
+      ALGOLIA_APP_ID = "xxx"
+      ALGOLIA_SEARCH_KEY = "xxx"
+
+      # Secrets (via wrangler secret)
+      # wrangler secret put ALGOLIA_ADMIN_KEY
+
+security_checklist:
+  - "Admin API key in server-side code only"
+  - "Search key with rate limits for public use"
+  - "Secured API keys for user-specific data"
+  - "HTTP referer restrictions on search key"
+  - "No PII in index names"
+  - "Record size under 100KB limit"
+  - "Sensitive data not indexed"
+  - "Rate limit errors handled gracefully"
+
+testing_patterns:
+  unit_tests: |
+    // Mock Algolia for testing
+    jest.mock('algoliasearch/lite', () => ({
+      __esModule: true,
+      default: () => ({
+        initIndex: () => ({
+          search: jest.fn().mockResolvedValue({
+            hits: [
+              { objectID: '1', name: 'Test Product' },
+            ],
+            nbHits: 1,
+          }),
+        }),
+      }),
+    }));
+
+    describe('ProductSearch', () => {
+      it('renders search results', async () => {
+        render(<ProductSearch />);
+
+        fireEvent.change(
+          screen.getByPlaceholderText('Search...'),
+          { target: { value: 'test' } }
+        );
+
+        await waitFor(() => {
+          expect(screen.getByText('Test Product')).toBeInTheDocument();
+        });
+      });
+    });
+
+  integration_tests: |
+    // Use Algolia's mock adapter for integration tests
+    import { createMockSearchClient } from '@algolia/client-search';
+
+    const mockClient = createMockSearchClient({
+      search: () => Promise.resolve({
+        results: [{
+          hits: testProducts,
+          nbHits: testProducts.length,
+        }],
+      }),
+    });
+
+    // Or test against real sandbox index
+    const testIndex = adminClient.initIndex('products_test');
+    await testIndex.saveObjects(testProducts);
+
+    // Run tests...
+
+    // Cleanup
+    await testIndex.clearObjects();
