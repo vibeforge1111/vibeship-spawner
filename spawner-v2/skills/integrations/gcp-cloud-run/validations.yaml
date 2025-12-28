@@ -1,0 +1,322 @@
+# Validations - GCP Cloud Run
+# Quality checks for Cloud Run implementations
+
+version: 1.0.0
+skill_id: gcp-cloud-run
+
+validations:
+  # Security Checks
+  - id: hardcoded-gcp-credentials
+    name: Hardcoded GCP Credentials
+    severity: error
+    description: GCP credentials must never be hardcoded in source code
+    pattern: |
+      ("type":\s*"service_account"|private_key.*BEGIN.*PRIVATE|"client_email":\s*"[^"]+@[^"]+\.iam\.gserviceaccount\.com")
+    message: "Hardcoded GCP service account credentials. Use Secret Manager or Workload Identity."
+    autofix: false
+
+  - id: gcp-api-key-in-code
+    name: GCP API Key in Source Code
+    severity: error
+    description: API keys should use Secret Manager
+    pattern: |
+      (AIza[0-9A-Za-z-_]{35}|[0-9]+-[0-9A-Za-z_]{32}\.apps\.googleusercontent\.com)
+    message: "Hardcoded GCP API key. Use Secret Manager."
+    autofix: false
+
+  - id: credentials-json-in-repo
+    name: Credentials JSON File in Repository
+    severity: error
+    description: Service account JSON files should not be in source control
+    pattern: |
+      (credentials\.json|service[-_]?account\.json|.*-key\.json)
+    file_pattern: "*.json"
+    message: "Credentials file detected. Add to .gitignore and use Secret Manager."
+    autofix: false
+
+  # Dockerfile Checks
+  - id: dockerfile-root-user
+    name: Running as Root User
+    severity: warning
+    description: Containers should not run as root for security
+    file_pattern: "Dockerfile*"
+    pattern: |
+      ^(?!.*USER\s+\d+|.*USER\s+\w+).*
+    anti_pattern: |
+      USER\s+(\d+|[a-z]+)
+    message: "Dockerfile runs as root. Add USER directive for security."
+    autofix: false
+
+  - id: dockerfile-no-healthcheck
+    name: Missing Health Check in Dockerfile
+    severity: info
+    description: Cloud Run uses HTTP health checks, Dockerfile HEALTHCHECK is optional
+    file_pattern: "Dockerfile*"
+    pattern: |
+      ^(?!.*HEALTHCHECK).*
+    message: "No HEALTHCHECK in Dockerfile. Cloud Run uses its own health checks."
+    autofix: false
+
+  - id: hardcoded-port
+    name: Hardcoded Port in Application
+    severity: warning
+    description: Port should come from PORT environment variable
+    pattern: |
+      (listen\(8080\)|\.listen\(\d+\)|port\s*=\s*\d+)
+    anti_pattern: |
+      (PORT|process\.env\.PORT|os\.environ\.get\(['"]PORT)
+    message: "Hardcoded port. Use PORT environment variable for Cloud Run."
+    autofix: false
+
+  # Memory/Performance Checks
+  - id: large-tmp-writes
+    name: Large File Writes to /tmp
+    severity: warning
+    description: /tmp uses container memory, large writes can cause OOM
+    pattern: |
+      (\/tmp\/|tempfile\.|NamedTemporaryFile|mktemp)
+    message: "/tmp writes consume memory. Consider Cloud Storage for large files."
+    autofix: false
+
+  - id: synchronous-file-operations
+    name: Synchronous File Operations
+    severity: warning
+    description: Sync file ops block the event loop in async apps
+    pattern: |
+      (readFileSync|writeFileSync|appendFileSync|existsSync|readdirSync)
+    message: "Synchronous file operations. Use async versions for better concurrency."
+    autofix: false
+
+  # Concurrency Checks
+  - id: global-mutable-state
+    name: Global Mutable State
+    severity: warning
+    description: Global state issues with concurrent requests
+    pattern: |
+      (global\s+\w+\s*=|let\s+\w+\s*=.*(?:outside|module).*function)
+    message: "Global mutable state may cause issues with concurrent requests."
+    autofix: false
+
+  - id: thread-unsafe-singleton
+    name: Thread-Unsafe Singleton Pattern
+    severity: warning
+    description: Singletons need thread safety for concurrency > 1
+    pattern: |
+      (if\s+.*instance.*is\s+None|if\s+not\s+.*_instance|_instance\s*=\s*None)
+    message: "Singleton pattern - ensure thread safety if using concurrency > 1."
+    autofix: false
+
+  # Connection Management
+  - id: connection-pool-missing
+    name: Database Connections Without Pool
+    severity: warning
+    description: Use connection pooling for database connections
+    pattern: |
+      (psycopg2\.connect|mysql\.connector\.connect|MongoClient\()
+    anti_pattern: |
+      (pool|Pool|connection_pool|pool_size)
+    message: "Database connection without pooling. Use connection pool for Cloud Run."
+    autofix: false
+
+  - id: long-lived-connections
+    name: Long-Lived Connections Without Keep-Alive
+    severity: info
+    description: VPC connections need keep-alive due to 10-min idle timeout
+    pattern: |
+      (redis\.Redis\(|redis\.StrictRedis\(|create_engine\()
+    anti_pattern: |
+      (socket_keepalive|keepalive|pool_recycle|pool_pre_ping)
+    message: "Long-lived connection - consider keep-alive for VPC idle timeout."
+    autofix: false
+
+  # Cloud Run Specific
+  - id: missing-graceful-shutdown
+    name: Missing Graceful Shutdown Handler
+    severity: info
+    description: Handle SIGTERM for graceful shutdown
+    pattern: |
+      (app\.listen|uvicorn\.run|serve\()
+    anti_pattern: |
+      (SIGTERM|signal\.signal|process\.on\(['"]SIGTERM|shutdown)
+    message: "Consider handling SIGTERM for graceful shutdown in Cloud Run."
+    autofix: false
+
+  - id: blocking-startup
+    name: Blocking Operations at Startup
+    severity: warning
+    description: Heavy startup work delays container readiness
+    pattern: |
+      (import.*time\.sleep|Thread\.sleep|await.*asyncio\.sleep)
+    message: "Blocking operation at startup. Consider lazy initialization."
+    autofix: false
+
+code_smells:
+  - id: heavy-imports-top-level
+    name: Heavy Imports at Top Level
+    description: Slows cold starts, consider lazy loading
+    pattern: |
+      ^(import tensorflow|import torch|import pandas|from transformers)
+    suggestion: "Consider lazy loading heavy libraries to reduce cold start time"
+
+  - id: missing-error-handling
+    name: Missing Error Handling on External Calls
+    description: External calls should have error handling
+    pattern: |
+      (await\s+fetch\(|await\s+axios|await\s+httpx|requests\.(get|post))
+    suggestion: "Add try/catch and error handling for external calls"
+
+  - id: unbounded-loops
+    name: Unbounded Loops Without Timeout
+    description: May cause request timeout
+    pattern: |
+      (while\s+True|while\s+1|for\s+.*in\s+range\(\))
+    suggestion: "Add timeout or limit to prevent request timeout"
+
+  - id: synchronous-io
+    name: Synchronous I/O in Async Context
+    description: Blocks event loop, reduces concurrency
+    pattern: |
+      (requests\.(get|post)|open\(.*\)\.read|time\.sleep)
+    suggestion: "Use async versions (httpx, aiofiles) in async apps"
+
+best_practices:
+  - id: use-port-env
+    name: Use PORT Environment Variable
+    check: |
+      Application listens on PORT environment variable
+    recommendation: |
+      # Python
+      port = int(os.environ.get("PORT", 8080))
+      uvicorn.run(app, host="0.0.0.0", port=port)
+
+      # Node.js
+      const port = process.env.PORT || 8080;
+      app.listen(port);
+
+  - id: health-check-endpoint
+    name: Implement Health Check Endpoint
+    check: |
+      Application has /health or /healthz endpoint
+    recommendation: |
+      # FastAPI
+      @app.get("/health")
+      async def health():
+          return {"status": "healthy"}
+
+      # Express
+      app.get('/health', (req, res) => {
+        res.json({ status: 'healthy' });
+      });
+
+  - id: graceful-shutdown
+    name: Handle Graceful Shutdown
+    check: |
+      Application handles SIGTERM signal
+    recommendation: |
+      # Python
+      import signal
+      import sys
+
+      def shutdown_handler(signum, frame):
+          print("Shutting down gracefully...")
+          # Cleanup connections
+          sys.exit(0)
+
+      signal.signal(signal.SIGTERM, shutdown_handler)
+
+      # Node.js
+      process.on('SIGTERM', () => {
+        console.log('Received SIGTERM, shutting down...');
+        server.close(() => {
+          process.exit(0);
+        });
+      });
+
+  - id: structured-logging
+    name: Use Structured Logging for Cloud Logging
+    check: |
+      Logs in JSON format for Cloud Logging integration
+    recommendation: |
+      # Python with google-cloud-logging
+      import google.cloud.logging
+      client = google.cloud.logging.Client()
+      client.setup_logging()
+
+      # Or manual JSON
+      import json
+      import sys
+
+      def log(severity, message, **kwargs):
+          entry = {
+              "severity": severity,
+              "message": message,
+              **kwargs
+          }
+          print(json.dumps(entry), file=sys.stdout)
+
+      log("INFO", "Request processed", user_id=123, latency_ms=45)
+
+  - id: secret-manager-integration
+    name: Use Secret Manager for Secrets
+    check: |
+      Secrets loaded from Secret Manager, not environment variables
+    recommendation: |
+      from google.cloud import secretmanager
+
+      def get_secret(secret_id: str, version: str = "latest") -> str:
+          client = secretmanager.SecretManagerServiceClient()
+          name = f"projects/{PROJECT_ID}/secrets/{secret_id}/versions/{version}"
+          response = client.access_secret_version(name=name)
+          return response.payload.data.decode("UTF-8")
+
+      # Use at startup
+      DB_PASSWORD = get_secret("db-password")
+
+  - id: connection-pooling
+    name: Use Connection Pooling
+    check: |
+      Database connections use pooling with appropriate settings
+    recommendation: |
+      # SQLAlchemy with Cloud SQL
+      from sqlalchemy import create_engine
+
+      engine = create_engine(
+          DATABASE_URL,
+          pool_size=5,          # Base pool size
+          max_overflow=2,       # Extra connections if needed
+          pool_recycle=300,     # Recycle every 5 min (VPC timeout is 10 min)
+          pool_pre_ping=True    # Validate connections
+      )
+
+      # Or use Cloud SQL Python Connector
+      from google.cloud.sql.connector import Connector
+
+      connector = Connector()
+      engine = create_engine("...", creator=connector.connect)
+
+testing_checklist:
+  local_development:
+    - "Container builds locally: docker build -t app ."
+    - "Container runs locally: docker run -p 8080:8080 app"
+    - "Health endpoint responds: curl localhost:8080/health"
+    - "PORT environment variable respected"
+
+  security:
+    - "No hardcoded credentials in code"
+    - "No service account JSON files in repo"
+    - "Secrets from Secret Manager"
+    - "Container runs as non-root"
+
+  production_readiness:
+    - "Memory sized appropriately (including /tmp usage)"
+    - "Request timeout set correctly"
+    - "Concurrency matches application type"
+    - "Min instances set if needed"
+    - "Graceful shutdown implemented"
+    - "Structured logging enabled"
+
+  performance:
+    - "Cold start time measured and acceptable"
+    - "Connection pooling configured"
+    - "Heavy libraries lazy-loaded"
+    - "No blocking operations in async code"
