@@ -1,0 +1,201 @@
+# Validations - Agent Tool Builder
+# Automated checks for tool quality
+
+version: 1.0.0
+skill_id: agent-tool-builder
+
+validations:
+  # Schema Quality
+  - id: tool-description-length
+    name: Tool Description Must Be Comprehensive
+    severity: warning
+    description: Tool descriptions should be at least 100 characters
+    pattern: |
+      "description":\s*"[^"]{1,99}"
+    message: "Tool description is too short. Add details about when to use it, parameters, and return values."
+    autofix: false
+
+  - id: parameter-description-missing
+    name: Parameter Descriptions Required
+    severity: warning
+    description: Every parameter should have a description
+    pattern: |
+      "properties":\s*\{[^}]*"type":\s*"[^"]+"\s*[,}]
+    anti_pattern: |
+      "description"
+    message: "Parameter missing description. Describe what it is and the expected format."
+    autofix: false
+
+  - id: missing-required-array
+    name: Schema Should Specify Required Fields
+    severity: info
+    description: Explicitly define which fields are required
+    pattern: |
+      "input_schema":\s*\{[^}]*"properties"
+    anti_pattern: |
+      "required"
+    message: "Schema doesn't specify required fields. Add 'required' array."
+    autofix: false
+
+  # Error Handling
+  - id: tool-no-try-catch
+    name: Tool Implementation Needs Error Handling
+    severity: error
+    description: Tool functions should handle exceptions
+    pattern: |
+      def\s+\w+.*->.*str:|async\s+def\s+\w+.*->.*str:
+    anti_pattern: |
+      try:|except
+    message: "Tool function without try/except block. Add error handling."
+    autofix: false
+
+  - id: missing-is-error-flag
+    name: Error Results Need is_error Flag
+    severity: warning
+    description: When returning errors, set is_error to true
+    pattern: |
+      "content":\s*"[Ee]rror
+    anti_pattern: |
+      "is_error":\s*true
+    message: "Error result without is_error flag. Add 'is_error': true."
+    autofix: false
+
+  # Return Types
+  - id: returning-dict-not-string
+    name: Tools Should Return Strings
+    severity: warning
+    description: Return JSON string, not dict/object
+    pattern: |
+      return\s*\{[^}]+\}$
+    message: "Returning dict instead of string. Use json.dumps() or JSON.stringify()."
+    autofix: false
+
+  # Input Validation
+  - id: tool-no-input-validation
+    name: Tools Should Validate Inputs
+    severity: warning
+    description: Validate LLM-provided inputs before execution
+    pattern: |
+      def\s+\w+\([^)]+\)\s*->|async\s+def\s+\w+\([^)]+\)\s*->
+    anti_pattern: |
+      isinstance|len\(|\.strip\(\)|validate|sanitize
+    message: "Tool function without visible input validation. Validate before execution."
+    autofix: false
+
+  - id: sql-without-parameterization
+    name: SQL Queries Must Use Parameterization
+    severity: error
+    description: Never concatenate user input into SQL
+    pattern: |
+      execute\([^)]*\+|execute\([^)]*f"|execute\([^)]*%
+    message: "SQL query appears to use string concatenation. Use parameterized queries."
+    autofix: false
+
+  # Timeout Handling
+  - id: external-call-no-timeout
+    name: External Calls Need Timeouts
+    severity: warning
+    description: HTTP requests and external calls should have timeouts
+    pattern: |
+      requests\.(get|post|put|delete)\(|fetch\(|axios\.|http\.
+    anti_pattern: |
+      timeout
+    message: "External API call without timeout. Add timeout parameter."
+    autofix: false
+
+  # MCP Specific
+  - id: mcp-tool-missing-inputschema
+    name: MCP Tools Must Have Input Schema
+    severity: error
+    description: All MCP tools require inputSchema
+    pattern: |
+      name:\s*["'][^"']+["']
+    anti_pattern: |
+      inputSchema
+    message: "MCP tool definition missing inputSchema."
+    autofix: false
+
+  # Parallel Tool Handling
+  - id: parallel-results-separate-messages
+    name: Parallel Results Must Be Single Message
+    severity: error
+    description: All parallel tool results go in one user message
+    pattern: |
+      append.*tool_result.*\n.*append.*tool_result
+    message: "Parallel tool results in separate messages. Combine into single message."
+    autofix: false
+
+code_smells:
+  - id: too-many-parameters
+    name: Tool Has Too Many Parameters
+    description: More than 5 parameters suggests tool does too much
+    pattern: |
+      "required":\s*\[[^\]]*,[^\]]*,[^\]]*,[^\]]*,[^\]]*,
+    suggestion: "Consider splitting into multiple focused tools"
+
+  - id: overly-complex-schema
+    name: Deeply Nested Schema
+    description: More than 2 levels of nesting is confusing for LLMs
+    pattern: |
+      "properties":\s*\{[^}]*"properties":\s*\{[^}]*"properties"
+    suggestion: "Flatten schema or use multiple tool calls"
+
+  - id: generic-tool-name
+    name: Generic Tool Name
+    description: Names like 'do_action' or 'process' are too vague
+    pattern: |
+      "name":\s*"(do|process|handle|execute|run)_
+    suggestion: "Use specific, descriptive names like 'search_products' or 'send_email'"
+
+best_practices:
+  - id: use-enums-for-choices
+    name: Use Enums for Limited Choices
+    check: |
+      When a parameter has a small set of valid values (< 10), use enum.
+    recommendation: |
+      Instead of:
+        "unit": {"type": "string", "description": "celsius or fahrenheit"}
+
+      Use:
+        "unit": {
+          "type": "string",
+          "enum": ["celsius", "fahrenheit"],
+          "description": "Temperature unit"
+        }
+
+  - id: examples-for-complex-tools
+    name: Add Examples for Complex Tools
+    check: |
+      Tools with nested objects, optional parameters, or format-sensitive
+      inputs should include input_examples.
+    recommendation: |
+      Add 1-5 examples showing:
+      - Minimal usage (required params only)
+      - Partial usage (some optional params)
+      - Full usage (all parameters)
+      Use realistic data, not placeholders.
+
+  - id: consistent-error-format
+    name: Use Consistent Error Format
+    check: |
+      All tools should return errors in the same format.
+    recommendation: |
+      Standardize on:
+      {
+        "type": "tool_result",
+        "tool_use_id": "...",
+        "content": "Error (type): Description. Suggestion for fix.",
+        "is_error": true
+      }
+
+  - id: log-tool-calls
+    name: Log All Tool Executions
+    check: |
+      Every tool call should be logged for debugging.
+    recommendation: |
+      Log at minimum:
+      - Tool name
+      - Input parameters (sanitized)
+      - Execution time
+      - Success/failure
+      - Error details if failed
