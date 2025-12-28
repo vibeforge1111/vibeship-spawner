@@ -1,0 +1,502 @@
+# Collaboration - Twilio Communications
+# How this skill works with other skills
+
+version: 1.0.0
+skill_id: twilio-communications
+
+prerequisites:
+  required: []
+
+  recommended:
+    - skill: backend
+      reason: "Webhook endpoints and API integration"
+      what_to_know:
+        - "REST API patterns"
+        - "Webhook security"
+        - "Async processing"
+
+    - skill: auth-specialist
+      reason: "Phone verification for authentication"
+      what_to_know:
+        - "2FA implementation patterns"
+        - "Session management"
+        - "Account recovery flows"
+
+delegation_triggers:
+  - trigger: "user needs AI voice assistant"
+    delegate_to: voice-agents
+    context: "Twilio provides telephony, voice-agents skill for AI conversation"
+
+  - trigger: "user needs Slack notifications"
+    delegate_to: slack-bot-builder
+    context: "Integrate SMS alerts with Slack notifications"
+
+  - trigger: "user needs full auth system"
+    delegate_to: auth-specialist
+    context: "Twilio Verify is one component of broader auth"
+
+  - trigger: "user needs workflow automation"
+    delegate_to: workflow-automation
+    context: "Trigger SMS/calls from automated workflows"
+
+  - trigger: "user needs high-volume messaging"
+    delegate_to: devops
+    context: "Scale webhooks, monitor delivery rates"
+
+receives_context_from:
+  - skill: auth-specialist
+    receives:
+      - "Auth flow requirements"
+      - "2FA implementation strategy"
+      - "Account recovery patterns"
+
+  - skill: voice-agents
+    receives:
+      - "AI conversation handling"
+      - "Call routing logic"
+      - "Voice response generation"
+
+  - skill: workflow-automation
+    receives:
+      - "Trigger conditions for notifications"
+      - "Message content templates"
+      - "Retry and escalation logic"
+
+  - skill: backend
+    receives:
+      - "API design patterns"
+      - "Database models for messaging"
+      - "Background job patterns"
+
+provides_context_to:
+  - skill: voice-agents
+    provides:
+      - "Telephony infrastructure (phone numbers, routing)"
+      - "TwiML for call control"
+      - "Recording and transcription"
+
+  - skill: auth-specialist
+    provides:
+      - "Phone verification API (Twilio Verify)"
+      - "Multi-channel verification options"
+      - "Fraud prevention capabilities"
+
+  - skill: workflow-automation
+    provides:
+      - "Notification delivery capability"
+      - "Delivery status feedback"
+      - "Multi-channel messaging"
+
+  - skill: devops
+    provides:
+      - "Webhook requirements"
+      - "Rate limiting needs"
+      - "Monitoring requirements"
+
+escalation_paths:
+  - situation: "High volume messaging needs"
+    escalate_to: devops
+    context: "Scale webhooks, short codes, toll-free numbers"
+
+  - situation: "AI-powered voice interactions"
+    escalate_to: voice-agents
+    context: "Twilio + AI voice agent integration"
+
+  - situation: "Complex auth flows"
+    escalate_to: auth-specialist
+    context: "Multi-factor, passwordless, account recovery"
+
+  - situation: "Carrier filtering issues"
+    escalate_to: devops
+    context: "A2P 10DLC, monitoring, alternative routing"
+
+workflow_integration:
+  typical_sequence:
+    1:
+      step: "Set up Twilio account"
+      skills: [twilio-communications]
+      output: "Account SID, Auth Token, phone number"
+
+    2:
+      step: "Configure environment"
+      skills: [twilio-communications, devops]
+      output: "Secure credentials, webhook endpoints"
+
+    3:
+      step: "Implement messaging"
+      skills: [twilio-communications, backend]
+      output: "Send/receive SMS, WhatsApp"
+
+    4:
+      step: "Add verification"
+      skills: [twilio-communications, auth-specialist]
+      output: "Phone verification in auth flow"
+
+    5:
+      step: "Add voice features"
+      skills: [twilio-communications, voice-agents]
+      output: "IVR, voice notifications"
+
+    6:
+      step: "Compliance setup"
+      skills: [twilio-communications]
+      output: "A2P 10DLC, opt-out handling"
+
+    7:
+      step: "Production monitoring"
+      skills: [twilio-communications, devops]
+      output: "Delivery rate monitoring, alerting"
+
+  decision_points:
+    - question: "SMS, WhatsApp, or Voice?"
+      guidance: |
+        SMS:
+        - Universal reach (all phones)
+        - No app needed
+        - Cost per message
+        - Carrier filtering in US
+        - Best for: transactional, alerts
+
+        WhatsApp:
+        - 2B+ users globally
+        - Rich media support
+        - Free inbound messages
+        - 24-hour session rules
+        - Best for: customer support, international
+
+        Voice:
+        - Highest attention
+        - Works without internet
+        - Most expensive
+        - Can leave voicemail
+        - Best for: urgent, accessibility, verification fallback
+
+    - question: "Which verification channel?"
+      guidance: |
+        SMS OTP:
+        - Most compatible
+        - 96% phishing block rate
+        - Can be intercepted (SIM swap)
+        - Best for: most users
+
+        Silent Network Auth:
+        - Best UX (no code to enter)
+        - Highest security
+        - Mobile apps only
+        - Best for: mobile-first apps
+
+        Voice OTP:
+        - Accessibility friendly
+        - SMS fallback
+        - Higher cost
+        - Best for: SMS delivery issues
+
+        WhatsApp OTP:
+        - Works in SMS-restricted regions
+        - Requires WhatsApp
+        - Best for: international apps
+
+collaboration_patterns:
+  with_voice_agents:
+    when: "Building AI-powered phone system"
+    approach: |
+      Twilio handles telephony, voice agent handles conversation:
+
+      ```python
+      # TwiML connects call to your voice agent
+      @app.route("/voice/incoming", methods=["POST"])
+      def incoming_call():
+          response = VoiceResponse()
+
+          # Stream audio to voice agent
+          response.start_stream(
+              url="wss://your-voice-agent.com/stream",
+              track="both_tracks"
+          )
+
+          return str(response)
+
+      # Your voice agent receives audio via WebSocket
+      # Processes with LLM, generates response
+      # Streams audio back via Twilio
+
+      # For simpler cases, use <Gather> for input
+      gather = Gather(
+          input="speech",
+          action="/voice/process",
+          speech_timeout="auto"
+      )
+      gather.say("How can I help you today?")
+      ```
+
+  with_auth_flow:
+    when: "Phone verification in signup/login"
+    approach: |
+      Twilio Verify as part of auth system:
+
+      ```python
+      # In auth-specialist's signup flow
+      async def signup_with_phone_verification():
+          # 1. User enters phone number
+          phone = request.json["phone"]
+
+          # 2. Send verification via Twilio
+          result = await twilio_verify.send_verification(phone)
+
+          # 3. User enters code
+          code = request.json["code"]
+          check = await twilio_verify.check_verification(phone, code)
+
+          if check["valid"]:
+              # 4. Phone verified, create account
+              user = await create_user(phone=phone)
+              return {"user": user, "token": generate_jwt(user)}
+          else:
+              return {"error": "Invalid code"}, 400
+
+      # For 2FA login
+      async def login_2fa():
+          # 1. Verify password first
+          user = await verify_password(email, password)
+
+          # 2. Send 2FA code
+          await twilio_verify.send_verification(user.phone)
+
+          # 3. Verify code
+          check = await twilio_verify.check_verification(user.phone, code)
+
+          if check["valid"]:
+              return {"token": generate_jwt(user)}
+      ```
+
+  with_workflow_automation:
+    when: "Automated notifications via n8n/Temporal"
+    approach: |
+      Twilio as notification step in workflow:
+
+      ```python
+      # Temporal workflow example
+      @workflow.defn
+      class OrderWorkflow:
+          @workflow.run
+          async def run(self, order: Order):
+              # Process order
+              await workflow.execute_activity(
+                  process_order,
+                  order,
+                  start_to_close_timeout=timedelta(minutes=5)
+              )
+
+              # Send confirmation via Twilio
+              await workflow.execute_activity(
+                  send_order_notification,
+                  order,
+                  start_to_close_timeout=timedelta(minutes=1),
+                  retry_policy=RetryPolicy(
+                      maximum_attempts=3,
+                      initial_interval=timedelta(seconds=5)
+                  )
+              )
+
+      @activity.defn
+      async def send_order_notification(order: Order):
+          """Activity that sends SMS via Twilio."""
+          message = f"Order #{order.id} confirmed! Arriving {order.eta}"
+
+          result = twilio_sms.send(
+              to=order.customer_phone,
+              body=message
+          )
+
+          if not result["success"]:
+              raise ApplicationError(f"SMS failed: {result['error']}")
+      ```
+
+  with_slack:
+    when: "SMS alerts with Slack integration"
+    approach: |
+      Notify Slack when SMS delivery fails:
+
+      ```python
+      @app.route("/webhooks/sms/status", methods=["POST"])
+      @require_twilio_signature
+      def sms_status():
+          status = request.form["MessageStatus"]
+
+          if status in ["undelivered", "failed"]:
+              # Alert team in Slack
+              error_code = request.form.get("ErrorCode")
+              to = request.form["To"]
+
+              slack_client.chat_postMessage(
+                  channel="#sms-alerts",
+                  text=f":warning: SMS delivery failed!\nTo: {mask_phone(to)}\nError: {error_code}"
+              )
+
+          return "", 200
+      ```
+
+platform_integration:
+  node_express:
+    setup: |
+      npm install twilio
+
+      const twilio = require('twilio');
+      const client = twilio(
+        process.env.TWILIO_ACCOUNT_SID,
+        process.env.TWILIO_AUTH_TOKEN
+      );
+
+      // Send SMS
+      const message = await client.messages.create({
+        to: '+14155551234',
+        from: process.env.TWILIO_PHONE_NUMBER,
+        body: 'Hello from Node!'
+      });
+
+      // Validate webhook
+      const validator = twilio.validateRequest(
+        process.env.TWILIO_AUTH_TOKEN,
+        req.headers['x-twilio-signature'],
+        url,
+        req.body
+      );
+    considerations:
+      - "Use express.urlencoded() middleware for webhooks"
+      - "Validate signature before processing"
+      - "Consider express-rate-limit for verify endpoints"
+
+  python_flask:
+    setup: |
+      pip install twilio
+
+      from twilio.rest import Client
+      from twilio.request_validator import RequestValidator
+
+      client = Client(
+          os.environ["TWILIO_ACCOUNT_SID"],
+          os.environ["TWILIO_AUTH_TOKEN"]
+      )
+
+      # Send SMS
+      message = client.messages.create(
+          to="+14155551234",
+          from_=os.environ["TWILIO_PHONE_NUMBER"],
+          body="Hello from Python!"
+      )
+
+      # Validate webhook
+      validator = RequestValidator(os.environ["TWILIO_AUTH_TOKEN"])
+      is_valid = validator.validate(url, params, signature)
+    considerations:
+      - "Use Flask's request.form for webhook data"
+      - "Consider Celery for async sending"
+      - "Use Flask-Limiter for rate limiting"
+
+  nextjs:
+    setup: |
+      npm install twilio
+
+      // pages/api/sms/send.ts
+      import twilio from 'twilio';
+
+      export default async function handler(req, res) {
+        const client = twilio(
+          process.env.TWILIO_ACCOUNT_SID,
+          process.env.TWILIO_AUTH_TOKEN
+        );
+
+        const message = await client.messages.create({
+          to: req.body.to,
+          from: process.env.TWILIO_PHONE_NUMBER,
+          body: req.body.message
+        });
+
+        res.json({ sid: message.sid });
+      }
+
+      // pages/api/webhooks/twilio.ts
+      export default async function webhook(req, res) {
+        // Validate signature
+        const validator = new twilio.RequestValidator(
+          process.env.TWILIO_AUTH_TOKEN
+        );
+
+        const url = `https://${req.headers.host}${req.url}`;
+        const isValid = validator.validate(
+          req.body,
+          req.headers['x-twilio-signature'],
+          url
+        );
+
+        if (!isValid) {
+          return res.status(403).end();
+        }
+
+        // Process webhook...
+        res.status(200).end();
+      }
+    considerations:
+      - "Use API routes for serverless Twilio integration"
+      - "Validate webhooks in middleware"
+      - "Store credentials in .env.local"
+
+cost_optimization:
+  messaging:
+    - "Use toll-free for higher volume (no 10DLC fees)"
+    - "Batch messages during off-peak hours"
+    - "Keep messages under 160 chars (1 segment)"
+    - "Use WhatsApp for high-engagement (free inbound)"
+
+  verification:
+    - "Use Silent Network Auth when possible (same price, better UX)"
+    - "Implement your own rate limiting (avoid wasted attempts)"
+    - "Cache verification status (don't re-verify on every request)"
+
+  voice:
+    - "Use TTS instead of <Play> for dynamic content"
+    - "Optimize IVR to reduce call duration"
+    - "Use webhooks instead of polling for status"
+
+testing_patterns:
+  unit_tests:
+    approach: "Mock Twilio client"
+    example: |
+      from unittest.mock import Mock, patch
+
+      @patch('twilio.rest.Client')
+      def test_send_sms(mock_client):
+          mock_messages = Mock()
+          mock_client.return_value.messages = mock_messages
+          mock_messages.create.return_value.sid = "SM123"
+
+          result = send_sms("+14155551234", "Test")
+
+          assert result["success"] == True
+          mock_messages.create.assert_called_once()
+
+  integration_tests:
+    approach: "Use Twilio test credentials or sandbox"
+    example: |
+      # Test credentials (don't send real messages)
+      TEST_ACCOUNT_SID = "ACtest..."
+      TEST_AUTH_TOKEN = "test..."
+
+      # Or use magic numbers
+      # +15005550006 always fails (invalid)
+      # +15005550001 always succeeds
+
+  webhook_tests:
+    approach: "Simulate Twilio requests with valid signature"
+    example: |
+      from twilio.request_validator import RequestValidator
+
+      def generate_test_request(params: dict):
+          validator = RequestValidator(os.environ["TWILIO_AUTH_TOKEN"])
+          url = "https://your-app.com/webhooks/twilio"
+          signature = validator.compute_signature(url, params)
+
+          return {
+              "data": params,
+              "headers": {"X-Twilio-Signature": signature}
+          }

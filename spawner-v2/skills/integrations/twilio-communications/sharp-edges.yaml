@@ -1,0 +1,579 @@
+# Sharp Edges - Twilio Communications
+# The gotchas that cause messaging and call failures
+
+version: 1.0.0
+skill_id: twilio-communications
+
+sharp_edges:
+  - id: opt-out-error-21610
+    severity: high
+    title: Sending to Users Who Opted Out (Error 21610)
+    situation: Sending SMS to a phone number
+    symptom: |
+      Message fails with error code 21610. Twilio rejects the message.
+      User never receives the SMS. Same number worked before.
+    why: |
+      The recipient replied "STOP" (or UNSUBSCRIBE, CANCEL, etc.) to a previous
+      message from your number. Twilio automatically honors opt-outs and blocks
+      further messages to that number from your account.
+
+      This is legally required for US messaging (TCPA, CTIA guidelines).
+      You cannot override this - the user must reply "START" to opt back in.
+    solution: |
+      ## Track opt-out status in your database
+
+      ```python
+      # In your webhook handler
+      @app.route("/webhooks/sms/incoming", methods=["POST"])
+      def incoming_sms():
+          from_number = request.form.get("From")
+          body = request.form.get("Body", "").strip().upper()
+
+          # Standard opt-out keywords
+          if body in ["STOP", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"]:
+              mark_user_opted_out(from_number)
+              return "", 200
+
+          # Standard opt-in keywords
+          if body in ["START", "SUBSCRIBE", "YES", "UNSTOP"]:
+              mark_user_opted_in(from_number)
+              return "", 200
+
+          # Process other messages...
+
+      # Before sending
+      def send_sms_safe(to: str, body: str):
+          if is_user_opted_out(to):
+              return {"success": False, "error": "User has opted out"}
+
+          try:
+              return send_sms(to, body)
+          except TwilioRestException as e:
+              if e.code == 21610:
+                  # Update database - they opted out via carrier
+                  mark_user_opted_out(to)
+              raise
+      ```
+
+      ## Include opt-out instructions
+      Add "Reply STOP to unsubscribe" to marketing messages.
+    detection_pattern:
+      - "21610"
+      - "opt"
+      - "unsubscribe"
+      - "STOP"
+
+  - id: unreachable-destination-30003
+    severity: medium
+    title: Phone Unreachable But Valid (Error 30003)
+    situation: Sending SMS to a mobile number
+    symptom: |
+      Message fails with error 30003. Number was valid and worked before.
+      Intermittent - sometimes works, sometimes fails.
+    why: |
+      Error 30003 means "Unreachable destination handset." The phone exists but
+      can't receive messages right now. Common causes:
+      - Phone powered off
+      - Airplane mode
+      - Out of signal range
+      - Carrier network issues
+      - Phone storage full
+
+      Unlike 30006 (permanent unreachable), 30003 is usually temporary.
+    solution: |
+      ## Implement retry logic for transient failures
+
+      ```python
+      TRANSIENT_ERRORS = [30003, 30008, 30009]  # Retriable errors
+
+      async def send_with_retry(to: str, body: str, max_retries: int = 3):
+          for attempt in range(max_retries):
+              result = send_sms(to, body)
+
+              if result["success"]:
+                  return result
+
+              if result.get("error_code") not in TRANSIENT_ERRORS:
+                  # Don't retry permanent failures
+                  return result
+
+              # Exponential backoff: 5min, 15min, 45min
+              delay = 300 * (3 ** attempt)
+              await asyncio.sleep(delay)
+
+          return {"success": False, "error": "Max retries exceeded"}
+      ```
+
+      ## Provide fallback channel
+
+      ```python
+      async def notify_user(user, message):
+          # Try SMS first
+          result = await send_sms(user.phone, message)
+
+          if result.get("error_code") == 30003:
+              # Phone unreachable - try email
+              await send_email(user.email, message)
+              return {"channel": "email", "status": "sent"}
+
+          return {"channel": "sms", "status": result["status"]}
+      ```
+    detection_pattern:
+      - "30003"
+      - "unreachable"
+      - "delivery failed"
+
+  - id: carrier-filtering
+    severity: high
+    title: Messages Blocked by Carrier Filtering
+    situation: Sending SMS to US phone numbers
+    symptom: |
+      Messages show as "sent" but never "delivered." No error from Twilio.
+      Users say they never received the message. Pattern in specific carriers
+      or message content.
+    why: |
+      US carriers (Verizon, AT&T, T-Mobile) aggressively filter SMS for spam.
+      Your message might be blocked if:
+      - Contains URLs (especially short URLs or unknown domains)
+      - Looks like phishing (urgent, account, verify, click now)
+      - High volume from same number
+      - Not using registered A2P 10DLC
+      - Low sender reputation
+
+      Carriers don't tell Twilio why messages are filtered - they just
+      silently drop them.
+    solution: |
+      ## Register for A2P 10DLC (US requirement)
+
+      ```
+      1. Go to Twilio Console > Messaging > Trust Hub
+      2. Register your business brand
+      3. Create a messaging campaign (describes use case)
+      4. Wait for approval (can take days)
+      5. Associate phone numbers with campaign
+      ```
+
+      ## Message content best practices
+
+      ```python
+      def sanitize_message(text: str) -> str:
+          """Make message less likely to be filtered."""
+          # Avoid URL shorteners - use full domain
+          # Avoid spam trigger words
+          # Keep it conversational, not promotional
+
+          # Example: Instead of this
+          bad = "URGENT: Verify your account now! Click: bit.ly/abc"
+
+          # Do this
+          good = "Hi! Your order #1234 is ready. Questions? Reply here."
+
+          return text
+
+      # Use toll-free or short code for high volume
+      # 10DLC is for <10K msg/day
+      # Toll-free: up to 10K msg/day
+      # Short code: 100K+ msg/day
+      ```
+
+      ## Monitor delivery rates
+
+      ```python
+      def track_delivery_rate():
+          sent = get_messages_with_status("sent")
+          delivered = get_messages_with_status("delivered")
+
+          rate = len(delivered) / len(sent) * 100
+
+          if rate < 95:
+              alert_team(f"Delivery rate dropped to {rate}%")
+      ```
+    detection_pattern:
+      - "carrier"
+      - "filter"
+      - "blocked"
+      - "not delivered"
+      - "10DLC"
+
+  - id: webhook-signature-bypass
+    severity: critical
+    title: Not Validating Webhook Signatures
+    situation: Receiving Twilio webhook callbacks
+    symptom: |
+      Attackers send fake webhooks to your endpoint. Fraudulent transactions
+      processed. Spoofed incoming messages trigger actions.
+    why: |
+      Twilio signs all webhook requests with X-Twilio-Signature header.
+      If you don't validate this, anyone who knows your webhook URL can
+      send fake requests pretending to be Twilio.
+
+      This can lead to:
+      - Fake message delivery confirmations
+      - Spoofed incoming messages
+      - Fraudulent verification approvals
+    solution: |
+      ## ALWAYS validate the signature
+
+      ```python
+      from twilio.request_validator import RequestValidator
+      from flask import Flask, request, abort
+      from functools import wraps
+      import os
+
+      def require_twilio_signature(f):
+          """Decorator to validate Twilio webhook requests."""
+          @wraps(f)
+          def wrapper(*args, **kwargs):
+              validator = RequestValidator(os.environ["TWILIO_AUTH_TOKEN"])
+
+              # Full URL including query string
+              url = request.url
+
+              # POST body as dict
+              params = request.form.to_dict()
+
+              # Signature header
+              signature = request.headers.get("X-Twilio-Signature", "")
+
+              if not validator.validate(url, params, signature):
+                  abort(403)
+
+              return f(*args, **kwargs)
+          return wrapper
+
+      @app.route("/webhooks/twilio", methods=["POST"])
+      @require_twilio_signature  # ALWAYS use this
+      def twilio_webhook():
+          # Safe to process
+          pass
+      ```
+
+      ## Common validation gotchas
+
+      ```python
+      # URL must match EXACTLY what Twilio called
+      # If behind proxy, you might need:
+      url = request.headers.get("X-Forwarded-Proto", "http") + "://" + \
+            request.headers.get("X-Forwarded-Host", request.host) + \
+            request.path
+
+      # If using ngrok, URL changes each restart
+      # Use consistent URL in production
+      ```
+    detection_pattern:
+      - "webhook"
+      - "signature"
+      - "validate"
+      - "X-Twilio"
+
+  - id: whatsapp-24hour-window
+    severity: high
+    title: WhatsApp Message Outside 24-Hour Window (Error 63016)
+    situation: Sending WhatsApp message to a user
+    symptom: |
+      Message fails with error 63016. "Message is outside the allowed window."
+      Template messages work, but regular messages fail.
+    why: |
+      WhatsApp has strict rules about unsolicited messages:
+      - Users must message you first
+      - You can only reply within 24 hours of their last message
+      - After 24 hours, you must use pre-approved template messages
+
+      This prevents spam and maintains WhatsApp's trust as a platform.
+    solution: |
+      ## Track session windows per user
+
+      ```python
+      from datetime import datetime, timedelta
+
+      class WhatsAppSession:
+          def __init__(self, redis_client):
+              self.redis = redis_client
+              self.window_hours = 24
+
+          def start_session(self, phone: str):
+              """Start/refresh 24-hour session on incoming message."""
+              key = f"wa_session:{phone}"
+              expires = datetime.now() + timedelta(hours=self.window_hours)
+              self.redis.set(key, expires.isoformat(), ex=self.window_hours * 3600)
+
+          def can_send_freeform(self, phone: str) -> bool:
+              """Check if we can send non-template message."""
+              key = f"wa_session:{phone}"
+              expires_str = self.redis.get(key)
+
+              if not expires_str:
+                  return False
+
+              expires = datetime.fromisoformat(expires_str)
+              return datetime.now() < expires
+
+          def send_message(self, phone: str, body: str, template_sid: str = None):
+              """Send message, using template if outside window."""
+              if self.can_send_freeform(phone):
+                  return send_whatsapp_message(phone, body)
+              elif template_sid:
+                  return send_whatsapp_template(phone, template_sid)
+              else:
+                  return {
+                      "success": False,
+                      "error": "Outside session window, template required"
+                  }
+      ```
+
+      ## Incoming message webhook
+
+      ```python
+      @app.route("/webhooks/whatsapp", methods=["POST"])
+      def whatsapp_incoming():
+          from_phone = request.form.get("From").replace("whatsapp:", "")
+
+          # Start/refresh session
+          session.start_session(from_phone)
+
+          # Process message...
+      ```
+
+      ## Create approved templates for common messages
+
+      ```
+      1. Twilio Console > Content Template Builder
+      2. Create template with {{1}} placeholders
+      3. Submit for WhatsApp approval (takes 24-48 hours)
+      4. Use content_sid to send
+      ```
+    detection_pattern:
+      - "63016"
+      - "whatsapp"
+      - "24 hour"
+      - "window"
+      - "template"
+
+  - id: exposed-credentials
+    severity: critical
+    title: Exposed Account SID or Auth Token
+    situation: Deploying Twilio integration
+    symptom: |
+      Unauthorized charges on Twilio account. Messages sent you didn't send.
+      Phone numbers purchased without authorization.
+    why: |
+      If attackers get your Account SID + Auth Token, they have FULL access
+      to your Twilio account. They can:
+      - Send messages (charging your account)
+      - Buy phone numbers
+      - Access call recordings
+      - Modify your configuration
+
+      Common exposure points:
+      - Hardcoded in source code (pushed to GitHub)
+      - In client-side JavaScript
+      - In Docker images
+      - In logs
+    solution: |
+      ## Never hardcode credentials
+
+      ```python
+      # BAD - never do this
+      client = Client("AC1234...", "abc123...")
+
+      # GOOD - environment variables
+      client = Client(
+          os.environ["TWILIO_ACCOUNT_SID"],
+          os.environ["TWILIO_AUTH_TOKEN"]
+      )
+
+      # GOOD - secrets manager
+      from aws_secretsmanager import get_secret
+      creds = get_secret("twilio-credentials")
+      client = Client(creds["sid"], creds["token"])
+      ```
+
+      ## Use API Key instead of Auth Token
+
+      ```python
+      # Auth Token has full account access
+      # API Keys can be scoped and revoked
+
+      # Create API Key in Twilio Console
+      client = Client(
+          os.environ["TWILIO_API_KEY_SID"],
+          os.environ["TWILIO_API_KEY_SECRET"],
+          os.environ["TWILIO_ACCOUNT_SID"]
+      )
+
+      # If compromised, revoke just that key
+      ```
+
+      ## Rotate tokens immediately if exposed
+
+      ```
+      1. Twilio Console > Account > API credentials
+      2. Rotate Auth Token
+      3. Update all deployments with new token
+      4. Review account activity for unauthorized use
+      ```
+    detection_pattern:
+      - "credential"
+      - "token"
+      - "secret"
+      - "AC.*"  # Account SID pattern
+
+  - id: verify-rate-limit-60203
+    severity: medium
+    title: Verify Rate Limit Exceeded (Error 60203)
+    situation: Sending verification codes
+    symptom: |
+      Verification request fails with error 60203.
+      "Max send attempts reached for this phone number."
+    why: |
+      Twilio Verify has built-in rate limits to prevent abuse:
+      - 5 verification attempts per phone number per service per 10 minutes
+      - Helps prevent SMS pumping fraud
+      - Protects against brute-force attacks
+
+      If users legitimately need more attempts, you may have UX issues.
+    solution: |
+      ## Implement application-level rate limiting too
+
+      ```python
+      from datetime import datetime, timedelta
+      import redis
+
+      class VerifyRateLimiter:
+          def __init__(self, redis_client):
+              self.redis = redis_client
+              # Stricter than Twilio's limit
+              self.max_attempts = 3
+              self.window_minutes = 10
+
+          def can_request(self, phone: str) -> bool:
+              key = f"verify_rate:{phone}"
+              attempts = self.redis.get(key)
+
+              if attempts and int(attempts) >= self.max_attempts:
+                  return False
+
+              return True
+
+          def record_attempt(self, phone: str):
+              key = f"verify_rate:{phone}"
+              pipe = self.redis.pipeline()
+              pipe.incr(key)
+              pipe.expire(key, self.window_minutes * 60)
+              pipe.execute()
+
+          def get_wait_time(self, phone: str) -> int:
+              """Return seconds until user can request again."""
+              key = f"verify_rate:{phone}"
+              ttl = self.redis.ttl(key)
+              return max(0, ttl)
+
+      # Usage
+      limiter = VerifyRateLimiter(redis_client)
+
+      @app.route("/verify/send", methods=["POST"])
+      def send_verification():
+          phone = request.json["phone"]
+
+          if not limiter.can_request(phone):
+              wait = limiter.get_wait_time(phone)
+              return {
+                  "error": f"Too many attempts. Try again in {wait} seconds."
+              }, 429
+
+          result = twilio_verify.send_verification(phone)
+
+          if result["success"]:
+              limiter.record_attempt(phone)
+
+          return result
+      ```
+
+      ## Provide clear user feedback
+
+      ```python
+      # Show remaining attempts
+      # Show countdown timer
+      # Offer alternative (voice call, email)
+      ```
+    detection_pattern:
+      - "60203"
+      - "rate limit"
+      - "too many"
+      - "verify"
+
+common_mistakes:
+  - mistake: "Phone numbers without E.164 format"
+    frequency: very_common
+    impact: "Messages fail with 21614"
+    fix: "Always use +[country][number] format"
+
+  - mistake: "Not handling opt-out/opt-in keywords"
+    frequency: common
+    impact: "Users stuck opted out, or TCPA violations"
+    fix: "Track opt-out status, handle STOP/START keywords"
+
+  - mistake: "Ignoring delivery status webhooks"
+    frequency: common
+    impact: "Don't know if messages actually delivered"
+    fix: "Set status_callback, track delivery rates"
+
+  - mistake: "Not registering for A2P 10DLC"
+    frequency: common
+    impact: "Messages filtered by carriers in US"
+    fix: "Register brand and campaign in Trust Hub"
+
+  - mistake: "Sending marketing without opt-in"
+    frequency: common
+    impact: "TCPA lawsuits, account suspension"
+    fix: "Get explicit written consent before marketing"
+
+  - mistake: "Hardcoding Twilio credentials"
+    frequency: common
+    impact: "Account compromise if exposed"
+    fix: "Use environment variables or secrets manager"
+
+error_code_reference:
+  auth_errors:
+    20003: "Authentication error - check Account SID and Auth Token"
+    20429: "Voice API rate limit exceeded"
+
+  sms_errors:
+    21211: "Invalid 'From' phone number"
+    21610: "Recipient opted out (replied STOP)"
+    21614: "Invalid 'To' phone number"
+    21617: "Phone number not owned by your account"
+    30003: "Unreachable destination (temporary)"
+    30005: "Unknown destination (invalid number)"
+    30006: "Landline or unreachable carrier"
+    30429: "Messaging rate limit exceeded"
+
+  verify_errors:
+    60200: "Invalid phone number"
+    60203: "Max send attempts reached"
+    60205: "Verify service not found"
+    60223: "Verification creation failed"
+
+  whatsapp_errors:
+    63016: "Outside 24-hour window (use template)"
+    63018: "Template not approved"
+    63025: "Too many template messages"
+    63038: "WhatsApp rate limit exceeded"
+
+compliance_notes:
+  us_sms:
+    - "A2P 10DLC registration required for business messaging"
+    - "TCPA requires written consent for marketing"
+    - "Must honor STOP/UNSUBSCRIBE requests"
+    - "Include opt-out instructions in marketing messages"
+
+  whatsapp:
+    - "Explicit active opt-in required"
+    - "24-hour session window for non-template messages"
+    - "Template messages must be pre-approved"
+    - "No more than one message per template per 24 hours"
+
+  verify:
+    - "Display terms and conditions"
+    - "Store consent evidence"
+    - "Treat non-opted-in as opted-out"

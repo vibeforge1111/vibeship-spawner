@@ -1,0 +1,332 @@
+# Validations - Twilio Communications
+# Quality checks for Twilio implementations
+
+version: 1.0.0
+skill_id: twilio-communications
+
+validations:
+  # Security Checks
+  - id: hardcoded-credentials
+    name: Hardcoded Twilio Credentials
+    severity: error
+    description: Twilio credentials must never be hardcoded
+    pattern: |
+      (AC[a-f0-9]{32}|SK[a-f0-9]{32})
+    message: "Hardcoded Twilio SID detected. Use environment variables."
+    autofix: false
+
+  - id: auth-token-in-code
+    name: Auth Token in Source Code
+    severity: error
+    description: Auth tokens should be in environment variables
+    pattern: |
+      auth_token\s*=\s*["'][a-f0-9]{32}["']
+    message: "Hardcoded auth token. Use os.environ['TWILIO_AUTH_TOKEN']."
+    autofix: false
+
+  - id: no-webhook-validation
+    name: Webhook Without Signature Validation
+    severity: error
+    description: Twilio webhooks must validate X-Twilio-Signature
+    pattern: |
+      @app\.route.*twilio|/webhooks/.*sms|/webhooks/.*voice
+    anti_pattern: |
+      (RequestValidator|validate.*signature|X-Twilio-Signature)
+    message: "Webhook without signature validation. Add RequestValidator check."
+    autofix: false
+
+  - id: credentials-client-side
+    name: Twilio Credentials in Client-Side Code
+    severity: error
+    description: Never expose Twilio credentials to browsers
+    pattern: |
+      (window\.|document\.|localStorage\.|export\s+const).*TWILIO
+    message: "Twilio credentials exposed client-side. Only use server-side."
+    autofix: false
+
+  # Phone Number Validation
+  - id: no-e164-validation
+    name: No E.164 Phone Number Validation
+    severity: warning
+    description: Phone numbers should be validated before sending
+    pattern: |
+      messages\.create\(.*to=
+    anti_pattern: |
+      (e164|E\.164|\+\d|validate.*phone|format.*phone)
+    message: "Sending to phone without E.164 validation."
+    autofix: false
+
+  - id: hardcoded-phone-numbers
+    name: Hardcoded Phone Numbers
+    severity: warning
+    description: Phone numbers should come from config or database
+    pattern: |
+      to=["']\+\d{10,15}["']
+    message: "Hardcoded phone number. Use config or environment variable."
+    autofix: false
+
+  # Error Handling
+  - id: no-twilio-error-handling
+    name: No Twilio Exception Handling
+    severity: warning
+    description: Twilio calls should handle TwilioRestException
+    pattern: |
+      (client\.messages\.create|client\.calls\.create)
+    anti_pattern: |
+      (TwilioRestException|except.*Twilio|try:)
+    message: "Twilio API call without error handling. Catch TwilioRestException."
+    autofix: false
+
+  - id: ignoring-error-codes
+    name: Not Handling Specific Error Codes
+    severity: info
+    description: Handle common Twilio error codes specifically
+    pattern: |
+      except TwilioRestException
+    anti_pattern: |
+      (error\.code|e\.code|21610|30003|63016)
+    message: "Consider handling specific error codes (21610, 30003, etc.)."
+    autofix: false
+
+  # Opt-Out Compliance
+  - id: no-opt-out-handling
+    name: No Opt-Out Keyword Handling
+    severity: warning
+    description: SMS systems must handle STOP/UNSUBSCRIBE keywords
+    pattern: |
+      incoming.*sms|sms.*webhook|receive.*message
+    anti_pattern: |
+      (STOP|UNSUBSCRIBE|opt.?out|opted.?out)
+    message: "No opt-out handling. Check for STOP/UNSUBSCRIBE keywords."
+    autofix: false
+
+  - id: no-opt-out-check-before-send
+    name: Not Checking Opt-Out Before Sending
+    severity: warning
+    description: Check if user has opted out before sending SMS
+    pattern: |
+      messages\.create
+    anti_pattern: |
+      (opt.?out|is.?subscribed|can.?message)
+    message: "Consider checking opt-out status before sending."
+    autofix: false
+
+  # Status Callbacks
+  - id: no-status-callback
+    name: No Delivery Status Callback
+    severity: info
+    description: Consider adding status callbacks to track delivery
+    pattern: |
+      messages\.create\([^)]+\)
+    anti_pattern: |
+      status_callback
+    message: "No status_callback set. Add to track delivery status."
+    autofix: false
+
+  # Rate Limiting
+  - id: no-rate-limiting
+    name: No Rate Limiting on Verify Endpoint
+    severity: warning
+    description: Verify endpoints should have rate limiting
+    pattern: |
+      (send_verification|verify.*send|/verify)
+    anti_pattern: |
+      (rate.?limit|RateLimiter|throttle|@limiter)
+    message: "Verify endpoint without rate limiting. Add rate limiting."
+    autofix: false
+
+  - id: no-retry-backoff
+    name: No Exponential Backoff on Retry
+    severity: info
+    description: Retries should use exponential backoff
+    pattern: |
+      (retry|Retry|max_retries)
+    anti_pattern: |
+      (exponential|backoff|delay.*\*|2\s*\*\*)
+    message: "Retry without exponential backoff. Use increasing delays."
+    autofix: false
+
+  # WhatsApp Specific
+  - id: no-session-tracking
+    name: No WhatsApp Session Window Tracking
+    severity: warning
+    description: Track 24-hour session windows for WhatsApp
+    pattern: |
+      whatsapp.*message|send.*whatsapp
+    anti_pattern: |
+      (session|24.?hour|window|template)
+    message: "No session window tracking. Track 24-hour window for WhatsApp."
+    autofix: false
+
+code_smells:
+  - id: sync-twilio-in-request
+    name: Synchronous Twilio Calls in Web Request
+    description: Twilio API calls can be slow, consider async/background
+    pattern: |
+      @app\.route.*\n.*messages\.create
+    suggestion: "Consider async or background job for Twilio calls"
+
+  - id: no-message-length-check
+    name: No SMS Message Length Check
+    description: SMS over 160 chars splits into segments (costs more)
+    pattern: |
+      messages\.create.*body=
+    suggestion: "Check message length. >160 chars = multiple segments"
+
+  - id: logging-phone-numbers
+    name: Logging Full Phone Numbers
+    description: PII concern - mask phone numbers in logs
+    pattern: |
+      (log|print|logger).*\+\d{10,15}
+    suggestion: "Mask phone numbers in logs: +1***555***4"
+
+best_practices:
+  - id: use-environment-variables
+    name: Use Environment Variables for Credentials
+    check: |
+      Credentials must come from environment or secrets manager.
+    recommendation: |
+      # Required environment variables
+      TWILIO_ACCOUNT_SID=ACxxxxxx
+      TWILIO_AUTH_TOKEN=xxxxxx
+      TWILIO_PHONE_NUMBER=+14155551234
+
+      # Optional
+      TWILIO_VERIFY_SID=VAxxxxxx
+      TWILIO_WHATSAPP_NUMBER=+14155551234
+
+      # In code
+      from twilio.rest import Client
+      import os
+
+      client = Client(
+          os.environ["TWILIO_ACCOUNT_SID"],
+          os.environ["TWILIO_AUTH_TOKEN"]
+      )
+
+  - id: validate-webhook-signatures
+    name: Always Validate Webhook Signatures
+    check: |
+      Every Twilio webhook endpoint must validate X-Twilio-Signature.
+    recommendation: |
+      from twilio.request_validator import RequestValidator
+      from functools import wraps
+
+      def require_twilio_signature(f):
+          @wraps(f)
+          def wrapper(*args, **kwargs):
+              validator = RequestValidator(os.environ["TWILIO_AUTH_TOKEN"])
+
+              if not validator.validate(
+                  request.url,
+                  request.form.to_dict(),
+                  request.headers.get("X-Twilio-Signature", "")
+              ):
+                  abort(403)
+
+              return f(*args, **kwargs)
+          return wrapper
+
+      @app.route("/webhooks/twilio", methods=["POST"])
+      @require_twilio_signature  # ALWAYS use
+      def webhook():
+          pass
+
+  - id: handle-delivery-status
+    name: Track Delivery Status
+    check: |
+      Set status callbacks to monitor message delivery.
+    recommendation: |
+      # Set callback when sending
+      message = client.messages.create(
+          to=to,
+          from_=from_number,
+          body=body,
+          status_callback="https://your-app.com/webhooks/status"
+      )
+
+      # Handle status updates
+      @app.route("/webhooks/status", methods=["POST"])
+      @require_twilio_signature
+      def status_callback():
+          message_sid = request.form["MessageSid"]
+          status = request.form["MessageStatus"]
+          # sent, delivered, undelivered, failed
+
+          update_message_status(message_sid, status)
+          return "", 200
+
+  - id: implement-retry-logic
+    name: Implement Retry with Exponential Backoff
+    check: |
+      API calls should retry on transient failures.
+    recommendation: |
+      from tenacity import retry, stop_after_attempt, wait_exponential
+
+      @retry(
+          stop=stop_after_attempt(3),
+          wait=wait_exponential(multiplier=1, min=4, max=60)
+      )
+      def send_sms(to: str, body: str):
+          try:
+              return client.messages.create(
+                  to=to,
+                  from_=from_number,
+                  body=body
+              )
+          except TwilioRestException as e:
+              # Don't retry permanent failures
+              if e.code in [21610, 21614, 30005]:
+                  raise
+              raise  # Retry transient failures
+
+  - id: track-opt-outs
+    name: Track and Respect Opt-Outs
+    check: |
+      Handle STOP keywords and check opt-out before sending.
+    recommendation: |
+      # Database model
+      class UserOptOut(db.Model):
+          phone = db.Column(db.String, primary_key=True)
+          opted_out_at = db.Column(db.DateTime)
+          channel = db.Column(db.String)  # sms, whatsapp
+
+      # Handle incoming keywords
+      def process_incoming_sms(from_phone, body):
+          if body.strip().upper() in ["STOP", "UNSUBSCRIBE", "CANCEL"]:
+              UserOptOut.upsert(phone=from_phone, channel="sms")
+              return
+
+          if body.strip().upper() in ["START", "SUBSCRIBE"]:
+              UserOptOut.delete(phone=from_phone)
+              return
+
+      # Check before sending
+      def can_send_sms(phone: str) -> bool:
+          return not UserOptOut.query.filter_by(phone=phone).first()
+
+compliance_checklist:
+  us_sms:
+    - "Registered for A2P 10DLC in Twilio Trust Hub"
+    - "Have written consent for marketing messages"
+    - "Handle STOP/UNSUBSCRIBE keywords"
+    - "Include opt-out instructions in marketing"
+    - "Track and respect opt-out status"
+
+  whatsapp:
+    - "Have explicit active opt-in from users"
+    - "Track 24-hour session windows"
+    - "Created and approved message templates"
+    - "Using templates for out-of-window messages"
+
+  verify:
+    - "Display terms and conditions"
+    - "Store consent evidence"
+    - "Rate limit verification endpoints"
+    - "Offer backup verification methods"
+
+  security:
+    - "Credentials in environment variables"
+    - "Webhook signatures validated"
+    - "Phone numbers masked in logs"
+    - "Using HTTPS for all webhooks"
