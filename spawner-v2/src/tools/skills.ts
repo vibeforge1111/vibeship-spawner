@@ -118,11 +118,55 @@ function findSimilarSkills(
 }
 
 /**
+ * Local skill paths - where skills are installed on user's machine
+ * Users clone: https://github.com/vibeforge1111/vibeship-spawner-skills
+ */
+const LOCAL_SKILLS_PATH = '~/.spawner/skills';
+const LOCAL_SKILLS_REPO = 'https://github.com/vibeforge1111/vibeship-spawner-skills';
+
+/**
+ * Map skill ID to its local filesystem path
+ */
+function getLocalSkillPath(skillId: string, category?: string): string {
+  // Default category mapping based on common patterns
+  const inferredCategory = category || inferCategoryFromSkillId(skillId);
+  return `${LOCAL_SKILLS_PATH}/${inferredCategory}/${skillId}`;
+}
+
+/**
+ * Infer category from skill ID patterns
+ */
+function inferCategoryFromSkillId(skillId: string): string {
+  // Known category mappings
+  const categoryPatterns: Record<string, string[]> = {
+    'ai': ['llm-', 'ml-', 'causal-', 'vector-', 'rag-', 'ai-agents'],
+    'data': ['postgres-', 'redis-', 'graph-', 'temporal-', 'data-', 'drizzle-', 'vector-specialist'],
+    'frameworks': ['nextjs-', 'supabase-', 'sveltekit', 'tailwind-', 'react-', 'typescript-'],
+    'marketing': ['ai-video', 'ai-image', 'ai-audio', 'content-', 'seo', 'copywriting', 'video-', 'brand-'],
+    'strategy': ['growth-', 'product-strategy', 'brand-positioning', 'founder-', 'pivot-', 'idea-maze'],
+    'startup': ['yc-', 'burn-rate', 'founder-mode'],
+    'integration': ['stripe-', 'email-', 'vercel-', 'nextjs-supabase'],
+    'design': ['ui-', 'ux-', 'branding', 'landing-page'],
+    'product': ['a-b-', 'analytics', 'product-management', 'customer-success'],
+    'communications': ['dev-communications', 'community-'],
+  };
+
+  for (const [category, patterns] of Object.entries(categoryPatterns)) {
+    if (patterns.some(p => skillId.startsWith(p) || skillId.includes(p))) {
+      return category;
+    }
+  }
+
+  // Default to development for most technical skills
+  return 'development';
+}
+
+/**
  * Input schema for spawner_skills
  */
 export const skillsInputSchema = z.object({
-  action: z.enum(['search', 'list', 'get', 'squad', 'exists', 'get_files', 'health', 'sync']).optional().describe(
-    'Action: search (default), list, get, squad, exists, get_files, health (scan completeness), sync (export all skills)'
+  action: z.enum(['search', 'list', 'get', 'squad', 'exists', 'get_files', 'health', 'sync', 'local']).optional().describe(
+    'Action: search (default), list, get, squad, exists, get_files, health, sync, local (get local paths for Claude to read)'
   ),
   query: z.string().optional().describe(
     'Search query - matches names, descriptions, tags, triggers'
@@ -155,14 +199,14 @@ export const skillsInputSchema = z.object({
  */
 export const skillsToolDefinition = {
   name: 'spawner_skills',
-  description: 'Search, list, and retrieve specialist skills. Use exists to check before creating. Use get_files for raw YAML. Use health to scan all skills.',
+  description: 'Search, list, and retrieve specialist skills. Skills are stored LOCALLY at ~/.spawner/skills/ - use action="local" to get paths for the Read tool. Use exists to check before creating.',
   inputSchema: {
     type: 'object' as const,
     properties: {
       action: {
         type: 'string',
-        enum: ['search', 'list', 'get', 'squad', 'exists', 'get_files', 'health', 'sync'],
-        description: 'Action: search (default), list, get, squad, exists, get_files, health (scan completeness), sync (export all skills)',
+        enum: ['search', 'list', 'get', 'squad', 'exists', 'get_files', 'health', 'sync', 'local'],
+        description: 'Action: search (default), list, get, squad, exists, get_files, health, sync, local (RECOMMENDED: get local paths for Claude to read with Read tool)',
       },
       query: {
         type: 'string',
@@ -258,6 +302,22 @@ export interface SkillsOutput {
     total_skills: number;
     total_files: number;
   };
+  // For local action - paths for Claude to read with Read tool
+  local?: {
+    skill_id: string;
+    skill_name: string;
+    local_path: string;
+    files: {
+      skill: string;
+      sharp_edges: string;
+      validations: string;
+      collaboration: string;
+    };
+    read_commands: string[];
+  };
+  // Local path hint included in all responses
+  local_path?: string;
+  local_hint?: string;
   _instruction: string;
 }
 
@@ -341,6 +401,12 @@ export async function executeSkills(
 
     case 'sync':
       return await handleSync(env, v1Registry, v2Skills);
+
+    case 'local':
+      if (!name) {
+        return handleLocalList(v1Registry, v2Skills, query, tag);
+      }
+      return handleLocal(v1Registry, v2Skills, name);
 
     default:
       throw new Error(`Unknown action: ${action}`);
@@ -429,6 +495,7 @@ function handleSearch(
 
   return {
     skills: results,
+    local_hint: `💡 Skills are stored locally at ${LOCAL_SKILLS_PATH}. Use action="local" with name="<skill>" to get paths for the Read tool.`,
     _instruction: buildSearchInstruction(results, query, tag, layer),
   };
 }
@@ -501,6 +568,7 @@ function handleList(
   return {
     skills: results,
     layers,
+    local_hint: `💡 Skills are stored locally at ${LOCAL_SKILLS_PATH}. Use action="local" to browse with Read tool paths.`,
     _instruction: buildListInstruction(results, layers, layer),
   };
 }
@@ -545,6 +613,9 @@ async function handleGet(
       // Check if this is a marketing skill that may need tool setup
       const setupHint = getSetupHintForSkill(skill.id, skill.tags ?? []);
 
+      // Get local path for this skill
+      const localPath = getLocalSkillPath(skill.id);
+
       const instruction = [
         `Loaded skill: **${skill.name}**`,
         '',
@@ -552,12 +623,15 @@ async function handleGet(
         edges.length > 0 ? `✓ ${edges.length} sharp edge${edges.length !== 1 ? 's' : ''} loaded` : '',
         skill.patterns?.length ? `✓ ${skill.patterns.length} pattern${skill.patterns.length !== 1 ? 's' : ''} available` : '',
         '',
+        `📁 **Local path:** \`${localPath}\``,
         'Use spawner_validate to check code against this skill\'s validations.',
         setupHint ? `\n---\n\n${setupHint}` : '',
       ].filter(Boolean).join('\n');
 
       return {
         skill_content: content,
+        local_path: localPath,
+        local_hint: `💡 Prefer reading skills locally with: Read: ${localPath}/skill.yaml`,
         _instruction: instruction,
       };
     }
@@ -637,13 +711,16 @@ function handleExists(
     // Determine path based on layer
     const layerFolder = v2Match.layer === 1 ? 'development' :
       v2Match.layer === 2 ? 'frameworks' : 'marketing';
+    const localPath = getLocalSkillPath(v2Match.id);
 
     return {
       exists: true,
       skill_id: v2Match.id,
       skill_name: v2Match.name,
       skill_path: `skills/${layerFolder}/${v2Match.id}/`,
-      _instruction: `Skill "${v2Match.name}" exists (V2). Use action="get" or action="get_files" to retrieve it.`,
+      local_path: localPath,
+      local_hint: `💡 Read locally: ${localPath}/skill.yaml`,
+      _instruction: `Skill "${v2Match.name}" exists (V2). Use action="local" to get Read tool paths, or action="get" for remote.`,
     };
   }
 
@@ -654,17 +731,20 @@ function handleExists(
     );
 
     if (v1Match) {
+      const skillId = v1Match.name ? normalizeSkillId(v1Match.name) : 'unknown';
+      const localPath = getLocalSkillPath(skillId);
       return {
         exists: true,
-        skill_id: v1Match.name ? normalizeSkillId(v1Match.name) : 'unknown',
+        skill_id: skillId,
         skill_name: v1Match.name,
         skill_path: v1Match.path,
+        local_path: localPath,
         _instruction: `Skill "${v1Match.name}" exists (V1 markdown). Use action="get" to retrieve it.`,
       };
     }
   }
 
-  // Not found - provide similar suggestions
+  // Not found - provide similar suggestions and local setup instructions
   const similar = findSimilarSkills(name, v1Registry, v2Skills);
   const suggestion = similar.length > 0
     ? `Did you mean: ${similar.join(', ')}?`
@@ -674,7 +754,8 @@ function handleExists(
     exists: false,
     similar,
     suggestion,
-    _instruction: `Skill "${name}" not found. ${suggestion}\n\nUse spawner_skill_new to create a new skill.`,
+    local_hint: `💡 Skills should be installed at ${LOCAL_SKILLS_PATH}. Clone: git clone ${LOCAL_SKILLS_REPO} ~/.spawner/skills`,
+    _instruction: `Skill "${name}" not found. ${suggestion}\n\nUse spawner_skill_new to create a new skill, or ensure local skills are installed.`,
   };
 }
 
@@ -727,6 +808,7 @@ async function handleGetFiles(
     // Determine path based on layer
     const layerFolder = v2Match.layer === 1 ? 'development' :
       v2Match.layer === 2 ? 'frameworks' : 'marketing';
+    const localPath = getLocalSkillPath(skillId);
 
     const fileList = Object.keys(files);
     const expectedFiles = ['skill.yaml', 'sharp-edges.yaml', 'validations.yaml', 'collaboration.yaml'];
@@ -737,11 +819,15 @@ async function handleGetFiles(
       skill_name: v2Match.name,
       files,
       source_path: `skills/${layerFolder}/${skillId}/`,
+      local_path: localPath,
+      local_hint: `💡 Prefer reading directly from local: ${localPath}/`,
       _instruction: [
         `Retrieved ${fileList.length} files for skill "${v2Match.name}":`,
         ...fileList.map(f => `  - ${f}`),
         missingFiles.length > 0 ? `\nMissing files: ${missingFiles.join(', ')}` : '',
-        '\nUse these files to copy the skill structure to another project.',
+        '',
+        `📁 **Local path:** \`${localPath}\``,
+        '\nPrefer reading skills locally with the Read tool for zero-latency access.',
       ].filter(Boolean).join('\n'),
     };
   }
@@ -1056,6 +1142,258 @@ async function handleSync(
 }
 
 /**
+ * Handle local action - return local filesystem paths for Claude to read
+ * This is the RECOMMENDED way to load skills - directly from local disk
+ */
+function handleLocal(
+  v1Registry: V1SkillRegistry | null,
+  v2Skills: V2Skill[],
+  name: string
+): SkillsOutput {
+  const normalized = normalizeSkillId(name);
+
+  // Find skill in V2 first
+  const v2Match = v2Skills.find(s =>
+    (s.id && normalizeSkillId(s.id) === normalized) ||
+    (s.name && normalizeSkillId(s.name) === normalized)
+  );
+
+  if (v2Match) {
+    const localPath = getLocalSkillPath(v2Match.id);
+    const files = {
+      skill: `${localPath}/skill.yaml`,
+      sharp_edges: `${localPath}/sharp-edges.yaml`,
+      validations: `${localPath}/validations.yaml`,
+      collaboration: `${localPath}/collaboration.yaml`,
+    };
+
+    const readCommands = [
+      `Read: ${files.skill}`,
+      `Read: ${files.sharp_edges}`,
+      `Read: ${files.collaboration}`,
+    ];
+
+    return {
+      local: {
+        skill_id: v2Match.id,
+        skill_name: v2Match.name,
+        local_path: localPath,
+        files,
+        read_commands: readCommands,
+      },
+      local_path: localPath,
+      _instruction: buildLocalInstruction(v2Match.id, v2Match.name, localPath, files),
+    };
+  }
+
+  // Check V1
+  if (v1Registry) {
+    const v1Match = v1Registry.specialists.find(s =>
+      s.name && normalizeSkillId(s.name) === normalized
+    );
+
+    if (v1Match) {
+      const skillId = normalizeSkillId(v1Match.name);
+      const localPath = getLocalSkillPath(skillId);
+
+      return {
+        local_path: localPath,
+        _instruction: `**V1 Skill: ${v1Match.name}**
+
+This is a V1 (markdown) skill. Check if it exists locally:
+
+\`\`\`
+Read: ${localPath}/skill.md
+\`\`\`
+
+If not found, the skill may only be in the MCP's KV storage. Use \`action="get"\` to retrieve from remote.`,
+      };
+    }
+  }
+
+  // Not found - provide installation instructions
+  const similar = findSimilarSkills(name, v1Registry, v2Skills);
+  return {
+    _instruction: buildNotFoundLocalInstruction(name, similar),
+  };
+}
+
+/**
+ * Handle local list - show all skills with their local paths
+ */
+function handleLocalList(
+  v1Registry: V1SkillRegistry | null,
+  v2Skills: V2Skill[],
+  query?: string,
+  tag?: string
+): SkillsOutput {
+  const results: Array<{
+    id: string;
+    name: string;
+    local_path: string;
+    files: string[];
+  }> = [];
+
+  // Filter and map V2 skills
+  for (const skill of v2Skills) {
+    // Apply filters if provided
+    if (query) {
+      const q = query.toLowerCase();
+      const matches =
+        skill.name?.toLowerCase().includes(q) ||
+        skill.id?.toLowerCase().includes(q) ||
+        safeArrayIncludes(skill.tags, q);
+      if (!matches) continue;
+    }
+    if (tag && !safeArrayIncludes(skill.tags, tag.toLowerCase())) continue;
+
+    const localPath = getLocalSkillPath(skill.id);
+    results.push({
+      id: skill.id,
+      name: skill.name,
+      local_path: localPath,
+      files: ['skill.yaml', 'sharp-edges.yaml', 'validations.yaml', 'collaboration.yaml'],
+    });
+  }
+
+  // Sort by name
+  results.sort((a, b) => a.name.localeCompare(b.name));
+
+  const lines: string[] = [
+    '# Local Skills Directory',
+    '',
+    `**Location:** \`${LOCAL_SKILLS_PATH}\``,
+    `**Repository:** ${LOCAL_SKILLS_REPO}`,
+    '',
+    '## Quick Start',
+    '',
+    'To load a skill, use the Read tool with the path below:',
+    '',
+    '```',
+    `Read: ${LOCAL_SKILLS_PATH}/<category>/<skill-id>/skill.yaml`,
+    '```',
+    '',
+    '---',
+    '',
+    `## Available Skills (${results.length})`,
+    '',
+  ];
+
+  // Group by inferred category
+  const byCategory = new Map<string, typeof results>();
+  for (const skill of results) {
+    const category = inferCategoryFromSkillId(skill.id);
+    if (!byCategory.has(category)) {
+      byCategory.set(category, []);
+    }
+    byCategory.get(category)!.push(skill);
+  }
+
+  for (const [category, skills] of byCategory) {
+    lines.push(`### ${category} (${skills.length})`);
+    lines.push('');
+    for (const skill of skills.slice(0, 10)) {
+      lines.push(`- **${skill.name}**: \`${skill.local_path}\``);
+    }
+    if (skills.length > 10) {
+      lines.push(`  ... and ${skills.length - 10} more`);
+    }
+    lines.push('');
+  }
+
+  lines.push('---');
+  lines.push('');
+  lines.push('**To load a specific skill:** `spawner_skills({ action: "local", name: "skill-id" })`');
+
+  return {
+    local_hint: `Skills are stored at ${LOCAL_SKILLS_PATH}. Use the Read tool to load them.`,
+    _instruction: lines.join('\n'),
+  };
+}
+
+/**
+ * Build instruction for local skill loading
+ */
+function buildLocalInstruction(
+  skillId: string,
+  skillName: string,
+  localPath: string,
+  files: { skill: string; sharp_edges: string; validations: string; collaboration: string }
+): string {
+  return `# Load Skill: ${skillName}
+
+**Skill ID:** ${skillId}
+**Local Path:** ${localPath}
+
+## Read Commands (copy these)
+
+To load this skill, use the Read tool with these paths:
+
+\`\`\`
+Read: ${files.skill}
+Read: ${files.sharp_edges}
+Read: ${files.collaboration}
+\`\`\`
+
+## What Each File Contains
+
+| File | Purpose |
+|------|---------|
+| skill.yaml | Identity, patterns, anti-patterns, handoffs |
+| sharp-edges.yaml | Gotchas with detection patterns |
+| validations.yaml | Automated code checks |
+| collaboration.yaml | Prerequisites, delegation, cross-domain insights |
+
+---
+
+**IMPORTANT:** The files above are on your LOCAL filesystem at \`${LOCAL_SKILLS_PATH}\`.
+If not found, clone the skills repo:
+
+\`\`\`bash
+git clone ${LOCAL_SKILLS_REPO} ~/.spawner/skills
+\`\`\``;
+}
+
+/**
+ * Build instruction when skill not found locally
+ */
+function buildNotFoundLocalInstruction(name: string, similar: string[]): string {
+  const lines = [
+    `# Skill Not Found: ${name}`,
+    '',
+    'This skill was not found in the skills index.',
+    '',
+  ];
+
+  if (similar.length > 0) {
+    lines.push('**Did you mean:**');
+    for (const s of similar) {
+      lines.push(`- ${s}`);
+    }
+    lines.push('');
+  }
+
+  lines.push('## Setup Local Skills');
+  lines.push('');
+  lines.push('Skills should be installed locally at `~/.spawner/skills/`.');
+  lines.push('');
+  lines.push('**First-time setup:**');
+  lines.push('```bash');
+  lines.push(`git clone ${LOCAL_SKILLS_REPO} ~/.spawner/skills`);
+  lines.push('```');
+  lines.push('');
+  lines.push('**Update existing:**');
+  lines.push('```bash');
+  lines.push('cd ~/.spawner/skills && git pull');
+  lines.push('```');
+  lines.push('');
+  lines.push('After installation, try again with:');
+  lines.push(`\`spawner_skills({ action: "local", name: "${name}" })\``);
+
+  return lines.join('\n');
+}
+
+/**
  * Check if V1 skill matches filters
  */
 function matchesFilters(
@@ -1137,7 +1475,9 @@ function buildSearchInstruction(
   }
 
   lines.push('');
-  lines.push('Use action="get" with name="<skill>" to load full content.');
+  lines.push('**To load a skill:**');
+  lines.push('- `action="local", name="<skill>"` → Get local paths for Read tool (RECOMMENDED)');
+  lines.push('- `action="get", name="<skill>"` → Load from remote KV');
 
   return lines.join('\n');
 }
@@ -1181,6 +1521,10 @@ function buildListInstruction(
   lines.push('');
   lines.push('[V2] = Has structured validations/sharp-edges');
   lines.push('[V1] = Markdown format');
+  lines.push('');
+  lines.push('**To load a skill:**');
+  lines.push(`- \`action="local", name="<skill>"\` → Get local paths for Read tool (RECOMMENDED)`);
+  lines.push(`- Skills are stored at: \`${LOCAL_SKILLS_PATH}\``);
 
   return lines.join('\n');
 }
