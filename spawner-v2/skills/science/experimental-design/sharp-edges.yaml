@@ -1,0 +1,104 @@
+id: experimental-design-sharp-edges
+skill: experimental-design
+version: 1.0.0
+
+sharp_edges:
+
+  - id: ofat-misses-interactions
+    severity: critical
+    title: "One-Factor-At-A-Time Misses All Interactions"
+    summary: "OFAT requires more runs and can never detect interaction effects"
+    symptoms:
+      - "Changing one variable at a time"
+      - "Optimal found but doesn't work in practice"
+      - "Variables tested independently"
+    why: |
+      OFAT assumes factors are independent. In reality, factor A's
+      effect often depends on factor B's level (interaction).
+      Factorial designs detect these interactions.
+
+      OFAT also requires MORE total runs for the same information.
+    gotcha: |
+      # OFAT approach (BAD)
+      # Vary temperature: 100, 150, 200 (best: 200)
+      # Vary pressure at T=200: 1, 2, 3 (best: 2)
+      # Conclude: T=200, P=2 is optimal
+
+      # Reality: Optimal might be T=150, P=3
+      # Interaction: High temp needs low pressure
+      # OFAT could never find this!
+    solution: |
+      Use factorial design:
+      from pyDOE2 import ff2n
+      design = ff2n(2)  # 2 factors, 4 runs
+      # Tests all combinations including interaction
+
+  - id: no-randomization-confound
+    severity: critical
+    title: "Systematic Run Order Creates False Effects"
+    summary: "Running all treatment A first biases results with time effects"
+    symptoms:
+      - "Experiments run in convenient order"
+      - "All replicates of condition X run consecutively"
+      - "Unexpected 'treatment effects'"
+    why: |
+      Equipment drifts over time. Operators get fatigued.
+      Materials age. If all treatment A runs are first,
+      time effects get confounded with treatment effects.
+    solution: |
+      np.random.shuffle(run_order)
+      # Run experiments in random order
+      # Or use blocking if time effects are expected
+
+  - id: missing-center-points
+    severity: high
+    title: "No Center Points to Check for Curvature"
+    summary: "Linear model fit when relationship is actually curved"
+    symptoms:
+      - "2-level factorial shows no effect"
+      - "Optimal settings don't work as expected"
+      - "Model has poor prediction accuracy"
+    solution: |
+      # Add center points to 2-level factorial
+      design = np.vstack([
+          ff2n(2),           # Corner points
+          [[0, 0], [0, 0]]   # Center points (replicates)
+      ])
+      # If center point response differs from corner average,
+      # curvature exists → need higher-order model
+
+  - id: resolution-aliasing
+    severity: high
+    title: "Fractional Factorial Aliasing Confusion"
+    summary: "In fractional designs, some effects are mathematically confounded"
+    symptoms:
+      - "Using fractional factorial without understanding resolution"
+      - "Main effect 'significant' but actually aliased with interaction"
+    why: |
+      Fractional factorials trade runs for information.
+      Resolution III: Main effects aliased with 2-way interactions
+      Resolution IV: Main effects clear, 2-way aliased with 2-way
+      Resolution V: Main and 2-way clear, aliased with 3-way
+    solution: |
+      # Check resolution before interpreting
+      # Use Resolution V or higher for main + 2-way interactions
+      # Or use foldover to de-alias
+
+  - id: inadequate-replication
+    severity: medium
+    title: "No Replication = No Error Estimate"
+    summary: "Without replicates, can't distinguish signal from noise"
+    symptoms:
+      - "One run per condition"
+      - "Every effect looks 'significant'"
+      - "No pure error estimate"
+    solution: |
+      # Include replicates, especially at center points
+      design = full_factorial(factors)
+      design = pd.concat([design, design])  # Duplicate for replicates
+      # Or at minimum, replicate center points
+
+detection:
+  file_patterns:
+    - "**/*.py"
+    - "**/*.R"

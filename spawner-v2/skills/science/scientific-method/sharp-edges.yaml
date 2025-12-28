@@ -1,0 +1,497 @@
+# Scientific Method Sharp Edges
+# Non-obvious gotchas that lead to invalid research and wasted effort
+
+id: scientific-method-sharp-edges
+skill: scientific-method
+version: 1.0.0
+
+# ============================================================================
+# CRITICAL GOTCHAS - Can invalidate entire studies
+# ============================================================================
+sharp_edges:
+
+  - id: reproducibility-crisis-seeds
+    severity: critical
+    title: "Unreported Random Seeds = Irreproducible Results"
+    summary: "Most ML/stats papers can't be reproduced because random seeds weren't documented"
+    symptoms:
+      - "Results vary significantly between runs"
+      - "Can't reproduce your own results from 6 months ago"
+      - "Reviewers or colleagues get different numbers"
+      - "Production model performs differently than paper model"
+    why: |
+      Random seeds affect: train/test splits, weight initialization,
+      dropout masks, data shuffling, stochastic gradient descent, and more.
+      Without fixed, documented seeds, you're running a different experiment
+      each time. Even NumPy, Python's random, and framework seeds
+      must ALL be set consistently.
+    gotcha: |
+      Setting torch.manual_seed(42) is NOT enough if you also use NumPy
+      or Python's random module. You need to set ALL of them:
+
+      # INCOMPLETE - only sets PyTorch seed
+      torch.manual_seed(42)
+
+      # STILL INCOMPLETE - misses CUDA
+      random.seed(42)
+      np.random.seed(42)
+      torch.manual_seed(42)
+
+      # CORRECT - set everything
+      def set_all_seeds(seed):
+          random.seed(seed)
+          np.random.seed(seed)
+          torch.manual_seed(seed)
+          torch.cuda.manual_seed_all(seed)
+          torch.backends.cudnn.deterministic = True
+          torch.backends.cudnn.benchmark = False
+          os.environ['PYTHONHASHSEED'] = str(seed)
+    solution: |
+      1. Create a seed setting function that covers all sources
+      2. Log seed values to experiment manifest
+      3. Use config files for seeds, not hardcoded values
+      4. For multi-GPU: set torch.cuda.manual_seed_all()
+      5. Document the seed in your paper/report
+    detection_pattern: "random\\.|np\\.random|torch\\.manual_seed(?!.*cuda)"
+    references:
+      - "https://pytorch.org/docs/stable/notes/randomness.html"
+      - "Bouthillier et al. 'Accounting for Variance in Machine Learning Benchmarks'"
+
+  - id: multiple-comparisons-disaster
+    severity: critical
+    title: "Multiple Comparisons Inflate False Positives to 60%+"
+    summary: "Running 20 tests at alpha=0.05 gives 64% chance of at least one false positive"
+    symptoms:
+      - "Finding 'significant' results that don't replicate"
+      - "Running many t-tests without correction"
+      - "Testing many subgroups until one is significant"
+      - "Checking outcomes at multiple timepoints"
+    why: |
+      With 20 independent tests at alpha=0.05:
+      P(at least one false positive) = 1 - (0.95)^20 = 64%
+
+      This is the mathematical reality of multiple testing.
+      Most "significant" findings in exploratory analyses are noise.
+    gotcha: |
+      Even "obvious" analyses multiply comparisons:
+
+      # Looks like ONE test, but it's actually MANY:
+      for age_group in ['18-25', '26-35', '36-45', '46-55', '55+']:
+          for gender in ['M', 'F', 'Other']:
+              for region in ['North', 'South', 'East', 'West']:
+                  test_significance(data[age_group, gender, region])
+
+      # That's 5 * 3 * 4 = 60 tests!
+      # Expected false positives: 60 * 0.05 = 3
+
+      # Common mistake: Only reporting the significant subgroups
+      # "We found significance in Males 26-35 in the South"
+      # (out of 60 tests, you'd expect 3 to be "significant" by chance)
+    solution: |
+      1. Pre-specify primary outcome (only one)
+      2. Use Bonferroni correction: alpha_adj = 0.05 / n_tests
+      3. Or use FDR (Benjamini-Hochberg) for exploratory work
+      4. Report ALL tests conducted, not just significant ones
+      5. Label post-hoc analyses as "exploratory"
+    detection_pattern: "for.*in.*\\n.*test|ttest_ind.*\\n.*if.*p.*<"
+
+  - id: harking-post-hoc-hypothesis
+    severity: critical
+    title: "HARKing Destroys Scientific Validity"
+    summary: "Hypothesizing After Results are Known turns exploration into false confirmation"
+    symptoms:
+      - "Hypothesis perfectly matches observed pattern"
+      - "No pre-registration document exists"
+      - "Hypothesis was 'refined' after seeing data"
+      - "Results seem too good to be true"
+    why: |
+      When you look at data first, you will ALWAYS find patterns.
+      Some are real, most are noise. If you then write a hypothesis
+      that predicts the noise pattern, you're committing scientific fraud.
+
+      Your brain is a pattern-matching machine - it WILL find something.
+      That's why hypothesis must come BEFORE data.
+    gotcha: |
+      # Classic HARKing pattern:
+
+      # 1. Look at data exploratorily
+      sns.pairplot(df)  # Notice age > 40 seems different
+
+      # 2. Run confirmatory test as if you predicted it
+      print("Testing our hypothesis that age > 40 differs...")
+      result = ttest_ind(df[df.age > 40], df[df.age <= 40])
+
+      # 3. Write paper claiming you predicted this
+      # "We hypothesized that users over 40 would behave differently"
+
+      # THIS IS FRAUD - the "hypothesis" came from the data
+    solution: |
+      1. Use pre-registration (OSF, AsPredicted) BEFORE data collection
+      2. Time-stamp hypotheses before accessing data
+      3. Clearly separate confirmatory vs exploratory analyses
+      4. In papers, cite pre-registration link
+      5. Label post-hoc discoveries as "exploratory finding"
+    detection_pattern: "hypothesis.*after|predict.*after.*analy"
+    references:
+      - "Kerr, N. L. (1998). HARKing: Hypothesizing After the Results are Known"
+
+  - id: survivorship-bias-samples
+    severity: critical
+    title: "Survivorship Bias Skews All Conclusions"
+    summary: "Analyzing only 'successful' cases leads to backwards conclusions"
+    symptoms:
+      - "Only studying current customers, not churned ones"
+      - "Only analyzing shipped products, not failed ones"
+      - "Looking at successful startups for success patterns"
+      - "Studying existing users but not those who bounced"
+    why: |
+      WWII planes that returned had bullet holes in wings and tail.
+      Engineers wanted to armor those spots. Abraham Wald said NO -
+      armor where returning planes DON'T have holes, because planes
+      hit there didn't return.
+
+      You can't learn from data you never collected.
+    gotcha: |
+      # Studying what makes successful apps successful
+      successful_apps = get_apps(rating > 4.5)  # Only survivors
+      features = analyze_common_patterns(successful_apps)
+      # "Successful apps use onboarding tutorials!"
+
+      # PROBLEM: Failed apps ALSO used tutorials
+      # You never saw them because they're dead
+
+      # You need the dead bodies too:
+      all_apps = get_all_apps_including_failures()
+      compare_survivors_vs_failures(all_apps)
+    solution: |
+      1. Include failed/churned/removed cases in your sample
+      2. Track cohorts from the beginning, not retrospectively
+      3. Use prospective studies, not just retrospective
+      4. Ask "What would the dead tell us?"
+      5. Log everything, even from users who leave
+    detection_pattern: "success|survivors|current_users"
+    references:
+      - "https://en.wikipedia.org/wiki/Survivorship_bias"
+
+# ============================================================================
+# HIGH SEVERITY - Seriously undermines research quality
+# ============================================================================
+
+  - id: underpowered-null-results
+    severity: high
+    title: "Underpowered Studies Can't Detect Real Effects"
+    summary: "With n=20, you need Cohen's d > 0.9 to detect at 80% power"
+    symptoms:
+      - "Ran quick study, found 'no effect'"
+      - "Didn't do power analysis before collecting data"
+      - "Confidently claimed null finding"
+      - "Sample size chosen by convenience, not statistics"
+    why: |
+      Statistical power = P(detect effect | effect exists)
+      With low power, most real effects go undetected.
+
+      Sample size requirements:
+      - Small effect (d=0.2): n=393 per group
+      - Medium effect (d=0.5): n=64 per group
+      - Large effect (d=0.8): n=26 per group
+
+      Most studies have n < 50 and try to detect medium effects.
+    gotcha: |
+      # Convenience sampling
+      n = len(available_users)  # Got 25 users
+      result = ttest_ind(treatment, control)
+
+      if result.pvalue > 0.05:
+          print("No significant effect found")
+          # WRONG: This means NOTHING with n=25
+
+      # You had ~33% power to detect a medium effect
+      # 67% chance of missing a REAL effect
+
+      # Cannot conclude "no effect exists"
+      # Can only conclude "we couldn't detect an effect"
+    solution: |
+      1. Calculate required N BEFORE starting
+      2. Use G*Power or statsmodels.stats.power
+      3. Don't start if you can't achieve 80% power
+      4. Report achieved power in publications
+      5. Distinguish "no effect" from "couldn't detect"
+    detection_pattern: "len\\(.*\\).*<\\s*50|sample_size.*=.*[12]\\d(?!\\d)"
+
+  - id: p-value-misinterpretation
+    severity: high
+    title: "P-values Don't Mean What You Think"
+    summary: "p=0.03 does NOT mean '3% chance the null is true'"
+    symptoms:
+      - "Claiming p=0.04 means treatment 'probably works'"
+      - "Using p-values to compare effect sizes between studies"
+      - "Stopping data collection when p < 0.05"
+      - "Treating p=0.049 very differently from p=0.051"
+    why: |
+      P-value = P(data this extreme | null hypothesis is true)
+      P-value ≠ P(null is true | data)
+
+      These are VERY different things (Bayes' theorem).
+      A p=0.03 could still correspond to 30%+ probability
+      the null is true, depending on priors.
+    gotcha: |
+      # Common misinterpretation
+      if p < 0.05:
+          print("95% confident the effect is real")  # WRONG
+
+      # p=0.05 means: IF null is true, 5% chance of this data
+      # It says NOTHING about probability null is true
+
+      # Also wrong: "p=0.001 is more significant than p=0.04"
+      # P-values are not effect size measures
+
+      # Cliff effects are arbitrary:
+      # p=0.049 -> "Significant! Publish!"
+      # p=0.051 -> "Not significant. File drawer."
+      # These are practically identical
+    solution: |
+      1. Report effect sizes with confidence intervals
+      2. Don't dichotomize at p=0.05
+      3. Consider Bayesian methods for probability statements
+      4. Interpret p-values correctly in writing
+      5. Use "statistically detectable" not "significant"
+    detection_pattern: "p.*<.*0\\.05.*significant|confidence.*p-value"
+    references:
+      - "ASA Statement on Statistical Significance and P-Values (2016)"
+      - "Wasserstein & Lazar, 'The ASA Statement on p-Values'"
+
+  - id: data-leakage-train-test
+    severity: high
+    title: "Data Leakage Gives Unrealistic Performance"
+    summary: "Information from test set leaking into training destroys validity"
+    symptoms:
+      - "Model performs great in development, fails in production"
+      - "Cross-validation scores much higher than holdout"
+      - "Performance drops significantly on new data"
+      - "Preprocessing fit on entire dataset before splitting"
+    why: |
+      If any information from test set influences training,
+      your evaluation is meaningless. You're testing on
+      data the model has "seen" in some form.
+
+      Common leaks:
+      - Normalizing before splitting
+      - Feature selection on full data
+      - Filling missing values with global stats
+      - Time series without temporal split
+    gotcha: |
+      # LEAK: Scaling before split
+      scaler = StandardScaler()
+      X_scaled = scaler.fit_transform(X)  # Fits on ALL data including test
+      X_train, X_test = train_test_split(X_scaled)  # Too late!
+
+      # LEAK: Feature selection before split
+      selector = SelectKBest(k=10)
+      X_selected = selector.fit_transform(X, y)  # Uses test labels!
+      X_train, X_test = train_test_split(X_selected)
+
+      # LEAK: Time series random split
+      X_train, X_test = train_test_split(time_series_data, shuffle=True)
+      # Test data is from BEFORE training data - impossible in production
+    solution: |
+      1. ALWAYS split first, then preprocess
+      2. Fit scalers/encoders on train only, transform test
+      3. Use pipelines to prevent leaks
+      4. For time series, use temporal splits
+      5. Be paranoid about any global statistics
+    detection_pattern: "fit_transform.*train_test_split|StandardScaler.*split"
+
+  - id: confirmation-bias-analysis
+    severity: high
+    title: "Confirmation Bias Makes You See What You Expect"
+    summary: "We scrutinize unexpected results more than expected ones"
+    symptoms:
+      - "Quickly accepting results that confirm hypothesis"
+      - "Spending hours debugging when results contradict"
+      - "Finding 'errors' only in unfavorable results"
+      - "Attributing favorable results to treatment, unfavorable to noise"
+    why: |
+      Human brains evolved to find patterns and confirm beliefs.
+      We unconsciously:
+      - Check favorable results less carefully
+      - Explain away unfavorable results as "noise"
+      - Notice bugs only when results surprise us
+      - Remember confirmations, forget contradictions
+    gotcha: |
+      # You expect treatment to work
+      result = run_experiment()
+
+      if result.treatment > result.control:
+          print("As hypothesized!")
+          # Barely glance at the data
+          publish(result)
+
+      else:
+          print("That's weird, let me check...")
+          check_for_bugs()  # Only now you check
+          verify_data_quality()  # Suddenly thorough
+          check_implementation()  # Finding any excuse
+          # "Must be a bug" - when it might be real
+    solution: |
+      1. Apply same scrutiny to ALL results
+      2. Pre-specify analysis in pre-registration
+      3. Have skeptical colleague review favorable results
+      4. Blinding: Don't know which group is treatment during analysis
+      5. Document decision process: "Why did I investigate X but not Y?"
+    references:
+      - "Nickerson, R. S. (1998). Confirmation bias: A ubiquitous phenomenon"
+
+# ============================================================================
+# MEDIUM SEVERITY - Common issues that reduce research quality
+# ============================================================================
+
+  - id: correlation-causation-fallacy
+    severity: medium
+    title: "Correlation Does Not Imply Causation"
+    summary: "Ice cream sales correlate with drowning deaths (both caused by summer)"
+    symptoms:
+      - "Found correlation, recommending intervention"
+      - "Not considering third variables (confounds)"
+      - "Using observational data for causal claims"
+      - "Ignoring reverse causation possibility"
+    why: |
+      Correlation can arise from:
+      1. A causes B (what you want)
+      2. B causes A (reverse causation)
+      3. C causes both A and B (confounding)
+      4. Random chance (spurious correlation)
+
+      Only experiments with randomization can establish causation.
+    gotcha: |
+      # Observational study
+      correlation = df['code_reviews'].corr(df['bug_count'])  # -0.6
+
+      # WRONG conclusion:
+      "Code reviews reduce bugs. Mandate more reviews."
+
+      # Alternative explanations:
+      # - Senior devs do more reviews AND write fewer bugs
+      # - Teams with fewer bugs have time for reviews
+      # - Well-managed teams do both
+      # - Random correlation in small sample
+    solution: |
+      1. For causal claims, use randomized experiments
+      2. If observational, use causal inference methods
+      3. Look for and control confounding variables
+      4. Consider reverse causation explicitly
+      5. Use careful language: "associated with" not "causes"
+    detection_pattern: "corr.*implies|causes.*correlation"
+
+  - id: overfitting-hypothesis
+    severity: medium
+    title: "Overfitting Your Hypothesis to Data"
+    summary: "Adding parameters until your hypothesis 'explains' the data"
+    symptoms:
+      - "Continually refining hypothesis to fit observations"
+      - "Adding epicycles to save a theory"
+      - "Post-hoc subgroup analyses to rescue null results"
+      - "Adding interaction terms until significance"
+    why: |
+      With enough parameters, you can fit any data.
+      But fitted models predict poorly on new data.
+
+      Same applies to hypotheses: with enough caveats,
+      any hypothesis can "explain" any data. But it won't
+      predict new observations.
+    gotcha: |
+      # Initial hypothesis fails
+      # H1: Treatment improves outcome (p=0.3)
+
+      # Add parameters until it "works"
+      # H2: Treatment improves outcome in males (p=0.15)
+      # H3: Treatment improves outcome in males over 40 (p=0.06)
+      # H4: Treatment improves outcome in employed males over 40 (p=0.04)
+
+      # "See, our hypothesis was confirmed!"
+      # No, you FOUND the subgroup where noise happened to be positive
+    solution: |
+      1. Pre-specify your hypothesis completely
+      2. No post-hoc subgroup analyses for primary conclusions
+      3. Simpler theories are better (Occam's razor)
+      4. If refining, get NEW data to test refined hypothesis
+      5. Report all variations tried
+    detection_pattern: "refine|adjust.*hypothesis|subgroup.*significant"
+
+  - id: single-study-overconfidence
+    severity: medium
+    title: "One Study Is Not Proof"
+    summary: "A single significant result has high false positive probability"
+    symptoms:
+      - "Drawing strong conclusions from one experiment"
+      - "Treating p<0.05 as 'proof' of effect"
+      - "Not attempting replication"
+      - "Ignoring effect size in favor of p-value"
+    why: |
+      Even with perfect methodology:
+      - 5% false positive rate means 1 in 20 studies wrong
+      - Publication bias means failed replications hidden
+      - Your specific sample might not generalize
+
+      Science requires independent replication.
+    solution: |
+      1. Attempt internal replication before publishing
+      2. Pre-register to enable meta-analysis
+      3. Share data for others to verify
+      4. Use language like "suggests" not "proves"
+      5. Wait for independent replication before strong claims
+    references:
+      - "Ioannidis, J. 'Why Most Published Research Findings Are False'"
+
+  - id: garden-of-forking-paths
+    severity: medium
+    title: "The Garden of Forking Paths"
+    summary: "Seemingly reasonable analysis decisions multiply to create many implicit tests"
+    symptoms:
+      - "Making 'obvious' analysis decisions as you go"
+      - "Not documenting decision rationale"
+      - "Each decision seems justified individually"
+      - "Different analysts get different results from same data"
+    why: |
+      Each "reasonable" choice forks the analysis:
+      - How to handle outliers? (5 options)
+      - Which control variables? (10 combinations)
+      - How to measure outcome? (3 ways)
+      - Which subsamples to include? (4 criteria)
+
+      5 * 10 * 3 * 4 = 600 possible analyses
+      Each feels reasonable, but you're implicitly testing 600 hypotheses.
+    gotcha: |
+      # Analyst A
+      df = df[df.age < 100]  # Remove outliers >100
+      outcome = df.revenue   # Use revenue
+      model = OLS(outcome ~ treatment + gender)
+
+      # Analyst B (equally reasonable choices)
+      df = df[df.age.between(18, 65)]  # Working age only
+      outcome = df.revenue.clip(upper=df.revenue.quantile(0.95))  # Winsorize
+      model = OLS(outcome ~ treatment + gender + age)
+
+      # They get p=0.04 and p=0.12 respectively
+      # Which is "correct"? Both are defensible.
+    solution: |
+      1. Pre-specify ALL analysis decisions
+      2. Run multiverse analysis (all combinations)
+      3. Report sensitivity to analytical choices
+      4. Use holdout data for final analysis
+      5. Have pre-registration for exact analysis plan
+    references:
+      - "Gelman & Loken, 'The Garden of Forking Paths'"
+
+# ============================================================================
+# DETECTION CONFIGURATION
+# ============================================================================
+detection:
+  file_patterns:
+    - "**/*.py"
+    - "**/*.R"
+    - "**/*.ipynb"
+    - "**/*.Rmd"
+  ignore_patterns:
+    - "**/test_*.py"
+    - "**/*_test.py"
+    - "**/tests/**"

@@ -1,0 +1,641 @@
+# Physics Simulation Skill
+# Numerical methods for physical systems
+
+id: physics-simulation
+name: Physics Simulation
+category: simulation
+complexity: advanced
+requires_skills:
+  - statistical-analysis
+
+description: |
+  Patterns for physics-based simulation including numerical integration,
+  rigid body dynamics, fluid simulation, finite element methods, and
+  multi-physics coupling. Covers accuracy, stability, and performance.
+
+patterns:
+
+  numerical_integration:
+    name: Numerical Integration Methods
+    description: ODE solvers for physical systems
+    pattern: |
+      import numpy as np
+      from typing import Callable, Tuple
+      from dataclasses import dataclass
+
+      @dataclass
+      class IntegratorState:
+          """State for adaptive integrators."""
+          t: float
+          y: np.ndarray
+          dt: float
+          error_estimate: float = 0.0
+
+      class Integrator:
+          """Base class for ODE integrators.
+
+          Solves: dy/dt = f(t, y)
+          """
+
+          def __init__(self, f: Callable, dt: float = 0.01):
+              self.f = f
+              self.dt = dt
+
+          def step(self, t: float, y: np.ndarray) -> Tuple[float, np.ndarray]:
+              raise NotImplementedError
+
+      class EulerIntegrator(Integrator):
+          """Forward Euler - simple but unstable."""
+
+          def step(self, t: float, y: np.ndarray) -> Tuple[float, np.ndarray]:
+              y_new = y + self.dt * self.f(t, y)
+              return t + self.dt, y_new
+
+      class RK4Integrator(Integrator):
+          """4th-order Runge-Kutta - good balance of accuracy and speed."""
+
+          def step(self, t: float, y: np.ndarray) -> Tuple[float, np.ndarray]:
+              dt = self.dt
+              k1 = self.f(t, y)
+              k2 = self.f(t + dt/2, y + dt/2 * k1)
+              k3 = self.f(t + dt/2, y + dt/2 * k2)
+              k4 = self.f(t + dt, y + dt * k3)
+
+              y_new = y + dt/6 * (k1 + 2*k2 + 2*k3 + k4)
+              return t + dt, y_new
+
+      class VerletIntegrator(Integrator):
+          """Velocity Verlet - symplectic, energy-preserving.
+
+          Best for Hamiltonian systems (mechanics, molecular dynamics).
+          """
+
+          def __init__(self, acceleration_func: Callable, dt: float = 0.01):
+              """
+              Args:
+                  acceleration_func: a(x) -> acceleration (not a(t, x, v))
+              """
+              self.a = acceleration_func
+              self.dt = dt
+
+          def step(self, x: np.ndarray, v: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+              """Single Verlet step.
+
+              Args:
+                  x: Position
+                  v: Velocity
+
+              Returns:
+                  (new_x, new_v)
+              """
+              dt = self.dt
+
+              # Half step velocity
+              a = self.a(x)
+              v_half = v + 0.5 * dt * a
+
+              # Full step position
+              x_new = x + dt * v_half
+
+              # Half step velocity with new acceleration
+              a_new = self.a(x_new)
+              v_new = v_half + 0.5 * dt * a_new
+
+              return x_new, v_new
+
+      class RK45Integrator(Integrator):
+          """Adaptive Runge-Kutta-Fehlberg with error control."""
+
+          def __init__(self, f: Callable, dt: float = 0.01,
+                       atol: float = 1e-6, rtol: float = 1e-3):
+              super().__init__(f, dt)
+              self.atol = atol
+              self.rtol = rtol
+
+              # Butcher tableau coefficients
+              self.c = np.array([0, 1/4, 3/8, 12/13, 1, 1/2])
+              self.a = [
+                  [],
+                  [1/4],
+                  [3/32, 9/32],
+                  [1932/2197, -7200/2197, 7296/2197],
+                  [439/216, -8, 3680/513, -845/4104],
+                  [-8/27, 2, -3544/2565, 1859/4104, -11/40]
+              ]
+              self.b4 = np.array([25/216, 0, 1408/2565, 2197/4104, -1/5, 0])
+              self.b5 = np.array([16/135, 0, 6656/12825, 28561/56430, -9/50, 2/55])
+
+          def step_with_error(self, t: float, y: np.ndarray, dt: float
+                              ) -> Tuple[np.ndarray, np.ndarray, float]:
+              """Single step with error estimate."""
+              k = [self.f(t, y)]
+
+              for i in range(1, 6):
+                  ti = t + self.c[i] * dt
+                  yi = y + dt * sum(self.a[i][j] * k[j] for j in range(i))
+                  k.append(self.f(ti, yi))
+
+              # 4th and 5th order solutions
+              y4 = y + dt * sum(self.b4[i] * k[i] for i in range(6))
+              y5 = y + dt * sum(self.b5[i] * k[i] for i in range(6))
+
+              # Error estimate
+              error = np.linalg.norm(y5 - y4)
+
+              return y5, y4, error
+
+          def step_adaptive(self, state: IntegratorState) -> IntegratorState:
+              """Adaptive step with automatic dt adjustment."""
+              t, y, dt = state.t, state.y, state.dt
+
+              while True:
+                  y5, y4, error = self.step_with_error(t, y, dt)
+
+                  # Tolerance
+                  tol = self.atol + self.rtol * np.linalg.norm(y)
+
+                  if error < tol:
+                      # Accept step
+                      # Adjust dt for next step
+                      if error > 0:
+                          dt_new = 0.9 * dt * (tol / error) ** 0.2
+                      else:
+                          dt_new = 2 * dt
+                      dt_new = min(dt_new, 10 * dt)  # Don't grow too fast
+
+                      return IntegratorState(t + dt, y5, dt_new, error)
+                  else:
+                      # Reject step, reduce dt
+                      dt = 0.9 * dt * (tol / error) ** 0.25
+                      dt = max(dt, 0.1 * state.dt)  # Don't shrink too fast
+    why: "Correct integration is fundamental to accurate physics simulation"
+
+  rigid_body_dynamics:
+    name: Rigid Body Dynamics
+    description: 3D rigid body simulation with constraints
+    pattern: |
+      import numpy as np
+      from scipy.spatial.transform import Rotation
+      from dataclasses import dataclass, field
+      from typing import List
+
+      @dataclass
+      class RigidBody:
+          """3D rigid body with state and properties."""
+          # State
+          position: np.ndarray = field(default_factory=lambda: np.zeros(3))
+          velocity: np.ndarray = field(default_factory=lambda: np.zeros(3))
+          orientation: Rotation = field(default_factory=lambda: Rotation.identity())
+          angular_velocity: np.ndarray = field(default_factory=lambda: np.zeros(3))
+
+          # Properties
+          mass: float = 1.0
+          inertia: np.ndarray = field(default_factory=lambda: np.eye(3))
+          inertia_inv: np.ndarray = field(default_factory=lambda: np.eye(3))
+
+          # Accumulated forces for this step
+          force: np.ndarray = field(default_factory=lambda: np.zeros(3))
+          torque: np.ndarray = field(default_factory=lambda: np.zeros(3))
+
+          def __post_init__(self):
+              self.inertia_inv = np.linalg.inv(self.inertia)
+
+          def apply_force(self, force: np.ndarray, point: np.ndarray = None):
+              """Apply force at point (world coordinates)."""
+              self.force += force
+              if point is not None:
+                  r = point - self.position
+                  self.torque += np.cross(r, force)
+
+          def apply_impulse(self, impulse: np.ndarray, point: np.ndarray = None):
+              """Apply instantaneous impulse."""
+              self.velocity += impulse / self.mass
+              if point is not None:
+                  r = point - self.position
+                  angular_impulse = np.cross(r, impulse)
+                  # Transform to body frame
+                  R = self.orientation.as_matrix()
+                  angular_impulse_body = R.T @ angular_impulse
+                  self.angular_velocity += R @ (self.inertia_inv @ angular_impulse_body)
+
+          def clear_forces(self):
+              self.force = np.zeros(3)
+              self.torque = np.zeros(3)
+
+      class RigidBodySimulator:
+          """Rigid body physics simulation."""
+
+          def __init__(self, dt: float = 0.01, gravity: np.ndarray = None):
+              self.dt = dt
+              self.gravity = gravity if gravity is not None else np.array([0, -9.81, 0])
+              self.bodies: List[RigidBody] = []
+
+          def add_body(self, body: RigidBody):
+              self.bodies.append(body)
+
+          def step(self):
+              """Advance simulation by dt."""
+              dt = self.dt
+
+              for body in self.bodies:
+                  # Apply gravity
+                  body.apply_force(body.mass * self.gravity)
+
+                  # Linear dynamics
+                  acceleration = body.force / body.mass
+                  body.velocity += acceleration * dt
+                  body.position += body.velocity * dt
+
+                  # Angular dynamics (in body frame)
+                  R = body.orientation.as_matrix()
+                  torque_body = R.T @ body.torque
+                  omega_body = R.T @ body.angular_velocity
+
+                  # Euler's rotation equations
+                  # I * dw/dt = torque - w x (I * w)
+                  I = body.inertia
+                  I_inv = body.inertia_inv
+                  omega_dot_body = I_inv @ (torque_body - np.cross(omega_body, I @ omega_body))
+
+                  omega_body_new = omega_body + omega_dot_body * dt
+                  body.angular_velocity = R @ omega_body_new
+
+                  # Update orientation
+                  omega_mag = np.linalg.norm(body.angular_velocity)
+                  if omega_mag > 1e-10:
+                      axis = body.angular_velocity / omega_mag
+                      angle = omega_mag * dt
+                      delta_rot = Rotation.from_rotvec(axis * angle)
+                      body.orientation = delta_rot * body.orientation
+
+                  body.clear_forces()
+
+      # Collision detection and response
+      def sphere_sphere_collision(body1: RigidBody, r1: float,
+                                   body2: RigidBody, r2: float,
+                                   restitution: float = 0.5):
+          """Detect and resolve sphere-sphere collision."""
+          diff = body2.position - body1.position
+          dist = np.linalg.norm(diff)
+          min_dist = r1 + r2
+
+          if dist < min_dist and dist > 0:
+              # Collision normal
+              n = diff / dist
+
+              # Penetration depth
+              penetration = min_dist - dist
+
+              # Separate bodies
+              total_mass = body1.mass + body2.mass
+              body1.position -= n * penetration * (body2.mass / total_mass)
+              body2.position += n * penetration * (body1.mass / total_mass)
+
+              # Relative velocity at contact
+              v_rel = body2.velocity - body1.velocity
+
+              # Normal velocity
+              v_n = np.dot(v_rel, n)
+
+              if v_n < 0:  # Approaching
+                  # Impulse magnitude
+                  j = -(1 + restitution) * v_n
+                  j /= 1/body1.mass + 1/body2.mass
+
+                  # Apply impulses
+                  body1.velocity -= j * n / body1.mass
+                  body2.velocity += j * n / body2.mass
+    why: "Rigid body dynamics is the foundation of game physics and robotics simulation"
+
+  finite_element:
+    name: Finite Element Method Basics
+    description: FEM for structural and thermal analysis
+    pattern: |
+      import numpy as np
+      from scipy.sparse import csr_matrix, lil_matrix
+      from scipy.sparse.linalg import spsolve
+      from typing import List, Tuple
+
+      class FEMSolver1D:
+          """1D Finite Element solver for rod/beam problems.
+
+          Solves: -d/dx(EA du/dx) = f(x)
+          with boundary conditions.
+          """
+
+          def __init__(self, nodes: np.ndarray, elements: List[Tuple[int, int]],
+                       E: float = 200e9, A: float = 0.01):
+              """
+              Args:
+                  nodes: Node coordinates [n_nodes]
+                  elements: List of (node_i, node_j) tuples
+                  E: Young's modulus
+                  A: Cross-sectional area
+              """
+              self.nodes = nodes
+              self.elements = elements
+              self.E = E
+              self.A = A
+              self.n_nodes = len(nodes)
+
+          def element_stiffness(self, elem_idx: int) -> Tuple[np.ndarray, float]:
+              """Compute element stiffness matrix."""
+              i, j = self.elements[elem_idx]
+              L = abs(self.nodes[j] - self.nodes[i])  # Element length
+
+              # Local stiffness matrix for 1D rod
+              k_local = self.E * self.A / L * np.array([
+                  [1, -1],
+                  [-1, 1]
+              ])
+
+              return k_local, L
+
+          def assemble_global_stiffness(self) -> np.ndarray:
+              """Assemble global stiffness matrix."""
+              K = lil_matrix((self.n_nodes, self.n_nodes))
+
+              for idx, (i, j) in enumerate(self.elements):
+                  k_local, _ = self.element_stiffness(idx)
+
+                  # Add to global matrix
+                  K[i, i] += k_local[0, 0]
+                  K[i, j] += k_local[0, 1]
+                  K[j, i] += k_local[1, 0]
+                  K[j, j] += k_local[1, 1]
+
+              return K.tocsr()
+
+          def solve(self, fixed_nodes: dict, forces: dict) -> np.ndarray:
+              """Solve the FEM problem.
+
+              Args:
+                  fixed_nodes: {node_idx: displacement}
+                  forces: {node_idx: force}
+
+              Returns:
+                  Nodal displacements
+              """
+              K = self.assemble_global_stiffness()
+              f = np.zeros(self.n_nodes)
+
+              # Apply forces
+              for node, force in forces.items():
+                  f[node] = force
+
+              # Apply boundary conditions (penalty method)
+              penalty = 1e20
+              for node, disp in fixed_nodes.items():
+                  K[node, node] += penalty
+                  f[node] = penalty * disp
+
+              # Solve
+              u = spsolve(K, f)
+
+              return u
+
+          def compute_stresses(self, u: np.ndarray) -> np.ndarray:
+              """Compute element stresses from displacements."""
+              stresses = []
+              for i, j in self.elements:
+                  L = abs(self.nodes[j] - self.nodes[i])
+                  strain = (u[j] - u[i]) / L
+                  stress = self.E * strain
+                  stresses.append(stress)
+              return np.array(stresses)
+
+      # 2D Triangle Element
+      class Triangle2D:
+          """2D constant strain triangle element."""
+
+          def __init__(self, nodes: np.ndarray, E: float, nu: float, t: float):
+              """
+              Args:
+                  nodes: 3x2 array of node coordinates
+                  E: Young's modulus
+                  nu: Poisson's ratio
+                  t: Thickness
+              """
+              self.nodes = nodes
+              self.E = E
+              self.nu = nu
+              self.t = t
+
+          def area(self) -> float:
+              """Compute triangle area."""
+              x = self.nodes[:, 0]
+              y = self.nodes[:, 1]
+              return 0.5 * abs((x[1]-x[0])*(y[2]-y[0]) - (x[2]-x[0])*(y[1]-y[0]))
+
+          def B_matrix(self) -> np.ndarray:
+              """Strain-displacement matrix."""
+              x = self.nodes[:, 0]
+              y = self.nodes[:, 1]
+              A = self.area()
+
+              b = np.array([y[1]-y[2], y[2]-y[0], y[0]-y[1]])
+              c = np.array([x[2]-x[1], x[0]-x[2], x[1]-x[0]])
+
+              B = np.zeros((3, 6))
+              for i in range(3):
+                  B[0, 2*i] = b[i]
+                  B[1, 2*i+1] = c[i]
+                  B[2, 2*i] = c[i]
+                  B[2, 2*i+1] = b[i]
+
+              return B / (2 * A)
+
+          def D_matrix(self) -> np.ndarray:
+              """Elasticity matrix (plane stress)."""
+              E, nu = self.E, self.nu
+              return E / (1 - nu**2) * np.array([
+                  [1, nu, 0],
+                  [nu, 1, 0],
+                  [0, 0, (1-nu)/2]
+              ])
+
+          def stiffness_matrix(self) -> np.ndarray:
+              """Element stiffness matrix (6x6)."""
+              B = self.B_matrix()
+              D = self.D_matrix()
+              A = self.area()
+              return self.t * A * B.T @ D @ B
+    why: "FEM enables accurate structural and thermal analysis"
+
+  particle_system:
+    name: Particle System Simulation
+    description: Large-scale particle dynamics with spatial hashing
+    pattern: |
+      import numpy as np
+      from collections import defaultdict
+      from typing import List, Tuple
+
+      class SpatialHash:
+          """Spatial hashing for efficient neighbor queries."""
+
+          def __init__(self, cell_size: float):
+              self.cell_size = cell_size
+              self.cells = defaultdict(list)
+
+          def clear(self):
+              self.cells.clear()
+
+          def _cell_key(self, pos: np.ndarray) -> Tuple[int, int, int]:
+              return tuple((pos / self.cell_size).astype(int))
+
+          def insert(self, idx: int, pos: np.ndarray):
+              key = self._cell_key(pos)
+              self.cells[key].append(idx)
+
+          def query_neighbors(self, pos: np.ndarray, radius: float) -> List[int]:
+              """Find all particles within radius of pos."""
+              neighbors = []
+              cell = np.array(self._cell_key(pos))
+              cells_to_check = int(np.ceil(radius / self.cell_size))
+
+              for dx in range(-cells_to_check, cells_to_check + 1):
+                  for dy in range(-cells_to_check, cells_to_check + 1):
+                      for dz in range(-cells_to_check, cells_to_check + 1):
+                          key = tuple(cell + [dx, dy, dz])
+                          neighbors.extend(self.cells.get(key, []))
+
+              return neighbors
+
+      class ParticleSystem:
+          """Particle-based physics simulation.
+
+          Suitable for:
+          - SPH fluid simulation
+          - Sand/granular materials
+          - Cloth/soft body
+          """
+
+          def __init__(self, n_particles: int, dt: float = 0.001):
+              self.n = n_particles
+              self.dt = dt
+
+              # State arrays
+              self.positions = np.zeros((n_particles, 3))
+              self.velocities = np.zeros((n_particles, 3))
+              self.forces = np.zeros((n_particles, 3))
+              self.masses = np.ones(n_particles)
+
+              # Spatial hash for neighbor queries
+              self.spatial_hash = SpatialHash(cell_size=0.1)
+
+              # Gravity
+              self.gravity = np.array([0, -9.81, 0])
+
+          def add_force_field(self, force: np.ndarray):
+              """Apply uniform force to all particles."""
+              self.forces += force
+
+          def compute_spring_forces(self, springs: List[Tuple[int, int, float, float]]):
+              """Compute spring forces between connected particles.
+
+              Args:
+                  springs: List of (i, j, rest_length, stiffness)
+              """
+              for i, j, L0, k in springs:
+                  diff = self.positions[j] - self.positions[i]
+                  dist = np.linalg.norm(diff)
+
+                  if dist > 1e-10:
+                      direction = diff / dist
+                      force = k * (dist - L0) * direction
+
+                      self.forces[i] += force
+                      self.forces[j] -= force
+
+          def compute_collision_forces(self, radius: float, stiffness: float = 1000):
+              """Compute particle-particle collision forces."""
+              self.spatial_hash.clear()
+              for i, pos in enumerate(self.positions):
+                  self.spatial_hash.insert(i, pos)
+
+              for i in range(self.n):
+                  neighbors = self.spatial_hash.query_neighbors(
+                      self.positions[i], 2 * radius
+                  )
+                  for j in neighbors:
+                      if j <= i:
+                          continue
+
+                      diff = self.positions[j] - self.positions[i]
+                      dist = np.linalg.norm(diff)
+
+                      if dist < 2 * radius and dist > 1e-10:
+                          # Overlap
+                          overlap = 2 * radius - dist
+                          direction = diff / dist
+                          force = stiffness * overlap * direction
+
+                          self.forces[i] -= force
+                          self.forces[j] += force
+
+          def step(self):
+              """Advance simulation by dt."""
+              # Apply gravity
+              self.forces += self.masses[:, np.newaxis] * self.gravity
+
+              # Integrate (semi-implicit Euler)
+              accelerations = self.forces / self.masses[:, np.newaxis]
+              self.velocities += accelerations * self.dt
+              self.positions += self.velocities * self.dt
+
+              # Clear forces
+              self.forces.fill(0)
+
+          def apply_box_constraint(self, box_min: np.ndarray, box_max: np.ndarray,
+                                    damping: float = 0.8):
+              """Constrain particles to box."""
+              for d in range(3):
+                  # Min boundary
+                  mask = self.positions[:, d] < box_min[d]
+                  self.positions[mask, d] = box_min[d]
+                  self.velocities[mask, d] *= -damping
+
+                  # Max boundary
+                  mask = self.positions[:, d] > box_max[d]
+                  self.positions[mask, d] = box_max[d]
+                  self.velocities[mask, d] *= -damping
+    why: "Particle systems enable fluid, cloth, and granular material simulation"
+
+anti_patterns:
+
+  unstable_timestep:
+    name: Timestep Too Large for Stability
+    problem: "Integration blows up due to CFL/stability violations"
+    solution: "Use adaptive timestepping or reduce dt based on system stiffness"
+
+  energy_drift:
+    name: Energy Not Conserved
+    problem: "Non-symplectic integrator causes energy drift in long simulations"
+    solution: "Use Verlet/symplectic integrators for Hamiltonian systems"
+
+  collision_tunneling:
+    name: Objects Pass Through Each Other
+    problem: "Fast objects skip collision detection"
+    solution: "Use continuous collision detection or limit velocity"
+
+handoffs:
+  - to: digital-twin
+    when: "Connecting simulation to real-world system"
+    pass: "Model parameters, sensor interfaces"
+
+  - to: monte-carlo
+    when: "Need uncertainty quantification"
+    pass: "Parameter distributions, output metrics"
+
+ecosystem:
+  libraries:
+    - "NumPy/SciPy - Core numerics"
+    - "PyBullet - Physics engine"
+    - "Pymunk - 2D physics"
+    - "FEniCS - Finite element"
+    - "OpenFOAM - CFD"
+
+  visualization:
+    - "Matplotlib - Static plots"
+    - "PyVista - 3D visualization"
+    - "Blender - Rendering"

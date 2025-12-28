@@ -1,0 +1,136 @@
+# Statistical Analysis Sharp Edges
+# Non-obvious gotchas that lead to incorrect statistical conclusions
+
+id: statistical-analysis-sharp-edges
+skill: statistical-analysis
+version: 1.0.0
+
+sharp_edges:
+
+  - id: small-sample-normality
+    severity: critical
+    title: "Shapiro-Wilk Paradox: Fails When You Need It Most"
+    summary: "Normality tests lack power for small samples - exactly when normality matters"
+    symptoms:
+      - "Shapiro-Wilk p > 0.05 with n=15"
+      - "Using t-test because 'normality passed'"
+      - "Non-significant test treated as proof of normality"
+    why: |
+      With small n, normality tests have low power - they often
+      fail to reject even clearly non-normal data. With large n,
+      they reject trivial deviations that don't affect t-test validity.
+    gotcha: |
+      data = np.random.exponential(1, 20)  # Clearly non-normal
+      stat, p = stats.shapiro(data)
+      if p > 0.05:
+          print("Data is normal!")  # WRONG - test has no power
+    solution: |
+      1. Use Q-Q plots for visual inspection
+      2. For small n, prefer robust/non-parametric methods
+      3. For large n, visual check matters more than test
+      4. Non-significant ≠ evidence of normality
+    detection_pattern: "shapiro.*if.*p.*>|normaltest.*>.*0\\.05"
+
+  - id: correlation-causation
+    severity: critical
+    title: "Hidden Confounders in Every Correlation"
+    summary: "High correlations can be entirely spurious due to confounding"
+    symptoms:
+      - "High correlation between X and Y"
+      - "Recommending intervention on X to change Y"
+      - "No consideration of confounding variables"
+    why: |
+      Shoe size correlates with reading ability (r≈0.7).
+      Cause: Age affects both. In complex systems, confounders
+      are often unmeasured or unknown.
+    solution: |
+      1. Draw causal diagram (DAG) before analysis
+      2. For causal claims, use experimental designs
+      3. For observational data, use causal inference methods
+      4. State limitations explicitly
+    detection_pattern: "corr.*cause|correlation.*recommend"
+
+  - id: paired-vs-independent
+    severity: high
+    title: "Wrong Test Type: Paired vs Independent"
+    summary: "Using independent test on paired data loses power; vice versa inflates errors"
+    symptoms:
+      - "Pre-post measurements analyzed as independent"
+      - "Same subjects in both conditions analyzed independently"
+    gotcha: |
+      before = measure_subjects(subjects)
+      after = measure_subjects(subjects)  # SAME subjects
+      ttest_ind(before, after)  # WRONG - loses power
+    solution: |
+      Same subject at different times → Paired (ttest_rel)
+      Random samples from populations → Independent (ttest_ind)
+    detection_pattern: "ttest_ind.*before.*after"
+
+  - id: anova-without-posthoc
+    severity: high
+    title: "ANOVA Says 'Different' But Not 'Which Ones'"
+    summary: "Significant ANOVA requires post-hoc tests to identify which pairs differ"
+    symptoms:
+      - "ANOVA p < 0.05, then directly comparing specific pairs"
+      - "Multiple t-tests after ANOVA without correction"
+    solution: |
+      Use post-hoc tests: Tukey HSD, Bonferroni, or Dunnett
+      from statsmodels.stats.multicomp import pairwise_tukeyhsd
+    detection_pattern: "f_oneway.*ttest_ind"
+
+  - id: regression-extrapolation
+    severity: high
+    title: "Regression Extrapolation: Monsters Beyond the Data"
+    summary: "Predictions outside observed range can be wildly wrong"
+    symptoms:
+      - "Predicting beyond range of training data"
+      - "Model used for forecasting far into future"
+    solution: |
+      1. Only predict within observed data range
+      2. If extrapolation needed, use uncertainty bounds
+      3. Consider non-linear models that asymptote appropriately
+    detection_pattern: "predict.*outside|forecast.*beyond"
+
+  - id: simpson-paradox
+    severity: high
+    title: "Simpson's Paradox: Aggregation Reverses Effect"
+    summary: "A trend in aggregated data can reverse when stratified"
+    symptoms:
+      - "Treatment looks better overall but worse in every subgroup"
+      - "Opposite conclusions from aggregate vs stratified analysis"
+    solution: |
+      1. Always stratify by potential confounders
+      2. Use regression to control for confounders
+      3. Report both aggregate and stratified results
+    detection_pattern: "groupby.*mean(?!.*stratif)"
+
+  - id: base-rate-neglect
+    severity: medium
+    title: "Base Rate Neglect: The Prosecutor's Fallacy"
+    summary: "P(A|B) ≠ P(B|A) - ignoring base rates gives wrong probabilities"
+    symptoms:
+      - "Confusing sensitivity with positive predictive value"
+      - "Test 99% accurate → 99% confident in positive result"
+    why: |
+      99% accurate test for 1/1000 disease: positive predictive
+      value is only ~9%, not 99%. Most positives are false positives.
+    solution: |
+      Use Bayes' theorem. Report PPV and NPV, not just sensitivity.
+    detection_pattern: "sensitivity.*accurate"
+
+  - id: ratio-interpretation
+    severity: medium
+    title: "Relative vs Absolute Risk Confusion"
+    summary: "50% relative risk reduction can be 0.1% absolute reduction"
+    symptoms:
+      - "Drug reduces risk by 50%!"
+      - "Ignoring baseline risk in relative measures"
+    solution: |
+      Always report absolute risk and NNT alongside relative risk.
+    detection_pattern: "relative.*risk.*without"
+
+detection:
+  file_patterns:
+    - "**/*.py"
+    - "**/*.R"
+    - "**/*.ipynb"

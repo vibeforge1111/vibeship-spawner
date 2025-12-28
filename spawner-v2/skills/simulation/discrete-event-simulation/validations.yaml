@@ -1,0 +1,113 @@
+validations:
+
+  - id: float-time-accumulation
+    name: Floating Point Time Accumulation
+    severity: warning
+    type: regex
+    pattern:
+      - "time\\s*\\+=\\s*\\d+\\.\\d+|current_time\\s*\\+=\\s*delta"
+      - "self\\.now\\s*\\+=.*\\d+\\.\\d+"
+    message: "Accumulating float time causes precision errors. Use integer time or track absolute."
+    fix_action: "Use integer time units: time = int(seconds * TIME_SCALE)"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-warmup-handling
+    name: Statistics Without Warm-up Truncation
+    severity: warning
+    type: regex
+    pattern:
+      - "mean\\(.*observations\\)|average\\(.*stats\\)(?!.*warmup|truncat)"
+    message: "Truncate warm-up period before computing steady-state statistics."
+    fix_action: "Detect warm-up: truncation = mser_detect(data); data = data[truncation:]"
+    applies_to:
+      - "**/*.py"
+
+  - id: single-seed-run
+    name: Single Simulation Run Without Replications
+    severity: info
+    type: regex
+    pattern:
+      - "result\\s*=\\s*run_simulation\\(\\)(?!.*for|while|replicate)"
+    message: "Run multiple replications to quantify output variability."
+    fix_action: "Run replications: results = [run(seed=i) for i in range(30)]"
+    applies_to:
+      - "**/*.py"
+
+  - id: unbounded-list-queue
+    name: Unbounded List Used as Queue
+    severity: info
+    type: regex
+    pattern:
+      - "queue\\s*=\\s*\\[\\]|waiting\\s*=\\s*\\[\\](?!.*maxlen|capacity)"
+    message: "Real queues have finite capacity. Model blocking/abandonment."
+    fix_action: "Use simpy.Store(capacity=N) or check length before append"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-event-priority
+    name: Events Without Priority/Tiebreaker
+    severity: info
+    type: regex
+    pattern:
+      - "heappush\\(.*,\\s*\\(time,\\s*event\\)\\)|Event\\(time=.*\\)(?!.*priority|sequence)"
+    message: "Define event priority for consistent same-time ordering."
+    fix_action: "Add priority: (time, priority, sequence, event) for deterministic tiebreaking"
+    applies_to:
+      - "**/*.py"
+
+  - id: nested-resource-request
+    name: Nested Resource Requests (Deadlock Risk)
+    severity: warning
+    type: regex
+    pattern:
+      - "with.*\\.request\\(\\).*:\\s*\\n.*with.*\\.request\\(\\)"
+    message: "Nested resource requests can cause deadlock. Acquire in consistent order."
+    fix_action: "Acquire resources in fixed global order, or use timeout with retry"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-confidence-interval
+    name: Results Reported Without Confidence Intervals
+    severity: info
+    type: regex
+    pattern:
+      - "print.*mean.*result(?!.*ci|confidence|stderr|\\+-)"
+    message: "Report confidence intervals with simulation results."
+    fix_action: "Add CI: ci = (mean - 1.96*se, mean + 1.96*se)"
+    applies_to:
+      - "**/*.py"
+
+  - id: independent-random-streams
+    name: Compared Systems Using Independent Random Streams
+    severity: info
+    type: regex
+    pattern:
+      - "system_a.*seed.*=.*\\n.*system_b.*seed.*=.*(?!.*same|crn)"
+    message: "Use Common Random Numbers (CRN) for system comparison."
+    fix_action: "Use same seed sequence for compared systems to reduce variance"
+    applies_to:
+      - "**/*.py"
+
+  - id: global-simulation-state
+    name: Global Mutable Simulation State
+    severity: warning
+    type: regex
+    pattern:
+      - "^current_time\\s*=|^event_queue\\s*=\\s*\\["
+      - "global\\s+sim_time|global\\s+queue"
+    message: "Global simulation state prevents multiple independent runs."
+    fix_action: "Encapsulate in SimulationEngine class with instance variables"
+    applies_to:
+      - "**/*.py"
+
+  - id: hard-coded-run-length
+    name: Hard-coded Simulation Run Length
+    severity: info
+    type: regex
+    pattern:
+      - "run\\(until=\\d+\\)|run\\(max_time=\\d+\\)(?!.*config|param)"
+    message: "Run length should be configurable for sensitivity analysis."
+    fix_action: "Accept parameter: def run_simulation(duration: float = 1000)"
+    applies_to:
+      - "**/*.py"

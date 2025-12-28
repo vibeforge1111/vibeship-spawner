@@ -1,0 +1,694 @@
+id: renewable-energy
+name: Renewable Energy Systems
+category: climate
+description: |
+  Design, model, and optimize renewable energy systems including solar PV,
+  wind power, energy storage, and grid integration.
+version: 1.0.0
+
+triggers:
+  - "renewable energy"
+  - "solar power"
+  - "solar PV"
+  - "wind energy"
+  - "wind turbine"
+  - "energy storage"
+  - "battery storage"
+  - "grid integration"
+  - "capacity factor"
+
+provides:
+  - Solar PV system design and modeling
+  - Wind energy resource assessment
+  - Energy storage sizing and optimization
+  - Grid integration analysis
+  - LCOE and financial modeling
+  - Hybrid system optimization
+
+patterns:
+  solar_pv_modeling:
+    description: "Photovoltaic system modeling and simulation"
+    example: |
+      import numpy as np
+      from dataclasses import dataclass
+      from typing import Tuple, Optional
+      from datetime import datetime
+
+      @dataclass
+      class PVModule:
+          """PV module specifications."""
+          name: str
+          p_stc: float         # Rated power at STC (W)
+          v_mp: float          # Voltage at max power (V)
+          i_mp: float          # Current at max power (A)
+          v_oc: float          # Open circuit voltage (V)
+          i_sc: float          # Short circuit current (A)
+          temp_coeff_pmax: float  # Power temp coefficient (%/°C)
+          temp_coeff_voc: float   # Voc temp coefficient (%/°C)
+          noct: float = 45.0   # Nominal Operating Cell Temperature (°C)
+          area: float = 1.7    # Module area (m²)
+
+      @dataclass
+      class PVSystem:
+          """PV system configuration."""
+          module: PVModule
+          n_modules: int
+          tilt: float          # Tilt angle (degrees)
+          azimuth: float       # Azimuth angle (degrees from north)
+          albedo: float = 0.2  # Ground reflectance
+          losses: float = 0.14 # System losses (soiling, wiring, etc.)
+
+      class SolarResourceCalculator:
+          """
+          Calculate solar irradiance on tilted surfaces.
+          """
+
+          @staticmethod
+          def solar_position(
+              latitude: float,
+              longitude: float,
+              timestamp: datetime
+          ) -> Tuple[float, float]:
+              """
+              Calculate solar zenith and azimuth angles.
+
+              Returns (zenith, azimuth) in degrees.
+              """
+              import math
+
+              # Day of year
+              n = timestamp.timetuple().tm_yday
+
+              # Declination angle
+              declination = 23.45 * math.sin(math.radians(360/365 * (284 + n)))
+
+              # Hour angle
+              hour = timestamp.hour + timestamp.minute/60
+              hour_angle = 15 * (hour - 12)  # 15 degrees per hour
+
+              # Solar altitude
+              lat_rad = math.radians(latitude)
+              dec_rad = math.radians(declination)
+              ha_rad = math.radians(hour_angle)
+
+              sin_alt = (math.sin(lat_rad) * math.sin(dec_rad) +
+                        math.cos(lat_rad) * math.cos(dec_rad) * math.cos(ha_rad))
+              altitude = math.degrees(math.asin(sin_alt))
+              zenith = 90 - altitude
+
+              # Solar azimuth
+              cos_az = ((math.sin(dec_rad) - math.sin(lat_rad) * sin_alt) /
+                       (math.cos(lat_rad) * math.cos(math.radians(altitude))))
+              azimuth = math.degrees(math.acos(max(-1, min(1, cos_az))))
+              if hour_angle > 0:
+                  azimuth = 360 - azimuth
+
+              return zenith, azimuth
+
+          @staticmethod
+          def poa_irradiance(
+              ghi: float,           # Global Horizontal Irradiance (W/m²)
+              dni: float,           # Direct Normal Irradiance (W/m²)
+              dhi: float,           # Diffuse Horizontal Irradiance (W/m²)
+              solar_zenith: float,  # Solar zenith angle (degrees)
+              solar_azimuth: float, # Solar azimuth angle (degrees)
+              tilt: float,          # Panel tilt (degrees)
+              azimuth: float,       # Panel azimuth (degrees)
+              albedo: float = 0.2
+          ) -> float:
+              """
+              Calculate Plane of Array irradiance.
+
+              Uses isotropic sky model for diffuse component.
+              """
+              import math
+
+              # Convert to radians
+              zenith_rad = math.radians(solar_zenith)
+              azimuth_rad = math.radians(solar_azimuth)
+              tilt_rad = math.radians(tilt)
+              panel_azimuth_rad = math.radians(azimuth)
+
+              # Angle of incidence
+              cos_aoi = (math.sin(zenith_rad) * math.sin(tilt_rad) *
+                        math.cos(azimuth_rad - panel_azimuth_rad) +
+                        math.cos(zenith_rad) * math.cos(tilt_rad))
+              cos_aoi = max(0, cos_aoi)
+
+              # Beam component
+              poa_beam = dni * cos_aoi
+
+              # Diffuse component (isotropic sky model)
+              poa_diffuse = dhi * (1 + math.cos(tilt_rad)) / 2
+
+              # Ground reflected
+              poa_ground = ghi * albedo * (1 - math.cos(tilt_rad)) / 2
+
+              return poa_beam + poa_diffuse + poa_ground
+
+      class PVPerformanceModel:
+          """
+          Model PV system power output.
+          """
+
+          def __init__(self, system: PVSystem):
+              self.system = system
+              self.module = system.module
+
+          def cell_temperature(
+              self,
+              poa_irradiance: float,
+              ambient_temp: float,
+              wind_speed: float = 1.0
+          ) -> float:
+              """
+              Calculate cell temperature using NOCT model.
+              """
+              noct = self.module.noct
+              # Simplified model
+              t_cell = ambient_temp + (noct - 20) * (poa_irradiance / 800)
+              # Wind correction
+              t_cell -= 0.5 * (wind_speed - 1)
+              return t_cell
+
+          def dc_power(
+              self,
+              poa_irradiance: float,
+              cell_temp: float
+          ) -> float:
+              """
+              Calculate DC power output.
+              """
+              if poa_irradiance <= 0:
+                  return 0
+
+              # Power at STC
+              p_stc = self.module.p_stc
+
+              # Irradiance effect (linear)
+              g_ratio = poa_irradiance / 1000  # STC is 1000 W/m²
+
+              # Temperature effect
+              temp_coeff = self.module.temp_coeff_pmax / 100  # Convert to decimal
+              temp_diff = cell_temp - 25  # STC is 25°C
+              temp_factor = 1 + temp_coeff * temp_diff
+
+              # Module power
+              p_module = p_stc * g_ratio * temp_factor
+
+              # System power
+              p_system = p_module * self.system.n_modules * (1 - self.system.losses)
+
+              return max(0, p_system)
+
+          def simulate_year(
+              self,
+              weather_data: 'pd.DataFrame'
+          ) -> 'pd.DataFrame':
+              """
+              Simulate annual PV production.
+
+              weather_data columns: ghi, dni, dhi, temp_air, wind_speed
+              """
+              import pandas as pd
+
+              results = []
+              for idx, row in weather_data.iterrows():
+                  # Solar position
+                  zenith, azimuth = SolarResourceCalculator.solar_position(
+                      latitude=self.system.latitude,
+                      longitude=self.system.longitude,
+                      timestamp=idx
+                  )
+
+                  # POA irradiance
+                  poa = SolarResourceCalculator.poa_irradiance(
+                      ghi=row['ghi'],
+                      dni=row['dni'],
+                      dhi=row['dhi'],
+                      solar_zenith=zenith,
+                      solar_azimuth=azimuth,
+                      tilt=self.system.tilt,
+                      azimuth=self.system.azimuth,
+                      albedo=self.system.albedo
+                  )
+
+                  # Cell temperature
+                  t_cell = self.cell_temperature(
+                      poa, row['temp_air'], row.get('wind_speed', 1)
+                  )
+
+                  # DC power
+                  p_dc = self.dc_power(poa, t_cell)
+
+                  results.append({
+                      'poa_irradiance': poa,
+                      'cell_temp': t_cell,
+                      'power_dc': p_dc
+                  })
+
+              return pd.DataFrame(results, index=weather_data.index)
+
+  wind_energy_modeling:
+    description: "Wind turbine power curve and energy yield"
+    example: |
+      import numpy as np
+      from dataclasses import dataclass
+      from typing import List, Callable
+      from scipy.interpolate import interp1d
+
+      @dataclass
+      class WindTurbine:
+          """Wind turbine specifications."""
+          name: str
+          rated_power: float      # kW
+          rotor_diameter: float   # m
+          hub_height: float       # m
+          cut_in_speed: float     # m/s
+          cut_out_speed: float    # m/s
+          rated_speed: float      # m/s
+          power_curve: List[Tuple[float, float]]  # [(wind_speed, power), ...]
+
+      class WindResourceCalculator:
+          """
+          Wind resource assessment and power calculations.
+          """
+
+          @staticmethod
+          def extrapolate_wind_speed(
+              measured_speed: float,
+              measured_height: float,
+              target_height: float,
+              roughness_length: float = 0.03  # Open terrain
+          ) -> float:
+              """
+              Extrapolate wind speed to hub height using log law.
+              """
+              import math
+              z0 = roughness_length
+              v_hub = measured_speed * (
+                  math.log(target_height / z0) /
+                  math.log(measured_height / z0)
+              )
+              return v_hub
+
+          @staticmethod
+          def weibull_parameters(
+              wind_speeds: np.ndarray
+          ) -> Tuple[float, float]:
+              """
+              Fit Weibull distribution to wind speed data.
+
+              Returns (scale parameter k, shape parameter c).
+              """
+              from scipy.stats import weibull_min
+
+              # Fit Weibull distribution
+              c, loc, scale = weibull_min.fit(wind_speeds[wind_speeds > 0], floc=0)
+
+              return scale, c  # A (scale) and k (shape)
+
+          @staticmethod
+          def capacity_factor(
+              turbine: WindTurbine,
+              wind_speeds: np.ndarray
+          ) -> float:
+              """
+              Calculate capacity factor from wind speed distribution.
+              """
+              # Create power curve interpolator
+              speeds = [p[0] for p in turbine.power_curve]
+              powers = [p[1] for p in turbine.power_curve]
+              power_func = interp1d(
+                  speeds, powers,
+                  kind='linear',
+                  bounds_error=False,
+                  fill_value=0
+              )
+
+              # Calculate power for each wind speed
+              power_output = power_func(wind_speeds)
+
+              # Capacity factor
+              cf = np.mean(power_output) / turbine.rated_power
+
+              return cf
+
+      class WindFarmModel:
+          """
+          Wind farm energy production model.
+          """
+
+          def __init__(
+              self,
+              turbines: List[WindTurbine],
+              positions: np.ndarray,  # (n_turbines, 2) x,y positions
+              wind_data: 'pd.DataFrame'
+          ):
+              self.turbines = turbines
+              self.positions = positions
+              self.wind_data = wind_data
+
+          def wake_deficit(
+              self,
+              upstream_idx: int,
+              downstream_idx: int,
+              wind_direction: float
+          ) -> float:
+              """
+              Calculate wake deficit using Jensen model.
+              """
+              import math
+
+              # Distance and angle between turbines
+              dx = self.positions[downstream_idx, 0] - self.positions[upstream_idx, 0]
+              dy = self.positions[downstream_idx, 1] - self.positions[upstream_idx, 1]
+              distance = math.sqrt(dx**2 + dy**2)
+
+              # Check if downstream turbine is in wake
+              turbine_angle = math.degrees(math.atan2(dy, dx))
+              angle_diff = abs(turbine_angle - wind_direction)
+              if angle_diff > 180:
+                  angle_diff = 360 - angle_diff
+
+              d_rotor = self.turbines[upstream_idx].rotor_diameter
+              wake_width = d_rotor + 2 * 0.04 * distance  # Wake expansion
+
+              if angle_diff > 30 or distance < d_rotor:
+                  return 0
+
+              # Jensen wake model
+              ct = 0.8  # Thrust coefficient (simplified)
+              deficit = (1 - math.sqrt(1 - ct)) * (d_rotor / wake_width) ** 2
+
+              return deficit
+
+          def simulate(self) -> 'pd.DataFrame':
+              """Simulate wind farm production."""
+              import pandas as pd
+
+              results = []
+              for idx, row in self.wind_data.iterrows():
+                  ws = row['wind_speed']
+                  wd = row['wind_direction']
+
+                  total_power = 0
+                  for i, turbine in enumerate(self.turbines):
+                      # Calculate wake losses from upstream turbines
+                      wake_loss = 0
+                      for j in range(len(self.turbines)):
+                          if i != j:
+                              wake_loss += self.wake_deficit(j, i, wd) ** 2
+                      wake_loss = np.sqrt(wake_loss)
+
+                      # Effective wind speed
+                      ws_eff = ws * (1 - wake_loss)
+
+                      # Power output
+                      power = self.turbine_power(turbine, ws_eff)
+                      total_power += power
+
+                  results.append({'power': total_power})
+
+              return pd.DataFrame(results, index=self.wind_data.index)
+
+          def turbine_power(self, turbine: WindTurbine, wind_speed: float) -> float:
+              """Calculate single turbine power output."""
+              if wind_speed < turbine.cut_in_speed:
+                  return 0
+              if wind_speed > turbine.cut_out_speed:
+                  return 0
+              if wind_speed >= turbine.rated_speed:
+                  return turbine.rated_power
+
+              # Interpolate power curve
+              speeds = [p[0] for p in turbine.power_curve]
+              powers = [p[1] for p in turbine.power_curve]
+              power_func = interp1d(speeds, powers, kind='linear')
+              return float(power_func(wind_speed))
+
+  energy_storage:
+    description: "Battery storage modeling and optimization"
+    example: |
+      import numpy as np
+      from dataclasses import dataclass
+      from typing import List, Tuple
+
+      @dataclass
+      class BatterySystem:
+          """Battery energy storage system specifications."""
+          capacity_kwh: float       # Energy capacity
+          power_kw: float           # Max charge/discharge power
+          efficiency_rt: float      # Round-trip efficiency
+          min_soc: float = 0.1      # Minimum state of charge
+          max_soc: float = 0.9      # Maximum state of charge
+          degradation_per_cycle: float = 0.0001  # Capacity loss per full cycle
+
+      class BatteryDispatch:
+          """
+          Battery dispatch and state tracking.
+          """
+
+          def __init__(self, battery: BatterySystem):
+              self.battery = battery
+              self.soc = 0.5  # Initial state of charge (fraction)
+              self.cumulative_throughput = 0.0
+              self.capacity_remaining = 1.0  # Fraction of original capacity
+
+          @property
+          def usable_capacity(self) -> float:
+              """Usable capacity considering degradation and SOC limits."""
+              return (self.battery.capacity_kwh *
+                      self.capacity_remaining *
+                      (self.battery.max_soc - self.battery.min_soc))
+
+          def dispatch(
+              self,
+              power_request: float,  # Positive = discharge, negative = charge
+              duration_hours: float = 1.0
+          ) -> Tuple[float, float]:
+              """
+              Dispatch battery for given power and duration.
+
+              Returns (actual_power, energy_transferred).
+              """
+              efficiency = np.sqrt(self.battery.efficiency_rt)
+
+              # Available energy
+              available_kwh = (self.soc - self.battery.min_soc) * self.battery.capacity_kwh
+              space_kwh = (self.battery.max_soc - self.soc) * self.battery.capacity_kwh
+
+              if power_request > 0:  # Discharge
+                  # Limit by power rating
+                  power_actual = min(power_request, self.battery.power_kw)
+                  # Limit by available energy
+                  max_energy = available_kwh * efficiency
+                  energy_out = min(power_actual * duration_hours, max_energy)
+                  power_actual = energy_out / duration_hours
+
+                  # Update SOC
+                  energy_from_battery = energy_out / efficiency
+                  self.soc -= energy_from_battery / self.battery.capacity_kwh
+
+              else:  # Charge
+                  power_actual = max(power_request, -self.battery.power_kw)
+                  # Limit by available space
+                  max_energy = space_kwh / efficiency
+                  energy_in = min(-power_actual * duration_hours, max_energy)
+                  power_actual = -energy_in / duration_hours
+
+                  # Update SOC
+                  energy_to_battery = energy_in * efficiency
+                  self.soc += energy_to_battery / self.battery.capacity_kwh
+
+              # Track degradation
+              self.cumulative_throughput += abs(power_actual) * duration_hours
+              cycles = self.cumulative_throughput / (2 * self.battery.capacity_kwh)
+              self.capacity_remaining = 1 - cycles * self.battery.degradation_per_cycle
+
+              return power_actual, abs(power_actual) * duration_hours
+
+      def optimize_storage_size(
+          load_profile: np.ndarray,
+          generation_profile: np.ndarray,
+          storage_costs: dict,
+          electricity_prices: np.ndarray
+      ) -> Tuple[float, float]:
+          """
+          Optimize battery size for given load and generation profiles.
+
+          Returns (optimal_capacity_kwh, optimal_power_kw).
+          """
+          from scipy.optimize import minimize
+
+          def objective(params):
+              capacity, power = params
+              battery = BatterySystem(
+                  capacity_kwh=capacity,
+                  power_kw=power,
+                  efficiency_rt=0.9
+              )
+
+              # Simulate operation
+              dispatch = BatteryDispatch(battery)
+              total_cost = capacity * storage_costs['per_kwh'] + power * storage_costs['per_kw']
+
+              for t in range(len(load_profile)):
+                  net_load = load_profile[t] - generation_profile[t]
+
+                  if net_load > 0:
+                      # Need power, discharge battery
+                      actual, _ = dispatch.dispatch(net_load, 1.0)
+                      grid_import = net_load - actual
+                      total_cost += grid_import * electricity_prices[t]
+                  else:
+                      # Excess power, charge battery
+                      dispatch.dispatch(net_load, 1.0)
+
+              return total_cost
+
+          result = minimize(
+              objective,
+              x0=[100, 50],
+              bounds=[(10, 1000), (5, 500)]
+          )
+
+          return result.x[0], result.x[1]
+
+  lcoe_analysis:
+    description: "Levelized Cost of Energy calculations"
+    example: |
+      from dataclasses import dataclass
+      from typing import List
+
+      @dataclass
+      class ProjectFinancials:
+          """Project financial parameters."""
+          capex: float           # Total capital cost ($)
+          opex_annual: float     # Annual O&M cost ($/year)
+          lifetime_years: int    # Project lifetime
+          discount_rate: float   # Nominal discount rate
+          degradation: float     # Annual degradation rate
+
+      def calculate_lcoe(
+          financials: ProjectFinancials,
+          year1_generation_kwh: float
+      ) -> float:
+          """
+          Calculate Levelized Cost of Energy.
+
+          LCOE = (Sum of costs) / (Sum of energy)
+          Both discounted to present value.
+          """
+          total_cost_pv = financials.capex
+          total_energy_pv = 0.0
+
+          for year in range(1, financials.lifetime_years + 1):
+              # Discount factor
+              df = 1 / (1 + financials.discount_rate) ** year
+
+              # Annual cost
+              annual_cost = financials.opex_annual
+              total_cost_pv += annual_cost * df
+
+              # Annual generation (with degradation)
+              generation = year1_generation_kwh * (1 - financials.degradation) ** (year - 1)
+              total_energy_pv += generation * df
+
+          lcoe = total_cost_pv / total_energy_pv
+          return lcoe
+
+      def compare_technologies(
+          technologies: List[dict],
+          location_params: dict
+      ) -> 'pd.DataFrame':
+          """
+          Compare LCOE of different renewable technologies.
+          """
+          import pandas as pd
+
+          results = []
+          for tech in technologies:
+              # Simulate generation
+              if tech['type'] == 'solar':
+                  generation = simulate_solar(location_params, tech)
+              elif tech['type'] == 'wind':
+                  generation = simulate_wind(location_params, tech)
+
+              # Calculate LCOE
+              financials = ProjectFinancials(
+                  capex=tech['capex'],
+                  opex_annual=tech['opex'],
+                  lifetime_years=tech['lifetime'],
+                  discount_rate=tech['discount_rate'],
+                  degradation=tech['degradation']
+              )
+
+              lcoe = calculate_lcoe(financials, generation)
+              cf = generation / (tech['capacity'] * 8760)
+
+              results.append({
+                  'technology': tech['name'],
+                  'capacity_factor': cf,
+                  'lcoe_per_kwh': lcoe,
+                  'annual_generation': generation
+              })
+
+          return pd.DataFrame(results)
+
+anti_patterns:
+  - pattern: "Single year for resource assessment"
+    problem: "Year-to-year variability not captured"
+    solution: "Use 10+ years of data, report P50/P90 exceedance"
+
+  - pattern: "Ignoring temperature effects on PV"
+    problem: "Hot climates: PV output 10-20% lower than STC"
+    solution: "Model cell temperature and derating"
+
+  - pattern: "Hub height wind speed from 10m data"
+    problem: "Wind shear significantly affects energy yield"
+    solution: "Extrapolate using log law or power law"
+
+  - pattern: "100% inverter efficiency assumed"
+    problem: "Inverter losses vary with loading, 2-5% typical"
+    solution: "Use inverter efficiency curve"
+
+  - pattern: "No wake losses in wind farms"
+    problem: "Wake losses 10-20% of potential production"
+    solution: "Model wake effects with Jensen or advanced models"
+
+handoffs:
+  - to: climate-modeling
+    when: "Climate change impacts on renewable resources"
+    context: "Future solar irradiance, wind speed projections"
+
+  - to: energy-systems
+    when: "Grid integration and dispatch"
+    context: "Renewable integration with demand, storage"
+
+  - to: carbon-accounting
+    when: "Emissions savings from renewables"
+    context: "Grid emission factors, avoided emissions"
+
+ecosystem:
+  python_tools:
+    - "pvlib - PV modeling"
+    - "windpowerlib - Wind power"
+    - "NREL SAM - System Advisor Model"
+    - "PyPSA - Power system analysis"
+
+  data_sources:
+    - "NSRDB - National Solar Radiation Database"
+    - "MERRA-2 - Wind resource data"
+    - "Global Wind Atlas"
+    - "Solcast - Solar resource"
+
+references:
+  books:
+    - "Renewable Energy - Sorensen"
+    - "Wind Energy Explained - Manwell"
+    - "Solar Engineering - Duffie & Beckman"
+
+  standards:
+    - "IEC 61724 - PV system performance"
+    - "IEC 61400 - Wind turbines"

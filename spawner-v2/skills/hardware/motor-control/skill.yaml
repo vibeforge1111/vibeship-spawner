@@ -1,0 +1,649 @@
+# Motor Control Skill
+# Electric motor control and power electronics
+
+id: motor-control
+name: Motor Control
+category: hardware
+complexity: advanced
+requires_skills:
+  - embedded-systems
+  - control-systems
+
+description: |
+  Patterns for electric motor control including Field Oriented Control (FOC),
+  stepper motor control, encoder interfaces, current sensing, and power
+  electronics. Covers BLDC, PMSM, DC brushed, and stepper motor applications.
+
+patterns:
+
+  foc_control:
+    name: Field Oriented Control (FOC)
+    description: Vector control for brushless motors
+    critical: true
+    pattern: |
+      import numpy as np
+      from dataclasses import dataclass
+
+      @dataclass
+      class FOCParams:
+          """FOC controller parameters."""
+          pole_pairs: int = 7          # Motor pole pairs
+          phase_resistance: float = 0.1  # Ohms
+          phase_inductance: float = 0.001  # Henries
+          flux_linkage: float = 0.01   # Weber
+
+          # Current loop gains
+          kp_d: float = 1.0
+          ki_d: float = 100.0
+          kp_q: float = 1.0
+          ki_q: float = 100.0
+
+          # Velocity loop gains
+          kp_vel: float = 0.5
+          ki_vel: float = 10.0
+
+      class FOCController:
+          """Field Oriented Control for BLDC/PMSM motors.
+
+          Transforms 3-phase currents to rotating d-q frame.
+          D-axis: flux (usually set to 0 for PMSM)
+          Q-axis: torque
+          """
+
+          def __init__(self, params: FOCParams, dt: float):
+              self.params = params
+              self.dt = dt
+
+              # Current PI controllers
+              self.id_integral = 0.0
+              self.iq_integral = 0.0
+
+              # Velocity PI controller
+              self.vel_integral = 0.0
+
+              # Limits
+              self.v_max = 12.0  # Bus voltage
+              self.i_max = 10.0  # Max phase current
+
+          def clarke_transform(self, ia: float, ib: float, ic: float) -> tuple:
+              """Clarke transform: 3-phase to alpha-beta (stationary frame).
+
+              Args:
+                  ia, ib, ic: Phase currents
+
+              Returns:
+                  (i_alpha, i_beta)
+              """
+              i_alpha = ia
+              i_beta = (ia + 2 * ib) / np.sqrt(3)
+              return i_alpha, i_beta
+
+          def park_transform(self, i_alpha: float, i_beta: float,
+                              theta_e: float) -> tuple:
+              """Park transform: alpha-beta to d-q (rotating frame).
+
+              Args:
+                  i_alpha, i_beta: Stationary frame currents
+                  theta_e: Electrical angle (radians)
+
+              Returns:
+                  (id, iq)
+              """
+              cos_theta = np.cos(theta_e)
+              sin_theta = np.sin(theta_e)
+
+              id = i_alpha * cos_theta + i_beta * sin_theta
+              iq = -i_alpha * sin_theta + i_beta * cos_theta
+
+              return id, iq
+
+          def inverse_park(self, vd: float, vq: float,
+                           theta_e: float) -> tuple:
+              """Inverse Park: d-q to alpha-beta.
+
+              Args:
+                  vd, vq: D-Q frame voltages
+                  theta_e: Electrical angle
+
+              Returns:
+                  (v_alpha, v_beta)
+              """
+              cos_theta = np.cos(theta_e)
+              sin_theta = np.sin(theta_e)
+
+              v_alpha = vd * cos_theta - vq * sin_theta
+              v_beta = vd * sin_theta + vq * cos_theta
+
+              return v_alpha, v_beta
+
+          def space_vector_modulation(self, v_alpha: float, v_beta: float,
+                                       v_bus: float) -> tuple:
+              """Space Vector PWM: alpha-beta to duty cycles.
+
+              Args:
+                  v_alpha, v_beta: Alpha-beta voltages
+                  v_bus: DC bus voltage
+
+              Returns:
+                  (duty_a, duty_b, duty_c) in range [0, 1]
+              """
+              # Normalize
+              v_alpha = v_alpha / v_bus
+              v_beta = v_beta / v_bus
+
+              # Inverse Clarke
+              va = v_alpha
+              vb = -0.5 * v_alpha + np.sqrt(3)/2 * v_beta
+              vc = -0.5 * v_alpha - np.sqrt(3)/2 * v_beta
+
+              # Add common-mode (center-aligned PWM)
+              v_min = min(va, vb, vc)
+              v_max = max(va, vb, vc)
+              v_offset = -(v_max + v_min) / 2
+
+              # Convert to duty cycle [0, 1]
+              duty_a = np.clip((va + v_offset + 0.5), 0, 1)
+              duty_b = np.clip((vb + v_offset + 0.5), 0, 1)
+              duty_c = np.clip((vc + v_offset + 0.5), 0, 1)
+
+              return duty_a, duty_b, duty_c
+
+          def current_loop(self, id_ref: float, iq_ref: float,
+                           id_meas: float, iq_meas: float,
+                           omega_e: float) -> tuple:
+              """D-Q current PI controllers with decoupling.
+
+              Args:
+                  id_ref, iq_ref: Reference currents
+                  id_meas, iq_meas: Measured currents
+                  omega_e: Electrical angular velocity
+
+              Returns:
+                  (vd, vq) voltage commands
+              """
+              p = self.params
+
+              # Current errors
+              ed = id_ref - id_meas
+              eq = iq_ref - iq_meas
+
+              # PI control
+              self.id_integral += ed * self.dt
+              self.iq_integral += eq * self.dt
+
+              # Anti-windup
+              self.id_integral = np.clip(self.id_integral, -self.v_max/p.ki_d,
+                                          self.v_max/p.ki_d)
+              self.iq_integral = np.clip(self.iq_integral, -self.v_max/p.ki_q,
+                                          self.v_max/p.ki_q)
+
+              vd_pi = p.kp_d * ed + p.ki_d * self.id_integral
+              vq_pi = p.kp_q * eq + p.ki_q * self.iq_integral
+
+              # Decoupling terms
+              vd_decoup = -omega_e * p.phase_inductance * iq_meas
+              vq_decoup = omega_e * (p.phase_inductance * id_meas + p.flux_linkage)
+
+              vd = vd_pi + vd_decoup
+              vq = vq_pi + vq_decoup
+
+              return vd, vq
+
+          def velocity_loop(self, vel_ref: float, vel_meas: float) -> float:
+              """Velocity PI controller.
+
+              Args:
+                  vel_ref: Reference velocity (rad/s mechanical)
+                  vel_meas: Measured velocity
+
+              Returns:
+                  iq_ref: Q-axis current reference (torque command)
+              """
+              p = self.params
+
+              error = vel_ref - vel_meas
+              self.vel_integral += error * self.dt
+
+              # Anti-windup
+              self.vel_integral = np.clip(self.vel_integral,
+                                           -self.i_max/p.ki_vel,
+                                           self.i_max/p.ki_vel)
+
+              iq_ref = p.kp_vel * error + p.ki_vel * self.vel_integral
+              return np.clip(iq_ref, -self.i_max, self.i_max)
+
+          def update(self, vel_ref: float, theta_m: float, omega_m: float,
+                     ia: float, ib: float, ic: float) -> tuple:
+              """Full FOC update cycle.
+
+              Args:
+                  vel_ref: Velocity reference (rad/s mechanical)
+                  theta_m: Rotor mechanical angle
+                  omega_m: Rotor mechanical velocity
+                  ia, ib, ic: Phase current measurements
+
+              Returns:
+                  (duty_a, duty_b, duty_c)
+              """
+              p = self.params
+
+              # Electrical angle and velocity
+              theta_e = theta_m * p.pole_pairs
+              omega_e = omega_m * p.pole_pairs
+
+              # Clarke and Park transforms
+              i_alpha, i_beta = self.clarke_transform(ia, ib, ic)
+              id_meas, iq_meas = self.park_transform(i_alpha, i_beta, theta_e)
+
+              # Velocity loop -> torque command
+              iq_ref = self.velocity_loop(vel_ref, omega_m)
+              id_ref = 0.0  # Zero d-axis current for PMSM
+
+              # Current loop
+              vd, vq = self.current_loop(id_ref, iq_ref, id_meas, iq_meas, omega_e)
+
+              # Inverse transform
+              v_alpha, v_beta = self.inverse_park(vd, vq, theta_e)
+
+              # PWM generation
+              return self.space_vector_modulation(v_alpha, v_beta, self.v_max)
+    why: "FOC provides optimal torque per amp, smooth operation, and high efficiency"
+
+  stepper_control:
+    name: Stepper Motor Control
+    description: Open-loop and closed-loop stepper control
+    pattern: |
+      import numpy as np
+      from dataclasses import dataclass
+      from typing import Tuple
+
+      @dataclass
+      class StepperParams:
+          steps_per_rev: int = 200      # Full steps per revolution
+          microsteps: int = 16          # Microstepping ratio
+          max_current: float = 2.0      # Amps per phase
+          accel_steps_per_sec2: float = 10000
+
+      class StepperController:
+          """Stepper motor controller with acceleration profiling.
+
+          Supports:
+          - Microstepping (sinusoidal current)
+          - Trapezoidal velocity profile
+          - Optional closed-loop with encoder
+          """
+
+          def __init__(self, params: StepperParams, dt: float):
+              self.params = params
+              self.dt = dt
+
+              # Microstep table (sinusoidal)
+              self.microstep_table = self._generate_microstep_table()
+
+              # Motion state
+              self.position_steps = 0.0
+              self.velocity_steps = 0.0
+              self.target_position = 0.0
+
+          def _generate_microstep_table(self) -> np.ndarray:
+              """Generate sinusoidal microstep current table."""
+              n = self.params.microsteps * 4  # Full electrical cycle
+              angles = np.linspace(0, 2*np.pi, n, endpoint=False)
+              return np.column_stack([np.sin(angles), np.cos(angles)])
+
+          def set_target(self, position_steps: float):
+              """Set target position in microsteps."""
+              self.target_position = position_steps
+
+          def update(self) -> Tuple[float, float]:
+              """Update stepper position with acceleration limiting.
+
+              Returns:
+                  (current_a, current_b): Phase currents
+              """
+              p = self.params
+              max_accel = p.accel_steps_per_sec2 * self.dt
+
+              # Position error
+              error = self.target_position - self.position_steps
+
+              # Velocity needed to stop at target (trapezoidal)
+              stopping_distance = self.velocity_steps**2 / (2 * p.accel_steps_per_sec2)
+
+              if abs(error) <= abs(stopping_distance):
+                  # Decelerate
+                  if self.velocity_steps > 0:
+                      self.velocity_steps = max(0, self.velocity_steps - max_accel)
+                  else:
+                      self.velocity_steps = min(0, self.velocity_steps + max_accel)
+              else:
+                  # Accelerate toward target
+                  if error > 0:
+                      self.velocity_steps = min(self.velocity_steps + max_accel,
+                                                 p.accel_steps_per_sec2)
+                  else:
+                      self.velocity_steps = max(self.velocity_steps - max_accel,
+                                                 -p.accel_steps_per_sec2)
+
+              # Update position
+              self.position_steps += self.velocity_steps * self.dt
+
+              # Get phase currents from microstep table
+              table_index = int(self.position_steps) % len(self.microstep_table)
+              currents = self.microstep_table[table_index] * p.max_current
+
+              return currents[0], currents[1]
+
+          def get_position_rad(self) -> float:
+              """Get position in radians."""
+              steps_per_rad = (self.params.steps_per_rev *
+                               self.params.microsteps) / (2 * np.pi)
+              return self.position_steps / steps_per_rad
+
+      # Closed-loop stepper with encoder
+      class ClosedLoopStepper(StepperController):
+          """Closed-loop stepper using encoder feedback."""
+
+          def __init__(self, params: StepperParams, dt: float,
+                       encoder_cpr: int):
+              super().__init__(params, dt)
+              self.encoder_cpr = encoder_cpr
+
+              # Position/velocity loops
+              self.kp_pos = 10.0
+              self.kp_vel = 0.1
+
+          def update_with_encoder(self, encoder_counts: int) -> Tuple[float, float]:
+              """Update with encoder feedback for anti-stall."""
+              # Calculate actual position
+              actual_rad = 2 * np.pi * encoder_counts / self.encoder_cpr
+
+              # Calculate expected position
+              expected_rad = self.get_position_rad()
+
+              # Position error (stall detection)
+              pos_error = expected_rad - actual_rad
+
+              # If large error, motor may be stalled
+              if abs(pos_error) > 0.5:  # radians
+                  # Reduce velocity, motor is stalling
+                  self.velocity_steps *= 0.5
+
+              # Normal update
+              return self.update()
+    why: "Stepper control with acceleration profiling prevents missed steps"
+
+  encoder_interface:
+    name: Quadrature Encoder Interface
+    description: Hardware and software encoder decoding
+    pattern: |
+      import numpy as np
+      from collections import deque
+
+      class QuadratureEncoder:
+          """Quadrature encoder with velocity estimation.
+
+          Supports:
+          - 4x decoding (count on all edges)
+          - Velocity estimation with filtering
+          - Index pulse handling
+          """
+
+          def __init__(self, cpr: int, dt: float):
+              """
+              Args:
+                  cpr: Counts per revolution (after 4x decoding)
+                  dt: Sample period
+              """
+              self.cpr = cpr
+              self.dt = dt
+
+              # State
+              self.count = 0
+              self.prev_count = 0
+              self.index_count = None  # Count at last index pulse
+
+              # Velocity estimation
+              self.velocity_filter = deque(maxlen=8)
+
+              # Previous A/B state for decoding
+              self.prev_a = 0
+              self.prev_b = 0
+
+          # Lookup table for quadrature decoding
+          # [prev_a, prev_b, curr_a, curr_b] -> count delta
+          QEI_TABLE = {
+              (0, 0, 0, 1): 1,  (0, 0, 1, 0): -1,
+              (0, 1, 0, 0): -1, (0, 1, 1, 1): 1,
+              (1, 0, 0, 0): 1,  (1, 0, 1, 1): -1,
+              (1, 1, 0, 1): -1, (1, 1, 1, 0): 1,
+          }
+
+          def update_hw(self, hw_count: int, index_pulse: bool = False):
+              """Update from hardware counter.
+
+              Args:
+                  hw_count: Current hardware counter value
+                  index_pulse: True if index pulse detected
+              """
+              self.prev_count = self.count
+              self.count = hw_count
+
+              if index_pulse:
+                  self.index_count = self.count
+
+          def update_sw(self, a: int, b: int):
+              """Software quadrature decoding.
+
+              Args:
+                  a, b: Current A and B channel states (0 or 1)
+              """
+              state = (self.prev_a, self.prev_b, a, b)
+              delta = self.QEI_TABLE.get(state, 0)
+
+              self.prev_count = self.count
+              self.count += delta
+              self.prev_a = a
+              self.prev_b = b
+
+          def get_position_rad(self) -> float:
+              """Get position in radians."""
+              return 2 * np.pi * self.count / self.cpr
+
+          def get_velocity_rad_s(self) -> float:
+              """Get filtered velocity in rad/s."""
+              # Simple difference
+              delta_counts = self.count - self.prev_count
+              velocity = 2 * np.pi * delta_counts / (self.cpr * self.dt)
+
+              # Moving average filter
+              self.velocity_filter.append(velocity)
+              return sum(self.velocity_filter) / len(self.velocity_filter)
+
+          def get_velocity_rpm(self) -> float:
+              """Get velocity in RPM."""
+              return self.get_velocity_rad_s() * 60 / (2 * np.pi)
+
+          def reset_to_index(self):
+              """Reset position to last index pulse location."""
+              if self.index_count is not None:
+                  self.count -= self.index_count
+                  self.index_count = 0
+
+      # Embedded C implementation for hardware timer
+      ENCODER_C = '''
+      // STM32 Hardware Quadrature Encoder
+
+      void encoder_init(TIM_TypeDef* tim, uint32_t cpr) {
+          // Configure timer in encoder mode
+          tim->SMCR = TIM_SMCR_SMS_0 | TIM_SMCR_SMS_1;  // Encoder mode 3 (4x)
+          tim->CCMR1 = TIM_CCMR1_CC1S_0 | TIM_CCMR1_CC2S_0;  // IC1 on TI1, IC2 on TI2
+          tim->CCER = 0;  // Rising edge, no inversion
+          tim->ARR = cpr - 1;  // Auto-reload (wrap at CPR)
+          tim->CNT = 0;
+          tim->CR1 = TIM_CR1_CEN;  // Enable
+      }
+
+      int32_t encoder_read(TIM_TypeDef* tim) {
+          return (int32_t)tim->CNT;
+      }
+
+      float encoder_velocity(TIM_TypeDef* tim, float dt, uint32_t cpr) {
+          static int32_t prev_count = 0;
+          int32_t count = (int32_t)tim->CNT;
+
+          // Handle wraparound
+          int32_t delta = count - prev_count;
+          if (delta > (int32_t)(cpr/2)) delta -= cpr;
+          if (delta < -(int32_t)(cpr/2)) delta += cpr;
+
+          prev_count = count;
+          return (2.0f * 3.14159f * delta) / (cpr * dt);
+      }
+      '''
+    why: "Proper encoder handling is essential for accurate position/velocity feedback"
+
+  current_sensing:
+    name: Current Sensing
+    description: Phase current measurement and reconstruction
+    pattern: |
+      import numpy as np
+
+      class CurrentSensor:
+          """Three-phase current sensing with reconstruction.
+
+          Supports:
+          - 3-shunt sensing (all phases)
+          - 2-shunt sensing (reconstruct third)
+          - Single-shunt sensing (sample during zero vectors)
+          """
+
+          def __init__(self, shunt_resistance: float = 0.01,
+                       gain: float = 20.0,
+                       vref: float = 3.3,
+                       adc_bits: int = 12):
+              """
+              Args:
+                  shunt_resistance: Shunt resistor value (Ohms)
+                  gain: Current sense amplifier gain
+                  vref: ADC reference voltage
+                  adc_bits: ADC resolution
+              """
+              self.shunt_r = shunt_resistance
+              self.gain = gain
+              self.vref = vref
+              self.adc_max = (1 << adc_bits) - 1
+
+              # Offset calibration (measure at zero current)
+              self.offset_a = self.adc_max / 2
+              self.offset_b = self.adc_max / 2
+              self.offset_c = self.adc_max / 2
+
+          def calibrate_offsets(self, adc_a: int, adc_b: int, adc_c: int):
+              """Calibrate zero-current offsets.
+
+              Call with motor disconnected or at zero current.
+              """
+              self.offset_a = adc_a
+              self.offset_b = adc_b
+              self.offset_c = adc_c
+
+          def adc_to_current(self, adc_value: int, offset: float) -> float:
+              """Convert ADC reading to current."""
+              voltage = (adc_value - offset) * self.vref / self.adc_max
+              current = voltage / (self.shunt_r * self.gain)
+              return current
+
+          def read_3_shunt(self, adc_a: int, adc_b: int, adc_c: int) -> tuple:
+              """Read currents from 3-shunt configuration."""
+              ia = self.adc_to_current(adc_a, self.offset_a)
+              ib = self.adc_to_current(adc_b, self.offset_b)
+              ic = self.adc_to_current(adc_c, self.offset_c)
+              return ia, ib, ic
+
+          def read_2_shunt(self, adc_a: int, adc_b: int) -> tuple:
+              """Read currents from 2-shunt, reconstruct third.
+
+              Uses Kirchhoff's current law: Ia + Ib + Ic = 0
+              """
+              ia = self.adc_to_current(adc_a, self.offset_a)
+              ib = self.adc_to_current(adc_b, self.offset_b)
+              ic = -(ia + ib)  # Reconstruct from KCL
+              return ia, ib, ic
+
+          def read_1_shunt(self, adc_samples: list, sectors: list) -> tuple:
+              """Read currents from single DC link shunt.
+
+              Requires sampling during specific PWM vectors.
+              More complex timing, but saves cost.
+              """
+              # Implementation depends on PWM timing
+              # Sample during two active vectors per period
+              currents = [0.0, 0.0, 0.0]
+
+              for adc_val, sector in zip(adc_samples, sectors):
+                  current = self.adc_to_current(adc_val, self.offset_a)
+                  if sector == 1:
+                      currents[0] = current
+                      currents[1] = -current
+                  elif sector == 2:
+                      currents[1] = current
+                      currents[2] = -current
+                  # ... other sectors
+
+              return tuple(currents)
+    why: "Accurate current sensing is critical for torque control"
+
+anti_patterns:
+
+  open_loop_bldc:
+    name: Open-Loop BLDC at High Speed
+    problem: "Open-loop commutation loses sync at high speed/load"
+    solution: "Use sensorless FOC with back-EMF observer or hall sensors"
+
+  slow_current_loop:
+    name: Slow Current Control Loop
+    problem: "Current loop slower than electrical dynamics causes instability"
+    solution: "Run current loop at 10-20kHz, faster than electrical time constant"
+
+  no_current_limit:
+    name: No Current Protection
+    problem: "Overcurrent damages motor, driver, or battery"
+    solution: "Implement hardware and software current limiting"
+
+  ignoring_dead_time:
+    name: Ignoring Dead Time Effects
+    problem: "No dead time causes shoot-through, burns driver"
+    solution: "Add dead time (100ns-1us), compensate in control"
+
+handoffs:
+  - to: embedded-systems
+    when: "Implementing on microcontroller"
+    pass: "PWM timer config, ADC sampling, interrupt priorities"
+
+  - to: control-systems
+    when: "Designing position/velocity control"
+    pass: "Motor model, bandwidth requirements"
+
+  - to: fpga-design
+    when: "Need hardware PWM/encoder"
+    pass: "Timing requirements, resolution"
+
+ecosystem:
+  microcontrollers:
+    - "STM32G4 - Motor control focused"
+    - "STM32F4 - General with motor timer"
+    - "ESP32 - With MCPWM"
+    - "TI C2000 - Industrial motor control"
+
+  drivers:
+    - "DRV8302/8305 - TI integrated driver"
+    - "IR2110 - High/low side driver"
+    - "L6234 - 3-phase driver"
+    - "TMC6100 - Trinamic silent driver"
+
+  libraries:
+    - "SimpleFOC - Arduino FOC library"
+    - "ODrive - Open source motor controller"
+    - "VESC - Electric skateboard controller"
+    - "STM32 Motor Control SDK"

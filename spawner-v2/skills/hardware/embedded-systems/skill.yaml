@@ -1,0 +1,530 @@
+# Embedded Systems Skill
+# Microcontroller and embedded software development
+
+id: embedded-systems
+name: Embedded Systems
+category: hardware
+complexity: advanced
+requires_skills:
+  - test-architect
+
+description: |
+  Patterns for embedded software development including real-time systems,
+  memory management, hardware abstraction, interrupt handling, and
+  debugging techniques for resource-constrained environments.
+
+patterns:
+
+  hardware_abstraction:
+    name: Hardware Abstraction Layer
+    description: Separate hardware-specific code from application logic
+    pattern: |
+      // hal/gpio.h - Hardware Abstraction Layer interface
+      #ifndef GPIO_HAL_H
+      #define GPIO_HAL_H
+
+      #include <stdint.h>
+      #include <stdbool.h>
+
+      typedef enum {
+          GPIO_MODE_INPUT,
+          GPIO_MODE_OUTPUT,
+          GPIO_MODE_ALTERNATE,
+          GPIO_MODE_ANALOG
+      } gpio_mode_t;
+
+      typedef enum {
+          GPIO_PULL_NONE,
+          GPIO_PULL_UP,
+          GPIO_PULL_DOWN
+      } gpio_pull_t;
+
+      typedef struct {
+          void* port;          // Platform-specific port register
+          uint8_t pin;
+          gpio_mode_t mode;
+          gpio_pull_t pull;
+      } gpio_config_t;
+
+      // HAL interface - platform-agnostic
+      void gpio_init(const gpio_config_t* config);
+      void gpio_write(const gpio_config_t* config, bool state);
+      bool gpio_read(const gpio_config_t* config);
+      void gpio_toggle(const gpio_config_t* config);
+
+      #endif
+
+      // hal/stm32/gpio_stm32.c - STM32 implementation
+      #include "hal/gpio.h"
+      #include "stm32f4xx_hal.h"
+
+      void gpio_init(const gpio_config_t* config) {
+          GPIO_InitTypeDef init = {0};
+          init.Pin = (1 << config->pin);
+
+          switch (config->mode) {
+              case GPIO_MODE_INPUT:
+                  init.Mode = GPIO_MODE_INPUT;
+                  break;
+              case GPIO_MODE_OUTPUT:
+                  init.Mode = GPIO_MODE_OUTPUT_PP;
+                  break;
+              // ... other modes
+          }
+
+          switch (config->pull) {
+              case GPIO_PULL_UP:
+                  init.Pull = GPIO_PULLUP;
+                  break;
+              case GPIO_PULL_DOWN:
+                  init.Pull = GPIO_PULLDOWN;
+                  break;
+              default:
+                  init.Pull = GPIO_NOPULL;
+          }
+
+          HAL_GPIO_Init((GPIO_TypeDef*)config->port, &init);
+      }
+
+      void gpio_write(const gpio_config_t* config, bool state) {
+          HAL_GPIO_WritePin(
+              (GPIO_TypeDef*)config->port,
+              (1 << config->pin),
+              state ? GPIO_PIN_SET : GPIO_PIN_RESET
+          );
+      }
+
+      // Application code uses HAL - portable across platforms
+      #include "hal/gpio.h"
+
+      static const gpio_config_t led_config = {
+          .port = GPIOA,
+          .pin = 5,
+          .mode = GPIO_MODE_OUTPUT,
+          .pull = GPIO_PULL_NONE
+      };
+
+      void blink_led(void) {
+          gpio_toggle(&led_config);
+      }
+    why: "HAL enables code reuse and easier testing"
+
+  interrupt_handling:
+    name: Interrupt Handling Best Practices
+    description: Safe and efficient interrupt service routines
+    critical: true
+    pattern: |
+      // Interrupt handling best practices
+
+      #include <stdint.h>
+      #include <stdbool.h>
+
+      // Rule 1: Keep ISRs short
+      // Do minimal work, set flag, handle in main loop
+
+      volatile bool data_ready = false;
+      volatile uint8_t rx_buffer[256];
+      volatile uint8_t rx_head = 0;
+
+      // ISR - minimal work
+      void USART1_IRQHandler(void) {
+          if (USART1->SR & USART_SR_RXNE) {
+              // Just store data, don't process
+              rx_buffer[rx_head++] = USART1->DR;
+              rx_head &= 0xFF;  // Wrap (power of 2)
+              data_ready = true;
+          }
+      }
+
+      // Main loop handles processing
+      void main_loop(void) {
+          if (data_ready) {
+              data_ready = false;
+              process_received_data();  // Long operation OK here
+          }
+      }
+
+      // Rule 2: Use volatile for shared variables
+      // Compiler doesn't optimize away reads
+
+      // WRONG
+      bool flag = false;  // Compiler may cache this
+
+      // CORRECT
+      volatile bool flag = false;
+
+      // Rule 3: Critical sections for multi-word operations
+      typedef struct {
+          uint32_t timestamp;
+          int16_t value;
+      } sensor_data_t;
+
+      volatile sensor_data_t sensor_data;
+
+      void update_sensor(uint32_t ts, int16_t val) {
+          // Disable interrupts for atomic update
+          uint32_t primask = __get_PRIMASK();
+          __disable_irq();
+
+          sensor_data.timestamp = ts;
+          sensor_data.value = val;
+
+          __set_PRIMASK(primask);  // Restore previous state
+      }
+
+      sensor_data_t read_sensor(void) {
+          sensor_data_t copy;
+
+          uint32_t primask = __get_PRIMASK();
+          __disable_irq();
+
+          copy = sensor_data;
+
+          __set_PRIMASK(primask);
+
+          return copy;
+      }
+
+      // Rule 4: Avoid dynamic memory in ISRs
+      // No malloc, printf, or other non-reentrant functions
+
+      // WRONG - in ISR
+      void BAD_ISR(void) {
+          char* msg = malloc(100);  // Can cause heap corruption
+          printf("Data: %d\n", value);  // printf is not reentrant
+      }
+    why: "Incorrect interrupt handling causes intermittent, hard-to-debug failures"
+
+  memory_management:
+    name: Memory Management for Embedded
+    description: Handle limited memory safely
+    pattern: |
+      // Memory management for constrained systems
+
+      // 1. Static allocation - preferred for embedded
+      #define MAX_TASKS 16
+      static task_t task_pool[MAX_TASKS];
+      static bool task_used[MAX_TASKS] = {false};
+
+      task_t* task_alloc(void) {
+          for (int i = 0; i < MAX_TASKS; i++) {
+              if (!task_used[i]) {
+                  task_used[i] = true;
+                  memset(&task_pool[i], 0, sizeof(task_t));
+                  return &task_pool[i];
+              }
+          }
+          return NULL;  // Pool exhausted
+      }
+
+      void task_free(task_t* task) {
+          int idx = task - task_pool;
+          if (idx >= 0 && idx < MAX_TASKS) {
+              task_used[idx] = false;
+          }
+      }
+
+      // 2. Ring buffer - no dynamic allocation
+      typedef struct {
+          uint8_t* buffer;
+          size_t size;
+          volatile size_t head;
+          volatile size_t tail;
+      } ring_buffer_t;
+
+      static uint8_t uart_buffer_data[256];
+      static ring_buffer_t uart_buffer = {
+          .buffer = uart_buffer_data,
+          .size = sizeof(uart_buffer_data),
+          .head = 0,
+          .tail = 0
+      };
+
+      bool ring_buffer_write(ring_buffer_t* rb, uint8_t byte) {
+          size_t next_head = (rb->head + 1) % rb->size;
+          if (next_head == rb->tail) {
+              return false;  // Buffer full
+          }
+          rb->buffer[rb->head] = byte;
+          rb->head = next_head;
+          return true;
+      }
+
+      bool ring_buffer_read(ring_buffer_t* rb, uint8_t* byte) {
+          if (rb->head == rb->tail) {
+              return false;  // Buffer empty
+          }
+          *byte = rb->buffer[rb->tail];
+          rb->tail = (rb->tail + 1) % rb->size;
+          return true;
+      }
+
+      // 3. Memory sections for linker control
+      // Place in specific memory regions
+
+      __attribute__((section(".ccmram")))
+      static uint8_t fast_buffer[1024];  // In CCM RAM
+
+      __attribute__((section(".noinit")))
+      static uint32_t persistent_counter;  // Survives reset
+
+      // 4. Stack usage monitoring
+      #define STACK_CANARY 0xDEADBEEF
+
+      void init_stack_monitor(void) {
+          extern uint32_t _estack;
+          extern uint32_t _Min_Stack_Size;
+          uint32_t* stack_bottom = &_estack - (uint32_t)&_Min_Stack_Size/4;
+
+          // Fill stack with pattern
+          for (uint32_t* p = stack_bottom; p < &_estack - 100; p++) {
+              *p = STACK_CANARY;
+          }
+      }
+
+      uint32_t get_stack_usage(void) {
+          extern uint32_t _estack;
+          extern uint32_t _Min_Stack_Size;
+          uint32_t* stack_bottom = &_estack - (uint32_t)&_Min_Stack_Size/4;
+
+          uint32_t* p = stack_bottom;
+          while (*p == STACK_CANARY && p < &_estack) {
+              p++;
+          }
+
+          return (&_estack - p) * sizeof(uint32_t);
+      }
+    why: "Memory issues cause crashes that are hard to reproduce"
+
+  state_machine:
+    name: State Machine Implementation
+    description: Robust state machine patterns
+    pattern: |
+      // State machine with entry/exit actions
+
+      typedef enum {
+          STATE_IDLE,
+          STATE_ARMED,
+          STATE_RUNNING,
+          STATE_ERROR,
+          STATE_COUNT
+      } state_t;
+
+      typedef enum {
+          EVENT_ARM,
+          EVENT_START,
+          EVENT_STOP,
+          EVENT_ERROR,
+          EVENT_RESET,
+          EVENT_COUNT
+      } event_t;
+
+      typedef struct {
+          state_t current_state;
+          void (*on_entry)(void);
+          void (*on_exit)(void);
+          void (*on_tick)(void);
+      } state_machine_t;
+
+      // State-specific handlers
+      static void idle_entry(void) { disable_motor(); }
+      static void idle_tick(void) { check_sensors(); }
+
+      static void armed_entry(void) { arm_system(); }
+      static void armed_tick(void) { check_arm_timeout(); }
+
+      static void running_entry(void) { enable_motor(); start_control_loop(); }
+      static void running_tick(void) { run_control_step(); }
+      static void running_exit(void) { stop_control_loop(); }
+
+      static void error_entry(void) { disable_motor(); set_error_led(); }
+
+      // State definitions
+      static const struct {
+          void (*on_entry)(void);
+          void (*on_exit)(void);
+          void (*on_tick)(void);
+      } state_handlers[STATE_COUNT] = {
+          [STATE_IDLE]    = {idle_entry, NULL, idle_tick},
+          [STATE_ARMED]   = {armed_entry, NULL, armed_tick},
+          [STATE_RUNNING] = {running_entry, running_exit, running_tick},
+          [STATE_ERROR]   = {error_entry, NULL, NULL},
+      };
+
+      // Transition table
+      static const state_t transitions[STATE_COUNT][EVENT_COUNT] = {
+          /*              ARM           START         STOP          ERROR         RESET */
+          [STATE_IDLE]   = {STATE_ARMED, STATE_IDLE,   STATE_IDLE,   STATE_ERROR,  STATE_IDLE},
+          [STATE_ARMED]  = {STATE_ARMED, STATE_RUNNING,STATE_IDLE,   STATE_ERROR,  STATE_IDLE},
+          [STATE_RUNNING]= {STATE_RUNNING,STATE_RUNNING,STATE_IDLE, STATE_ERROR,  STATE_IDLE},
+          [STATE_ERROR]  = {STATE_ERROR, STATE_ERROR,  STATE_ERROR,  STATE_ERROR,  STATE_IDLE},
+      };
+
+      static state_machine_t sm = {.current_state = STATE_IDLE};
+
+      void sm_process_event(event_t event) {
+          state_t next = transitions[sm.current_state][event];
+
+          if (next != sm.current_state) {
+              // Exit current state
+              if (state_handlers[sm.current_state].on_exit) {
+                  state_handlers[sm.current_state].on_exit();
+              }
+
+              // Transition
+              sm.current_state = next;
+
+              // Enter new state
+              if (state_handlers[sm.current_state].on_entry) {
+                  state_handlers[sm.current_state].on_entry();
+              }
+          }
+      }
+
+      void sm_tick(void) {
+          if (state_handlers[sm.current_state].on_tick) {
+              state_handlers[sm.current_state].on_tick();
+          }
+      }
+    why: "State machines make complex behavior predictable and testable"
+
+  rtos_patterns:
+    name: RTOS Task Patterns
+    description: FreeRTOS and similar RTOS patterns
+    pattern: |
+      // FreeRTOS task patterns
+
+      #include "FreeRTOS.h"
+      #include "task.h"
+      #include "queue.h"
+      #include "semphr.h"
+
+      // 1. Producer-Consumer with Queue
+      static QueueHandle_t sensor_queue;
+
+      void sensor_task(void* params) {
+          sensor_data_t data;
+
+          while (1) {
+              data = read_sensor();
+
+              // Non-blocking send with timeout
+              if (xQueueSend(sensor_queue, &data, pdMS_TO_TICKS(10)) != pdTRUE) {
+                  // Queue full - log or handle
+                  increment_dropped_counter();
+              }
+
+              vTaskDelay(pdMS_TO_TICKS(10));  // 100Hz
+          }
+      }
+
+      void processing_task(void* params) {
+          sensor_data_t data;
+
+          while (1) {
+              // Block until data available
+              if (xQueueReceive(sensor_queue, &data, portMAX_DELAY) == pdTRUE) {
+                  process_data(&data);
+              }
+          }
+      }
+
+      // 2. Mutex for shared resource
+      static SemaphoreHandle_t i2c_mutex;
+
+      bool i2c_write_protected(uint8_t addr, uint8_t* data, size_t len) {
+          if (xSemaphoreTake(i2c_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+              bool result = i2c_write(addr, data, len);
+              xSemaphoreGive(i2c_mutex);
+              return result;
+          }
+          return false;  // Timeout
+      }
+
+      // 3. Event groups for synchronization
+      static EventGroupHandle_t system_events;
+      #define EVENT_SENSOR_READY  (1 << 0)
+      #define EVENT_CONFIG_LOADED (1 << 1)
+      #define EVENT_SYSTEM_GO     (1 << 2)
+
+      void init_task(void* params) {
+          load_configuration();
+          xEventGroupSetBits(system_events, EVENT_CONFIG_LOADED);
+
+          // Wait for all subsystems ready
+          xEventGroupWaitBits(
+              system_events,
+              EVENT_SENSOR_READY | EVENT_CONFIG_LOADED,
+              pdFALSE,  // Don't clear bits
+              pdTRUE,   // Wait for ALL bits
+              portMAX_DELAY
+          );
+
+          xEventGroupSetBits(system_events, EVENT_SYSTEM_GO);
+          vTaskDelete(NULL);  // Self-delete
+      }
+
+      // 4. Task priorities
+      // Higher number = higher priority in FreeRTOS
+      #define PRIORITY_CONTROL    (configMAX_PRIORITIES - 1)  // Highest
+      #define PRIORITY_SENSOR     (configMAX_PRIORITIES - 2)
+      #define PRIORITY_COMMS      (tskIDLE_PRIORITY + 2)
+      #define PRIORITY_LOGGING    (tskIDLE_PRIORITY + 1)      // Lowest
+
+      void app_main(void) {
+          sensor_queue = xQueueCreate(10, sizeof(sensor_data_t));
+          i2c_mutex = xSemaphoreCreateMutex();
+          system_events = xEventGroupCreate();
+
+          xTaskCreate(control_task, "control", 512, NULL, PRIORITY_CONTROL, NULL);
+          xTaskCreate(sensor_task, "sensor", 256, NULL, PRIORITY_SENSOR, NULL);
+          xTaskCreate(comms_task, "comms", 512, NULL, PRIORITY_COMMS, NULL);
+
+          vTaskStartScheduler();
+      }
+    why: "RTOS patterns enable reliable multitasking in embedded systems"
+
+anti_patterns:
+
+  busy_wait:
+    name: Busy-Wait Instead of Interrupt
+    problem: "while(!flag); wastes CPU cycles and power"
+    solution: "Use interrupts, DMA, or RTOS event waiting"
+
+  malloc_in_embedded:
+    name: Dynamic Memory in Constrained System
+    problem: "malloc can fragment heap, fail unpredictably"
+    solution: "Use static allocation or fixed-size pools"
+
+  printf_debug:
+    name: Printf for Debugging Timing-Critical Code
+    problem: "Printf is slow and disrupts timing"
+    solution: "Use trace buffers, toggle pins, or SEGGER RTT"
+
+handoffs:
+  - to: ros2-robotics
+    when: "Need ROS2 integration"
+    pass: "Hardware interface, message types"
+
+  - to: fpga-design
+    when: "Need hardware acceleration"
+    pass: "Interface specification, timing requirements"
+
+ecosystem:
+  platforms:
+    - "STM32 - ARM Cortex-M"
+    - "ESP32 - WiFi/BT integrated"
+    - "Nordic nRF - Low power BLE"
+    - "Raspberry Pi Pico - RP2040"
+
+  rtos:
+    - "FreeRTOS - Most popular"
+    - "Zephyr - Modern, Linux Foundation"
+    - "ThreadX - Azure RTOS"
+    - "ChibiOS - Automotive grade"
+
+  tools:
+    - "OpenOCD - Debug interface"
+    - "SEGGER J-Link - Debug probe"
+    - "PlatformIO - Development platform"
+    - "STM32CubeIDE"

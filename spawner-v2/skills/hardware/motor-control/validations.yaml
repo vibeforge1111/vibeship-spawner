@@ -1,0 +1,141 @@
+validations:
+
+  - id: no-dead-time
+    name: PWM Configuration Without Dead Time
+    severity: error
+    type: regex
+    pattern:
+      - "TIM\\d+->CCR\\d+.*=(?!.*BDTR|dead)"
+      - "set_pwm.*high.*low(?!.*dead|delay)"
+    message: "PWM configuration should include dead time to prevent shoot-through."
+    fix_action: "Configure BDTR register or add software dead time"
+    applies_to:
+      - "**/*.c"
+      - "**/*.cpp"
+
+  - id: unsync-adc-sampling
+    name: ADC Current Sampling Not Synchronized to PWM
+    severity: warning
+    type: regex
+    pattern:
+      - "read_adc.*current(?!.*timer|trigger|sync)"
+      - "adc_read.*phase(?!.*pwm|ccr)"
+    message: "Current sensing should be triggered from PWM timer for accurate readings."
+    fix_action: "Configure ADC external trigger from timer TRGO or CCRx"
+    applies_to:
+      - "**/*.c"
+      - "**/*.cpp"
+
+  - id: no-current-limit
+    name: Motor Control Without Current Limiting
+    severity: warning
+    type: regex
+    pattern:
+      - "class.*FOC.*:(?![\\s\\S]{0,500}(i_max|current_limit|overcurrent))"
+      - "def foc_update(?![\\s\\S]{0,300}(max|limit|clip))"
+    message: "Motor control should include current limiting to protect motor and driver."
+    fix_action: "Add current limits: iq_ref = np.clip(iq_ref, -I_MAX, I_MAX)"
+    applies_to:
+      - "**/*.py"
+      - "**/*.c"
+
+  - id: hardcoded-pole-pairs
+    name: Hardcoded Motor Pole Pairs
+    severity: info
+    type: regex
+    pattern:
+      - "pole_pairs\\s*=\\s*\\d+\\s*(?!#|//)"
+      - "\\*\\s*7\\s*;.*electrical|electrical.*\\*\\s*7"
+    message: "Motor pole pairs should be configurable, not hardcoded."
+    fix_action: "Load from configuration or motor parameter struct"
+    applies_to:
+      - "**/*.py"
+      - "**/*.c"
+
+  - id: missing-encoder-filter
+    name: Encoder Reading Without Noise Filtering
+    severity: info
+    type: regex
+    pattern:
+      - "velocity\\s*=.*count.*-.*prev.*(?!filter|average|median)"
+      - "encoder_velocity(?!.*filter)"
+    message: "Encoder velocity should be filtered to reject noise spikes."
+    fix_action: "Add moving average or median filter on velocity"
+    applies_to:
+      - "**/*.py"
+      - "**/*.c"
+
+  - id: blocking-motor-isr
+    name: Blocking Operations in Motor Control ISR
+    severity: error
+    type: regex
+    pattern:
+      - "void.*IRQ.*motor.*\\{[^}]*(printf|delay|wait)"
+      - "motor.*callback.*\\{[^}]*(print|sleep)"
+    message: "Motor control ISR should be fast with no blocking operations."
+    fix_action: "Move logging/delays outside ISR, minimize ISR work"
+    applies_to:
+      - "**/*.c"
+      - "**/*.cpp"
+
+  - id: no-offset-calibration
+    name: Current Sensor Without Offset Calibration
+    severity: warning
+    type: regex
+    pattern:
+      - "adc.*current.*(?!offset|calibrat)"
+      - "read_current(?![\\s\\S]{0,200}offset)"
+    message: "Current sensors need offset calibration at zero current."
+    fix_action: "Calibrate offsets at startup with motor disconnected or no current"
+    applies_to:
+      - "**/*.py"
+      - "**/*.c"
+
+  - id: no-angle-offset
+    name: FOC Without Electrical Angle Calibration
+    severity: warning
+    type: regex
+    pattern:
+      - "theta_e\\s*=.*encoder.*\\*.*pole_pairs(?!.*offset)"
+      - "electrical_angle.*=.*position.*\\*(?!.*calibrat)"
+    message: "FOC requires calibrating encoder to motor electrical zero."
+    fix_action: "Implement angle calibration routine: apply d-axis current, read encoder"
+    applies_to:
+      - "**/*.py"
+      - "**/*.c"
+
+  - id: missing-regeneration-protection
+    name: Motor Control Without Regeneration Protection
+    severity: info
+    type: regex
+    pattern:
+      - "class.*Motor.*:(?![\\s\\S]{0,800}(v_bus|regen|brake_resistor))"
+    message: "Consider regenerative braking protection for fast deceleration."
+    fix_action: "Monitor bus voltage and reduce braking torque or engage brake resistor"
+    applies_to:
+      - "**/*.py"
+      - "**/*.c"
+
+  - id: slow-foc-loop
+    name: FOC Loop at Low Frequency
+    severity: warning
+    type: regex
+    pattern:
+      - "foc_update.*delay.*([5-9]\\d|[1-9]\\d{2,})"
+      - "motor.*loop.*sleep.*0\\.0[1-9]"
+    message: "FOC current loop should run at 10kHz+ for good performance."
+    fix_action: "Use timer interrupt at 10-20kHz for FOC loop"
+    applies_to:
+      - "**/*.py"
+      - "**/*.c"
+
+  - id: inverse-park-before-park
+    name: Inverse Park Applied Before Forward Park
+    severity: error
+    type: regex
+    pattern:
+      - "inverse_park.*\\n.*park_transform|v_alpha.*i_alpha"
+    message: "FOC sequence: Clarke -> Park -> Control -> Inverse Park -> SVPWM"
+    fix_action: "Apply transforms in correct order"
+    applies_to:
+      - "**/*.py"

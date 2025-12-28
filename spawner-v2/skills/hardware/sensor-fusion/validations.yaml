@@ -1,0 +1,131 @@
+validations:
+
+  - id: identity-noise-matrix
+    name: Identity Matrix for Noise Covariance
+    severity: warning
+    type: regex
+    pattern:
+      - "\\bQ\\s*=\\s*np\\.eye\\s*\\("
+      - "\\bR\\s*=\\s*np\\.eye\\s*\\("
+      - "self\\.Q\\s*=\\s*np\\.eye"
+      - "self\\.R\\s*=\\s*np\\.eye"
+    message: "Using identity matrix for Q or R suggests untuned noise parameters. Calibrate from sensor data."
+    fix_action: "Use Allan variance for IMU, measure sensor variance empirically"
+    applies_to:
+      - "**/*.py"
+
+  - id: non-joseph-update
+    name: Non-Joseph Form Covariance Update
+    severity: info
+    type: regex
+    pattern:
+      - "P\\s*=\\s*\\([^)]*-\\s*K\\s*@\\s*H\\s*\\)\\s*@\\s*P"
+      - "self\\.P\\s*=\\s*\\(.*I.*-.*K.*H.*\\)\\s*@\\s*self\\.P(?!.*@)"
+    message: "Use Joseph form for covariance update to maintain positive-definiteness."
+    fix_action: "Use: P = (I - K @ H) @ P @ (I - K @ H).T + K @ R @ K.T"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-outlier-rejection
+    name: Kalman Update Without Outlier Rejection
+    severity: info
+    type: regex
+    pattern:
+      - "def\\s+update.*:\\s*[^}]*K\\s*@\\s*y(?![\\s\\S]{0,200}mahalanobis|gate|chi2)"
+    message: "Consider adding Mahalanobis gating to reject outlier measurements."
+    fix_action: "Add chi-squared test on innovation before update"
+    applies_to:
+      - "**/*.py"
+
+  - id: manual-jacobian
+    name: Manual Jacobian Without Verification
+    severity: warning
+    type: regex
+    pattern:
+      - "def\\s+.*jacobian.*:\\s*[^}]*\\bF\\s*=\\s*np\\."
+      - "def\\s+.*jacobian.*:\\s*[^}]*\\bH\\s*=\\s*np\\."
+    message: "Manual Jacobians are error-prone. Consider automatic differentiation or numerical verification."
+    fix_action: "Use JAX/PyTorch autodiff, or verify against numerical Jacobian"
+    applies_to:
+      - "**/*.py"
+
+  - id: arrival-time-fusion
+    name: Using Arrival Time Instead of Sensor Time
+    severity: warning
+    type: regex
+    pattern:
+      - "time\\.time\\(\\).*update"
+      - "rospy\\.Time\\.now\\(\\).*(?!header\\.stamp)"
+      - "self\\.get_clock\\(\\)\\.now\\(\\).*(?!msg\\.header)"
+    message: "Using current time instead of sensor timestamp causes fusion lag."
+    fix_action: "Use msg.header.stamp or sensor's hardware timestamp"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-covariance-bounds
+    name: No Minimum Covariance Enforcement
+    severity: info
+    type: regex
+    pattern:
+      - "class.*Kalman.*:(?![\\s\\S]{0,500}min_cov|eigval|positive_definite)"
+    message: "Consider adding minimum covariance bounds to prevent filter collapse."
+    fix_action: "Add eigenvalue check and enforce minimum variance"
+    applies_to:
+      - "**/*.py"
+
+  - id: unit-quaternion-violation
+    name: Quaternion Not Normalized After Update
+    severity: warning
+    type: regex
+    pattern:
+      - "q\\s*\\+=.*(?![\\s\\S]{0,50}normalize|/.*norm)"
+      - "self\\.q\\s*=.*\\+.*(?![\\s\\S]{0,50}/)"
+    message: "Quaternions must be normalized after updates to maintain unit constraint."
+    fix_action: "Add: q = q / np.linalg.norm(q) after quaternion operations"
+    applies_to:
+      - "**/*.py"
+
+  - id: angle-wrap-missing
+    name: Angle State Without Wrapping
+    severity: warning
+    type: regex
+    pattern:
+      - "(theta|yaw|heading|psi).*\\+=(?![\\s\\S]{0,100}wrap|atan2|mod)"
+    message: "Angle states should be wrapped to [-pi, pi] to avoid discontinuities."
+    fix_action: "Use np.arctan2(np.sin(angle), np.cos(angle)) to wrap angles"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-filter-health-check
+    name: No Filter Consistency Monitoring
+    severity: info
+    type: regex
+    pattern:
+      - "class.*Kalman.*:(?![\\s\\S]{0,800}NEES|NIS|innovation|chi2|health)"
+    message: "Add NEES/NIS monitoring to detect filter inconsistency."
+    fix_action: "Compute normalized innovation and compare to chi-squared bounds"
+    applies_to:
+      - "**/*.py"
+
+  - id: large-initial-covariance
+    name: Extremely Large Initial Covariance
+    severity: info
+    type: regex
+    pattern:
+      - "P\\s*=\\s*np\\.eye.*\\*\\s*(1e[3-9]|1e\\d{2,}|10{4,})"
+    message: "Very large initial covariance may cause numerical issues. Use realistic uncertainty."
+    fix_action: "Set P0 based on actual initial state uncertainty"
+    applies_to:
+      - "**/*.py"
+
+  - id: synchronous-fusion
+    name: Multiple Sensors in Single Update
+    severity: info
+    type: regex
+    pattern:
+      - "update.*imu.*gps|update.*gps.*imu"
+      - "kf\\.update.*\\[.*imu.*gps.*\\]"
+    message: "Fusing multiple sensors simultaneously may lose timing information."
+    fix_action: "Consider sequential updates with proper timestamps"
+    applies_to:
+      - "**/*.py"

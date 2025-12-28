@@ -1,0 +1,227 @@
+id: clinical-trial-analysis-sharp-edges
+skill: clinical-trial-analysis
+version: 1.0.0
+
+sharp_edges:
+
+  - id: pfs-os-discordance
+    severity: critical
+    title: "Assuming PFS Improvement Means OS Improvement"
+    summary: "PFS gains don't always translate to OS benefit - can even show harm"
+    symptoms:
+      - "Significant PFS improvement but OS shows no benefit"
+      - "Crossover confounds OS analysis"
+      - "Later OS data shows potential harm"
+    why: |
+      Per FDA 2024 guidance: Several recent examples demonstrated that common
+      early endpoints do not always predict treatment effect or potential harm.
+
+      Examples:
+      - PI3K inhibitors: PFS improvement but OS detriment in hematologic malignancies
+      - PARP inhibitors: PFS benefit but potential OS harm in ovarian cancer
+
+      Reasons for discordance:
+      - Treatment toxicity catches up over time
+      - Post-progression therapies differ between arms
+      - PFS gain may be purely radiographic, not clinical
+      - Crossover to active treatment in control arm
+
+      OS is the only endpoint measuring true clinical benefit.
+    gotcha: |
+      # Trial shows HR=0.65 for PFS (p<0.001)
+      # Press release: "Breakthrough results!"
+      # But OS data at 5 years: HR=1.15 (favoring control)
+      # The drug caused net harm despite PFS benefit
+
+      # Publishing PFS results before OS matures
+      # Then control arm crosses over, OS can never be measured
+    solution: |
+      # Pre-specify OS as safety endpoint per FDA guidance
+      safety_endpoints = {
+          'primary': 'PFS',
+          'key_secondary': 'OS',
+          'os_monitoring': {
+              'interim_analyses': [0.50, 0.75, 1.00],
+              'futility_boundary': True,
+              'harm_boundary': 'O-Brien Fleming'
+          }
+      }
+
+      # Plan crossover handling upfront
+      os_analysis_plan = {
+          'primary': 'ITT',
+          'sensitivity': ['RPSFT', 'IPCW'],
+          'crossover_adjustment': True
+      }
+
+      # Ensure adequate OS follow-up before publication
+
+  - id: subgroup-fishing
+    severity: critical
+    title: "Post-Hoc Subgroup Fishing After Overall Trial Failure"
+    summary: "Finding 'significant' subgroups invalidates statistical inference"
+    symptoms:
+      - "Overall trial negative, but 'hypothesis-generating' subgroup positive"
+      - "Multiple subgroups tested without multiplicity adjustment"
+      - "Subgroup definition refined post-hoc"
+    why: |
+      If you test enough subgroups, one will be significant by chance.
+      With 20 subgroups and alpha=0.05, expect 1 false positive.
+
+      Common violations:
+      - Testing biomarker cutoffs until one works
+      - Splitting by age/sex/region until finding significance
+      - Reporting only 'successful' subgroups
+
+      Regulators now scrutinize subgroup claims heavily.
+    gotcha: |
+      # Overall trial: HR=0.95, p=0.42 (negative)
+      # Then: "In biomarker-high subgroup (N=127), HR=0.58, p=0.03"
+      # But biomarker cutoff was optimized post-hoc
+      # This is almost certainly a false positive
+
+      # Testing 15 subgroups, reporting 1 significant one
+      # Without multiplicity adjustment, meaningless
+    solution: |
+      # Pre-specify subgroups in statistical analysis plan
+      prespecified_subgroups = [
+          {
+              'name': 'Biomarker-positive',
+              'definition': 'IHC ≥50% per central lab',
+              'rationale': 'Biological mechanism',
+              'analysis': 'Stratified by randomization factors'
+          }
+      ]
+
+      # Limit number of subgroups (typically 3-5 max)
+      # Adjust for multiplicity if testing multiple
+
+      # Report ALL subgroups, not just positive ones
+      # Use forest plots for transparency
+
+  - id: proportional-hazards-violation
+    severity: high
+    title: "Using Cox Model When Proportional Hazards Violated"
+    summary: "Hazard ratio meaningless when hazards cross"
+    symptoms:
+      - "Survival curves cross"
+      - "Treatment effect changes over time"
+      - "Schoenfeld residuals test significant"
+    why: |
+      Cox proportional hazards assumes constant hazard ratio over time.
+      When curves cross:
+      - Treatment may be harmful early, beneficial late
+      - Or beneficial early, harmful late
+      - A single HR doesn't capture this
+
+      Reporting HR=1.0 when curves cross misses the story.
+
+      Common in immunotherapy: delayed separation of curves.
+    gotcha: |
+      # Immunotherapy trial
+      # Early: Control doing better (immune response takes time)
+      # Late: Treatment doing much better
+
+      # Cox HR = 0.85, but curves crossed at month 6
+      # This HR is misleading - treatment is harmful early!
+    solution: |
+      # Test proportional hazards assumption
+      cph.check_assumptions(data, p_value_threshold=0.05)
+
+      # If violated, use:
+      # 1. Restricted Mean Survival Time (RMST)
+      rmst_diff = rmst(treatment, 24) - rmst(control, 24)
+
+      # 2. Milestone analysis (survival at fixed time)
+      survival_12mo = kaplan_meier_at_time(data, 12)
+
+      # 3. Time-varying Cox model
+      cph_tv = CoxTimeVaryingFitter()
+
+      # 4. MaxCombo test (handles crossing)
+      maxcombo_test(treatment_times, control_times)
+
+  - id: immortal-time-bias
+    severity: critical
+    title: "Immortal Time Bias in Observational Analyses"
+    summary: "Misclassifying time before treatment as treated time"
+    symptoms:
+      - "Treatment looks protective in observational data"
+      - "Treated patients have impossibly good survival"
+      - "Time from diagnosis to treatment start ignored"
+    why: |
+      To receive treatment, patients must survive to treatment start.
+      If you count this pre-treatment time as "treated", you give
+      treatment credit for time when patient couldn't die.
+
+      This artificially improves treatment group survival.
+
+      Common in:
+      - Registry analyses
+      - EHR-based studies
+      - Second-line treatment analyses
+    gotcha: |
+      # Patients who got Drug X had better survival
+      # But: Time 0 = diagnosis
+      #      Drug X started average 3 months after diagnosis
+      # Those 3 months are "immortal" - patient couldn't die (or wouldn't be in Drug X group)
+
+      # Wrong: Include pre-treatment time as treated
+      drug_x_survival = time_from_diagnosis  # WRONG
+
+      # Effectively comparing drug_x + 3mo "free" survival vs control
+    solution: |
+      # Landmark analysis: Start clock at treatment decision point
+      landmark_time = 90  # days
+      eligible = data[data['diagnosis_to_decision'] <= landmark_time]
+      # All patients must be alive at landmark
+
+      # Time-varying treatment indicator
+      # Treatment exposure starts when treatment starts
+      data['treatment_status'] = (data['time'] >= data['treatment_start']).astype(int)
+
+      # Use proper time origins in Cox model
+      cph.fit(data, duration_col='time_from_treatment_start', ...)
+
+  - id: informative-censoring
+    severity: high
+    title: "Informative Censoring Biasing Survival Estimates"
+    summary: "Censoring correlated with outcome violates assumptions"
+    symptoms:
+      - "Patients lost to follow-up are sicker"
+      - "Censoring differs between treatment arms"
+      - "Kaplan-Meier overestimates survival"
+    why: |
+      Kaplan-Meier assumes censoring is non-informative (random).
+      If sicker patients drop out more:
+      - Remaining patients are healthier
+      - Survival estimate is biased upward
+
+      Common causes:
+      - Toxicity leads to dropout
+      - Patients switch to other treatments
+      - Travel burden in one arm
+    solution: |
+      # Check censoring patterns by arm
+      def check_censoring(data, group_col, time_col, event_col):
+          by_group = data.groupby(group_col)
+          censoring_rates = by_group.apply(
+              lambda x: (x[event_col] == 0).mean()
+          )
+          # Large differences suggest informative censoring
+          return censoring_rates
+
+      # Sensitivity analyses:
+      # 1. Worst-case: Assume censored = events
+      # 2. Best-case: Assume censored = no events
+      # 3. Inverse probability of censoring weighting (IPCW)
+
+      # Report censoring information
+      # Show number at risk at each time point
+
+detection:
+  file_patterns:
+    - "**/*.py"
+    - "**/*.R"
+    - "**/*.sas"
+    - "**/*.ipynb"

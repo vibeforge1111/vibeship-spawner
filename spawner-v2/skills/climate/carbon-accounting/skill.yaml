@@ -1,0 +1,626 @@
+id: carbon-accounting
+name: Carbon Accounting & GHG Protocol
+category: climate
+description: |
+  Calculate, track, and report greenhouse gas emissions following GHG Protocol
+  standards, including Scope 1, 2, and 3 emissions and science-based targets.
+version: 1.0.0
+
+triggers:
+  - "carbon accounting"
+  - "GHG emissions"
+  - "scope 1"
+  - "scope 2"
+  - "scope 3"
+  - "carbon footprint"
+  - "emission factor"
+  - "science-based target"
+  - "SBTi"
+  - "net zero"
+
+provides:
+  - GHG Protocol scope calculations
+  - Emission factor application
+  - Scope 3 category assessment
+  - Science-based target setting
+  - Carbon footprint reporting
+  - Reduction pathway modeling
+
+patterns:
+  ghg_scopes:
+    description: "GHG Protocol scope classifications and calculations"
+    example: |
+      from dataclasses import dataclass, field
+      from typing import Dict, List, Optional
+      from enum import Enum
+      import pandas as pd
+
+      class Scope(Enum):
+          SCOPE_1 = "Scope 1"  # Direct emissions
+          SCOPE_2 = "Scope 2"  # Indirect - purchased energy
+          SCOPE_3 = "Scope 3"  # Value chain emissions
+
+      class Scope3Category(Enum):
+          """GHG Protocol Scope 3 categories."""
+          PURCHASED_GOODS = "1. Purchased goods and services"
+          CAPITAL_GOODS = "2. Capital goods"
+          FUEL_ENERGY = "3. Fuel and energy-related activities"
+          UPSTREAM_TRANSPORT = "4. Upstream transportation"
+          WASTE = "5. Waste generated in operations"
+          BUSINESS_TRAVEL = "6. Business travel"
+          EMPLOYEE_COMMUTE = "7. Employee commuting"
+          UPSTREAM_LEASED = "8. Upstream leased assets"
+          DOWNSTREAM_TRANSPORT = "9. Downstream transportation"
+          PROCESSING_SOLD = "10. Processing of sold products"
+          USE_OF_SOLD = "11. Use of sold products"
+          END_OF_LIFE = "12. End-of-life treatment"
+          DOWNSTREAM_LEASED = "13. Downstream leased assets"
+          FRANCHISES = "14. Franchises"
+          INVESTMENTS = "15. Investments"
+
+      @dataclass
+      class EmissionSource:
+          """Single emission source."""
+          name: str
+          scope: Scope
+          category: Optional[Scope3Category] = None
+          activity_data: float = 0.0
+          activity_unit: str = ""
+          emission_factor: float = 0.0
+          ef_unit: str = "kgCO2e"
+          data_quality: str = "primary"  # primary, secondary, estimated
+
+      @dataclass
+      class GHGInventory:
+          """Complete GHG emissions inventory."""
+          organization: str
+          reporting_year: int
+          boundary: str  # operational, equity share, financial control
+          sources: List[EmissionSource] = field(default_factory=list)
+
+          def calculate_emissions(self) -> Dict[str, float]:
+              """Calculate total emissions by scope."""
+              results = {
+                  Scope.SCOPE_1.value: 0.0,
+                  Scope.SCOPE_2.value: 0.0,
+                  Scope.SCOPE_3.value: 0.0
+              }
+
+              for source in self.sources:
+                  emissions = source.activity_data * source.emission_factor
+                  results[source.scope.value] += emissions
+
+              results['Total'] = sum(results.values())
+              return results
+
+          def calculate_by_category(self) -> Dict[str, float]:
+              """Calculate Scope 3 by category."""
+              results = {}
+              for source in self.sources:
+                  if source.scope == Scope.SCOPE_3 and source.category:
+                      cat_name = source.category.value
+                      emissions = source.activity_data * source.emission_factor
+                      results[cat_name] = results.get(cat_name, 0) + emissions
+              return results
+
+          def to_dataframe(self) -> pd.DataFrame:
+              """Export inventory as DataFrame."""
+              rows = []
+              for source in self.sources:
+                  emissions = source.activity_data * source.emission_factor
+                  rows.append({
+                      'Source': source.name,
+                      'Scope': source.scope.value,
+                      'Category': source.category.value if source.category else 'N/A',
+                      'Activity Data': source.activity_data,
+                      'Activity Unit': source.activity_unit,
+                      'Emission Factor': source.emission_factor,
+                      'Emissions (kgCO2e)': emissions,
+                      'Data Quality': source.data_quality
+                  })
+              return pd.DataFrame(rows)
+
+  emission_factors:
+    description: "Emission factor database and application"
+    example: |
+      from dataclasses import dataclass
+      from typing import Dict, Optional
+      import json
+
+      @dataclass
+      class EmissionFactor:
+          """Emission factor with metadata."""
+          factor: float           # kgCO2e per unit
+          unit: str              # Unit of activity
+          source: str            # Data source
+          year: int              # Reference year
+          region: str            # Geographic scope
+          uncertainty: float     # Percentage uncertainty
+          gases: Dict[str, float] = None  # Individual GHGs
+
+      class EmissionFactorDatabase:
+          """
+          Database of emission factors from multiple sources.
+          """
+
+          def __init__(self):
+              self.factors: Dict[str, Dict[str, EmissionFactor]] = {
+                  'electricity': {},
+                  'fuel': {},
+                  'transport': {},
+                  'materials': {},
+                  'waste': {}
+              }
+              self._load_defaults()
+
+          def _load_defaults(self):
+              """Load default emission factors."""
+              # Electricity (location-based, kgCO2e/kWh)
+              self.factors['electricity'] = {
+                  'US_average': EmissionFactor(0.417, 'kWh', 'EPA eGRID', 2022, 'US', 5),
+                  'US_WECC': EmissionFactor(0.322, 'kWh', 'EPA eGRID', 2022, 'US-West', 5),
+                  'EU_average': EmissionFactor(0.276, 'kWh', 'EEA', 2022, 'EU', 5),
+                  'UK': EmissionFactor(0.193, 'kWh', 'DEFRA', 2023, 'UK', 3),
+                  'solar_lifecycle': EmissionFactor(0.041, 'kWh', 'IPCC', 2021, 'Global', 20),
+                  'wind_lifecycle': EmissionFactor(0.011, 'kWh', 'IPCC', 2021, 'Global', 20),
+              }
+
+              # Fuels (kgCO2e/unit)
+              self.factors['fuel'] = {
+                  'natural_gas': EmissionFactor(2.02, 'm3', 'EPA', 2023, 'US', 3),
+                  'diesel': EmissionFactor(2.68, 'liter', 'EPA', 2023, 'Global', 3),
+                  'gasoline': EmissionFactor(2.31, 'liter', 'EPA', 2023, 'Global', 3),
+                  'propane': EmissionFactor(1.51, 'liter', 'EPA', 2023, 'Global', 3),
+                  'coal': EmissionFactor(2.42, 'kg', 'EPA', 2023, 'Global', 5),
+              }
+
+              # Transport (kgCO2e/unit)
+              self.factors['transport'] = {
+                  'car_average': EmissionFactor(0.21, 'km', 'DEFRA', 2023, 'Global', 10),
+                  'car_ev': EmissionFactor(0.05, 'km', 'DEFRA', 2023, 'Global', 20),
+                  'flight_short': EmissionFactor(0.255, 'km', 'DEFRA', 2023, 'Global', 15),
+                  'flight_long': EmissionFactor(0.195, 'km', 'DEFRA', 2023, 'Global', 15),
+                  'rail': EmissionFactor(0.035, 'km', 'DEFRA', 2023, 'Global', 10),
+                  'truck_freight': EmissionFactor(0.062, 'tonne-km', 'DEFRA', 2023, 'Global', 10),
+              }
+
+          def get(
+              self,
+              category: str,
+              name: str,
+              region: Optional[str] = None
+          ) -> EmissionFactor:
+              """Get emission factor, optionally filtered by region."""
+              if category not in self.factors:
+                  raise KeyError(f"Unknown category: {category}")
+
+              if name not in self.factors[category]:
+                  raise KeyError(f"Unknown factor: {name} in {category}")
+
+              return self.factors[category][name]
+
+          def calculate_emissions(
+              self,
+              category: str,
+              factor_name: str,
+              activity_data: float
+          ) -> float:
+              """Calculate emissions from activity data."""
+              ef = self.get(category, factor_name)
+              return activity_data * ef.factor
+
+      # Usage
+      db = EmissionFactorDatabase()
+      electricity_emissions = db.calculate_emissions('electricity', 'US_average', 100000)  # 100 MWh
+      print(f"Electricity emissions: {electricity_emissions:.0f} kgCO2e")
+
+  scope2_methods:
+    description: "Scope 2 location-based and market-based accounting"
+    example: |
+      from dataclasses import dataclass
+      from typing import Optional, Dict, List
+      import pandas as pd
+
+      @dataclass
+      class ElectricityContract:
+          """Electricity supply contract."""
+          supplier: str
+          amount_mwh: float
+          start_date: str
+          end_date: str
+          contract_type: str  # "bundled_ppa", "unbundled_rec", "standard"
+          emission_factor: Optional[float] = None  # Contractual EF
+          rec_tracking: Optional[str] = None  # REC tracking system
+
+      @dataclass
+      class GridRegion:
+          """Grid region characteristics."""
+          name: str
+          location_ef: float  # Location-based EF (kgCO2e/kWh)
+          residual_ef: float  # Residual mix EF (kgCO2e/kWh)
+
+      class Scope2Calculator:
+          """
+          Calculate Scope 2 emissions using both methods.
+
+          Location-based: Uses grid average emission factor.
+          Market-based: Uses contractual instruments (RECs, PPAs, etc.)
+          """
+
+          def __init__(self, region: GridRegion):
+              self.region = region
+              self.contracts: List[ElectricityContract] = []
+
+          def add_contract(self, contract: ElectricityContract):
+              """Add electricity supply contract."""
+              self.contracts.append(contract)
+
+          def calculate_location_based(self, total_mwh: float) -> float:
+              """Calculate location-based Scope 2 emissions."""
+              return total_mwh * 1000 * self.region.location_ef  # Convert to kWh
+
+          def calculate_market_based(self, total_mwh: float) -> float:
+              """
+              Calculate market-based Scope 2 emissions.
+
+              Hierarchy:
+              1. Bundled energy contracts (PPAs with RECs)
+              2. Unbundled energy attribute certificates (RECs)
+              3. Residual mix
+              """
+              covered_mwh = 0.0
+              emissions = 0.0
+
+              # Sort by quality (bundled PPAs first)
+              priority_order = {
+                  'bundled_ppa': 1,
+                  'unbundled_rec': 2,
+                  'standard': 3
+              }
+              sorted_contracts = sorted(
+                  self.contracts,
+                  key=lambda c: priority_order.get(c.contract_type, 4)
+              )
+
+              for contract in sorted_contracts:
+                  if covered_mwh >= total_mwh:
+                      break
+
+                  applicable_mwh = min(contract.amount_mwh, total_mwh - covered_mwh)
+                  covered_mwh += applicable_mwh
+
+                  if contract.emission_factor is not None:
+                      # Use contractual emission factor
+                      emissions += applicable_mwh * 1000 * contract.emission_factor
+                  elif contract.contract_type in ['bundled_ppa', 'unbundled_rec']:
+                      # RECs/PPAs typically count as zero emissions
+                      emissions += 0
+                  else:
+                      # Standard contract uses residual mix
+                      emissions += applicable_mwh * 1000 * self.region.residual_ef
+
+              # Remaining uncovered uses residual mix
+              uncovered_mwh = total_mwh - covered_mwh
+              if uncovered_mwh > 0:
+                  emissions += uncovered_mwh * 1000 * self.region.residual_ef
+
+              return emissions
+
+          def report(self, total_mwh: float) -> Dict[str, float]:
+              """Generate Scope 2 report with both methods."""
+              return {
+                  'total_electricity_mwh': total_mwh,
+                  'location_based_kgCO2e': self.calculate_location_based(total_mwh),
+                  'market_based_kgCO2e': self.calculate_market_based(total_mwh),
+                  'renewable_percentage': self._renewable_percentage(total_mwh)
+              }
+
+          def _renewable_percentage(self, total_mwh: float) -> float:
+              """Calculate percentage covered by renewables."""
+              renewable_mwh = sum(
+                  c.amount_mwh for c in self.contracts
+                  if c.contract_type in ['bundled_ppa', 'unbundled_rec']
+              )
+              return min(100, renewable_mwh / total_mwh * 100)
+
+  scope3_screening:
+    description: "Scope 3 category screening and materiality"
+    example: |
+      from dataclasses import dataclass
+      from typing import Dict, List, Tuple
+      from enum import Enum
+
+      class DataAvailability(Enum):
+          HIGH = "Primary data available"
+          MEDIUM = "Secondary data/estimates"
+          LOW = "Limited data"
+
+      @dataclass
+      class Scope3Screening:
+          """Scope 3 category screening result."""
+          category: Scope3Category
+          estimated_emissions: float  # tCO2e
+          percentage_of_total: float
+          data_availability: DataAvailability
+          materiality: str  # "material", "not material", "to be determined"
+          notes: str
+
+      class Scope3Screener:
+          """
+          Screen and prioritize Scope 3 categories.
+
+          Based on GHG Protocol Scope 3 Standard guidance.
+          """
+
+          def __init__(self, company_profile: dict):
+              self.profile = company_profile
+              self.results: Dict[Scope3Category, Scope3Screening] = {}
+
+          def screen_all_categories(self) -> List[Scope3Screening]:
+              """Screen all 15 Scope 3 categories for relevance."""
+              screenings = []
+
+              for category in Scope3Category:
+                  screening = self._screen_category(category)
+                  screenings.append(screening)
+                  self.results[category] = screening
+
+              # Calculate percentages
+              total = sum(s.estimated_emissions for s in screenings)
+              for screening in screenings:
+                  screening.percentage_of_total = (
+                      screening.estimated_emissions / total * 100 if total > 0 else 0
+                  )
+
+              return sorted(screenings, key=lambda s: s.estimated_emissions, reverse=True)
+
+          def _screen_category(self, category: Scope3Category) -> Scope3Screening:
+              """Screen individual category."""
+              # Industry-specific estimation logic
+              revenue = self.profile.get('revenue', 0)
+              employees = self.profile.get('employees', 0)
+              industry = self.profile.get('industry', 'general')
+
+              # Simplified estimation using spend-based method
+              estimators = {
+                  Scope3Category.PURCHASED_GOODS: lambda: revenue * 0.05 * 0.4,
+                  Scope3Category.CAPITAL_GOODS: lambda: revenue * 0.02 * 0.5,
+                  Scope3Category.BUSINESS_TRAVEL: lambda: employees * 0.5 * 0.25,
+                  Scope3Category.EMPLOYEE_COMMUTE: lambda: employees * 220 * 20 * 0.00021,
+                  # ... other categories
+              }
+
+              estimate = estimators.get(category, lambda: 0)()
+
+              return Scope3Screening(
+                  category=category,
+                  estimated_emissions=estimate,
+                  percentage_of_total=0,  # Calculated later
+                  data_availability=DataAvailability.LOW,
+                  materiality="to be determined",
+                  notes=""
+              )
+
+          def identify_material_categories(
+              self,
+              threshold_percentage: float = 5.0,
+              top_n: int = None
+          ) -> List[Scope3Category]:
+              """Identify material categories for detailed assessment."""
+              screenings = self.screen_all_categories()
+
+              material = []
+              for s in screenings:
+                  if s.percentage_of_total >= threshold_percentage:
+                      s.materiality = "material"
+                      material.append(s.category)
+                  elif top_n and len(material) < top_n:
+                      s.materiality = "material"
+                      material.append(s.category)
+                  else:
+                      s.materiality = "not material"
+
+              return material
+
+  sbti_targets:
+    description: "Science-based target setting and tracking"
+    example: |
+      from dataclasses import dataclass
+      from typing import List, Dict
+      from datetime import date
+      import numpy as np
+
+      @dataclass
+      class BaselineEmissions:
+          """Baseline year emissions."""
+          year: int
+          scope1: float
+          scope2_location: float
+          scope2_market: float
+          scope3: float
+
+          @property
+          def total_scope12(self) -> float:
+              return self.scope1 + self.scope2_market
+
+          @property
+          def total(self) -> float:
+              return self.scope1 + self.scope2_market + self.scope3
+
+      @dataclass
+      class ScienceBasedTarget:
+          """SBTi-aligned target definition."""
+          target_type: str  # "absolute", "intensity"
+          target_year: int
+          reduction_percentage: float
+          scope_coverage: List[str]  # ["scope1", "scope2", "scope3"]
+          pathway: str  # "1.5C", "well-below-2C"
+
+      class SBTiPathwayCalculator:
+          """
+          Calculate science-based target pathways.
+
+          Based on SBTi methodology and sector decarbonization.
+          """
+
+          # SDA pathway reduction rates by sector (annual %)
+          SECTOR_PATHWAYS = {
+              '1.5C': {
+                  'power': 7.5,
+                  'services': 4.2,
+                  'manufacturing': 4.2,
+                  'transport': 4.2,
+              },
+              'well-below-2C': {
+                  'power': 5.0,
+                  'services': 2.5,
+                  'manufacturing': 2.5,
+                  'transport': 2.5,
+              }
+          }
+
+          def __init__(self, baseline: BaselineEmissions, sector: str):
+              self.baseline = baseline
+              self.sector = sector
+
+          def absolute_contraction(
+              self,
+              target_year: int,
+              pathway: str = '1.5C'
+          ) -> ScienceBasedTarget:
+              """
+              Calculate absolute contraction target.
+
+              1.5°C: 4.2% annual reduction for Scope 1+2
+              Well-below 2°C: 2.5% annual reduction
+              """
+              years = target_year - self.baseline.year
+              annual_rate = 0.042 if pathway == '1.5C' else 0.025
+
+              reduction = 1 - (1 - annual_rate) ** years
+
+              return ScienceBasedTarget(
+                  target_type='absolute',
+                  target_year=target_year,
+                  reduction_percentage=reduction * 100,
+                  scope_coverage=['scope1', 'scope2'],
+                  pathway=pathway
+              )
+
+          def generate_pathway(
+              self,
+              target: ScienceBasedTarget,
+              current_year: int = None
+          ) -> Dict[int, Dict[str, float]]:
+              """Generate year-by-year emissions pathway."""
+              if current_year is None:
+                  current_year = date.today().year
+
+              pathway = {}
+              years = target.target_year - self.baseline.year
+              annual_reduction = target.reduction_percentage / 100 / years
+
+              for year in range(self.baseline.year, target.target_year + 1):
+                  years_elapsed = year - self.baseline.year
+                  factor = 1 - (annual_reduction * years_elapsed)
+
+                  pathway[year] = {
+                      'target_scope12': self.baseline.total_scope12 * factor,
+                      'target_scope3': self.baseline.scope3 * factor if 'scope3' in target.scope_coverage else self.baseline.scope3
+                  }
+
+              return pathway
+
+          def track_progress(
+              self,
+              actual_emissions: Dict[int, float],
+              target: ScienceBasedTarget
+          ) -> Dict[str, any]:
+              """Track progress against target pathway."""
+              pathway = self.generate_pathway(target)
+
+              progress = {
+                  'on_track': True,
+                  'years': {}
+              }
+
+              for year, actual in actual_emissions.items():
+                  if year in pathway:
+                      target_value = pathway[year]['target_scope12']
+                      variance = (actual - target_value) / target_value * 100
+
+                      progress['years'][year] = {
+                          'actual': actual,
+                          'target': target_value,
+                          'variance_percent': variance,
+                          'on_track': actual <= target_value
+                      }
+
+                      if actual > target_value:
+                          progress['on_track'] = False
+
+              return progress
+
+anti_patterns:
+  - pattern: "Scope 3 excluded from target"
+    problem: "Value chain emissions often 80%+ of footprint"
+    solution: "Include material Scope 3 categories in targets"
+
+  - pattern: "Location-based only for market claims"
+    problem: "Can't claim renewable energy benefits"
+    solution: "Report both methods, use market-based for RE claims"
+
+  - pattern: "Using outdated emission factors"
+    problem: "Grid emissions change significantly year-over-year"
+    solution: "Use emission factors from reporting year or recent"
+
+  - pattern: "Double counting RECs"
+    problem: "Same REC claimed by multiple parties"
+    solution: "Use tracked/certified instruments, retire properly"
+
+  - pattern: "No baseline recalculation policy"
+    problem: "Acquisitions/divestitures make comparison invalid"
+    solution: "Recalculate baseline for structural changes"
+
+handoffs:
+  - to: climate-modeling
+    when: "Emissions pathway alignment with warming scenarios"
+    context: "SSP scenarios and carbon budgets"
+
+  - to: renewable-energy
+    when: "Calculating avoided emissions from renewables"
+    context: "Grid emission factors and RE generation"
+
+  - to: sustainability-metrics
+    when: "Integrating carbon into broader ESG"
+    context: "CDP, TCFD reporting requirements"
+
+ecosystem:
+  frameworks:
+    - "GHG Protocol - Corporate Standard"
+    - "GHG Protocol - Scope 3 Standard"
+    - "SBTi - Science Based Targets"
+    - "ISO 14064 - GHG accounting"
+
+  databases:
+    - "EPA - Emission Factors Hub"
+    - "DEFRA - UK Conversion Factors"
+    - "Ecoinvent - LCA database"
+    - "EXIOBASE - IO analysis"
+
+  reporting:
+    - "CDP - Climate disclosure"
+    - "TCFD - Climate risk"
+    - "GRI 305 - Emissions"
+    - "SASB - Industry standards"
+
+references:
+  standards:
+    - "GHG Protocol Corporate Standard (2004)"
+    - "GHG Protocol Scope 3 Standard (2011)"
+    - "SBTi Criteria v5.0 (2023)"
+
+  guidance:
+    - "GHG Protocol Scope 2 Guidance (2015)"
+    - "SBTi Corporate Manual"
+    - "CDP Technical Note on Scope 3"

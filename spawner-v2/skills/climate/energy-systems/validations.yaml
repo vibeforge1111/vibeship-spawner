@@ -1,0 +1,144 @@
+validations:
+
+  - id: dc-power-flow-voltage
+    name: DC Power Flow for Voltage Analysis
+    severity: warning
+    type: regex
+    pattern:
+      - "rundcpp.*voltage|voltage.*rundcpp"
+      - "dc_power_flow.*volt(?!age_angle)"
+    message: "DC power flow ignores voltage magnitudes. Use AC for voltage studies."
+    fix_action: "Use: pp.runpp(net) instead of pp.rundcpp(net)"
+    applies_to:
+      - "**/*.py"
+
+  - id: storage-no-efficiency
+    name: Battery Storage Without Efficiency
+    severity: warning
+    type: regex
+    pattern:
+      - "energy_out\\s*=\\s*energy_in(?!.*eff)"
+      - "soc.*charge.*discharge(?!.*loss|eff)"
+    message: "Battery round-trip efficiency is 85-95%, not 100%."
+    fix_action: "Apply: energy_out = energy_in * sqrt(round_trip_eff) for each direction"
+    applies_to:
+      - "**/*.py"
+
+  - id: storage-no-degradation
+    name: Battery Optimization Without Degradation
+    severity: info
+    type: regex
+    pattern:
+      - "arbitrage|dispatch.*optim(?!.*degrad|cycle|life)"
+      - "maximize.*revenue.*storage(?!.*wear)"
+    message: "Include degradation cost in storage optimization."
+    fix_action: "Add degradation cost = cycles * (replacement_cost / cycle_life)"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-ramp-constraints
+    name: Dispatch Without Ramp Constraints
+    severity: warning
+    type: regex
+    pattern:
+      - "dispatch\\[t\\].*=(?!.*ramp)"
+      - "power\\[t\\].*=.*demand(?!.*ramp|limit)"
+    message: "Include generator ramp rate constraints in dispatch."
+    fix_action: "Add: abs(p[t] - p[t-1]) <= ramp_rate * timestep"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-min-up-down
+    name: Unit Commitment Without Min Up/Down Time
+    severity: info
+    type: regex
+    pattern:
+      - "unit_commitment(?!.*min_up|min_down)"
+      - "on_off.*var(?!.*up_time|down_time)"
+    message: "Include minimum up/down time constraints for thermal units."
+    fix_action: "Add: sum(u[t-min_up:t]) >= min_up * (u[t] - u[t-1])"
+    applies_to:
+      - "**/*.py"
+
+  - id: single-contingency
+    name: Only N-1 Contingency Analysis
+    severity: info
+    type: regex
+    pattern:
+      - "contingency.*for.*element(?!.*n_1_1|n-1-1|second)"
+      - "n_minus_1(?!.*n_minus_2|cascade)"
+    message: "Consider N-1-1 for critical infrastructure."
+    fix_action: "After N-1, check second contingency before system is restored."
+    applies_to:
+      - "**/*.py"
+
+  - id: constant-load
+    name: Static Load in Dynamic Simulation
+    severity: info
+    type: regex
+    pattern:
+      - "dynamic.*sim.*p_mw\\s*=\\s*\\d+(?!.*zip|composite)"
+      - "transient.*load.*const"
+    message: "Use voltage-dependent load models for dynamic studies."
+    fix_action: "Apply ZIP model: P = P0 * (z*V² + i*V + p)"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-power-balance-check
+    name: Power Flow Without Balance Verification
+    severity: warning
+    type: regex
+    pattern:
+      - "runpp|runpf(?!.*balance|verify|check)"
+    message: "Verify power balance after power flow simulation."
+    fix_action: "Check: abs(sum(gen) - sum(load) - losses) < tolerance"
+    applies_to:
+      - "**/*.py"
+
+  - id: per-unit-mismatch
+    name: Mixing Per-Unit and Physical Units
+    severity: warning
+    type: regex
+    pattern:
+      - "pu.*\\*.*mw|mw.*\\*.*pu(?!.*base)"
+      - "v_pu.*\\+.*kv|kv.*\\+.*v_pu"
+    message: "Don't mix per-unit and physical units without base conversion."
+    fix_action: "Convert: MW = pu * S_base; kV = pu * V_base"
+    applies_to:
+      - "**/*.py"
+
+  - id: ignore-losses
+    name: Dispatch Ignoring Transmission Losses
+    severity: info
+    type: regex
+    pattern:
+      - "demand.*=.*sum.*gen(?!.*loss)"
+      - "balance.*gen.*load(?!.*loss)"
+    message: "Include transmission losses (2-6% of generation)."
+    fix_action: "Add: sum(gen) = sum(load) + losses"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-reactive-limits
+    name: Generator Without Reactive Power Limits
+    severity: info
+    type: regex
+    pattern:
+      - "create_gen.*p_mw(?!.*q_max|q_min)"
+      - "gen.*reactive(?!.*limit|cap)"
+    message: "Define generator reactive power limits for voltage analysis."
+    fix_action: "Add: max_q_mvar and min_q_mvar to generator definition"
+    applies_to:
+      - "**/*.py"
+
+  - id: frequency-ignored
+    name: Large Disturbance Without Frequency Response
+    severity: info
+    type: regex
+    pattern:
+      - "trip.*gen.*(?!.*frequency|inertia|governor)"
+      - "contingency.*generator(?!.*freq)"
+    message: "Model frequency response for generator trip studies."
+    fix_action: "Include inertia constant H, governor droop, load damping."
+    applies_to:
+      - "**/*.py"

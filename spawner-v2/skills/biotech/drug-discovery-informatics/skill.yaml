@@ -1,0 +1,578 @@
+# Drug Discovery Informatics Skill
+# Computational approaches for drug discovery and development
+
+id: drug-discovery-informatics
+name: Drug Discovery Informatics
+category: biotech
+complexity: advanced
+requires_skills:
+  - protein-structure
+  - statistical-analysis
+
+description: |
+  Patterns for computer-aided drug discovery including virtual screening,
+  molecular docking, ADMET prediction, lead optimization, and integration
+  with AI/ML methods. Covers both structure-based and ligand-based approaches.
+
+patterns:
+
+  virtual_screening:
+    name: Virtual Screening Workflow
+    description: Screen large compound libraries against targets
+    when: "Need to identify hit compounds from large databases"
+    pattern: |
+      from pathlib import Path
+      from dataclasses import dataclass
+      from typing import List, Optional, Tuple
+      import pandas as pd
+
+      @dataclass
+      class VirtualScreeningConfig:
+          """Configuration for virtual screening campaign."""
+          library_path: Path
+          target_structure: Path
+          binding_site: List[Tuple[float, float, float]]  # Center coordinates
+          box_size: Tuple[float, float, float] = (20, 20, 20)
+          exhaustiveness: int = 8
+          num_modes: int = 9
+          energy_cutoff: float = 3.0  # kcal/mol from best
+
+      def prepare_receptor(
+          pdb_file: Path,
+          output_pdbqt: Path,
+          remove_waters: bool = True,
+          add_hydrogens: bool = True
+      ) -> Path:
+          """
+          Prepare receptor for docking.
+
+          Steps:
+          1. Remove waters and heteroatoms (optional)
+          2. Add hydrogens at pH 7.4
+          3. Assign Gasteiger charges
+          4. Convert to PDBQT format
+          """
+          from openbabel import openbabel
+
+          conv = openbabel.OBConversion()
+          conv.SetInAndOutFormats("pdb", "pdbqt")
+
+          mol = openbabel.OBMol()
+          conv.ReadFile(mol, str(pdb_file))
+
+          if remove_waters:
+              # Remove water molecules
+              for residue in list(mol.GetResidues()):
+                  if residue.GetName() == "HOH":
+                      mol.DeleteResidue(residue)
+
+          if add_hydrogens:
+              mol.AddHydrogens()
+
+          # Assign charges
+          charge_model = openbabel.OBChargeModel.FindType("gasteiger")
+          charge_model.ComputeCharges(mol)
+
+          conv.WriteFile(mol, str(output_pdbqt))
+          return output_pdbqt
+
+      def run_vina_screen(
+          receptor: Path,
+          ligand_library: Path,
+          config: VirtualScreeningConfig,
+          output_dir: Path,
+          n_cpus: int = 8
+      ) -> pd.DataFrame:
+          """
+          Run AutoDock Vina virtual screening.
+
+          Returns DataFrame with compound IDs and docking scores.
+          """
+          import subprocess
+
+          output_dir.mkdir(parents=True, exist_ok=True)
+
+          results = []
+          ligands = list(ligand_library.glob("*.pdbqt"))
+
+          for ligand in ligands:
+              output_file = output_dir / f"{ligand.stem}_docked.pdbqt"
+              log_file = output_dir / f"{ligand.stem}.log"
+
+              cmd = [
+                  "vina",
+                  "--receptor", str(receptor),
+                  "--ligand", str(ligand),
+                  "--out", str(output_file),
+                  "--log", str(log_file),
+                  "--center_x", str(config.binding_site[0][0]),
+                  "--center_y", str(config.binding_site[0][1]),
+                  "--center_z", str(config.binding_site[0][2]),
+                  "--size_x", str(config.box_size[0]),
+                  "--size_y", str(config.box_size[1]),
+                  "--size_z", str(config.box_size[2]),
+                  "--exhaustiveness", str(config.exhaustiveness),
+                  "--num_modes", str(config.num_modes),
+                  "--cpu", str(n_cpus)
+              ]
+
+              subprocess.run(cmd, check=True, capture_output=True)
+
+              # Parse score from log
+              score = parse_vina_log(log_file)
+              results.append({
+                  'compound_id': ligand.stem,
+                  'docking_score': score,
+                  'output_file': str(output_file)
+              })
+
+          return pd.DataFrame(results).sort_values('docking_score')
+    why: "Virtual screening reduces experimental costs by 100-1000x"
+
+  molecular_docking:
+    name: Molecular Docking Best Practices
+    description: Dock ligands to protein targets accurately
+    pattern: |
+      from pathlib import Path
+      from dataclasses import dataclass
+      import subprocess
+
+      @dataclass
+      class DockingResult:
+          """Results from docking calculation."""
+          ligand_id: str
+          score: float
+          pose_file: Path
+          interactions: dict
+          rmsd_from_input: Optional[float] = None
+
+      def dock_with_gnina(
+          receptor: Path,
+          ligand: Path,
+          output: Path,
+          binding_site: Tuple[float, float, float],
+          box_size: float = 20,
+          exhaustiveness: int = 16
+      ) -> DockingResult:
+          """
+          Dock using GNINA (CNN-based scoring).
+
+          GNINA often outperforms classical scoring functions.
+          """
+          cmd = [
+              "gnina",
+              "--receptor", str(receptor),
+              "--ligand", str(ligand),
+              "--out", str(output),
+              "--center_x", str(binding_site[0]),
+              "--center_y", str(binding_site[1]),
+              "--center_z", str(binding_site[2]),
+              "--size", str(box_size),
+              "--exhaustiveness", str(exhaustiveness),
+              "--cnn_scoring", "rescore",
+              "--cnn", "crossdock_default2018"
+          ]
+
+          result = subprocess.run(cmd, capture_output=True, text=True)
+
+          # Parse CNN score
+          # ...
+          return DockingResult(...)
+
+      # Covalent docking for covalent inhibitors
+      def dock_covalent(
+          receptor: Path,
+          ligand: Path,
+          reactive_residue: str,  # e.g., "CYS145"
+          warhead_type: str = "acrylamide"
+      ) -> DockingResult:
+          """
+          Covalent docking for covalent drug discovery.
+
+          CRITICAL: Standard docking CANNOT handle covalent bonds.
+          Use specialized tools: CovDock, DOCKovalent, GOLD covalent.
+          """
+          # Using AutoDock-GPU covalent mode or CovDock
+          # ...
+          pass
+
+      # Pose analysis and validation
+      def analyze_binding_interactions(
+          complex_pdb: Path
+      ) -> dict:
+          """
+          Analyze protein-ligand interactions.
+
+          Returns hydrogen bonds, hydrophobic contacts,
+          pi-stacking, salt bridges.
+          """
+          from plip.structure.preparation import PDBComplex
+
+          complex_obj = PDBComplex()
+          complex_obj.load_pdb(str(complex_pdb))
+          complex_obj.analyze()
+
+          interactions = {}
+          for ligand_id, binding_site in complex_obj.interaction_sets.items():
+              interactions[ligand_id] = {
+                  'h_bonds': binding_site.hbonds_ldon + binding_site.hbonds_pdon,
+                  'hydrophobic': binding_site.hydrophobic_contacts,
+                  'pi_stacking': binding_site.pistacking,
+                  'salt_bridges': binding_site.saltbridge_lneg + binding_site.saltbridge_pneg
+              }
+
+          return interactions
+    why: "Accurate docking predicts binding modes for lead optimization"
+
+  admet_prediction:
+    name: ADMET Property Prediction
+    description: Predict absorption, distribution, metabolism, excretion, toxicity
+    critical: true
+    pattern: |
+      from rdkit import Chem
+      from rdkit.Chem import Descriptors, Lipinski, QED
+      import pandas as pd
+      from dataclasses import dataclass
+
+      @dataclass
+      class ADMETProfile:
+          """ADMET property predictions for a compound."""
+          # Physicochemical
+          molecular_weight: float
+          logp: float
+          tpsa: float
+          h_bond_donors: int
+          h_bond_acceptors: int
+          rotatable_bonds: int
+
+          # Drug-likeness
+          lipinski_violations: int
+          qed_score: float
+          brenk_alerts: int
+
+          # Predicted properties
+          absorption_class: str  # High/Medium/Low
+          bbb_penetration: bool
+          pgp_substrate: bool
+          cyp_inhibition: dict  # CYP1A2, CYP2C19, etc.
+          herg_liability: str  # High/Medium/Low
+
+          # Toxicity
+          ames_mutagenic: bool
+          hepatotoxicity_risk: str
+          carcinogenicity_risk: str
+
+      def calculate_physicochemical(smiles: str) -> dict:
+          """Calculate basic physicochemical properties."""
+          mol = Chem.MolFromSmiles(smiles)
+          if mol is None:
+              raise ValueError(f"Invalid SMILES: {smiles}")
+
+          return {
+              'molecular_weight': Descriptors.MolWt(mol),
+              'logp': Descriptors.MolLogP(mol),
+              'tpsa': Descriptors.TPSA(mol),
+              'h_bond_donors': Descriptors.NumHDonors(mol),
+              'h_bond_acceptors': Descriptors.NumHAcceptors(mol),
+              'rotatable_bonds': Descriptors.NumRotatableBonds(mol),
+              'aromatic_rings': Descriptors.NumAromaticRings(mol),
+              'fraction_sp3': Descriptors.FractionCSP3(mol)
+          }
+
+      def check_lipinski_rule_of_5(smiles: str) -> dict:
+          """
+          Lipinski's Rule of Five for oral bioavailability.
+
+          Violations:
+          - MW > 500
+          - LogP > 5
+          - H-bond donors > 5
+          - H-bond acceptors > 10
+          """
+          mol = Chem.MolFromSmiles(smiles)
+
+          violations = 0
+          details = {}
+
+          mw = Descriptors.MolWt(mol)
+          if mw > 500:
+              violations += 1
+              details['mw'] = f"{mw:.1f} > 500"
+
+          logp = Descriptors.MolLogP(mol)
+          if logp > 5:
+              violations += 1
+              details['logp'] = f"{logp:.2f} > 5"
+
+          hbd = Descriptors.NumHDonors(mol)
+          if hbd > 5:
+              violations += 1
+              details['hbd'] = f"{hbd} > 5"
+
+          hba = Descriptors.NumHAcceptors(mol)
+          if hba > 10:
+              violations += 1
+              details['hba'] = f"{hba} > 10"
+
+          return {
+              'violations': violations,
+              'passes': violations <= 1,  # One violation allowed
+              'details': details
+          }
+
+      def predict_admet_ml(smiles: str) -> ADMETProfile:
+          """
+          ML-based ADMET prediction.
+
+          Uses models like ADMETlab, SwissADME, pkCSM.
+          """
+          # Using ADMETlab or similar
+          # Many tools available as web services or local models
+
+          # Example with admetSAR predictions
+          # ...
+          pass
+
+      # PAINS filter for reactive compounds
+      def check_pains(smiles: str) -> list:
+          """
+          Check for Pan-Assay INterference compoundS.
+
+          PAINS are frequent hitters that give false positives.
+          """
+          from rdkit.Chem.FilterCatalog import FilterCatalog, FilterCatalogParams
+
+          mol = Chem.MolFromSmiles(smiles)
+          params = FilterCatalogParams()
+          params.AddCatalog(FilterCatalogParams.FilterCatalogs.PAINS)
+          catalog = FilterCatalog(params)
+
+          matches = []
+          for match in catalog.GetMatches(mol):
+              matches.append(match.GetDescription())
+
+          return matches
+    why: "ADMET failures cause 50% of clinical drug development failures"
+
+  lead_optimization:
+    name: Lead Optimization Strategies
+    description: Optimize hits to leads with better properties
+    pattern: |
+      from rdkit import Chem
+      from rdkit.Chem import AllChem, rdFMCS
+      import pandas as pd
+
+      def matched_molecular_pairs(
+          compounds: pd.DataFrame,
+          smiles_col: str = 'smiles',
+          activity_col: str = 'ic50'
+      ) -> pd.DataFrame:
+          """
+          Find matched molecular pairs for SAR analysis.
+
+          Identifies structural transformations that improve activity.
+          """
+          from mmpdb import fragment, index
+
+          # Generate fragments and find pairs
+          # ...
+          pass
+
+      def bioisosteric_replacement(
+          smiles: str,
+          replacement_type: str = 'carboxylic_acid'
+      ) -> list:
+          """
+          Suggest bioisosteric replacements.
+
+          Common bioisosteres:
+          - COOH → tetrazole, sulfonamide
+          - Phenyl → pyridine, thiophene
+          - Ester → amide, reverse amide
+          """
+          bioisosteres = {
+              'carboxylic_acid': [
+                  'C(=O)O >> c1nnn[nH]1',  # Tetrazole
+                  'C(=O)O >> S(=O)(=O)N',  # Sulfonamide
+                  'C(=O)O >> P(=O)(O)O',   # Phosphonate
+              ],
+              'phenyl': [
+                  'c1ccccc1 >> c1ccncc1',  # Pyridine
+                  'c1ccccc1 >> c1ccsc1',   # Thiophene
+              ]
+          }
+
+          mol = Chem.MolFromSmiles(smiles)
+          replacements = []
+
+          for rxn_smarts in bioisosteres.get(replacement_type, []):
+              rxn = AllChem.ReactionFromSmarts(rxn_smarts)
+              products = rxn.RunReactants((mol,))
+              for product in products:
+                  replacements.append(Chem.MolToSmiles(product[0]))
+
+          return replacements
+
+      def multiparameter_optimization(
+          compounds: pd.DataFrame,
+          objectives: dict,
+          weights: dict = None
+      ) -> pd.DataFrame:
+          """
+          Multi-parameter optimization (MPO).
+
+          Balance potency, selectivity, ADMET properties.
+          """
+          # Calculate MPO score
+          # Common: CNS MPO, Pfizer 3/75 rule
+
+          if weights is None:
+              weights = {obj: 1.0 for obj in objectives}
+
+          def score_compound(row):
+              total = 0
+              for prop, (target, direction) in objectives.items():
+                  value = row[prop]
+                  if direction == 'minimize':
+                      score = 1 - min(value / target, 1)
+                  else:  # maximize
+                      score = min(value / target, 1)
+                  total += score * weights[prop]
+              return total / sum(weights.values())
+
+          compounds['mpo_score'] = compounds.apply(score_compound, axis=1)
+          return compounds.sort_values('mpo_score', ascending=False)
+    why: "Systematic optimization improves success rate in drug development"
+
+  generative_design:
+    name: AI-Driven Molecule Generation
+    description: Generate novel molecules with desired properties
+    pattern: |
+      from typing import List, Callable
+      from dataclasses import dataclass
+
+      @dataclass
+      class GenerationConfig:
+          """Configuration for generative molecule design."""
+          target_properties: dict  # Property: target value
+          num_generations: int = 1000
+          population_size: int = 100
+          mutation_rate: float = 0.1
+
+      def reinvent_generate(
+          scoring_function: Callable,
+          prior_model: str,
+          num_molecules: int = 1000
+      ) -> List[str]:
+          """
+          Generate molecules using REINVENT.
+
+          Uses reinforcement learning to optimize for
+          desired properties while maintaining drug-likeness.
+          """
+          # REINVENT is a popular generative model
+          # https://github.com/MolecularAI/REINVENT4
+          pass
+
+      def generate_with_chembl(
+          seed_molecule: str,
+          target_activity: float,
+          target_protein: str
+      ) -> List[str]:
+          """
+          Generate analogs using ChEMBL data.
+
+          Finds similar active compounds and combines features.
+          """
+          from chembl_webresource_client.new_client import new_client
+
+          # Search for similar actives
+          similarity = new_client.similarity
+          similar_compounds = similarity.filter(
+              smiles=seed_molecule,
+              similarity=70
+          )
+
+          # Filter by activity against target
+          # ...
+          pass
+
+      # De novo design with genetic algorithms
+      def genetic_algorithm_design(
+          config: GenerationConfig,
+          fitness_function: Callable
+      ) -> List[str]:
+          """
+          Genetic algorithm for molecule optimization.
+          """
+          from rdkit import Chem
+          from rdkit.Chem import AllChem
+
+          # SELFIES for robust molecule representation
+          import selfies as sf
+
+          # Initialize population
+          # Mutate, crossover, select
+          # ...
+          pass
+    why: "Generative AI explores chemical space beyond known compounds"
+
+anti_patterns:
+
+  ignoring_admet:
+    name: Optimizing Potency Without ADMET
+    problem: "Highly potent compound fails in vivo due to poor ADMET"
+    solution: "Balance potency with ADMET from the start"
+
+  single_scoring_function:
+    name: Trusting Single Docking Score
+    problem: "Docking scores poorly correlate with binding affinity"
+    solution: "Use consensus scoring, validate with orthogonal methods"
+
+  standard_docking_for_covalent:
+    name: Using Non-Covalent Docking for Covalent Targets
+    problem: "Standard docking cannot model covalent bond formation"
+    solution: "Use CovDock, DOCKovalent, or GOLD covalent mode"
+
+handoffs:
+  - to: protein-structure
+    when: "Need target structure for docking"
+    pass: "Target protein sequence or PDB ID"
+
+  - to: clinical-trial-analysis
+    when: "Lead compound ready for clinical development"
+    pass: "Compound profile, preclinical data"
+
+  - to: statistical-analysis
+    when: "Need SAR analysis or QSAR modeling"
+    pass: "Activity data, compound structures"
+
+ecosystem:
+  docking:
+    - "AutoDock Vina - Fast and accurate"
+    - "GNINA - CNN-based scoring"
+    - "Glide - Schrodinger commercial"
+    - "GOLD - Genetic algorithm docking"
+
+  virtual_screening:
+    - "OpenEye ROCS - Shape-based screening"
+    - "Pharmit - Pharmacophore search"
+    - "LigandScout - Pharmacophore modeling"
+
+  admet_prediction:
+    - "ADMETlab 2.0 - Comprehensive prediction"
+    - "SwissADME - Free web tool"
+    - "pkCSM - Pharmacokinetics prediction"
+    - "admetSAR - Toxicity prediction"
+
+  generative:
+    - "REINVENT - RL-based generation"
+    - "MolGPT - Transformer-based"
+    - "ChemBERTa - Molecular BERT"
+    - "GENTRL - Generative tensorial RL"
+
+  databases:
+    - "ChEMBL - Bioactivity database"
+    - "PubChem - Chemical compounds"
+    - "ZINC - Commercially available compounds"
+    - "Enamine REAL - Synthesizable compounds"

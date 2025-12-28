@@ -1,0 +1,313 @@
+# Scientific Method Validations
+# Automated checks for research methodology issues
+
+validations:
+
+  # --- CRITICAL: Reproducibility Issues ---
+
+  - id: missing-random-seed
+    name: Missing Random Seed Setting
+    severity: error
+    type: regex
+    pattern:
+      - "random\\.shuffle|random\\.choice|random\\.sample(?![\\s\\S]{0,200}seed)"
+      - "np\\.random\\.(rand|randn|choice|shuffle)(?![\\s\\S]{0,200}seed)"
+      - "torch\\.(rand|randn)(?![\\s\\S]{0,200}manual_seed)"
+      - "train_test_split(?![\\s\\S]{0,200}random_state)"
+    message: "Random operations without seed setting destroy reproducibility."
+    fix_action: |
+      Set all random seeds at the start of your script:
+      random.seed(42)
+      np.random.seed(42)
+      torch.manual_seed(42)
+    applies_to:
+      - "**/*.py"
+      - "**/*.ipynb"
+
+  - id: incomplete-seed-setting
+    name: Incomplete Random Seed Coverage
+    severity: error
+    type: regex
+    pattern:
+      - "torch\\.manual_seed(?![\\s\\S]{0,100}cuda\\.manual_seed)"
+      - "np\\.random\\.seed(?![\\s\\S]{0,200}random\\.seed)"
+    message: "Setting one seed but not others leaves reproducibility gaps."
+    fix_action: |
+      Create a comprehensive seed function:
+      def set_all_seeds(seed):
+          random.seed(seed)
+          np.random.seed(seed)
+          torch.manual_seed(seed)
+          torch.cuda.manual_seed_all(seed)
+    applies_to:
+      - "**/*.py"
+
+  - id: no-environment-pinning
+    name: Missing Dependency Version Pinning
+    severity: warning
+    type: regex
+    pattern:
+      - "requirements\\.txt.*\\n(?![\\s\\S]*==)"
+      - "pip install (?!.*==)"
+    message: "Dependencies without version pins lead to irreproducible environments."
+    fix_action: "Pin exact versions: numpy==1.24.3 or use pip freeze > requirements.lock"
+    applies_to:
+      - "**/requirements.txt"
+      - "**/*.sh"
+      - "**/*.md"
+
+  # --- HIGH: Statistical Issues ---
+
+  - id: multiple-comparisons-no-correction
+    name: Multiple Statistical Tests Without Correction
+    severity: warning
+    type: regex
+    pattern:
+      - "for.*in.*:\\n.*ttest_ind|for.*in.*:\\n.*mannwhitneyu"
+      - "ttest_ind.*\\n.*ttest_ind.*\\n.*ttest_ind"
+      - "chi2_contingency.*\\n.*chi2_contingency"
+    message: "Running multiple tests without correction inflates false positive rate."
+    fix_action: |
+      Apply Bonferroni correction: adjusted_alpha = 0.05 / n_tests
+      Or use FDR correction: statsmodels.stats.multitest.multipletests(pvals, method='fdr_bh')
+    applies_to:
+      - "**/*.py"
+      - "**/*.R"
+      - "**/*.ipynb"
+
+  - id: p-value-threshold-hardcoded
+    name: Hardcoded P-Value Threshold
+    severity: info
+    type: regex
+    pattern:
+      - "p.*<.*0\\.05"
+      - "pvalue.*<.*0\\.05"
+      - "p_value.*<.*0\\.05"
+    message: "Consider if 0.05 is appropriate. Report exact p-value and effect size."
+    fix_action: |
+      Instead of if p < 0.05:
+      Report: f"p = {p:.4f}, d = {effect_size:.2f}, 95% CI [{ci_low:.2f}, {ci_high:.2f}]"
+    applies_to:
+      - "**/*.py"
+      - "**/*.R"
+      - "**/*.ipynb"
+
+  - id: no-effect-size
+    name: Statistical Test Without Effect Size
+    severity: warning
+    type: regex
+    pattern:
+      - "ttest_ind.*print.*p(?!.*cohen|.*effect)"
+      - "mannwhitneyu.*pvalue(?!.*effect|.*r|.*cliff)"
+      - "chisquare.*print(?!.*cramer|.*phi|.*odds)"
+    message: "Statistical tests should report effect sizes, not just p-values."
+    fix_action: |
+      Calculate and report effect sizes:
+      - t-test: Cohen's d = (mean1 - mean2) / pooled_std
+      - Chi-square: Cramer's V
+      - Mann-Whitney: Rank-biserial r
+    applies_to:
+      - "**/*.py"
+      - "**/*.R"
+
+  - id: no-confidence-interval
+    name: Point Estimate Without Confidence Interval
+    severity: warning
+    type: regex
+    pattern:
+      - "mean\\(\\).*print(?!.*ci|.*interval|.*std|.*se)"
+      - "accuracy.*=.*\\.\\d+(?![\\s\\S]{0,100}±|\\+/-|ci|interval)"
+    message: "Report confidence intervals to show precision of estimates."
+    fix_action: |
+      For means: stats.t.interval(0.95, len(data)-1, loc=np.mean(data), scale=stats.sem(data))
+      For proportions: statsmodels.stats.proportion.proportion_confint()
+    applies_to:
+      - "**/*.py"
+      - "**/*.R"
+
+  # --- MEDIUM: Experimental Design Issues ---
+
+  - id: no-power-analysis
+    name: Experiment Without Power Analysis
+    severity: warning
+    type: regex
+    pattern:
+      - "n.*=.*[1-5]\\d(?!\\d).*ttest|sample.*size.*=.*[1-5]\\d(?!\\d)"
+    message: "Small sample sizes may lack power to detect real effects."
+    fix_action: |
+      Use power analysis before data collection:
+      from statsmodels.stats.power import TTestIndPower
+      analysis = TTestIndPower()
+      n = analysis.solve_power(effect_size=0.5, alpha=0.05, power=0.8)
+    applies_to:
+      - "**/*.py"
+      - "**/*.R"
+
+  - id: data-leakage-scaling
+    name: Scaling Before Train-Test Split
+    severity: error
+    type: regex
+    pattern:
+      - "StandardScaler\\(\\)\\.fit_transform.*train_test_split"
+      - "MinMaxScaler\\(\\)\\.fit_transform.*train_test_split"
+      - "normalize.*train_test_split"
+    message: "Fitting scaler on full data before split leaks test information."
+    fix_action: |
+      Split first, then fit scaler on train only:
+      X_train, X_test = train_test_split(X)
+      scaler = StandardScaler().fit(X_train)
+      X_train_scaled = scaler.transform(X_train)
+      X_test_scaled = scaler.transform(X_test)
+    applies_to:
+      - "**/*.py"
+      - "**/*.ipynb"
+
+  - id: data-leakage-feature-selection
+    name: Feature Selection Before Split
+    severity: error
+    type: regex
+    pattern:
+      - "SelectKBest.*fit.*train_test_split"
+      - "RFE.*fit.*train_test_split"
+      - "VarianceThreshold.*fit_transform.*split"
+    message: "Feature selection on full data leaks test set information."
+    fix_action: |
+      Use Pipeline to ensure proper ordering:
+      from sklearn.pipeline import Pipeline
+      pipe = Pipeline([
+          ('scaler', StandardScaler()),
+          ('selector', SelectKBest(k=10)),
+          ('model', LogisticRegression()),
+      ])
+      # Fit on train, evaluate on test
+    applies_to:
+      - "**/*.py"
+      - "**/*.ipynb"
+
+  - id: time-series-random-split
+    name: Random Split on Time Series Data
+    severity: error
+    type: regex
+    pattern:
+      - "train_test_split.*shuffle.*=.*True.*time|date|timestamp"
+      - "train_test_split(?![\\s\\S]{0,100}shuffle.*=.*False).*\\bts\\b|series"
+    message: "Time series data must use temporal splits, not random splits."
+    fix_action: |
+      Use temporal split:
+      split_date = df['date'].quantile(0.8)
+      train = df[df['date'] < split_date]
+      test = df[df['date'] >= split_date]
+
+      Or use TimeSeriesSplit from sklearn
+    applies_to:
+      - "**/*.py"
+      - "**/*.ipynb"
+
+  # --- INFO: Best Practices ---
+
+  - id: no-pre-registration
+    name: No Pre-Registration Reference
+    severity: info
+    type: regex
+    pattern:
+      - "hypothesis.*test(?!.*osf|.*aspredicted|.*pre.?regist)"
+    message: "Consider pre-registering hypotheses to prevent HARKing."
+    fix_action: |
+      Pre-register at:
+      - OSF: https://osf.io/prereg/
+      - AsPredicted: https://aspredicted.org/
+      Include pre-registration link in your analysis code comments.
+    applies_to:
+      - "**/*.py"
+      - "**/*.R"
+      - "**/*.md"
+
+  - id: significance-language
+    name: Incorrect Significance Language
+    severity: info
+    type: regex
+    pattern:
+      - "statistically significant.*means"
+      - "p.*<.*0\\.05.*proves"
+      - "significant.*therefore.*works"
+    message: "Statistical significance doesn't mean practical importance or proof."
+    fix_action: |
+      Use careful language:
+      - "Statistically detectable" not "significant"
+      - "Associated with" not "causes"
+      - Report effect size for practical significance
+    applies_to:
+      - "**/*.py"
+      - "**/*.R"
+      - "**/*.md"
+
+  - id: no-reproducibility-manifest
+    name: No Experiment Manifest
+    severity: info
+    type: regex
+    pattern:
+      - "def.*experiment|run.*experiment(?![\\s\\S]{0,1000}manifest|version|git.*commit)"
+    message: "Experiments should log environment, seeds, and versions for reproducibility."
+    fix_action: |
+      Create a manifest:
+      manifest = {
+          'git_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD']),
+          'python_version': sys.version,
+          'seeds': {'numpy': 42, 'torch': 42, 'random': 42},
+          'timestamp': datetime.utcnow().isoformat(),
+      }
+      json.dump(manifest, open('experiment_manifest.json', 'w'))
+    applies_to:
+      - "**/*.py"
+      - "**/*.ipynb"
+
+  - id: hardcoded-data-paths
+    name: Hardcoded Data File Paths
+    severity: info
+    type: regex
+    pattern:
+      - "pd\\.read_csv\\(['\"]C:|pd\\.read_csv\\(['\"]D:"
+      - "pd\\.read_csv\\(['\"]Users/"
+      - "open\\(['\"].*\\.csv['\"]\\)"
+    message: "Hardcoded paths reduce reproducibility across systems."
+    fix_action: |
+      Use relative paths or environment variables:
+      DATA_DIR = Path(os.environ.get('DATA_DIR', './data'))
+      df = pd.read_csv(DATA_DIR / 'experiment_data.csv')
+    applies_to:
+      - "**/*.py"
+      - "**/*.ipynb"
+
+  - id: missing-null-hypothesis
+    name: Test Without Explicit Null Hypothesis
+    severity: info
+    type: regex
+    pattern:
+      - "ttest_ind.*#(?!.*null|.*H0)"
+    message: "Document the null hypothesis for statistical tests."
+    fix_action: |
+      Add comments documenting hypotheses:
+      # H0: Mean response time is equal between groups
+      # H1: Treatment group has lower mean response time
+      t_stat, p_value = ttest_ind(control, treatment, alternative='greater')
+    applies_to:
+      - "**/*.py"
+      - "**/*.R"
+
+  - id: optional-stopping
+    name: Potential Optional Stopping
+    severity: warning
+    type: regex
+    pattern:
+      - "while.*p.*>.*0\\.05|while.*pvalue.*>|for.*collect.*data.*if.*p"
+    message: "Optional stopping (checking p-value during data collection) inflates false positives."
+    fix_action: |
+      Either:
+      1. Pre-specify sample size and don't check until complete
+      2. Use sequential analysis with proper alpha spending
+
+      from statsmodels.stats.sequential_design import GSTDesign
+      gst = GSTDesign(alpha=0.05, beta=0.2, ...)
+    applies_to:
+      - "**/*.py"
+      - "**/*.R"

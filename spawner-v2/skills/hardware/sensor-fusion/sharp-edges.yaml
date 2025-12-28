@@ -1,0 +1,351 @@
+id: sensor-fusion-sharp-edges
+skill: sensor-fusion
+version: 1.0.0
+
+sharp_edges:
+
+  - id: covariance-tuning
+    severity: critical
+    title: "Q and R Tuning is the #1 EKF Failure Mode"
+    summary: "Incorrectly tuned noise covariances cause filter divergence or overconfidence"
+    symptoms:
+      - "Filter estimates lag behind reality"
+      - "Uncertainty grows unbounded"
+      - "Estimates snap to measurements (ignoring dynamics)"
+      - "Works in simulation, fails on real sensor"
+    why: |
+      Q (process noise) and R (measurement noise) determine the filter's trust balance.
+
+      Q too small: Filter trusts model too much, ignores measurements
+      Q too large: Filter trusts measurements too much, noisy estimates
+      R too small: Filter trusts measurements too much, follows noise
+      R too large: Filter ignores measurements, drifts
+
+      Most practitioners guess these values. Real sensors have complex noise
+      characteristics that require proper calibration.
+
+      EKF adds another source of Q: linearization error is not modeled,
+      making the filter overconfident in its estimates.
+    gotcha: |
+      # Common mistake: using identity matrices
+      self.Q = np.eye(n) * 0.01  # Arbitrary!
+      self.R = np.eye(m) * 0.1   # Based on nothing!
+
+      # Or copying values from a different system
+      # "I saw Q=0.1 in a tutorial, so I'll use that"
+    solution: |
+      # 1. Characterize sensor noise properly
+      # For IMU: Use Allan variance analysis
+      # Collect 1+ hour of static data, run Allan deviation
+
+      # 2. Start with physics-based Q
+      # Process noise should reflect actual uncertainty in your model
+      # For constant velocity: Q represents acceleration uncertainty
+      q_accel = 0.5  # m/s^2 expected acceleration noise
+      dt = 0.01
+      Q = np.array([
+          [dt**4/4, dt**3/2],  # Position covariance
+          [dt**3/2, dt**2]     # Velocity covariance
+      ]) * q_accel**2
+
+      # 3. Use sensor datasheets for R
+      # R should be actual measurement variance
+      R = np.array([[sensor_std**2]])  # From calibration or datasheet
+
+      # 4. Monitor filter health
+      # NEES should be around dim(state) for consistent filter
+      # NIS should be around dim(measurement)
+      nees = (x_true - x_est).T @ np.linalg.inv(P) @ (x_true - x_est)
+      expected_nees = n  # Should fluctuate around this
+
+      # 5. Use automated tuning if available
+      # Genetic algorithms, Bayesian optimization, etc.
+
+  - id: jacobian-errors
+    severity: critical
+    title: "Jacobian Computation Errors Corrupt EKF Silently"
+    summary: "Wrong Jacobian causes incorrect covariance and filter divergence"
+    symptoms:
+      - "Filter works for a while, then diverges"
+      - "Covariance becomes negative definite (NaN/Inf)"
+      - "Works at slow update rates, fails at fast rates"
+      - "Estimate jumps when certain measurements arrive"
+    why: |
+      EKF requires correct Jacobians of nonlinear models.
+      Hand-computing Jacobians is error-prone, especially for
+      complex models (e.g., quaternion kinematics, camera projection).
+
+      Common errors:
+      - Sign errors in partial derivatives
+      - Wrong variable in derivative
+      - Forgetting chain rule
+      - Transposed dimensions
+
+      A wrong Jacobian gives wrong covariance update,
+      leading to overconfident or underconfident estimates.
+    gotcha: |
+      # Manual Jacobian with subtle error
+      def process_jacobian(x, u):
+          theta = x[2, 0]
+          v = u[0, 0]
+          dt = 0.1
+
+          F = np.eye(3)
+          F[0, 2] = -v * dt * np.cos(theta)  # WRONG! Should be -sin
+          F[1, 2] = v * dt * np.sin(theta)   # WRONG! Should be cos
+          return F
+
+      # Filter seems to work but covariance is wrong
+    solution: |
+      # 1. Use automatic differentiation
+      import jax
+      import jax.numpy as jnp
+
+      def process_model(x, u):
+          # Your nonlinear model
+          return new_x
+
+      # Automatic Jacobian - no manual errors!
+      process_jacobian = jax.jacobian(process_model, argnums=0)
+
+      # 2. Or use symbolic differentiation (SymPy)
+      from sympy import symbols, Matrix, cos, sin
+
+      x, y, theta, v, omega, dt = symbols('x y theta v omega dt')
+      state = Matrix([x, y, theta])
+      f = Matrix([
+          x + v * dt * cos(theta),
+          y + v * dt * sin(theta),
+          theta + omega * dt
+      ])
+      F_sym = f.jacobian(state)
+      # Generates correct: [[-v*dt*sin(theta)], [v*dt*cos(theta)], ...]
+
+      # 3. Verify numerically
+      def numerical_jacobian(f, x, eps=1e-7):
+          n = len(x)
+          J = np.zeros((len(f(x)), n))
+          for i in range(n):
+              x_plus = x.copy(); x_plus[i] += eps
+              x_minus = x.copy(); x_minus[i] -= eps
+              J[:, i] = (f(x_plus) - f(x_minus)) / (2 * eps)
+          return J
+
+      # Compare analytical vs numerical
+      J_analytical = process_jacobian(x, u)
+      J_numerical = numerical_jacobian(lambda x: process_model(x, u), x)
+      assert np.allclose(J_analytical, J_numerical, atol=1e-5)
+
+  - id: frame-convention
+    severity: high
+    title: "Inconsistent Coordinate Frame Conventions"
+    summary: "Mixing NED/ENU or body/world frames corrupts fusion"
+    symptoms:
+      - "Velocity points wrong direction"
+      - "Yaw rotates backwards"
+      - "GPS and IMU disagree on position"
+      - "Works in one axis, wrong in another"
+    why: |
+      Different sensors and systems use different conventions:
+
+      - NED (North-East-Down): Aviation, many IMUs
+      - ENU (East-North-Up): ROS, some GPS receivers
+      - Body frame: Sensor-relative
+      - World frame: Fixed reference
+
+      Mixing conventions without proper transforms causes
+      systematic errors that look like calibration problems.
+
+      Common mixups:
+      - Gravity direction (+Z vs -Z)
+      - Yaw direction (clockwise vs counter-clockwise)
+      - Axis order (XYZ vs NED)
+    solution: |
+      # 1. Document your conventions explicitly
+      """
+      World frame: ENU (x=East, y=North, z=Up)
+      Body frame: FLU (x=Forward, y=Left, z=Up)
+      Rotation: Counter-clockwise positive (right-hand rule)
+      """
+
+      # 2. Create explicit transform functions
+      def ned_to_enu(v_ned):
+          """Convert NED vector to ENU."""
+          return np.array([v_ned[1], v_ned[0], -v_ned[2]])
+
+      def enu_to_ned(v_enu):
+          """Convert ENU vector to NED."""
+          return np.array([v_enu[1], v_enu[0], -v_enu[2]])
+
+      # 3. Transform at sensor boundary
+      class IMUDriver:
+          def __init__(self, frame='enu'):
+              self.frame = frame
+
+          def read(self):
+              raw = self._read_hardware()  # Returns NED
+              if self.frame == 'enu':
+                  return ned_to_enu(raw)
+              return raw
+
+      # 4. Validate with known motion
+      # Move robot forward: x should increase
+      # Rotate left: yaw should increase (if CCW positive)
+
+  - id: time-synchronization
+    severity: high
+    title: "Sensor Timestamps Not Synchronized"
+    summary: "Using arrival time instead of measurement time causes lag"
+    symptoms:
+      - "Estimates lag behind reality"
+      - "Fast maneuvers cause large errors"
+      - "Fusion seems delayed"
+      - "Works at slow speeds, fails at high speeds"
+    why: |
+      Sensors have different latencies:
+      - IMU: ~1ms
+      - Camera: 10-50ms (exposure + readout)
+      - GPS: 50-200ms (processing delay)
+      - LiDAR: 50-100ms (scan aggregation)
+
+      Using message arrival time instead of actual measurement time
+      causes the filter to associate old measurements with current state.
+
+      At 1 m/s with 100ms delay, that's 10cm error per measurement.
+    gotcha: |
+      def sensor_callback(self, msg):
+          # WRONG: Using current time
+          current_time = time.time()
+          self.kf.update(msg.data, timestamp=current_time)
+
+          # Measurement was actually taken 50ms ago!
+    solution: |
+      # 1. Use hardware timestamps when available
+      def sensor_callback(self, msg):
+          # Use sensor's timestamp, not arrival time
+          sensor_time = msg.header.stamp
+          self.kf.update(msg.data, timestamp=sensor_time)
+
+      # 2. For delayed measurements, use EKF with state augmentation
+      # or out-of-sequence measurement handling
+
+      class DelayedMeasurementHandler:
+          def __init__(self, kf, max_delay=0.2):
+              self.kf = kf
+              self.state_history = []  # (time, state, covariance)
+              self.max_delay = max_delay
+
+          def add_measurement(self, z, timestamp):
+              # Find state at measurement time
+              for i, (t, x, P) in enumerate(self.state_history):
+                  if t >= timestamp:
+                      # Roll back, update, replay
+                      self.kf.x, self.kf.P = x, P
+                      self.kf.update(z)
+                      # Replay newer predictions...
+                      break
+
+      # 3. Estimate and compensate for sensor latency
+      imu_latency = 0.001  # Measure empirically
+      camera_latency = 0.033
+      gps_latency = 0.1
+
+  - id: filter-divergence
+    severity: high
+    title: "Filter Divergence from Covariance Collapse"
+    summary: "Covariance becomes too small, filter ignores valid measurements"
+    symptoms:
+      - "Filter stops responding to measurements"
+      - "Covariance eigenvalues near zero"
+      - "Kalman gain goes to zero"
+      - "Estimate drifts despite good measurements"
+    why: |
+      Causes of covariance collapse:
+
+      1. Q too small: Covariance shrinks each prediction
+      2. Numerical precision: Repeated updates lose positive-definiteness
+      3. Unobservable states: Covariance goes to zero for unobservable dimensions
+      4. Redundant information: Fusing same information twice
+
+      Once covariance is too small, Kalman gain approaches zero,
+      and the filter ignores all future measurements.
+    solution: |
+      # 1. Use Joseph form for covariance update (numerically stable)
+      def update_joseph_form(self, z):
+          # Standard update
+          y = z - self.H @ self.x
+          S = self.H @ self.P @ self.H.T + self.R
+          K = self.P @ self.H.T @ np.linalg.inv(S)
+          self.x = self.x + K @ y
+
+          # Joseph form (preserves positive-definiteness)
+          I_KH = np.eye(self.n) - K @ self.H
+          self.P = I_KH @ self.P @ I_KH.T + K @ self.R @ K.T
+
+          # NOT: self.P = (I - K @ H) @ P  # Loses symmetry/PD
+
+      # 2. Add minimum covariance bounds
+      def enforce_min_covariance(P, min_var=1e-6):
+          # Ensure eigenvalues don't go to zero
+          eigvals, eigvecs = np.linalg.eigh(P)
+          eigvals = np.maximum(eigvals, min_var)
+          return eigvecs @ np.diag(eigvals) @ eigvecs.T
+
+      # 3. Use Square-Root Kalman Filter for better numerics
+      # Propagates sqrt(P) instead of P
+
+      # 4. Monitor filter health
+      def check_filter_health(self):
+          eigvals = np.linalg.eigvalsh(self.P)
+          if np.any(eigvals < 1e-10):
+              print("WARNING: Covariance near singular!")
+          if np.any(eigvals < 0):
+              print("ERROR: Covariance not positive definite!")
+              self.P = self._make_positive_definite(self.P)
+
+  - id: initialization-failure
+    severity: medium
+    title: "Filter Initialization Without Proper Uncertainty"
+    summary: "Starting with wrong initial covariance causes slow convergence or divergence"
+    symptoms:
+      - "Takes long time to converge to correct state"
+      - "Initial estimates wildly wrong"
+      - "Filter trusts bad initial guess too much"
+    why: |
+      Initial covariance P0 tells the filter how uncertain the initial state is.
+
+      P0 too small: Filter trusts bad initial guess, ignores measurements
+      P0 too large: Filter has numerical issues, slow convergence
+
+      Many tutorials use identity matrix, which is often wrong.
+    solution: |
+      # Set P0 based on actual initial uncertainty
+      def initialize_filter(self, initial_measurement):
+          # Position from GPS: ~3m accuracy
+          self.x[0:2] = initial_measurement[0:2]
+          self.P[0, 0] = 3.0**2  # 3m standard deviation squared
+          self.P[1, 1] = 3.0**2
+
+          # Heading: unknown, full circle
+          self.x[2] = 0  # Or from magnetometer
+          self.P[2, 2] = np.pi**2  # Could be anywhere in [-pi, pi]
+
+          # Velocity: start at rest
+          self.x[3:5] = 0
+          self.P[3, 3] = 1.0**2  # Might be moving up to 1 m/s
+          self.P[4, 4] = 1.0**2
+
+      # Use first few measurements to initialize
+      def initialize_from_measurements(self, measurements, n_init=10):
+          """Initialize from first N measurements."""
+          data = np.array(measurements[:n_init])
+          self.x = data.mean(axis=0).reshape(-1, 1)
+          self.P = np.diag(data.var(axis=0))
+
+detection:
+  file_patterns:
+    - "**/*.py"
+    - "**/*.cpp"
+    - "**/*kalman*.py"
+    - "**/*ekf*.py"
+    - "**/*filter*.py"

@@ -1,0 +1,223 @@
+id: physics-simulation-sharp-edges
+skill: physics-simulation
+version: 1.0.0
+
+sharp_edges:
+
+  - id: numerical-instability
+    severity: critical
+    title: "Simulation Explodes Due to Timestep Instability"
+    summary: "Timestep exceeds stability limit, values grow exponentially"
+    symptoms:
+      - "Values suddenly become NaN or Inf"
+      - "Particles/bodies fly off to infinity"
+      - "Works for a while, then explodes"
+    why: |
+      Every numerical integration scheme has a maximum stable timestep.
+      For explicit methods, this depends on system stiffness.
+
+      CFL condition: dt < dx / v_max (wave propagation)
+      Spring stability: dt < 2 * sqrt(m/k) (harmonic oscillator)
+
+      Exceeding these limits causes exponential error growth.
+      The system doesn't just get inaccurate - it explodes.
+    gotcha: |
+      # Stiff spring with large timestep
+      k = 10000  # Very stiff spring
+      m = 1.0
+      dt = 0.01  # Too large!
+
+      # Critical timestep: 2 * sqrt(1/10000) = 0.02
+      # But for stability need dt << 0.02
+
+      # Simulation explodes after a few steps
+    solution: |
+      # 1. Compute stability limit
+      dt_crit = 2 * np.sqrt(m / k)
+      dt = 0.1 * dt_crit  # Safety factor
+
+      # 2. Use adaptive timestepping
+      integrator = RK45Integrator(f, dt, atol=1e-6, rtol=1e-3)
+
+      # 3. Use implicit methods for stiff systems
+      from scipy.integrate import solve_ivp
+      result = solve_ivp(f, t_span, y0, method='BDF')  # Implicit, stiff-stable
+
+      # 4. Substep within each frame
+      def step_safe(dt_frame):
+          n_substeps = max(1, int(np.ceil(dt_frame / dt_crit * 10)))
+          dt_sub = dt_frame / n_substeps
+          for _ in range(n_substeps):
+              step(dt_sub)
+
+  - id: energy-drift
+    severity: high
+    title: "Energy Grows or Decays Over Long Simulations"
+    summary: "Non-symplectic integrator causes secular energy error"
+    symptoms:
+      - "Orbits spiral inward or outward"
+      - "Pendulum gains/loses amplitude"
+      - "Energy increases exponentially over time"
+    why: |
+      Standard Runge-Kutta methods don't preserve Hamiltonian structure.
+      They introduce small energy errors each step that accumulate.
+
+      For long simulations (orbits, molecular dynamics), this error
+      dominates the solution. Planets spiral into the sun.
+
+      Symplectic integrators (Verlet, leapfrog) preserve phase-space
+      structure and bound energy error.
+    gotcha: |
+      # RK4 for orbital mechanics
+      def simulate_orbit():
+          for _ in range(1000000):  # Long simulation
+              t, state = rk4.step(t, state)
+          # Planet is now in wrong orbit!
+    solution: |
+      # Use symplectic integrator for Hamiltonian systems
+      class LeapfrogIntegrator:
+          """Symplectic leapfrog (velocity Verlet)."""
+
+          def step(self, x, v, a_func, dt):
+              # Kick-drift-kick variant
+              a = a_func(x)
+              v_half = v + 0.5 * dt * a
+              x_new = x + dt * v_half
+              a_new = a_func(x_new)
+              v_new = v_half + 0.5 * dt * a_new
+              return x_new, v_new
+
+      # Energy now oscillates around true value
+      # instead of drifting
+
+      # For higher-order symplectic methods:
+      # - Yoshida 4th order
+      # - Forest-Ruth
+      # - SPRK methods
+
+  - id: collision-tunneling
+    severity: high
+    title: "Fast Objects Pass Through Walls"
+    summary: "Discrete collision detection misses fast-moving objects"
+    symptoms:
+      - "Small objects pass through thin walls"
+      - "High-speed projectiles don't collide"
+      - "Works at low speed, fails at high speed"
+    why: |
+      Discrete collision detection checks position at each timestep.
+      If object moves more than its width per timestep, it can
+      teleport through obstacles without ever overlapping.
+
+      Example: Ball radius 0.1, velocity 100, dt 0.01
+      Movement per step: 1.0 > diameter
+      Ball can pass through 0.9m wall!
+    solution: |
+      # 1. Continuous Collision Detection (CCD)
+      def continuous_collision(p0, p1, wall_normal, wall_d):
+          """Find time of collision along trajectory."""
+          d0 = np.dot(p0, wall_normal) - wall_d
+          d1 = np.dot(p1, wall_normal) - wall_d
+
+          if d0 * d1 < 0:  # Crossed plane
+              t_hit = d0 / (d0 - d1)
+              return t_hit
+          return None
+
+      # 2. Limit velocity
+      v_max = 0.5 * min_object_size / dt
+      velocity = np.clip(velocity, -v_max, v_max)
+
+      # 3. Use smaller timestep
+      dt = min_object_size / (2 * max_velocity)
+
+      # 4. Swept volume collision
+      # Create capsule from old to new position
+      # Test capsule against obstacles
+
+  - id: contact-jitter
+    severity: medium
+    title: "Objects Vibrate When Resting on Surfaces"
+    summary: "Penalty forces cause oscillation at contact"
+    symptoms:
+      - "Objects jitter instead of resting"
+      - "Stacking is unstable"
+      - "Energy increases at contacts"
+    why: |
+      Simple penalty-based collision (spring force when overlapping)
+      turns contact into an oscillator.
+
+      Object penetrates -> spring pushes out -> object bounces ->
+      penetrates again -> oscillation.
+
+      High stiffness makes it worse (stiffer spring = faster oscillation).
+    solution: |
+      # 1. Add damping to contact forces
+      def contact_force(penetration, velocity_into_contact):
+          k = 10000  # Spring stiffness
+          c = 2 * np.sqrt(k * mass)  # Critical damping
+
+          f_spring = k * penetration
+          f_damping = c * max(0, -velocity_into_contact)
+
+          return f_spring + f_damping
+
+      # 2. Use position-based dynamics
+      # Directly correct positions instead of applying forces
+
+      # 3. Implement sleeping
+      if kinetic_energy < threshold and contact_time > settling_time:
+          body.sleeping = True
+          # Don't simulate until disturbed
+
+      # 4. Use constraint-based solver (Gauss-Seidel)
+      # Iteratively project velocities to satisfy constraints
+
+  - id: floating-point-precision
+    severity: medium
+    title: "Precision Loss Far From Origin"
+    summary: "Floating-point precision degrades at large coordinates"
+    symptoms:
+      - "Physics works near origin, jitters far away"
+      - "Large game worlds have weird physics at edges"
+      - "Small objects at large coordinates behave oddly"
+    why: |
+      IEEE 754 float32 has ~7 significant digits.
+      At position 1,000,000, smallest distinguishable delta is ~0.1
+
+      This means:
+      - Velocity changes < 0.1 are lost
+      - Collision detection becomes imprecise
+      - Integration errors accumulate
+
+      Common in large game worlds, planetary simulations.
+    solution: |
+      # 1. Use double precision for simulation
+      positions = np.zeros((n, 3), dtype=np.float64)
+
+      # 2. Use floating origin
+      class FloatingOrigin:
+          def __init__(self, threshold=10000):
+              self.offset = np.zeros(3)
+              self.threshold = threshold
+
+          def update(self, camera_pos):
+              if np.linalg.norm(camera_pos) > self.threshold:
+                  shift = camera_pos.copy()
+                  self.offset += shift
+                  # Shift all objects
+                  for obj in all_objects:
+                      obj.position -= shift
+                  return shift
+              return np.zeros(3)
+
+      # 3. Use local coordinates for physics
+      # Global = local + chunk_offset
+
+      # 4. For planetary: use spherical or other curvilinear coords
+
+detection:
+  file_patterns:
+    - "**/*.py"
+    - "**/*simulation*.py"
+    - "**/*physics*.py"
+    - "**/*dynamics*.py"

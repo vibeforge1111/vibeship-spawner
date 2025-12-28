@@ -1,0 +1,337 @@
+id: agent-based-modeling-sharp-edges
+skill: agent-based-modeling
+version: 1.0.0
+
+sharp_edges:
+
+  - id: synchronization-artifacts
+    severity: critical
+    title: "Update Order Creates Artificial Dynamics"
+    summary: "Sequential updates give unfair advantage to early agents"
+    symptoms:
+      - "Results change when agent order changes"
+      - "First agents always win in competition"
+      - "Patterns emerge that don't exist in real system"
+    why: |
+      Sequential update: agent 1 acts, then agent 2 sees result, then acts.
+      Agent 1 always gets first pick of resources.
+      Agent 2 always reacts to agent 1's action.
+
+      Real systems are often simultaneous or asynchronous.
+      Sequential creates artificial causal ordering.
+
+      Worse: deterministic order = deterministic artifacts.
+    gotcha: |
+      # Fixed order update
+      for agent in agents:  # Same order every step
+          agent.perceive()
+          agent.decide()
+          agent.act()  # Agent 0 always acts first!
+
+      # Agent 0 takes resource, agent 1 never gets it
+      # But in reality they would compete simultaneously
+    solution: |
+      # 1. Shuffle agent order each step
+      def step():
+          agent_order = list(agents)
+          np.random.shuffle(agent_order)
+          for agent in agent_order:
+              agent.step()
+
+      # 2. Simultaneous update (two-phase)
+      def simultaneous_step():
+          # Phase 1: All agents decide
+          decisions = {a.id: a.decide() for a in agents}
+
+          # Phase 2: All agents act (seeing old state)
+          for agent in agents:
+              agent.act(decisions[agent.id])
+
+      # 3. Event-driven (truly asynchronous)
+      # Each agent has next_action_time
+      # Process in time order
+
+  - id: spatial-artifacts
+    severity: high
+    title: "Grid Discretization Creates Unrealistic Patterns"
+    summary: "Square grid creates directional bias in movement"
+    symptoms:
+      - "Agents cluster in grid patterns"
+      - "Diagonal movement faster than cardinal"
+      - "Eight-directional movement visible in emergent patterns"
+    why: |
+      Square grids have anisotropic distance:
+      - Diagonal neighbors: sqrt(2) * cell_size away
+      - Cardinal neighbors: 1 * cell_size away
+
+      Moore neighborhood (8 neighbors): diagonal is closer in grid steps
+      Von Neumann (4 neighbors): diagonal is further
+
+      Neither matches Euclidean distance.
+      Agents "see" grid structure, patterns emerge from grid.
+    gotcha: |
+      # Grid-based movement
+      def move(agent, direction):
+          dx, dy = {
+              'N': (0, 1), 'S': (0, -1), 'E': (1, 0), 'W': (-1, 0),
+              'NE': (1, 1), 'NW': (-1, 1), 'SE': (1, -1), 'SW': (-1, -1)
+          }[direction]
+          agent.x += dx
+          agent.y += dy
+
+      # Problem: NE moves sqrt(2) grid units but costs 1 move
+      # Diagonal movement is "free" extra distance
+    solution: |
+      # 1. Continuous space
+      def move_continuous(agent, angle, speed):
+          agent.x += speed * np.cos(angle)
+          agent.y += speed * np.sin(angle)
+
+      # 2. Hexagonal grid (more isotropic)
+      # 6 neighbors all equidistant
+
+      # 3. Correct diagonal cost
+      def move_with_distance(agent, direction):
+          dx, dy, cost = movements[direction]
+          if agent.movement_budget >= cost:
+              agent.x += dx
+              agent.y += dy
+              agent.movement_budget -= cost
+
+      movements = {
+          'N': (0, 1, 1.0),
+          'NE': (1, 1, 1.414),  # sqrt(2)
+          # ...
+      }
+
+      # 4. Off-lattice with spatial hashing for queries
+
+  - id: scale-dependence
+    severity: high
+    title: "Emergent Behavior Depends on Agent Count"
+    summary: "Patterns change qualitatively with population size"
+    symptoms:
+      - "Small test runs behave differently from large runs"
+      - "Threshold behaviors at certain population sizes"
+      - "Results not generalizable across scales"
+    why: |
+      Many ABM phenomena have critical population thresholds:
+      - Disease: herd immunity requires N > threshold
+      - Flocking: need enough neighbors for alignment
+      - Markets: liquidity requires sufficient traders
+
+      Testing with N=100, deploying with N=10000 can show
+      completely different dynamics.
+
+      Finite-size effects: fluctuations scale as 1/sqrt(N).
+    gotcha: |
+      # Developed with small test population
+      def test_model():
+          env = Environment(n_agents=100)
+          run_simulation(env)
+          # Works fine, agents spread evenly
+
+      # Production with larger population
+      def production_model():
+          env = Environment(n_agents=10000)
+          run_simulation(env)
+          # Suddenly: clustering, crashes, different behavior!
+    solution: |
+      # 1. Test at multiple scales
+      def scale_analysis():
+          for n in [100, 1000, 10000, 100000]:
+              env = Environment(n_agents=n)
+              metrics = run_and_measure(env)
+              plot_vs_scale(n, metrics)
+
+      # 2. Identify critical thresholds
+      # Look for non-linear changes in metrics vs N
+
+      # 3. Use finite-size scaling theory
+      # Rescale by N^alpha to collapse curves
+
+      # 4. Mean-field approximation for large N
+      # Analytic solution for N -> infinity
+
+      # 5. Normalize interaction parameters
+      def interaction_strength(n_agents):
+          # Keep total interaction constant as N grows
+          return base_strength / np.sqrt(n_agents)
+
+  - id: parameter-sensitivity
+    severity: medium
+    title: "Small Parameter Changes Cause Qualitative Shifts"
+    summary: "Model is on edge of phase transition, unstable"
+    symptoms:
+      - "Different random seeds give completely different outcomes"
+      - "Tiny parameter change causes regime shift"
+      - "Bistability: same parameters, different outcomes"
+    why: |
+      ABMs often have phase transitions (order/disorder, survival/extinction).
+      Near transition, system is sensitive.
+
+      If calibrated near transition:
+      - High variance across runs
+      - Sensitivity to numerical precision
+      - Non-reproducible results
+
+      Real systems may actually be near transitions (critical phenomena).
+    gotcha: |
+      # Parameters from literature
+      reproduction_rate = 0.05
+      death_rate = 0.048  # Near critical point!
+
+      # Run 1: population explodes
+      # Run 2: population dies
+      # Same parameters, different seeds
+    solution: |
+      # 1. Map phase diagram
+      def phase_diagram():
+          for r in np.linspace(0, 0.1, 50):
+              for d in np.linspace(0, 0.1, 50):
+                  outcome = run_many_replications(r, d)
+                  plot_phase(r, d, outcome)
+
+      # 2. Identify stable operating regions
+      # Stay away from phase boundaries
+
+      # 3. Report variance, not just means
+      def robust_analysis(params):
+          results = [run_simulation(params) for _ in range(100)]
+          return {
+              'mean': np.mean(results),
+              'std': np.std(results),
+              'min': np.min(results),
+              'max': np.max(results),
+              'bimodal': is_bimodal(results)
+          }
+
+      # 4. Sensitivity analysis (Sobol indices)
+      # Quantify which parameters matter most
+
+  - id: computational-explosion
+    severity: medium
+    title: "Simulation Becomes Intractably Slow"
+    summary: "O(N^2) interactions or too-small timesteps"
+    symptoms:
+      - "Simulation slows exponentially with agent count"
+      - "Can't run enough replications for statistics"
+      - "Forced to use unrealistically small populations"
+    why: |
+      Common ABM operations are O(N^2):
+      - Every agent checks every other agent
+      - Full interaction matrix updates
+      - All-to-all communication
+
+      For N=10000: 100 million pairs per step.
+
+      Also: very small timesteps for stability compound issue.
+    gotcha: |
+      # Naive neighbor check
+      def find_neighbors(agent, all_agents, radius):
+          neighbors = []
+          for other in all_agents:  # O(N)
+              if distance(agent, other) < radius:
+                  neighbors.append(other)
+          return neighbors
+
+      # Called for each agent: O(N^2) total
+
+      # With 10000 agents, 100 timesteps:
+      # 10 billion distance calculations!
+    solution: |
+      # 1. Spatial data structures
+      from scipy.spatial import cKDTree
+
+      def efficient_neighbors(agents, radius):
+          positions = np.array([a.position for a in agents])
+          tree = cKDTree(positions)
+
+          neighbors = {}
+          for i, agent in enumerate(agents):
+              indices = tree.query_ball_point(agent.position, radius)
+              neighbors[agent.id] = [agents[j] for j in indices if j != i]
+          return neighbors
+
+      # 2. Grid-based spatial hashing
+      class SpatialHash:
+          def __init__(self, cell_size):
+              self.cell_size = cell_size
+              self.grid = defaultdict(list)
+
+          def insert(self, agent):
+              cell = self._cell(agent.position)
+              self.grid[cell].append(agent)
+
+          def query(self, position, radius):
+              # Only check nearby cells
+              cells_to_check = self._cells_in_radius(position, radius)
+              return [a for cell in cells_to_check for a in self.grid[cell]]
+
+      # 3. Reduce interaction frequency
+      # Not every agent needs to interact every step
+
+      # 4. Coarse-grained models for large N
+      # Represent groups of agents as single entities
+
+  - id: validation-gap
+    severity: medium
+    title: "No Empirical Validation of Emergent Behavior"
+    summary: "Model produces patterns but no proof they match reality"
+    symptoms:
+      - "Pretty visualizations but no quantitative validation"
+      - "Emergent patterns assumed correct without data"
+      - "Policy recommendations from unvalidated model"
+    why: |
+      ABMs are easy to build, hard to validate.
+      Emergence looks impressive but may be artifact.
+
+      Multiple models can produce same macro pattern
+      from very different micro rules (equifinality).
+
+      Without validation: model is speculation.
+    gotcha: |
+      # Build elaborate model
+      model = ComplexEcosystemABM(
+          predator_vision=10,
+          prey_speed=2.0,
+          grass_growth_rate=0.1,
+          # ... 20 more parameters
+      )
+
+      # Run and observe beautiful patterns
+      model.run(10000)
+      model.visualize()  # Wow, looks like nature!
+
+      # But: is it actually predicting anything correctly?
+      # No comparison to real data
+    solution: |
+      # 1. Pattern-oriented modeling
+      # Define specific patterns the model must reproduce
+      validation_targets = {
+          'population_cycles': (period=5, amplitude=0.3),
+          'spatial_clustering': (index=0.7),
+          'size_distribution': 'power_law',
+      }
+
+      # 2. Quantitative comparison to data
+      def validate(model, empirical_data):
+          model_output = model.run()
+          for pattern, target in validation_targets.items():
+              score = compare_pattern(model_output, target, empirical_data)
+              if score < threshold:
+                  raise ValidationError(f"{pattern} doesn't match")
+
+      # 3. Out-of-sample prediction
+      # Calibrate on one dataset, validate on another
+
+      # 4. Document assumptions explicitly (ODD protocol)
+      # Make clear what is assumed vs what is validated
+
+detection:
+  file_patterns:
+    - "**/*agent*.py"
+    - "**/*abm*.py"
+    - "**/*simulation*.py"
+    - "**/*population*.py"
+    - "**/*swarm*.py"

@@ -1,0 +1,515 @@
+id: sustainability-metrics
+name: Sustainability Metrics & ESG Reporting
+category: climate
+version: 1.0.0
+
+description: |
+  ESG performance measurement, sustainability reporting frameworks,
+  materiality assessment, and impact quantification. Covers CDP, TCFD,
+  GRI, SASB, CSRD/ESRS, and emerging disclosure requirements.
+
+triggers:
+  - "ESG|sustainability reporting|disclosure"
+  - "CDP|climate disclosure|carbon disclosure"
+  - "TCFD|climate risk|scenario analysis"
+  - "GRI|global reporting initiative"
+  - "SASB|materiality|industry standards"
+  - "CSRD|ESRS|EU sustainability"
+  - "SDG|sustainable development goals"
+  - "impact measurement|social impact"
+
+patterns:
+  materiality_assessment:
+    description: "Double materiality analysis for ESG topics"
+    use_when: "Identifying material sustainability topics for reporting"
+    implementation: |
+      from dataclasses import dataclass
+      from typing import List, Dict
+      import numpy as np
+
+      @dataclass
+      class MaterialityTopic:
+          name: str
+          category: str  # Environmental, Social, Governance
+          financial_impact: float  # 1-5 scale
+          stakeholder_importance: float  # 1-5 scale
+          impact_on_society: float  # 1-5 for double materiality
+          time_horizon: str  # short, medium, long-term
+          likelihood: float  # 0-1
+
+      class MaterialityMatrix:
+          def __init__(self, topics: List[MaterialityTopic]):
+              self.topics = topics
+              self.threshold_material = 3.5  # Topics above this are material
+
+          def calculate_single_materiality(self) -> Dict[str, float]:
+              """Traditional single materiality (financial + stakeholder)."""
+              scores = {}
+              for topic in self.topics:
+                  # Weighted average of financial and stakeholder views
+                  score = 0.5 * topic.financial_impact + 0.5 * topic.stakeholder_importance
+                  scores[topic.name] = score
+              return scores
+
+          def calculate_double_materiality(self) -> Dict[str, dict]:
+              """CSRD double materiality (financial + impact)."""
+              results = {}
+              for topic in self.topics:
+                  financial_materiality = (
+                      topic.financial_impact * topic.likelihood
+                  )
+                  impact_materiality = (
+                      topic.impact_on_society * topic.likelihood
+                  )
+
+                  # Material if either dimension is significant
+                  is_material = (
+                      financial_materiality >= self.threshold_material or
+                      impact_materiality >= self.threshold_material
+                  )
+
+                  results[topic.name] = {
+                      'financial_materiality': financial_materiality,
+                      'impact_materiality': impact_materiality,
+                      'is_material': is_material,
+                      'materiality_type': self._classify_type(
+                          financial_materiality, impact_materiality
+                      )
+                  }
+              return results
+
+          def _classify_type(self, financial: float, impact: float) -> str:
+              if financial >= self.threshold_material and impact >= self.threshold_material:
+                  return 'double_material'
+              elif financial >= self.threshold_material:
+                  return 'financial_only'
+              elif impact >= self.threshold_material:
+                  return 'impact_only'
+              return 'not_material'
+
+          def stakeholder_engagement(self, stakeholder_weights: Dict[str, float]) -> Dict:
+              """Weight topics by stakeholder group importance."""
+              # stakeholder_weights: {'investors': 0.3, 'employees': 0.2, ...}
+              pass
+
+      # Usage
+      topics = [
+          MaterialityTopic(
+              name="Climate Change", category="E",
+              financial_impact=4.5, stakeholder_importance=4.8,
+              impact_on_society=5.0, time_horizon="long", likelihood=0.9
+          ),
+          MaterialityTopic(
+              name="Data Privacy", category="S",
+              financial_impact=4.2, stakeholder_importance=4.5,
+              impact_on_society=3.8, time_horizon="short", likelihood=0.7
+          ),
+          MaterialityTopic(
+              name="Board Diversity", category="G",
+              financial_impact=2.5, stakeholder_importance=3.8,
+              impact_on_society=3.2, time_horizon="medium", likelihood=0.8
+          ),
+      ]
+
+      matrix = MaterialityMatrix(topics)
+      double_mat = matrix.calculate_double_materiality()
+
+  tcfd_disclosure:
+    description: "TCFD-aligned climate risk disclosure"
+    use_when: "Preparing climate risk and opportunity disclosures"
+    implementation: |
+      from dataclasses import dataclass
+      from typing import List, Optional
+      from enum import Enum
+
+      class RiskCategory(Enum):
+          TRANSITION_POLICY = "Policy and Legal"
+          TRANSITION_TECHNOLOGY = "Technology"
+          TRANSITION_MARKET = "Market"
+          TRANSITION_REPUTATION = "Reputation"
+          PHYSICAL_ACUTE = "Acute Physical"
+          PHYSICAL_CHRONIC = "Chronic Physical"
+
+      @dataclass
+      class ClimateRisk:
+          description: str
+          category: RiskCategory
+          time_horizon: str  # short (<1yr), medium (1-5yr), long (>5yr)
+          likelihood: float  # 1-5
+          financial_impact: float  # 1-5
+          affected_areas: List[str]  # Operations, Supply chain, Markets
+
+          def risk_score(self) -> float:
+              return self.likelihood * self.financial_impact
+
+      @dataclass
+      class ClimateOpportunity:
+          description: str
+          category: str  # Resource efficiency, Energy source, Products, Markets, Resilience
+          time_horizon: str
+          financial_benefit: float  # 1-5
+          investment_required: float  # 1-5
+          affected_areas: List[str]
+
+      class TCFDAssessment:
+          def __init__(self):
+              self.risks: List[ClimateRisk] = []
+              self.opportunities: List[ClimateOpportunity] = []
+              self.scenarios = {}
+
+          def add_risk(self, risk: ClimateRisk):
+              self.risks.append(risk)
+
+          def add_opportunity(self, opportunity: ClimateOpportunity):
+              self.opportunities.append(opportunity)
+
+          def scenario_analysis(self, scenarios: List[str]) -> Dict:
+              """Assess impacts under different climate scenarios."""
+              results = {}
+
+              for scenario in scenarios:  # e.g., ['1.5C', '2C', '4C']
+                  results[scenario] = {
+                      'transition_risk': self._assess_transition(scenario),
+                      'physical_risk': self._assess_physical(scenario),
+                      'net_impact': None
+                  }
+                  results[scenario]['net_impact'] = (
+                      results[scenario]['transition_risk'] +
+                      results[scenario]['physical_risk']
+                  )
+
+              return results
+
+          def _assess_transition(self, scenario: str) -> float:
+              """Higher transition risk in aggressive mitigation scenarios."""
+              multipliers = {'1.5C': 1.5, '2C': 1.0, '4C': 0.5}
+              base_risk = sum(
+                  r.risk_score() for r in self.risks
+                  if r.category.name.startswith('TRANSITION')
+              )
+              return base_risk * multipliers.get(scenario, 1.0)
+
+          def _assess_physical(self, scenario: str) -> float:
+              """Higher physical risk in high-warming scenarios."""
+              multipliers = {'1.5C': 0.5, '2C': 1.0, '4C': 2.0}
+              base_risk = sum(
+                  r.risk_score() for r in self.risks
+                  if r.category.name.startswith('PHYSICAL')
+              )
+              return base_risk * multipliers.get(scenario, 1.0)
+
+          def generate_disclosure(self) -> Dict:
+              """Generate TCFD-aligned disclosure structure."""
+              return {
+                  'governance': {
+                      'board_oversight': None,  # Fill in
+                      'management_role': None
+                  },
+                  'strategy': {
+                      'risks_opportunities': [
+                          {'type': 'risk', 'item': r, 'score': r.risk_score()}
+                          for r in sorted(self.risks, key=lambda x: -x.risk_score())
+                      ],
+                      'scenario_analysis': self.scenario_analysis(['1.5C', '2C', '4C'])
+                  },
+                  'risk_management': {
+                      'identification_process': None,
+                      'mitigation_actions': None
+                  },
+                  'metrics_targets': {
+                      'emissions': None,  # Link to carbon-accounting
+                      'targets': None
+                  }
+              }
+
+  esg_metrics_framework:
+    description: "Comprehensive ESG KPI tracking system"
+    use_when: "Building ESG metrics dashboard and tracking"
+    implementation: |
+      from dataclasses import dataclass, field
+      from typing import Dict, List, Optional
+      from datetime import datetime
+      import pandas as pd
+
+      @dataclass
+      class ESGMetric:
+          id: str
+          name: str
+          category: str  # E, S, or G
+          subcategory: str
+          unit: str
+          direction: str  # 'lower_better' or 'higher_better'
+          frameworks: List[str]  # GRI, SASB, CDP, etc.
+          sdg_alignment: List[int]  # SDG numbers
+
+      @dataclass
+      class MetricValue:
+          metric_id: str
+          period: str  # '2023', '2023-Q1', etc.
+          value: float
+          verified: bool
+          data_source: str
+          notes: str = ""
+
+      class ESGDashboard:
+          def __init__(self):
+              self.metrics: Dict[str, ESGMetric] = {}
+              self.values: List[MetricValue] = []
+              self._initialize_standard_metrics()
+
+          def _initialize_standard_metrics(self):
+              """Load standard ESG metrics."""
+              standards = [
+                  # Environmental
+                  ESGMetric("E001", "GHG Scope 1", "E", "Emissions",
+                           "tCO2e", "lower_better",
+                           ["GRI 305-1", "CDP C6.1", "SASB"], [13]),
+                  ESGMetric("E002", "GHG Scope 2", "E", "Emissions",
+                           "tCO2e", "lower_better",
+                           ["GRI 305-2", "CDP C6.3", "SASB"], [13]),
+                  ESGMetric("E003", "GHG Scope 3", "E", "Emissions",
+                           "tCO2e", "lower_better",
+                           ["GRI 305-3", "CDP C6.5"], [13]),
+                  ESGMetric("E004", "Energy Consumption", "E", "Energy",
+                           "MWh", "lower_better",
+                           ["GRI 302-1", "SASB"], [7, 13]),
+                  ESGMetric("E005", "Renewable Energy %", "E", "Energy",
+                           "%", "higher_better",
+                           ["GRI 302-1", "RE100"], [7]),
+                  ESGMetric("E006", "Water Withdrawal", "E", "Water",
+                           "ML", "lower_better",
+                           ["GRI 303-3", "CDP Water"], [6]),
+
+                  # Social
+                  ESGMetric("S001", "Employee Count", "S", "Workforce",
+                           "FTE", "neutral",
+                           ["GRI 102-8"], [8]),
+                  ESGMetric("S002", "Gender Diversity %", "S", "Diversity",
+                           "%", "higher_better",
+                           ["GRI 405-1"], [5]),
+                  ESGMetric("S003", "Lost Time Injury Rate", "S", "Safety",
+                           "per 200k hrs", "lower_better",
+                           ["GRI 403-9", "SASB"], [8]),
+                  ESGMetric("S004", "Training Hours", "S", "Development",
+                           "hrs/employee", "higher_better",
+                           ["GRI 404-1"], [4]),
+
+                  # Governance
+                  ESGMetric("G001", "Board Independence %", "G", "Board",
+                           "%", "higher_better",
+                           ["GRI 102-22"], [16]),
+                  ESGMetric("G002", "Board Gender Diversity %", "G", "Board",
+                           "%", "higher_better",
+                           ["GRI 405-1"], [5]),
+                  ESGMetric("G003", "Ethics Violations", "G", "Ethics",
+                           "count", "lower_better",
+                           ["GRI 205-3", "GRI 406-1"], [16]),
+              ]
+
+              for metric in standards:
+                  self.metrics[metric.id] = metric
+
+          def record_value(self, metric_id: str, period: str, value: float,
+                          verified: bool = False, source: str = ""):
+              if metric_id not in self.metrics:
+                  raise ValueError(f"Unknown metric: {metric_id}")
+
+              self.values.append(MetricValue(
+                  metric_id=metric_id,
+                  period=period,
+                  value=value,
+                  verified=verified,
+                  data_source=source
+              ))
+
+          def get_trend(self, metric_id: str) -> pd.DataFrame:
+              """Get historical trend for a metric."""
+              metric_values = [v for v in self.values if v.metric_id == metric_id]
+              df = pd.DataFrame([vars(v) for v in metric_values])
+              df = df.sort_values('period')
+              return df
+
+          def calculate_performance(self, period: str) -> Dict:
+              """Calculate overall ESG performance for period."""
+              e_score = self._category_score('E', period)
+              s_score = self._category_score('S', period)
+              g_score = self._category_score('G', period)
+
+              return {
+                  'period': period,
+                  'environmental': e_score,
+                  'social': s_score,
+                  'governance': g_score,
+                  'overall': (e_score + s_score + g_score) / 3
+              }
+
+          def _category_score(self, category: str, period: str) -> float:
+              # Simplified scoring - compare to targets/benchmarks
+              pass
+
+  sdg_alignment:
+    description: "Map business activities to UN SDGs"
+    use_when: "Demonstrating contribution to Sustainable Development Goals"
+    implementation: |
+      from dataclasses import dataclass
+      from typing import List, Dict
+
+      SDG_GOALS = {
+          1: "No Poverty",
+          2: "Zero Hunger",
+          3: "Good Health and Well-Being",
+          4: "Quality Education",
+          5: "Gender Equality",
+          6: "Clean Water and Sanitation",
+          7: "Affordable and Clean Energy",
+          8: "Decent Work and Economic Growth",
+          9: "Industry, Innovation and Infrastructure",
+          10: "Reduced Inequalities",
+          11: "Sustainable Cities and Communities",
+          12: "Responsible Consumption and Production",
+          13: "Climate Action",
+          14: "Life Below Water",
+          15: "Life on Land",
+          16: "Peace, Justice and Strong Institutions",
+          17: "Partnerships for the Goals"
+      }
+
+      @dataclass
+      class SDGContribution:
+          sdg_number: int
+          target: str  # e.g., "13.2" for climate target
+          activity: str
+          contribution_type: str  # 'positive', 'neutral', 'negative'
+          quantified_impact: Optional[Dict] = None
+          evidence: str = ""
+
+      class SDGMapper:
+          def __init__(self):
+              self.contributions: List[SDGContribution] = []
+
+          def add_contribution(self, contribution: SDGContribution):
+              self.contributions.append(contribution)
+
+          def by_sdg(self, sdg_number: int) -> List[SDGContribution]:
+              return [c for c in self.contributions if c.sdg_number == sdg_number]
+
+          def summary(self) -> Dict:
+              summary = {}
+              for sdg_num in SDG_GOALS:
+                  contribs = self.by_sdg(sdg_num)
+                  if contribs:
+                      positive = sum(1 for c in contribs if c.contribution_type == 'positive')
+                      negative = sum(1 for c in contribs if c.contribution_type == 'negative')
+                      summary[sdg_num] = {
+                          'name': SDG_GOALS[sdg_num],
+                          'positive_contributions': positive,
+                          'negative_contributions': negative,
+                          'net': positive - negative
+                      }
+              return summary
+
+          def impact_report(self) -> str:
+              """Generate SDG impact narrative."""
+              summary = self.summary()
+              report = "# SDG Contribution Report\n\n"
+
+              for sdg_num, data in sorted(summary.items()):
+                  report += f"## SDG {sdg_num}: {data['name']}\n"
+                  report += f"Net contribution score: {data['net']}\n\n"
+
+                  for contrib in self.by_sdg(sdg_num):
+                      report += f"- {contrib.activity}: {contrib.contribution_type}\n"
+                      if contrib.quantified_impact:
+                          for metric, value in contrib.quantified_impact.items():
+                              report += f"  - {metric}: {value}\n"
+                  report += "\n"
+
+              return report
+
+anti_patterns:
+  - pattern: "Cherry-picking favorable metrics"
+    why: "Stakeholders expect balanced disclosure of challenges and progress"
+    instead: "Report material topics regardless of performance"
+
+  - pattern: "Changing methodology year-over-year"
+    why: "Prevents meaningful trend analysis and erodes trust"
+    instead: "Maintain consistent methodology; explain and restate when changes needed"
+
+  - pattern: "Aggregating without segmentation"
+    why: "Masks significant variations by region, business unit, or category"
+    instead: "Disaggregate metrics for material segments"
+
+  - pattern: "Qualitative claims without data"
+    why: "Greenwashing risk; stakeholders demand quantification"
+    instead: "Back every claim with measurable metrics and evidence"
+
+  - pattern: "Reporting only what's required"
+    why: "Misses opportunity to demonstrate leadership and anticipate regulation"
+    instead: "Report on material topics beyond minimum requirements"
+
+  - pattern: "Treating ESG as communications exercise"
+    why: "Without integration into strategy, reporting is hollow"
+    instead: "Link ESG metrics to business strategy and executive incentives"
+
+handoffs:
+  - to: carbon-accounting
+    when: "Calculating GHG emissions for climate metrics"
+    pass: "Reporting boundaries, verification requirements"
+
+  - to: climate-modeling
+    when: "Climate scenario analysis for TCFD"
+    pass: "Scenario parameters, time horizons"
+
+  - to: quantitative-finance
+    when: "Valuing climate risks and opportunities"
+    pass: "Risk scenarios, financial impact ranges"
+
+  - to: supply-chain-analytics
+    when: "Assessing supply chain sustainability"
+    pass: "Supplier data requirements, Scope 3 categories"
+
+ecosystem:
+  reporting_frameworks:
+    mandatory:
+      - "CSRD/ESRS - EU Corporate Sustainability Reporting Directive"
+      - "SEC Climate Disclosure Rule - US securities"
+      - "ISSB IFRS S1/S2 - Global baseline"
+
+    voluntary:
+      - "GRI Standards - Global Reporting Initiative"
+      - "SASB Standards - Industry-specific"
+      - "CDP - Climate, Water, Forests"
+      - "TCFD - Climate risk disclosure"
+
+  rating_agencies:
+    - "MSCI ESG Ratings"
+    - "Sustainalytics"
+    - "ISS ESG"
+    - "S&P Global ESG Scores"
+    - "CDP Scores"
+
+  data_platforms:
+    - "Refinitiv ESG Data"
+    - "Bloomberg ESG Data"
+    - "Morningstar Sustainalytics"
+    - "FactSet ESG"
+
+  verification_standards:
+    - "ISAE 3000 - Assurance engagements"
+    - "ISAE 3410 - GHG statements"
+    - "AA1000 Assurance Standard"
+
+references:
+  key_documents:
+    - "GRI Universal Standards 2021"
+    - "SASB Standards by Industry"
+    - "TCFD Recommendations and Guidance"
+    - "ESRS Topical Standards"
+    - "UN SDG Indicators"
+
+  best_practices:
+    - "Complete materiality assessment before reporting"
+    - "Align metrics across frameworks to reduce burden"
+    - "Seek third-party verification for key metrics"
+    - "Include forward-looking targets and transition plans"
+    - "Integrate ESG into mainstream financial reporting"

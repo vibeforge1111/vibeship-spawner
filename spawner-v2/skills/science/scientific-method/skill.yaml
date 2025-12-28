@@ -1,0 +1,986 @@
+# Scientific Method Skill
+# Rigorous research methodology for computational and experimental research
+
+id: scientific-method
+name: Scientific Method
+category: science
+complexity: advanced
+requires_skills:
+  - statistical-analysis
+  - data-reproducibility
+
+description: |
+  The scientific method applied to computational research, data science, and
+  experimental software engineering. Covers hypothesis formulation, experimental
+  design, controls, reproducibility, and avoiding common methodological pitfalls
+  like p-hacking, HARKing, and confirmation bias.
+
+# ============================================================================
+# CORE PATTERNS
+# ============================================================================
+patterns:
+
+  # --- Hypothesis Formulation ---
+
+  hypothesis_formulation:
+    name: Formulating Testable Hypotheses
+    description: Transform research questions into testable hypotheses
+    when: "Starting any research or experimental work"
+    pattern: |
+      # Scientific Hypothesis Structure
+
+      ## BAD: Vague, untestable hypothesis
+      # "The new algorithm is better"
+      # "Users prefer our UI"
+      # "This approach is faster"
+
+      ## GOOD: Specific, falsifiable, measurable
+
+      # 1. Null Hypothesis (H0) - What you're testing against
+      # 2. Alternative Hypothesis (H1) - What you're trying to prove
+      # 3. Operationalization - How you'll measure it
+      # 4. Effect Size - What magnitude matters
+
+      @dataclass
+      class Hypothesis:
+          """Structured hypothesis for computational research."""
+
+          research_question: str
+          null_hypothesis: str      # H0: Status quo, no effect
+          alt_hypothesis: str       # H1: What you expect to find
+          independent_var: str      # What you're manipulating
+          dependent_var: str        # What you're measuring
+          controls: List[str]       # What you're holding constant
+          effect_size: str          # Minimum meaningful difference
+          measurement: str          # How you'll measure DV
+          sample_size: int          # Required N for power
+
+      # Example: Testing a new caching algorithm
+      cache_hypothesis = Hypothesis(
+          research_question="Does the new LRU-K algorithm reduce cache misses?",
+          null_hypothesis="LRU-K cache miss rate equals standard LRU miss rate",
+          alt_hypothesis="LRU-K cache miss rate is lower than LRU miss rate",
+          independent_var="Caching algorithm (LRU vs LRU-K)",
+          dependent_var="Cache miss rate (percentage)",
+          controls=[
+              "Same hardware (CPU, RAM, storage)",
+              "Same workload (identical request sequences)",
+              "Same cache size (1GB)",
+              "Same key distribution",
+          ],
+          effect_size="5% reduction in cache misses (practical significance)",
+          measurement="Misses / Total Requests over 1M requests",
+          sample_size=30,  # Runs per condition
+      )
+
+      # Pre-registration template
+      PRE_REGISTRATION = """
+      ## Pre-Registration Document
+
+      **Title**: {title}
+      **Date**: {date}
+      **Authors**: {authors}
+
+      ### Hypotheses
+      - H0: {null_hypothesis}
+      - H1: {alt_hypothesis}
+
+      ### Study Design
+      - Independent Variable: {iv}
+      - Dependent Variable: {dv}
+      - Controls: {controls}
+
+      ### Analysis Plan
+      - Primary Test: {statistical_test}
+      - Alpha Level: {alpha}
+      - Power: {power}
+      - Minimum Effect Size: {effect_size}
+      - Sample Size Justification: {sample_justification}
+
+      ### Data Collection
+      - Start Date: {start_date}
+      - End Date: {end_date}
+      - Stopping Rule: {stopping_rule}
+
+      ### Exclusion Criteria
+      {exclusion_criteria}
+      """
+    why: "Pre-registered hypotheses prevent HARKing and p-hacking"
+
+  experimental_design:
+    name: Designing Controlled Experiments
+    description: Structure experiments with proper controls and randomization
+    when: "Planning any comparative study or A/B test"
+    pattern: |
+      import random
+      from typing import List, Dict, Callable
+      from dataclasses import dataclass
+      from enum import Enum
+
+      class ExperimentDesign(Enum):
+          BETWEEN_SUBJECTS = "between"      # Different participants per condition
+          WITHIN_SUBJECTS = "within"        # Same participants, all conditions
+          MIXED = "mixed"                   # Combination
+          FACTORIAL = "factorial"           # Multiple IVs, all combinations
+          RANDOMIZED_BLOCK = "block"        # Group by confound, randomize within
+
+      @dataclass
+      class Experiment:
+          """Structured experimental design."""
+
+          name: str
+          design: ExperimentDesign
+          conditions: List[str]
+          sample_size_per_condition: int
+          randomization_seed: int
+          blocks: List[str] = None
+
+          def validate(self) -> List[str]:
+              """Check for common design issues."""
+              issues = []
+
+              if self.sample_size_per_condition < 30:
+                  issues.append(
+                      f"Small sample size ({self.sample_size_per_condition}). "
+                      "Consider power analysis for required N."
+                  )
+
+              if len(self.conditions) < 2:
+                  issues.append("Need at least 2 conditions for comparison")
+
+              if self.design == ExperimentDesign.WITHIN_SUBJECTS:
+                  if not hasattr(self, 'counterbalance'):
+                      issues.append(
+                          "Within-subjects needs counterbalancing for order effects"
+                      )
+
+              return issues
+
+      # Randomization with reproducibility
+      def create_assignments(
+          participants: List[str],
+          conditions: List[str],
+          seed: int,
+          design: ExperimentDesign = ExperimentDesign.BETWEEN_SUBJECTS,
+      ) -> Dict[str, str]:
+          """Randomly assign participants to conditions."""
+          random.seed(seed)  # CRITICAL: Fixed seed for reproducibility
+
+          if design == ExperimentDesign.BETWEEN_SUBJECTS:
+              shuffled = participants.copy()
+              random.shuffle(shuffled)
+              per_condition = len(participants) // len(conditions)
+
+              assignments = {}
+              for i, condition in enumerate(conditions):
+                  start = i * per_condition
+                  end = start + per_condition
+                  for p in shuffled[start:end]:
+                      assignments[p] = condition
+
+              return assignments
+
+          elif design == ExperimentDesign.WITHIN_SUBJECTS:
+              # All participants get all conditions (counterbalanced)
+              orders = list(itertools.permutations(conditions))
+              return {
+                  p: orders[i % len(orders)]
+                  for i, p in enumerate(participants)
+              }
+
+      # Control types
+      class Controls:
+          """Types of experimental controls."""
+
+          @staticmethod
+          def positive_control(known_effect: Callable) -> Dict:
+              """
+              Condition known to produce the effect.
+              Validates experimental setup is working.
+              """
+              return {"type": "positive", "func": known_effect}
+
+          @staticmethod
+          def negative_control(no_effect: Callable) -> Dict:
+              """
+              Condition known to NOT produce effect.
+              Validates we're not getting false positives.
+              """
+              return {"type": "negative", "func": no_effect}
+
+          @staticmethod
+          def baseline(current_system: Callable) -> Dict:
+              """
+              Current production system for comparison.
+              """
+              return {"type": "baseline", "func": current_system}
+
+      # Example: A/B test for new recommendation algorithm
+      experiment = Experiment(
+          name="Recommendation Algorithm Comparison",
+          design=ExperimentDesign.BETWEEN_SUBJECTS,
+          conditions=["control_collaborative", "treatment_hybrid"],
+          sample_size_per_condition=1000,
+          randomization_seed=42,  # Documented, fixed seed
+      )
+
+      controls = {
+          "positive": Controls.positive_control(always_show_bestsellers),
+          "negative": Controls.negative_control(random_recommendations),
+          "baseline": Controls.baseline(current_collaborative_filter),
+      }
+    why: "Proper controls distinguish real effects from noise and bias"
+
+  # --- Reproducibility ---
+
+  computational_reproducibility:
+    name: Ensuring Computational Reproducibility
+    description: Make experiments reproducible by others
+    when: "Running any computational experiment or analysis"
+    pattern: |
+      import hashlib
+      import json
+      import subprocess
+      from datetime import datetime
+      from pathlib import Path
+
+      @dataclass
+      class ReproducibleExperiment:
+          """
+          Framework for reproducible computational research.
+
+          Following five pillars of reproducibility:
+          1. Literate programming (documented code)
+          2. Defined environments (containerization)
+          3. Version control (code + data)
+          4. Automation (no manual steps)
+          5. Dissemination (share everything)
+          """
+
+          name: str
+          version: str
+          random_seeds: Dict[str, int]
+          environment: str  # Docker image or conda env
+          data_version: str
+          code_commit: str
+
+      # Requirements pinning with hashes
+      REQUIREMENTS_LOCK = """
+      # requirements.lock - Exact versions with hashes
+      numpy==1.24.3 \
+          --hash=sha256:a03fb...
+      pandas==2.0.1 \
+          --hash=sha256:b12cd...
+      scikit-learn==1.2.2 \
+          --hash=sha256:c34ef...
+      """
+
+      # Docker environment for exact reproducibility
+      DOCKERFILE = """
+      FROM python:3.11.4-slim-bookworm@sha256:abc123...
+
+      # System dependencies with exact versions
+      RUN apt-get update && apt-get install -y \
+          libgomp1=12.2.0-14 \
+          && rm -rf /var/lib/apt/lists/*
+
+      # Copy and install exact requirements
+      COPY requirements.lock .
+      RUN pip install --no-cache-dir -r requirements.lock
+
+      # Copy experiment code
+      COPY . /experiment
+      WORKDIR /experiment
+
+      # Set deterministic environment
+      ENV PYTHONHASHSEED=0
+      ENV CUBLAS_WORKSPACE_CONFIG=:4096:8
+
+      CMD ["python", "run_experiment.py"]
+      """
+
+      # Random seed management
+      def set_all_seeds(seed: int):
+          """Set all random seeds for reproducibility."""
+          import random
+          import numpy as np
+          import torch
+
+          random.seed(seed)
+          np.random.seed(seed)
+          torch.manual_seed(seed)
+          torch.cuda.manual_seed_all(seed)
+
+          # For full reproducibility (slower)
+          torch.backends.cudnn.deterministic = True
+          torch.backends.cudnn.benchmark = False
+
+          # Document the seed
+          return {
+              "master_seed": seed,
+              "python_random": seed,
+              "numpy": seed,
+              "torch": seed,
+              "timestamp": datetime.utcnow().isoformat(),
+          }
+
+      # Data versioning with DVC
+      DVC_CONFIG = """
+      # .dvc/config
+      [core]
+          autostage = true
+          analytics = false
+
+      [remote "origin"]
+          url = s3://research-data-bucket/experiments
+      """
+
+      # Experiment manifest
+      def create_manifest(experiment_dir: Path) -> Dict:
+          """Create reproducibility manifest."""
+          return {
+              "timestamp": datetime.utcnow().isoformat(),
+              "git_commit": subprocess.check_output(
+                  ["git", "rev-parse", "HEAD"]
+              ).decode().strip(),
+              "git_dirty": bool(subprocess.check_output(
+                  ["git", "status", "--porcelain"]
+              )),
+              "python_version": sys.version,
+              "platform": platform.platform(),
+              "environment_hash": hash_environment(),
+              "data_hash": hash_data_files(experiment_dir / "data"),
+              "code_hash": hash_code_files(experiment_dir / "src"),
+              "config": load_config(experiment_dir / "config.yaml"),
+              "seeds": load_seeds(experiment_dir / "seeds.json"),
+          }
+
+      def hash_file(path: Path) -> str:
+          """SHA-256 hash of file contents."""
+          sha256 = hashlib.sha256()
+          with open(path, 'rb') as f:
+              for chunk in iter(lambda: f.read(4096), b''):
+                  sha256.update(chunk)
+          return sha256.hexdigest()
+
+      # Automated experiment runner
+      def run_reproducible(config_path: str):
+          """
+          Run experiment with full reproducibility tracking.
+          """
+          config = yaml.safe_load(open(config_path))
+
+          # 1. Create isolated environment
+          env_id = create_container(config['environment'])
+
+          # 2. Set all seeds
+          seeds = set_all_seeds(config['master_seed'])
+
+          # 3. Create manifest before running
+          manifest = create_manifest(Path(config['experiment_dir']))
+          save_manifest(manifest, config['output_dir'] / 'manifest.json')
+
+          # 4. Run experiment
+          results = run_in_container(env_id, config)
+
+          # 5. Save results with provenance
+          results['_provenance'] = manifest
+          save_results(results, config['output_dir'] / 'results.json')
+
+          return results
+    why: "Only 11% of studies can be reproduced - proper infrastructure is essential"
+
+  # --- Statistical Rigor ---
+
+  power_analysis:
+    name: Statistical Power Analysis
+    description: Determine required sample size before running experiments
+    when: "Planning any quantitative study"
+    pattern: |
+      from scipy import stats
+      import numpy as np
+      from statsmodels.stats.power import TTestIndPower, TTestPower
+
+      def calculate_sample_size(
+          effect_size: float,
+          alpha: float = 0.05,
+          power: float = 0.80,
+          test_type: str = "two-sample",
+          alternative: str = "two-sided",
+      ) -> int:
+          """
+          Calculate required sample size for desired power.
+
+          Parameters:
+          -----------
+          effect_size : float
+              Cohen's d for t-tests (0.2 small, 0.5 medium, 0.8 large)
+          alpha : float
+              Significance level (Type I error rate)
+          power : float
+              Desired power (1 - Type II error rate)
+          test_type : str
+              "two-sample" for comparing groups, "paired" for within-subjects
+          alternative : str
+              "two-sided", "larger", or "smaller"
+
+          Returns:
+          --------
+          int : Required sample size per group
+          """
+          if test_type == "two-sample":
+              analysis = TTestIndPower()
+          else:
+              analysis = TTestPower()
+
+          n = analysis.solve_power(
+              effect_size=effect_size,
+              alpha=alpha,
+              power=power,
+              alternative=alternative,
+          )
+
+          return int(np.ceil(n))
+
+      # Effect size calculations
+      def cohens_d(group1: np.ndarray, group2: np.ndarray) -> float:
+          """Calculate Cohen's d effect size."""
+          n1, n2 = len(group1), len(group2)
+          var1, var2 = group1.var(), group2.var()
+
+          # Pooled standard deviation
+          pooled_std = np.sqrt(
+              ((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2)
+          )
+
+          return (group1.mean() - group2.mean()) / pooled_std
+
+      def interpret_effect_size(d: float) -> str:
+          """Interpret Cohen's d magnitude."""
+          d = abs(d)
+          if d < 0.2:
+              return "negligible"
+          elif d < 0.5:
+              return "small"
+          elif d < 0.8:
+              return "medium"
+          else:
+              return "large"
+
+      # Common research scenarios
+      SAMPLE_SIZE_TABLE = """
+      | Effect Size | Power 0.80 | Power 0.90 | Power 0.95 |
+      |-------------|------------|------------|------------|
+      | Small (0.2) | 393        | 526        | 651        |
+      | Medium (0.5)| 64         | 85         | 105        |
+      | Large (0.8) | 26         | 34         | 42         |
+
+      Note: Per group, for two-sample t-test, alpha=0.05, two-sided
+      """
+
+      # Example: Planning an A/B test
+      def plan_ab_test(
+          baseline_conversion: float,
+          minimum_detectable_effect: float,
+          alpha: float = 0.05,
+          power: float = 0.80,
+      ) -> Dict:
+          """
+          Plan A/B test sample size for conversion rate.
+          """
+          # Convert to effect size
+          treatment_conversion = baseline_conversion * (1 + minimum_detectable_effect)
+
+          # Use proportion-based power analysis
+          from statsmodels.stats.power import NormalIndPower
+          from statsmodels.stats.proportion import proportion_effectsize
+
+          effect_size = proportion_effectsize(
+              baseline_conversion,
+              treatment_conversion
+          )
+
+          analysis = NormalIndPower()
+          n = analysis.solve_power(
+              effect_size=effect_size,
+              alpha=alpha,
+              power=power,
+              alternative='two-sided',
+          )
+
+          return {
+              "sample_size_per_group": int(np.ceil(n)),
+              "total_sample_size": int(np.ceil(n * 2)),
+              "effect_size": effect_size,
+              "baseline": baseline_conversion,
+              "expected_treatment": treatment_conversion,
+              "minimum_detectable_effect": minimum_detectable_effect,
+          }
+
+      # Usage
+      plan = plan_ab_test(
+          baseline_conversion=0.05,     # 5% current conversion
+          minimum_detectable_effect=0.10,  # Want to detect 10% relative improvement
+      )
+      print(f"Need {plan['total_sample_size']} total users")
+    why: "Underpowered studies waste resources and produce unreliable results"
+
+  avoiding_p_hacking:
+    name: Avoiding P-Hacking and HARKing
+    description: Prevent questionable research practices
+    when: "Analyzing experimental data"
+    pattern: |
+      from typing import List, Tuple
+      from dataclasses import dataclass
+      from enum import Enum
+
+      class QRP(Enum):
+          """Questionable Research Practices to avoid."""
+          P_HACKING = "Running multiple tests until p < 0.05"
+          HARKING = "Hypothesizing After Results are Known"
+          OPTIONAL_STOPPING = "Stopping data collection when p < 0.05"
+          SELECTIVE_REPORTING = "Only reporting significant results"
+          OUTCOME_SWITCHING = "Changing primary outcome post-hoc"
+          CHERRY_PICKING = "Selecting favorable subgroups"
+
+      @dataclass
+      class AnalysisPlan:
+          """
+          Pre-registered analysis plan to prevent p-hacking.
+
+          Create BEFORE looking at data.
+          """
+          primary_hypothesis: str
+          primary_outcome: str
+          primary_test: str
+          alpha: float
+          secondary_outcomes: List[str]
+          exploratory_outcomes: List[str]
+          exclusion_criteria: List[str]
+          subgroup_analyses: List[str]  # Pre-specified only
+          multiple_comparison_correction: str
+
+      # Multiple comparison corrections
+      def bonferroni_correction(alpha: float, n_tests: int) -> float:
+          """
+          Bonferroni correction for multiple comparisons.
+
+          Most conservative - divides alpha by number of tests.
+          """
+          return alpha / n_tests
+
+      def holm_bonferroni(p_values: List[float], alpha: float = 0.05) -> List[bool]:
+          """
+          Holm-Bonferroni step-down procedure.
+
+          Less conservative than Bonferroni, more powerful.
+          """
+          n = len(p_values)
+          sorted_indices = np.argsort(p_values)
+          sorted_p = np.array(p_values)[sorted_indices]
+
+          significant = []
+          for i, p in enumerate(sorted_p):
+              adjusted_alpha = alpha / (n - i)
+              if p <= adjusted_alpha:
+                  significant.append(sorted_indices[i])
+              else:
+                  break
+
+          return [i in significant for i in range(n)]
+
+      def fdr_benjamini_hochberg(
+          p_values: List[float],
+          alpha: float = 0.05
+      ) -> List[bool]:
+          """
+          Benjamini-Hochberg FDR control.
+
+          Controls false discovery rate, not family-wise error rate.
+          More powerful for exploratory analyses.
+          """
+          n = len(p_values)
+          sorted_indices = np.argsort(p_values)
+          sorted_p = np.array(p_values)[sorted_indices]
+
+          # Find largest k where p[k] <= (k/n) * alpha
+          thresholds = [(i + 1) / n * alpha for i in range(n)]
+          significant_count = 0
+
+          for i in range(n - 1, -1, -1):
+              if sorted_p[i] <= thresholds[i]:
+                  significant_count = i + 1
+                  break
+
+          return [
+              sorted_indices[i] in sorted_indices[:significant_count]
+              for i in range(n)
+          ]
+
+      # Analysis checklist
+      def validate_analysis(
+          plan: AnalysisPlan,
+          actual_tests: List[str],
+          reported_results: List[str],
+      ) -> List[str]:
+          """
+          Check for deviations from pre-registered plan.
+          """
+          warnings = []
+
+          # Check for unplanned tests
+          planned_tests = {plan.primary_test} | set(plan.secondary_outcomes)
+          unplanned = set(actual_tests) - planned_tests
+          if unplanned:
+              warnings.append(
+                  f"UNPLANNED TESTS: {unplanned}. "
+                  "Must be labeled as exploratory."
+              )
+
+          # Check for unreported tests
+          unreported = set(actual_tests) - set(reported_results)
+          if unreported:
+              warnings.append(
+                  f"UNREPORTED TESTS: {unreported}. "
+                  "All tests must be reported (file drawer problem)."
+              )
+
+          # Check for multiple comparison correction
+          if len(actual_tests) > 1 and not plan.multiple_comparison_correction:
+              warnings.append(
+                  "MULTIPLE COMPARISONS without correction. "
+                  f"Apply {plan.multiple_comparison_correction or 'Bonferroni/FDR'}."
+              )
+
+          return warnings
+
+      # Sequential analysis with proper stopping rules
+      def sequential_test(
+          data_stream,
+          alpha_spending_func,
+          max_n: int,
+          interim_analyses: List[int],
+      ):
+          """
+          Sequential analysis with alpha spending.
+
+          Allows stopping early while controlling Type I error.
+          Uses O'Brien-Fleming or Pocock boundaries.
+          """
+          spent_alpha = 0
+          for n in interim_analyses:
+              data = collect_n_samples(data_stream, n)
+              current_alpha = alpha_spending_func(n / max_n)
+              boundary = calculate_boundary(current_alpha - spent_alpha)
+
+              z_stat = calculate_z_statistic(data)
+
+              if abs(z_stat) > boundary:
+                  return {"stop": True, "n": n, "z": z_stat, "p": z_to_p(z_stat)}
+
+              spent_alpha = current_alpha
+
+          return {"stop": False, "n": max_n, "message": "Complete full trial"}
+    why: "P-hacking inflates false positive rates from 5% to over 60%"
+
+  # --- Results Interpretation ---
+
+  effect_size_reporting:
+    name: Reporting Effect Sizes and Confidence Intervals
+    description: Go beyond p-values to practical significance
+    when: "Reporting any statistical results"
+    pattern: |
+      from scipy import stats
+      import numpy as np
+      from dataclasses import dataclass
+
+      @dataclass
+      class StatisticalResult:
+          """
+          Complete statistical result with effect size and CI.
+
+          P-values alone are insufficient. Always report:
+          1. Effect size (magnitude)
+          2. Confidence interval (precision)
+          3. P-value (if using NHST)
+          4. Sample size
+          """
+          test_name: str
+          statistic: float
+          p_value: float
+          effect_size: float
+          effect_size_name: str
+          ci_lower: float
+          ci_upper: float
+          confidence_level: float
+          n: int
+          interpretation: str
+
+      def complete_t_test(
+          group1: np.ndarray,
+          group2: np.ndarray,
+          alpha: float = 0.05,
+      ) -> StatisticalResult:
+          """
+          Complete two-sample t-test with effect size and CI.
+          """
+          # Basic t-test
+          t_stat, p_value = stats.ttest_ind(group1, group2)
+
+          # Effect size (Cohen's d)
+          d = cohens_d(group1, group2)
+
+          # Confidence interval for the difference
+          diff = group1.mean() - group2.mean()
+          se = np.sqrt(group1.var()/len(group1) + group2.var()/len(group2))
+          df = len(group1) + len(group2) - 2
+          t_crit = stats.t.ppf(1 - alpha/2, df)
+          ci_lower = diff - t_crit * se
+          ci_upper = diff + t_crit * se
+
+          # Interpretation
+          interpretation = (
+              f"The difference between groups was {diff:.3f} "
+              f"(95% CI: [{ci_lower:.3f}, {ci_upper:.3f}]), "
+              f"representing a {interpret_effect_size(d)} effect "
+              f"(Cohen's d = {d:.2f}). "
+          )
+
+          if p_value < alpha:
+              interpretation += f"This was statistically significant (p = {p_value:.4f})."
+          else:
+              interpretation += f"This was not statistically significant (p = {p_value:.4f})."
+
+          return StatisticalResult(
+              test_name="Independent samples t-test",
+              statistic=t_stat,
+              p_value=p_value,
+              effect_size=d,
+              effect_size_name="Cohen's d",
+              ci_lower=ci_lower,
+              ci_upper=ci_upper,
+              confidence_level=1 - alpha,
+              n=len(group1) + len(group2),
+              interpretation=interpretation,
+          )
+
+      # Reporting template (APA style)
+      APA_TEMPLATE = """
+      Results were analyzed using a {test_name}. {group_description}
+      showed a {direction} effect ({M1} = {mean1:.2f}, SD = {sd1:.2f})
+      compared to {comparison_group} ({M2} = {mean2:.2f}, SD = {sd2:.2f}),
+      {t_or_f}({df}) = {statistic:.2f}, p {p_comparison} {p_value:.3f},
+      {effect_name} = {effect_size:.2f} [{ci_lower:.2f}, {ci_upper:.2f}].
+
+      The effect size was {effect_interpretation}, suggesting
+      {practical_significance}.
+      """
+
+      def format_apa_result(result: StatisticalResult, context: Dict) -> str:
+          """Format result in APA style."""
+          p_comparison = "<" if result.p_value < 0.001 else "="
+          p_display = ".001" if result.p_value < 0.001 else f"{result.p_value:.3f}"
+
+          return APA_TEMPLATE.format(
+              test_name=result.test_name,
+              group_description=context['group1_name'],
+              direction="higher" if result.statistic > 0 else "lower",
+              mean1=context['mean1'],
+              sd1=context['sd1'],
+              comparison_group=context['group2_name'],
+              mean2=context['mean2'],
+              sd2=context['sd2'],
+              t_or_f="t" if "t-test" in result.test_name else "F",
+              df=result.n - 2,
+              statistic=abs(result.statistic),
+              p_comparison=p_comparison,
+              p_value=result.p_value,
+              effect_name=result.effect_size_name,
+              effect_size=result.effect_size,
+              ci_lower=result.ci_lower,
+              ci_upper=result.ci_upper,
+              effect_interpretation=interpret_effect_size(result.effect_size),
+              practical_significance=context.get('practical_meaning', ''),
+          )
+    why: "Effect sizes communicate practical significance beyond statistical significance"
+
+# ============================================================================
+# ANTI-PATTERNS
+# ============================================================================
+anti_patterns:
+
+  p_hacking:
+    name: P-Hacking (Data Dredging)
+    description: Searching for significant results through multiple analyses
+    problem: |
+      # Running many tests until one is significant
+      for outcome in all_outcomes:
+          for subgroup in all_subgroups:
+              p = run_test(data, outcome, subgroup)
+              if p < 0.05:
+                  print(f"Significant! {outcome} in {subgroup}")
+                  # Only report this one
+
+      # With 20 outcomes and 5 subgroups = 100 tests
+      # Expected ~5 false positives at alpha=0.05
+    solution: |
+      # Pre-register one primary outcome
+      # Apply multiple comparison correction
+      # Report ALL tests, not just significant ones
+      analysis_plan = AnalysisPlan(
+          primary_outcome="conversion_rate",
+          secondary_outcomes=["time_on_page", "bounce_rate"],
+          multiple_comparison_correction="Bonferroni",
+      )
+
+      # Adjust alpha for multiple tests
+      adjusted_alpha = 0.05 / len(all_tests)
+    impact: "False positive rate inflates from 5% to 60%+"
+
+  harking:
+    name: HARKing (Hypothesizing After Results Known)
+    description: Formulating hypothesis after seeing data
+    problem: |
+      # Look at data first
+      results = analyze_data()
+
+      # Notice unexpected pattern
+      # "Oh interesting, users over 30 convert better"
+
+      # Write paper claiming you predicted this
+      hypothesis = "We hypothesized users over 30 would convert better"
+
+      # This is FRAUD - the hypothesis wasn't pre-specified
+    solution: |
+      # Write hypothesis BEFORE collecting data
+      # Use pre-registration (OSF, AsPredicted)
+      # Clearly label post-hoc analyses as "exploratory"
+
+      pre_registration = """
+      Submitted: 2024-01-15 (before data collection)
+      Hypothesis: Treatment group will have higher conversion
+      Primary analysis: Two-sample t-test
+      """
+
+      # In paper:
+      # "Our pre-registered hypothesis was X (see OSF: link)"
+      # "Exploratory analysis revealed Y (not pre-registered)"
+    impact: "Destroys scientific validity, unreproducible findings"
+
+  underpowered_studies:
+    name: Underpowered Studies
+    description: Running experiments without enough samples
+    problem: |
+      # Run small pilot study
+      n = 10  # Way too small
+
+      result = ttest_ind(group1, group2)
+      if result.pvalue > 0.05:
+          print("No effect found")
+          # WRONG: Absence of evidence != evidence of absence
+
+      # With n=10, you can only detect HUGE effects (d > 1.3)
+      # You'll miss real medium effects
+    solution: |
+      # Calculate sample size BEFORE running
+      required_n = calculate_sample_size(
+          effect_size=0.5,  # Medium effect
+          power=0.80,
+          alpha=0.05,
+      )
+      print(f"Need {required_n} per group")  # Usually ~64
+
+      # Don't start until you can recruit enough
+    impact: "Wasted resources, false negatives, unreliable science"
+
+  confusing_correlation_causation:
+    name: Correlation vs Causation
+    description: Inferring causation from observational data
+    problem: |
+      # Observational finding
+      correlation = np.corrcoef(ice_cream_sales, drowning_deaths)[0, 1]
+      # correlation = 0.85
+
+      # WRONG conclusion:
+      # "Ice cream causes drowning"
+
+      # CORRECT: Both are caused by summer (confound)
+    solution: |
+      # For causal claims, you need:
+      # 1. Randomized experiment
+      # 2. Natural experiment
+      # 3. Regression discontinuity
+      # 4. Difference-in-differences
+      # 5. Instrumental variables
+
+      # Or explicitly state:
+      # "We found a correlation; causal interpretation is limited"
+
+      # Check for confounds
+      confounds = identify_confounds(outcome, exposure, data)
+      if confounds:
+          use_observational_methods(confounds)
+    impact: "Invalid conclusions, wasted interventions"
+
+# ============================================================================
+# DECISION FRAMEWORK
+# ============================================================================
+decision_tree:
+  start: "What type of research question?"
+  nodes:
+    design_choice:
+      question: "Can you randomize treatment assignment?"
+      options:
+        - answer: "Yes, full control"
+          next: "Randomized Controlled Trial"
+        - answer: "No, observational only"
+          next: "Quasi-experimental design"
+        - answer: "Partial control"
+          next: "Natural experiment or RDD"
+
+    sample_size:
+      question: "Have you done power analysis?"
+      options:
+        - answer: "Yes, adequate power"
+          next: "Proceed with data collection"
+        - answer: "No"
+          next: "STOP - Calculate required N first"
+
+# ============================================================================
+# HANDOFFS
+# ============================================================================
+handoffs:
+  - to: statistical-analysis
+    when: "Ready to analyze collected data"
+    pass: "Pre-registered analysis plan, raw data, codebook"
+
+  - to: data-reproducibility
+    when: "Preparing to share results"
+    pass: "Code, data, environment specs"
+
+  - to: research-paper-writing
+    when: "Ready to write up findings"
+    pass: "Results, figures, statistical outputs"
+
+ecosystem:
+  pre_registration:
+    - "OSF (Open Science Framework)"
+    - "AsPredicted"
+    - "ClinicalTrials.gov"
+
+  statistical_tools:
+    - "G*Power - Power analysis"
+    - "R - Statistical computing"
+    - "statsmodels - Python statistics"
+    - "scipy.stats - Statistical tests"
+
+  reproducibility:
+    - "Docker - Environment isolation"
+    - "DVC - Data version control"
+    - "MLflow - Experiment tracking"
+    - "Jupyter - Literate programming"
+
+  collaboration:
+    - "GitHub - Code collaboration"
+    - "Overleaf - LaTeX collaboration"
+    - "Zotero - Reference management"

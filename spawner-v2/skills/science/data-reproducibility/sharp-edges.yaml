@@ -1,0 +1,94 @@
+id: data-reproducibility-sharp-edges
+skill: data-reproducibility
+version: 1.0.0
+
+sharp_edges:
+
+  - id: floating-point-nondeterminism
+    severity: critical
+    title: "Floating Point Non-determinism Across Hardware"
+    summary: "Same code, same seed, different results on different GPUs"
+    symptoms:
+      - "Results differ between local and cloud"
+      - "CI produces different numbers than laptop"
+      - "Model checkpoints don't reproduce exactly"
+    why: |
+      GPU operations often use non-deterministic algorithms for speed.
+      Different hardware has different floating point precision.
+      Order of operations affects floating point results.
+    gotcha: |
+      # Set seed everywhere
+      torch.manual_seed(42)
+      # But still get different results!
+
+      # GPU operations are non-deterministic by default
+      # cudnn autotuning picks fastest (not reproducible) algorithm
+    solution: |
+      torch.backends.cudnn.deterministic = True
+      torch.backends.cudnn.benchmark = False
+      torch.use_deterministic_algorithms(True)
+      # Note: Some ops don't have deterministic implementations
+
+  - id: implicit-dependencies
+    severity: critical
+    title: "Implicit System Dependencies"
+    summary: "pip freeze misses system libraries your code depends on"
+    symptoms:
+      - "Works on your machine, fails on fresh install"
+      - "Cryptic import errors about missing .so files"
+      - "Different numerical results on different systems"
+    why: |
+      Python packages often wrap system libraries (BLAS, LAPACK, OpenSSL).
+      pip/conda can't capture system-level dependencies.
+      Different systems have different versions installed.
+    solution: |
+      1. Use Docker for complete isolation
+      2. Document system requirements in README
+      3. Use conda for scientific packages (bundles system libs)
+      4. Test in clean environment before publishing
+
+  - id: data-drift-unnoticed
+    severity: high
+    title: "Data Changed But Nobody Noticed"
+    summary: "Upstream data source changed, breaking reproducibility"
+    symptoms:
+      - "Model performance suddenly drops"
+      - "Can't reproduce old results with current data"
+      - "Results from paper don't match current code"
+    solution: |
+      1. Version data with DVC or similar
+      2. Hash all input data in manifests
+      3. Archive exact dataset used for publications
+      4. Never depend on mutable data sources for research
+
+  - id: timestamp-randomness
+    severity: high
+    title: "Timestamps Introduce Hidden Randomness"
+    summary: "datetime.now() in features breaks reproducibility"
+    symptoms:
+      - "Different results when run at different times"
+      - "Time-based features change between runs"
+    solution: |
+      # Bad
+      df['age'] = (datetime.now() - df['birth_date']).days / 365
+
+      # Good: Use fixed reference date
+      REFERENCE_DATE = datetime(2024, 1, 1)
+      df['age'] = (REFERENCE_DATE - df['birth_date']).days / 365
+
+  - id: order-dependent-hashing
+    severity: medium
+    title: "Python Dict/Set Ordering Was Random Before 3.7"
+    summary: "Hash randomization affects iteration order"
+    symptoms:
+      - "Different feature order in older Python"
+      - "PYTHONHASHSEED not set"
+    solution: |
+      os.environ['PYTHONHASHSEED'] = '0'
+      # Or use Python 3.7+ where dicts maintain insertion order
+
+detection:
+  file_patterns:
+    - "**/*.py"
+    - "**/Dockerfile"
+    - "**/requirements*.txt"

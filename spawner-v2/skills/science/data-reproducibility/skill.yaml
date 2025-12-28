@@ -1,0 +1,156 @@
+# Data Reproducibility Skill
+# Ensuring computational research can be reproduced
+
+id: data-reproducibility
+name: Data Reproducibility
+category: science
+complexity: advanced
+requires_skills:
+  - scientific-method
+
+description: |
+  Infrastructure and practices for reproducible computational research.
+  Covers environment management, data versioning, code documentation,
+  and sharing protocols that enable others to reproduce your results.
+
+patterns:
+
+  environment_management:
+    name: Reproducible Computational Environments
+    description: Ensure exact environment reproduction
+    when: "Setting up any computational experiment"
+    pattern: |
+      # Docker for complete environment isolation
+      FROM python:3.11.4-slim@sha256:abc123...  # Pin digest
+
+      # Pin all dependencies with hashes
+      COPY requirements.lock .
+      RUN pip install --no-cache-dir -r requirements.lock
+
+      # Set deterministic environment variables
+      ENV PYTHONHASHSEED=0
+      ENV CUBLAS_WORKSPACE_CONFIG=:4096:8
+
+      # requirements.lock format:
+      # numpy==1.24.3 --hash=sha256:abc...
+      # pandas==2.0.1 --hash=sha256:def...
+
+      # Conda alternative:
+      # conda env export --from-history > environment.yml
+      # conda-lock lock -f environment.yml
+
+  seed_management:
+    name: Random Seed Management
+    description: Control all sources of randomness
+    pattern: |
+      import random
+      import numpy as np
+      import torch
+      import os
+
+      def set_all_seeds(seed: int) -> dict:
+          """Set ALL random seeds for reproducibility."""
+          random.seed(seed)
+          np.random.seed(seed)
+          torch.manual_seed(seed)
+          torch.cuda.manual_seed_all(seed)
+          torch.backends.cudnn.deterministic = True
+          torch.backends.cudnn.benchmark = False
+          os.environ['PYTHONHASHSEED'] = str(seed)
+
+          return {"seed": seed, "timestamp": datetime.utcnow().isoformat()}
+
+  data_versioning:
+    name: Data Version Control
+    description: Track data changes alongside code
+    pattern: |
+      # DVC (Data Version Control) setup
+      # dvc init
+      # dvc remote add -d storage s3://bucket/data
+
+      # Track large files
+      # dvc add data/training.csv
+      # git add data/training.csv.dvc .gitignore
+      # git commit -m "Add training data"
+      # dvc push
+
+      # .dvc file contains hash:
+      # md5: abc123...
+      # outs:
+      # - md5: def456...
+      #   path: data/training.csv
+
+      # To reproduce:
+      # git checkout <commit>
+      # dvc checkout
+
+  experiment_manifest:
+    name: Experiment Manifest Creation
+    description: Document everything needed to reproduce
+    pattern: |
+      import hashlib
+      import subprocess
+      import json
+
+      def create_manifest(experiment_dir: str) -> dict:
+          return {
+              "timestamp": datetime.utcnow().isoformat(),
+              "git_commit": subprocess.check_output(
+                  ["git", "rev-parse", "HEAD"]
+              ).decode().strip(),
+              "git_dirty": bool(subprocess.check_output(
+                  ["git", "status", "--porcelain"]
+              )),
+              "python_version": sys.version,
+              "platform": platform.platform(),
+              "seeds": {"numpy": 42, "torch": 42, "random": 42},
+              "data_hash": hash_directory(f"{experiment_dir}/data"),
+              "config": yaml.safe_load(open(f"{experiment_dir}/config.yaml")),
+          }
+
+      # Save with results
+      results["_provenance"] = manifest
+      json.dump(results, open("results.json", "w"))
+
+anti_patterns:
+  hardcoded_paths:
+    name: Hardcoded File Paths
+    problem: "pd.read_csv('C:/Users/me/data.csv')"
+    solution: |
+      DATA_DIR = Path(os.environ.get('DATA_DIR', './data'))
+      df = pd.read_csv(DATA_DIR / 'data.csv')
+
+  missing_seeds:
+    name: Undocumented Random Seeds
+    problem: "Results change each run"
+    solution: "Set and log all seeds before any random operations"
+
+handoffs:
+  - to: scientific-method
+    when: "Need experimental design guidance"
+    pass: "Research question, reproducibility requirements"
+
+  - to: ml-ops
+    when: "Need ML experiment tracking"
+    pass: "Model artifacts, metrics, hyperparameters"
+
+ecosystem:
+  environment:
+    - "Docker - Container isolation"
+    - "conda-lock - Locked conda environments"
+    - "pip-tools - Requirements compilation"
+
+  data_versioning:
+    - "DVC - Data version control"
+    - "LakeFS - Git for data lakes"
+    - "Pachyderm - Data pipelines"
+
+  experiment_tracking:
+    - "MLflow - Experiment tracking"
+    - "Weights & Biases - ML observability"
+    - "Neptune - Metadata management"
+
+  sharing:
+    - "Zenodo - DOI for datasets"
+    - "Binder - Reproducible notebooks"
+    - "Code Ocean - Computational capsules"

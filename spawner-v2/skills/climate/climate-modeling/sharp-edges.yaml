@@ -1,0 +1,274 @@
+id: climate-modeling-sharp-edges
+skill: climate-modeling
+version: 1.0.0
+
+sharp_edges:
+
+  - id: single-model-reliance
+    severity: critical
+    title: "Relying on Single Climate Model"
+    summary: "Single model ignores structural uncertainty"
+    symptoms:
+      - "Results change dramatically with different model"
+      - "Confidence intervals too narrow"
+      - "Surprises when using different CMIP6 model"
+    why: |
+      Climate models differ in:
+      - Physical parameterizations
+      - Resolution
+      - Sensitivity to forcing
+
+      CMIP6 equilibrium climate sensitivity ranges 1.8-5.6°C.
+      Single model gives false precision.
+
+      "All models are wrong, but some are useful."
+      Ensemble captures structural uncertainty.
+    gotcha: |
+      # Use first available model
+      model_data = load_cmip6('ACCESS-CM2', 'ssp245', 'tas')
+      future_temp = model_data.sel(time='2081-2100').mean()
+      print(f"Temperature change: {future_temp - baseline:.2f}°C")
+
+      # But GFDL-ESM4 might give very different answer!
+      # Single number hides huge uncertainty
+    solution: |
+      # 1. Use multi-model ensemble
+      models = ['ACCESS-CM2', 'CESM2', 'GFDL-ESM4', 'MPI-ESM1-2-LR', ...]
+      ensemble = load_ensemble(models, 'ssp245', 'tas')
+
+      # 2. Report range, not point estimate
+      results = {
+          'mean': ensemble.mean(dim='model'),
+          'p10': ensemble.quantile(0.1, dim='model'),
+          'p90': ensemble.quantile(0.9, dim='model')
+      }
+
+      print(f"Temperature change: {results['mean']:.1f}°C "
+            f"(range: {results['p10']:.1f} to {results['p90']:.1f}°C)")
+
+      # 3. Check model agreement
+      agreement = (ensemble > 0).mean(dim='model')
+      # Report where models disagree
+
+  - id: scenario-as-forecast
+    severity: high
+    title: "Treating SSP Scenarios as Forecasts"
+    summary: "Presenting scenarios as predictions of what will happen"
+    symptoms:
+      - "Claiming 'by 2100, temperature will be X'"
+      - "Single scenario presented without alternatives"
+      - "Policy based on one scenario outcome"
+    why: |
+      SSPs are 'what-if' scenarios, not predictions.
+      No probability assigned to scenarios.
+
+      SSP5-8.5 is not 'business as usual' - it's high emissions.
+      SSP1-2.6 requires massive policy change.
+
+      Presenting one scenario as 'the future' is misleading.
+    gotcha: |
+      # Present single scenario as prediction
+      future = load_cmip6('*', 'ssp585', 'tas')  # Highest emissions
+      warming = future.sel(time='2100').mean() - baseline
+
+      report = f"Global warming will reach {warming:.1f}°C by 2100"
+      # WRONG: This is IF emissions follow SSP5-8.5
+    solution: |
+      # 1. Present multiple scenarios
+      scenarios = ['ssp126', 'ssp245', 'ssp370', 'ssp585']
+      results = {}
+      for ssp in scenarios:
+          data = load_ensemble('*', ssp, 'tas')
+          results[ssp] = data.sel(time='2081-2100').mean()
+
+      # 2. Use conditional language
+      print("Projected warming by 2081-2100 (relative to 1995-2014):")
+      for ssp, warming in results.items():
+          print(f"  Under {ssp}: {warming.mean():.1f}°C")
+
+      # 3. Explain scenario assumptions
+      # "SSP2-4.5 assumes moderate mitigation efforts..."
+
+  - id: bias-in-extremes
+    severity: high
+    title: "Bias Correction Fails for Extremes"
+    summary: "Standard bias correction doesn't work for rare events"
+    symptoms:
+      - "Corrected extremes still unrealistic"
+      - "100-year events become 10-year events (or vice versa)"
+      - "Return periods wrong after correction"
+    why: |
+      Standard quantile mapping uses historical data.
+      Extremes (99th percentile, 100-year events) have few samples.
+
+      Climate change shifts entire distribution, including tails.
+      Extrapolation to unseen extremes is uncertain.
+
+      Bias correction assumes stationarity in bias.
+    gotcha: |
+      # Standard quantile mapping
+      corrected = quantile_mapping(model, obs)
+      extreme_99 = corrected.quantile(0.99)
+
+      # But:
+      # 1. Model's 99th percentile poorly sampled
+      # 2. Future extremes may exceed historical range
+      # 3. Bias in extremes may differ from mean
+    solution: |
+      # 1. Use extreme value theory
+      from scipy.stats import genextreme
+
+      def correct_extremes(model, obs, threshold_percentile=95):
+          # Fit GEV to observations
+          obs_extreme = obs[obs > obs.quantile(threshold_percentile/100)]
+          params_obs = genextreme.fit(obs_extreme)
+
+          # Fit GEV to model
+          model_extreme = model[model > model.quantile(threshold_percentile/100)]
+          params_model = genextreme.fit(model_extreme)
+
+          # Map through GEV
+          # ...
+
+      # 2. Use methods designed for non-stationarity
+      # Quantile Delta Mapping preserves model's projected changes
+
+      # 3. Validate with out-of-sample extremes
+      # Check if corrected extremes match observed in validation period
+
+  - id: calendar-mismatch
+    severity: medium
+    title: "Calendar Differences Cause Date Errors"
+    summary: "Different calendar systems create alignment issues"
+    symptoms:
+      - "Dates don't match between models"
+      - "February 29 or 30 causes errors"
+      - "360-day calendar shifts seasons"
+    why: |
+      Climate models use different calendars:
+      - 'standard' (Gregorian with leap years)
+      - 'noleap' (365 days, no Feb 29)
+      - '360_day' (12 months of 30 days)
+      - 'proleptic_gregorian'
+
+      Comparing data across calendars:
+      - Dates don't align
+      - February 29 may or may not exist
+      - Day of year 100 is different date
+
+      xarray handles this, but be careful with raw dates.
+    gotcha: |
+      # Mixing calendars
+      model1 = load_model('CESM2')  # noleap calendar
+      model2 = load_model('MPI')    # proleptic_gregorian
+
+      # This may fail or give wrong results
+      combined = xr.concat([model1, model2], dim='model')
+
+      # Feb 29 doesn't exist in model1!
+      leap_day = model1.sel(time='2020-02-29')  # KeyError!
+    solution: |
+      # 1. Convert to common calendar
+      import cftime
+
+      def convert_calendar(ds, target='standard'):
+          return ds.convert_calendar(target, align_on='year')
+
+      # 2. Use xarray's calendar-aware operations
+      # time.dt.dayofyear handles different calendars
+
+      # 3. Work with monthly data to avoid calendar issues
+      monthly = ds.resample(time='MS').mean()
+
+      # 4. Check calendar before combining
+      print(f"Calendar: {ds.time.dt.calendar}")
+
+  - id: spatial-resolution-mismatch
+    severity: medium
+    title: "Comparing Data at Different Resolutions"
+    summary: "Direct comparison of coarse GCM to fine observations"
+    symptoms:
+      - "GCM looks systematically biased in mountains"
+      - "Coastal areas poorly represented"
+      - "Point observations don't match gridded model"
+    why: |
+      GCMs: 50-200 km resolution
+      Observations: station points or 1-10 km grids
+
+      GCM grid cell represents area average.
+      Point observation is single location.
+      These are not comparable.
+
+      Mountains, coasts, urban heat islands: subgrid.
+    gotcha: |
+      # Compare GCM to station
+      gcm_value = gcm.sel(lat=station_lat, lon=station_lon, method='nearest')
+      station_value = obs.mean()
+
+      bias = gcm_value - station_value  # Large!
+      # But: GCM grid cell is 100km, station is 1 point
+      # They're measuring different things
+    solution: |
+      # 1. Regrid to common resolution
+      import xesmf as xe
+
+      # Regrid GCM to obs grid (or vice versa)
+      regridder = xe.Regridder(gcm, obs, 'bilinear')
+      gcm_regridded = regridder(gcm)
+
+      # 2. Area-weight station observations
+      # Match GCM grid cell with all stations inside
+      # Weight by representativeness
+
+      # 3. Use gridded observations for validation
+      # CRU, ERA5, etc. - already on grids
+
+      # 4. Downscale before comparison
+      # Bring GCM to observation resolution
+
+  - id: temporal-aggregation
+    severity: medium
+    title: "Wrong Temporal Aggregation for Application"
+    summary: "Using annual means when daily extremes matter"
+    symptoms:
+      - "Impact model gives wrong results"
+      - "Extremes underestimated"
+      - "Thresholds never exceeded in aggregated data"
+    why: |
+      Climate data often distributed as monthly/annual means.
+      But impacts often depend on:
+      - Daily extremes (heat waves)
+      - Sub-daily intensity (flood peaks)
+      - Duration above threshold
+
+      Annual mean temperature can be same while extremes differ.
+      Mean annual precipitation doesn't show droughts.
+    gotcha: |
+      # Use annual mean for heat wave analysis
+      annual_temp = load_data('tas_annual_mean')
+
+      # Count heat waves (days > 35°C)
+      heat_waves = (annual_temp > 35).sum()  # Always 0!
+      # Annual mean is never 35°C
+
+      # Need daily data!
+    solution: |
+      # 1. Use appropriate temporal resolution
+      daily_temp = load_data('tasmax_day')  # Daily maximum
+      heat_days = (daily_temp > 35).groupby('time.year').sum()
+
+      # 2. Compute indices from daily data, then aggregate
+      # Don't aggregate first then compute
+
+      # 3. Check what temporal resolution impact model needs
+      # Document data requirements
+
+      # 4. Use temporal disaggregation if only monthly available
+      # (but know limitations)
+
+detection:
+  file_patterns:
+    - "**/*climate*.py"
+    - "**/*cmip*.py"
+    - "**/*downscal*.py"
+    - "**/*projection*.py"

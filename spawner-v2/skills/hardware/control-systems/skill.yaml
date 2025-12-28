@@ -1,0 +1,634 @@
+# Control Systems Skill
+# Feedback control and motion planning
+
+id: control-systems
+name: Control Systems
+category: hardware
+complexity: advanced
+requires_skills:
+  - sensor-fusion
+  - statistical-analysis
+
+description: |
+  Patterns for feedback control systems including PID tuning, state-space control,
+  Model Predictive Control (MPC), trajectory tracking, and stability analysis.
+  Covers both classical and modern control approaches for robotics and automation.
+
+patterns:
+
+  pid_controller:
+    name: PID Controller Implementation
+    description: Classic proportional-integral-derivative control with anti-windup
+    pattern: |
+      import numpy as np
+      from dataclasses import dataclass
+      from typing import Optional
+
+      @dataclass
+      class PIDGains:
+          """PID gains with optional derivative filter."""
+          kp: float = 1.0      # Proportional gain
+          ki: float = 0.0      # Integral gain
+          kd: float = 0.0      # Derivative gain
+          tau_d: float = 0.1   # Derivative filter time constant
+
+      class PIDController:
+          """PID controller with anti-windup and derivative filtering.
+
+          Features:
+          - Integral anti-windup (clamping and back-calculation)
+          - Derivative on measurement (avoids derivative kick)
+          - Low-pass filter on derivative term
+          - Bumpless transfer for gain changes
+          """
+
+          def __init__(self, gains: PIDGains, dt: float,
+                       output_limits: tuple = (-np.inf, np.inf)):
+              self.gains = gains
+              self.dt = dt
+              self.output_min, self.output_max = output_limits
+
+              # State
+              self.integral = 0.0
+              self.prev_measurement = None
+              self.prev_derivative = 0.0
+              self.prev_output = 0.0
+
+          def update(self, setpoint: float, measurement: float) -> float:
+              """Compute control output.
+
+              Args:
+                  setpoint: Desired value
+                  measurement: Current measured value
+
+              Returns:
+                  Control output (clamped to limits)
+              """
+              error = setpoint - measurement
+
+              # Proportional term
+              p_term = self.gains.kp * error
+
+              # Integral term with clamping anti-windup
+              self.integral += error * self.dt
+              i_term = self.gains.ki * self.integral
+
+              # Derivative term on measurement (not error)
+              # Avoids derivative kick on setpoint changes
+              if self.prev_measurement is None:
+                  d_term = 0.0
+              else:
+                  # Raw derivative
+                  d_raw = -(measurement - self.prev_measurement) / self.dt
+
+                  # Low-pass filter on derivative
+                  alpha = self.dt / (self.gains.tau_d + self.dt)
+                  d_filtered = alpha * d_raw + (1 - alpha) * self.prev_derivative
+                  self.prev_derivative = d_filtered
+
+                  d_term = self.gains.kd * d_filtered
+
+              self.prev_measurement = measurement
+
+              # Compute output
+              output_unsat = p_term + i_term + d_term
+
+              # Clamp output
+              output = np.clip(output_unsat, self.output_min, self.output_max)
+
+              # Back-calculation anti-windup
+              if self.gains.ki != 0:
+                  saturation_error = output - output_unsat
+                  self.integral += saturation_error / self.gains.ki
+
+              self.prev_output = output
+              return output
+
+          def reset(self):
+              """Reset controller state."""
+              self.integral = 0.0
+              self.prev_measurement = None
+              self.prev_derivative = 0.0
+
+          def set_gains(self, gains: PIDGains):
+              """Update gains with bumpless transfer."""
+              # Adjust integral to maintain output continuity
+              if self.gains.ki != 0 and gains.ki != 0:
+                  self.integral *= self.gains.ki / gains.ki
+              self.gains = gains
+
+      # Ziegler-Nichols tuning helper
+      def ziegler_nichols_tuning(ku: float, tu: float, controller_type: str = 'PID') -> PIDGains:
+          """Compute PID gains using Ziegler-Nichols method.
+
+          Args:
+              ku: Ultimate gain (gain at which oscillation occurs)
+              tu: Ultimate period (period of oscillation)
+              controller_type: 'P', 'PI', or 'PID'
+
+          Returns:
+              Tuned PID gains
+          """
+          if controller_type == 'P':
+              return PIDGains(kp=0.5 * ku)
+          elif controller_type == 'PI':
+              return PIDGains(kp=0.45 * ku, ki=0.54 * ku / tu)
+          else:  # PID
+              return PIDGains(
+                  kp=0.6 * ku,
+                  ki=1.2 * ku / tu,
+                  kd=0.075 * ku * tu
+              )
+    why: "PID is the workhorse of industrial control - simple, robust, well-understood"
+
+  cascade_control:
+    name: Cascade Control
+    description: Nested control loops for improved disturbance rejection
+    pattern: |
+      class CascadeController:
+          """Cascade (nested loop) control structure.
+
+          Outer loop: Slower, controls primary variable (position, temperature)
+          Inner loop: Faster, controls secondary variable (velocity, power)
+
+          Benefits:
+          - Better disturbance rejection
+          - Inner loop handles fast dynamics
+          - Outer loop handles slow setpoint tracking
+          """
+
+          def __init__(self, outer_gains: PIDGains, inner_gains: PIDGains,
+                       dt_outer: float, dt_inner: float,
+                       inner_limits: tuple = (-np.inf, np.inf)):
+              self.outer = PIDController(outer_gains, dt_outer, output_limits=inner_limits)
+              self.inner = PIDController(inner_gains, dt_inner)
+              self.dt_ratio = int(dt_outer / dt_inner)
+
+          def update(self, setpoint: float, outer_measurement: float,
+                     inner_measurement: float) -> float:
+              """Compute cascaded control output.
+
+              Example: Position control
+                  setpoint: desired position
+                  outer_measurement: actual position
+                  inner_measurement: actual velocity
+                  output: motor command (torque/current)
+              """
+              # Outer loop runs at slower rate
+              # Output is setpoint for inner loop
+              inner_setpoint = self.outer.update(setpoint, outer_measurement)
+
+              # Inner loop runs at faster rate
+              output = self.inner.update(inner_setpoint, inner_measurement)
+
+              return output
+
+      # Example: Position-Velocity cascade for motor
+      cascade = CascadeController(
+          outer_gains=PIDGains(kp=10.0, ki=1.0, kd=0.0),  # Position loop
+          inner_gains=PIDGains(kp=5.0, ki=10.0, kd=0.0),  # Velocity loop
+          dt_outer=0.01,  # 100 Hz position loop
+          dt_inner=0.001  # 1 kHz velocity loop
+      )
+    why: "Cascade control handles systems with nested dynamics (common in motion control)"
+
+  state_space_control:
+    name: State-Space Controller
+    description: Full-state feedback with observer
+    pattern: |
+      import numpy as np
+      from scipy import linalg
+
+      class StateSpaceController:
+          """Linear state-space controller with Luenberger observer.
+
+          System: dx/dt = Ax + Bu
+                  y = Cx + Du
+
+          Controller: u = -Kx + Kr*r (state feedback with reference scaling)
+          Observer: dx_hat/dt = Ax_hat + Bu + L(y - Cx_hat)
+          """
+
+          def __init__(self, A: np.ndarray, B: np.ndarray,
+                       C: np.ndarray, D: np.ndarray = None,
+                       dt: float = 0.01):
+              self.A = A
+              self.B = B
+              self.C = C
+              self.D = D if D is not None else np.zeros((C.shape[0], B.shape[1]))
+              self.dt = dt
+
+              self.n = A.shape[0]  # Number of states
+              self.m = B.shape[1]  # Number of inputs
+              self.p = C.shape[0]  # Number of outputs
+
+              # Controller and observer gains (must be designed)
+              self.K = None  # State feedback gain
+              self.L = None  # Observer gain
+              self.Kr = None  # Reference gain
+
+              # Observer state
+              self.x_hat = np.zeros((self.n, 1))
+
+          def design_lqr(self, Q: np.ndarray, R: np.ndarray):
+              """Design LQR controller gains.
+
+              Minimizes: J = integral(x'Qx + u'Ru) dt
+
+              Args:
+                  Q: State cost matrix (n x n, positive semi-definite)
+                  R: Input cost matrix (m x m, positive definite)
+              """
+              # Solve continuous algebraic Riccati equation
+              P = linalg.solve_continuous_are(self.A, self.B, Q, R)
+              self.K = np.linalg.inv(R) @ self.B.T @ P
+
+              # Compute reference gain for zero steady-state error
+              # Kr = -inv(C @ inv(A - B @ K) @ B)
+              Acl = self.A - self.B @ self.K
+              self.Kr = -np.linalg.inv(self.C @ np.linalg.inv(Acl) @ self.B)
+
+              return self.K
+
+          def design_observer(self, poles: np.ndarray = None, bandwidth_mult: float = 5.0):
+              """Design Luenberger observer via pole placement.
+
+              Observer should be faster than controller (typically 2-10x).
+              """
+              if poles is None:
+                  # Place observer poles at 5x controller bandwidth
+                  ctrl_poles = np.linalg.eigvals(self.A - self.B @ self.K)
+                  poles = bandwidth_mult * np.real(ctrl_poles)
+
+              # Pole placement for observer (dual problem)
+              from scipy.signal import place_poles
+              result = place_poles(self.A.T, self.C.T, poles)
+              self.L = result.gain_matrix.T
+
+              return self.L
+
+          def update(self, y: np.ndarray, r: np.ndarray) -> np.ndarray:
+              """Compute control output with observer.
+
+              Args:
+                  y: Measured output
+                  r: Reference (setpoint)
+
+              Returns:
+                  Control input u
+              """
+              # Observer prediction
+              y_hat = self.C @ self.x_hat
+
+              # Observer correction
+              dx_hat = (self.A @ self.x_hat +
+                        self.B @ (-self.K @ self.x_hat + self.Kr @ r) +
+                        self.L @ (y - y_hat))
+
+              # Euler integration
+              self.x_hat = self.x_hat + dx_hat * self.dt
+
+              # Control law
+              u = -self.K @ self.x_hat + self.Kr @ r
+
+              return u
+
+      # Example: Mass-spring-damper position control
+      m, c, k = 1.0, 0.5, 2.0  # Mass, damping, stiffness
+      A = np.array([[0, 1], [-k/m, -c/m]])
+      B = np.array([[0], [1/m]])
+      C = np.array([[1, 0]])  # Measure position only
+
+      ctrl = StateSpaceController(A, B, C, dt=0.01)
+      ctrl.design_lqr(Q=np.diag([10, 1]), R=np.array([[0.1]]))
+      ctrl.design_observer()
+    why: "State-space provides optimal multi-input-multi-output control"
+
+  model_predictive_control:
+    name: Model Predictive Control (MPC)
+    description: Optimal control with constraints over prediction horizon
+    critical: true
+    pattern: |
+      import numpy as np
+      from scipy.optimize import minimize
+      from dataclasses import dataclass
+      from typing import Callable, Optional
+
+      @dataclass
+      class MPCParams:
+          """MPC tuning parameters."""
+          horizon: int = 20           # Prediction horizon
+          dt: float = 0.1             # Time step
+          Q: np.ndarray = None        # State cost (tracking error)
+          R: np.ndarray = None        # Input cost (control effort)
+          Qf: np.ndarray = None       # Terminal state cost
+
+      class LinearMPC:
+          """Linear MPC with constraints.
+
+          Solves: min sum_{k=0}^{N-1} (x_k - r)'Q(x_k - r) + u_k'R u_k + (x_N - r)'Qf(x_N - r)
+                  s.t. x_{k+1} = Ad @ x_k + Bd @ u_k
+                       u_min <= u_k <= u_max
+                       x_min <= x_k <= x_max
+          """
+
+          def __init__(self, Ad: np.ndarray, Bd: np.ndarray,
+                       params: MPCParams,
+                       u_min: np.ndarray = None, u_max: np.ndarray = None,
+                       x_min: np.ndarray = None, x_max: np.ndarray = None):
+              self.Ad = Ad
+              self.Bd = Bd
+              self.params = params
+
+              self.n = Ad.shape[0]  # States
+              self.m = Bd.shape[1]  # Inputs
+              self.N = params.horizon
+
+              # Default costs
+              if params.Q is None:
+                  params.Q = np.eye(self.n)
+              if params.R is None:
+                  params.R = 0.1 * np.eye(self.m)
+              if params.Qf is None:
+                  params.Qf = params.Q
+
+              # Constraints
+              self.u_min = u_min if u_min is not None else -np.inf * np.ones(self.m)
+              self.u_max = u_max if u_max is not None else np.inf * np.ones(self.m)
+              self.x_min = x_min if x_min is not None else -np.inf * np.ones(self.n)
+              self.x_max = x_max if x_max is not None else np.inf * np.ones(self.n)
+
+              # Warm start
+              self.u_prev = np.zeros((self.N, self.m))
+
+          def _predict_trajectory(self, x0: np.ndarray, u_seq: np.ndarray) -> np.ndarray:
+              """Predict state trajectory given initial state and control sequence."""
+              x_traj = np.zeros((self.N + 1, self.n))
+              x_traj[0] = x0.flatten()
+
+              for k in range(self.N):
+                  x_traj[k + 1] = self.Ad @ x_traj[k] + self.Bd @ u_seq[k]
+
+              return x_traj
+
+          def _cost_function(self, u_flat: np.ndarray, x0: np.ndarray,
+                              reference: np.ndarray) -> float:
+              """Compute total cost over horizon."""
+              u_seq = u_flat.reshape((self.N, self.m))
+              x_traj = self._predict_trajectory(x0, u_seq)
+
+              cost = 0.0
+              Q, R, Qf = self.params.Q, self.params.R, self.params.Qf
+
+              for k in range(self.N):
+                  # Stage cost
+                  e = x_traj[k] - reference
+                  cost += e @ Q @ e + u_seq[k] @ R @ u_seq[k]
+
+              # Terminal cost
+              e = x_traj[self.N] - reference
+              cost += e @ Qf @ e
+
+              return cost
+
+          def update(self, x0: np.ndarray, reference: np.ndarray) -> np.ndarray:
+              """Solve MPC optimization problem.
+
+              Args:
+                  x0: Current state
+                  reference: Desired state (or trajectory)
+
+              Returns:
+                  Optimal control input for current time step
+              """
+              x0 = x0.flatten()
+              reference = reference.flatten()
+
+              # Initial guess (warm start from previous solution)
+              u0 = self.u_prev.flatten()
+
+              # Input bounds
+              bounds = []
+              for _ in range(self.N):
+                  for j in range(self.m):
+                      bounds.append((self.u_min[j], self.u_max[j]))
+
+              # Solve optimization
+              result = minimize(
+                  self._cost_function,
+                  u0,
+                  args=(x0, reference),
+                  method='SLSQP',
+                  bounds=bounds,
+                  options={'maxiter': 50, 'disp': False}
+              )
+
+              u_opt = result.x.reshape((self.N, self.m))
+
+              # Warm start for next iteration
+              self.u_prev[:-1] = u_opt[1:]
+              self.u_prev[-1] = u_opt[-1]
+
+              # Return first control input
+              return u_opt[0]
+
+      # Example: Double integrator with input limits
+      dt = 0.1
+      Ad = np.array([[1, dt], [0, 1]])
+      Bd = np.array([[0.5 * dt**2], [dt]])
+
+      mpc = LinearMPC(
+          Ad, Bd,
+          MPCParams(horizon=20, dt=dt, Q=np.diag([10, 1]), R=np.array([[0.1]])),
+          u_min=np.array([-1.0]),  # Max deceleration
+          u_max=np.array([1.0])    # Max acceleration
+      )
+    why: "MPC handles constraints and preview, essential for optimal robot motion"
+
+  trajectory_tracking:
+    name: Trajectory Tracking Controller
+    description: Follow time-parameterized reference trajectory
+    pattern: |
+      import numpy as np
+      from typing import Callable, Tuple
+
+      class TrajectoryTracker:
+          """Track a time-parameterized reference trajectory.
+
+          Uses feedforward + feedback control:
+          u = u_ff(t) + K @ (x_ref(t) - x)
+
+          Feedforward comes from desired trajectory dynamics.
+          Feedback corrects for disturbances and model errors.
+          """
+
+          def __init__(self, K: np.ndarray, trajectory_func: Callable):
+              """
+              Args:
+                  K: Feedback gain matrix
+                  trajectory_func: Function (t) -> (x_ref, u_ff)
+                      Returns reference state and feedforward input at time t
+              """
+              self.K = K
+              self.trajectory_func = trajectory_func
+              self.t = 0.0
+
+          def update(self, x: np.ndarray, dt: float) -> Tuple[np.ndarray, np.ndarray]:
+              """Compute tracking control.
+
+              Args:
+                  x: Current state
+                  dt: Time step
+
+              Returns:
+                  (control_input, tracking_error)
+              """
+              # Get reference at current time
+              x_ref, u_ff = self.trajectory_func(self.t)
+
+              # Tracking error
+              error = x_ref - x
+
+              # Control: feedforward + feedback
+              u = u_ff + self.K @ error
+
+              self.t += dt
+
+              return u, error
+
+      # Trajectory generation utilities
+      def minimum_jerk_trajectory(start: float, end: float,
+                                   duration: float, t: float) -> Tuple[float, float, float]:
+          """Minimum jerk trajectory for smooth motion.
+
+          Returns position, velocity, acceleration at time t.
+          """
+          if t < 0:
+              return start, 0.0, 0.0
+          if t > duration:
+              return end, 0.0, 0.0
+
+          tau = t / duration
+          tau3 = tau ** 3
+          tau4 = tau ** 4
+          tau5 = tau ** 5
+
+          # Position
+          s = 10 * tau3 - 15 * tau4 + 6 * tau5
+          pos = start + (end - start) * s
+
+          # Velocity
+          ds = (30 * tau**2 - 60 * tau3 + 30 * tau4) / duration
+          vel = (end - start) * ds
+
+          # Acceleration
+          dds = (60 * tau - 180 * tau**2 + 120 * tau3) / duration**2
+          acc = (end - start) * dds
+
+          return pos, vel, acc
+
+      def trapezoidal_velocity_profile(start: float, end: float,
+                                        v_max: float, a_max: float,
+                                        t: float) -> Tuple[float, float, float]:
+          """Trapezoidal velocity profile (bang-bang with cruise).
+
+          Returns position, velocity, acceleration at time t.
+          """
+          distance = end - start
+          sign = np.sign(distance)
+          distance = abs(distance)
+
+          # Time to accelerate to v_max
+          t_acc = v_max / a_max
+
+          # Distance during acceleration
+          d_acc = 0.5 * a_max * t_acc**2
+
+          if 2 * d_acc >= distance:
+              # Triangle profile (never reach v_max)
+              t_acc = np.sqrt(distance / a_max)
+              t_total = 2 * t_acc
+              t_cruise = 0
+          else:
+              # Trapezoidal profile
+              d_cruise = distance - 2 * d_acc
+              t_cruise = d_cruise / v_max
+              t_total = 2 * t_acc + t_cruise
+
+          if t < 0:
+              return start, 0.0, 0.0
+          elif t < t_acc:
+              # Acceleration phase
+              pos = start + sign * 0.5 * a_max * t**2
+              vel = sign * a_max * t
+              acc = sign * a_max
+          elif t < t_acc + t_cruise:
+              # Cruise phase
+              pos = start + sign * (d_acc + v_max * (t - t_acc))
+              vel = sign * v_max
+              acc = 0.0
+          elif t < t_total:
+              # Deceleration phase
+              t_dec = t - t_acc - t_cruise
+              pos = start + sign * (d_acc + v_max * t_cruise + v_max * t_dec - 0.5 * a_max * t_dec**2)
+              vel = sign * (v_max - a_max * t_dec)
+              acc = -sign * a_max
+          else:
+              return end, 0.0, 0.0
+
+          return pos, vel, acc
+    why: "Smooth trajectory tracking is essential for robotics motion"
+
+anti_patterns:
+
+  derivative_kick:
+    name: Derivative on Error (Derivative Kick)
+    problem: "Derivative of error causes spikes on setpoint change"
+    solution: "Use derivative on measurement: d/dt(measurement), not d/dt(error)"
+
+  integral_windup:
+    name: Integral Windup
+    problem: "Integral accumulates during saturation, causes overshoot"
+    solution: "Implement anti-windup: clamping, back-calculation, or conditional integration"
+
+  tuning_at_one_point:
+    name: Tuning at Single Operating Point
+    problem: "Controller works at one speed/load, fails at others"
+    solution: "Use gain scheduling or adaptive control for varying conditions"
+
+  ignoring_actuator_limits:
+    name: Ignoring Actuator Saturation
+    problem: "Controller commands exceed physical limits"
+    solution: "Include constraints in control design (MPC) or saturate output"
+
+handoffs:
+  - to: sensor-fusion
+    when: "Need state estimation for feedback"
+    pass: "State variables needed, update rates, noise characteristics"
+
+  - to: embedded-systems
+    when: "Implementing on microcontroller"
+    pass: "Sample rate, timing constraints, fixed-point requirements"
+
+  - to: motor-control
+    when: "Controlling electric motors"
+    pass: "Motor model, current/voltage limits, encoder interface"
+
+ecosystem:
+  simulation:
+    - "MATLAB/Simulink - Industry standard"
+    - "Python Control Library (python-control)"
+    - "scipy.signal - Signal processing and control"
+    - "casadi - Optimal control and MPC"
+
+  embedded:
+    - "PX4 - Drone autopilot"
+    - "ArduPilot - Autonomous vehicles"
+    - "micro-ROS - ROS2 on MCUs"
+    - "ros2_control - ROS2 control framework"
+
+  optimization:
+    - "OSQP - Quadratic programming"
+    - "CVXPY - Convex optimization"
+    - "ACADOS - Real-time MPC"
+    - "CasADi - Algorithmic differentiation"

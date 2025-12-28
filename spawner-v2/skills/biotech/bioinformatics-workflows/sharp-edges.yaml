@@ -1,0 +1,256 @@
+id: bioinformatics-workflows-sharp-edges
+skill: bioinformatics-workflows
+version: 1.0.0
+
+sharp_edges:
+
+  - id: non-resumable-pipeline
+    severity: critical
+    title: "Pipeline Not Resumable After Failure"
+    summary: "Restart from beginning after crash wastes hours/days of compute"
+    symptoms:
+      - "Cluster job times out, entire pipeline restarts"
+      - "One sample fails, all samples re-run"
+      - "Intermediate files deleted before completion"
+    why: |
+      Genomics pipelines can run for days. Without checkpointing/caching:
+      - A network blip at hour 47 means starting over
+      - Cluster preemption restarts everything
+      - Debugging requires full re-runs
+
+      Most workflow managers have resume capability, but it must be configured.
+    gotcha: |
+      # Snakemake: Deletes temp files by default
+      temp("results/aligned/{sample}.unsorted.bam")
+      # If job fails after this, can't resume without re-running
+
+      # Nextflow: cache disabled
+      process.cache = false
+      # Every run starts from scratch
+    solution: |
+      # Nextflow: Enable resume (default)
+      nextflow run main.nf -resume
+
+      # Snakemake: Use --keep-incomplete
+      snakemake --keep-incomplete ...
+
+      # Keep intermediate files until pipeline completes
+      # Don't mark as temp() until you're sure
+
+      # Use work directory on fast storage
+      workDir = '/scratch/nextflow_work'
+
+  - id: unstable-sort-order
+    severity: high
+    title: "Non-Deterministic File Processing Order"
+    summary: "Glob patterns produce different order on different runs"
+    symptoms:
+      - "Same inputs, different checksum on outputs"
+      - "Merged VCFs have samples in random order"
+      - "Hard to compare runs"
+    why: |
+      file() and glob patterns don't guarantee order.
+      Different filesystems return files in different orders.
+      This causes non-reproducible outputs even with same inputs.
+    gotcha: |
+      # Nextflow - order not guaranteed
+      Channel.fromFilePairs("*.{1,2}.fq.gz")
+
+      # Snakemake - expand() order varies
+      expand("data/{sample}.bam", sample=samples)
+    solution: |
+      // Nextflow: Sort the channel
+      Channel
+          .fromFilePairs("*.{1,2}.fq.gz")
+          .toSortedList { it[0] }  // Sort by sample name
+          .flatMap()
+          .set { sorted_reads }
+
+      # Snakemake: Sort in rule
+      sorted_samples = sorted(samples)
+      expand("data/{sample}.bam", sample=sorted_samples)
+
+      # Always sort before merging
+      bcftools merge $(ls *.vcf.gz | sort) > merged.vcf.gz
+
+  - id: symlink-container-failure
+    severity: high
+    title: "Symlinks Not Followed in Containers"
+    summary: "Files exist but container process can't read them"
+    symptoms:
+      - "File not found errors in container"
+      - "Works outside container, fails inside"
+      - "Absolute path works, relative doesn't"
+    why: |
+      Containers mount specific directories.
+      Symlinks pointing outside mounted directories are broken.
+      This is especially common with shared storage and staged inputs.
+    gotcha: |
+      # Host filesystem:
+      /data/project/sample.bam -> /shared/raw_data/sample.bam
+
+      # Container only mounts /data/project
+      # Symlink target /shared/raw_data is not available
+    solution: |
+      // Nextflow: Use stageInMode 'copy' for problem files
+      process ALIGN {
+          stageInMode 'copy'  // or 'link' with full path mounts
+          ...
+      }
+
+      // Mount all required directories
+      docker.runOptions = '-v /data:/data -v /shared:/shared'
+      singularity.runOptions = '-B /data:/data -B /shared:/shared'
+
+      # Snakemake: Use shadow rules
+      rule align:
+          shadow: "minimal"  # Copies inputs to temp dir
+          ...
+
+  - id: memory-estimation-wrong
+    severity: high
+    title: "Memory Requests Don't Match Actual Usage"
+    summary: "Jobs OOM killed or waste cluster resources"
+    symptoms:
+      - "Jobs killed with OOM (out of memory)"
+      - "Jobs pending because requesting too much memory"
+      - "Cluster efficiency < 50%"
+    why: |
+      Genomics tools have variable memory usage:
+      - BWA: ~5GB per thread for human genome
+      - STAR: 30-40GB for genome loading
+      - GATK: Varies wildly by step
+
+      Static memory requests don't account for sample size variation.
+    gotcha: |
+      # Requesting flat 8GB for all samples
+      process {
+          memory = '8 GB'
+      }
+      # Small sample: wastes 6GB
+      # Large sample: OOM killed
+    solution: |
+      // Nextflow: Dynamic memory based on input
+      process ALIGN {
+          memory { 6.GB * task.cpus }
+
+          // Or with retry
+          memory { 8.GB * task.attempt }
+          errorStrategy { task.exitStatus in 137..140 ? 'retry' : 'terminate' }
+          maxRetries 3
+      }
+
+      # Snakemake: Use resources based on input
+      rule align:
+          resources:
+              mem_mb=lambda wildcards, input: max(8000, input.size_mb * 10)
+          ...
+
+      # Profile tools to understand memory patterns
+      # Use /usr/bin/time -v to get max RSS
+
+  - id: missing-exit-codes
+    severity: high
+    title: "Ignoring Non-Zero Exit Codes"
+    summary: "Pipeline continues after tool failure, producing garbage"
+    symptoms:
+      - "Empty output files"
+      - "Truncated BAMs/VCFs"
+      - "Downstream tools fail with cryptic errors"
+    why: |
+      Some tools return non-zero exit codes for warnings.
+      Others return 0 even on failure.
+      Shell pipelines mask exit codes by default.
+    gotcha: |
+      # Shell pipeline hides BWA failure
+      bwa mem ref.fa reads.fq | samtools sort -o out.bam
+      # Exit code is from samtools, not bwa
+
+      # Tool returns 0 but wrote nothing
+      some_tool input.fa > output.fa  # Empty file, exit 0
+    solution: |
+      # Use pipefail in shell
+      set -euo pipefail
+      bwa mem ref.fa reads.fq | samtools sort -o out.bam
+
+      # Nextflow: Always set in shell
+      process ALIGN {
+          shell:
+          '''
+          set -euo pipefail
+          bwa mem !{ref} !{reads} | samtools sort -o !{output}
+          '''
+      }
+
+      # Validate outputs
+      if [[ ! -s output.fa ]]; then
+          echo "Error: output file is empty" >&2
+          exit 1
+      fi
+
+      # Check expected output patterns
+      samtools quickcheck aligned.bam || exit 1
+
+  - id: race-condition-outputs
+    severity: critical
+    title: "Multiple Jobs Writing to Same Output"
+    summary: "Parallel jobs overwrite each other's results"
+    symptoms:
+      - "Random missing samples in merged output"
+      - "Different results each run"
+      - "File corruption errors"
+    why: |
+      When parallelizing, multiple jobs may try to write to the same file.
+      This causes race conditions and data loss.
+    gotcha: |
+      # Multiple parallel jobs appending to same file
+      parallel 'process {} >> combined_results.txt' ::: samples/*
+      # Order is random, may have interleaved lines
+
+      # GATK GenomicsDBImport with multiple writers
+      gatk GenomicsDBImport ... --batch-size 50
+      # Can fail with too many concurrent writers
+    solution: |
+      # Write to separate files, merge at end
+      parallel 'process {} > results/{/.}.txt' ::: samples/*
+      cat results/*.txt > combined_results.txt
+
+      # Use atomic writes
+      process {} > temp_$$.txt && mv temp_$$.txt final.txt
+
+      # Let workflow manager handle parallelism
+      # Don't manually parallelize within rules/processes
+
+  - id: version-drift-containers
+    severity: high
+    title: "Using 'latest' Container Tags"
+    summary: "Pipeline behavior changes without code changes"
+    symptoms:
+      - "Pipeline worked yesterday, fails today"
+      - "Different results on different machines"
+      - "Can't reproduce old analysis"
+    why: |
+      'latest' tags get updated. Your pipeline pulls a new version
+      with different behavior, bugs, or broken dependencies.
+    gotcha: |
+      container = 'biocontainers/bwa:latest'
+      # Today: bwa 0.7.17
+      # Next week: bwa 0.7.18 with different defaults
+    solution: |
+      # Always use specific version tags
+      container = 'biocontainers/bwa:0.7.17--h5bf99c6_8'
+
+      # Use SHA256 digest for maximum reproducibility
+      container = 'biocontainers/bwa@sha256:abc123...'
+
+      # Lock all tool versions in environment
+      # Export conda-lock or requirements.txt
+
+detection:
+  file_patterns:
+    - "**/*.nf"
+    - "**/nextflow.config"
+    - "**/*.smk"
+    - "**/Snakefile"
+    - "**/*.wdl"
+    - "**/*.cwl"

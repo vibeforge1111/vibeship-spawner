@@ -1,0 +1,657 @@
+# Lab Automation Skill
+# Laboratory robotics, liquid handling, and workflow automation
+
+id: lab-automation
+name: Lab Automation
+category: biotech
+complexity: advanced
+requires_skills:
+  - data-engineering
+  - devops
+
+description: |
+  Patterns for laboratory automation including liquid handling robotics,
+  LIMS integration, protocol development, quality control, and high-throughput
+  workflows. Covers both open-source (Opentrons) and commercial platforms.
+
+patterns:
+
+  opentrons_protocol:
+    name: Opentrons Protocol Development
+    description: Write protocols for Opentrons OT-2/Flex liquid handlers
+    when: "Automating liquid handling with Opentrons robots"
+    pattern: |
+      from opentrons import protocol_api
+      from typing import List, Dict, Optional
+      import json
+
+      # OT-2 Protocol Template
+      metadata = {
+          'protocolName': 'PCR Setup Protocol',
+          'author': 'Lab Automation Team',
+          'description': 'Automated PCR reaction setup',
+          'apiLevel': '2.15'
+      }
+
+      def run(protocol: protocol_api.ProtocolContext):
+          """
+          Main protocol function.
+
+          Best practices:
+          1. Load labware first
+          2. Load pipettes
+          3. Define liquid handling parameters
+          4. Execute transfers with proper technique
+          """
+
+          # Load labware
+          sample_plate = protocol.load_labware(
+              'nest_96_wellplate_100ul_pcr_full_skirt',
+              '1',
+              label='Sample Plate'
+          )
+
+          reagent_reservoir = protocol.load_labware(
+              'nest_12_reservoir_15ml',
+              '2',
+              label='Reagents'
+          )
+
+          dest_plate = protocol.load_labware(
+              'nest_96_wellplate_100ul_pcr_full_skirt',
+              '3',
+              label='Destination Plate'
+          )
+
+          tiprack_20 = protocol.load_labware(
+              'opentrons_96_tiprack_20ul',
+              '4'
+          )
+
+          tiprack_300 = protocol.load_labware(
+              'opentrons_96_tiprack_300ul',
+              '5'
+          )
+
+          # Load pipettes
+          p20 = protocol.load_instrument(
+              'p20_single_gen2',
+              'right',
+              tip_racks=[tiprack_20]
+          )
+
+          p300 = protocol.load_instrument(
+              'p300_multi_gen2',
+              'left',
+              tip_racks=[tiprack_300]
+          )
+
+          # Define reagent locations
+          master_mix = reagent_reservoir['A1']
+
+          # Protocol execution
+          # Step 1: Distribute master mix
+          p300.pick_up_tip()
+          for col in dest_plate.columns():
+              p300.aspirate(50, master_mix)
+              p300.dispense(50, col[0].top(-2))  # Dispense from top
+              p300.blow_out(col[0].top(-2))
+          p300.drop_tip()
+
+          # Step 2: Transfer samples
+          for source, dest in zip(sample_plate.wells(), dest_plate.wells()):
+              p20.pick_up_tip()
+              p20.aspirate(5, source.bottom(1))  # Aspirate from bottom
+              p20.dispense(5, dest.bottom(1))
+              p20.mix(3, 10, dest.bottom(1))  # Mix after dispense
+              p20.blow_out(dest.top(-2))
+              p20.drop_tip()
+
+      # Advanced: Parameterized protocol with runtime parameters
+      def add_parameters(parameters):
+          """Define runtime parameters for flexible protocols."""
+          parameters.add_int(
+              variable_name="sample_count",
+              display_name="Number of Samples",
+              default=96,
+              minimum=1,
+              maximum=96
+          )
+          parameters.add_float(
+              variable_name="sample_volume",
+              display_name="Sample Volume (µL)",
+              default=5.0,
+              minimum=1.0,
+              maximum=20.0
+          )
+    why: "Opentrons is the most accessible liquid handling platform"
+
+  liquid_handling_best_practices:
+    name: Liquid Handling Best Practices
+    description: Techniques for accurate and precise dispensing
+    critical: true
+    pattern: |
+      from dataclasses import dataclass
+      from typing import Optional
+      from enum import Enum
+
+      class LiquidClass(Enum):
+          """Liquid classes with different handling parameters."""
+          AQUEOUS = "aqueous"
+          VISCOUS = "viscous"  # Glycerol, DMSO
+          VOLATILE = "volatile"  # Ethanol, acetone
+          DETERGENT = "detergent"  # Triton, Tween
+          SERUM = "serum"
+
+      @dataclass
+      class LiquidHandlingParams:
+          """Parameters for accurate liquid handling."""
+          liquid_class: LiquidClass
+          aspirate_rate: float  # µL/s
+          dispense_rate: float  # µL/s
+          blow_out_rate: float  # µL/s
+          aspirate_delay: float  # seconds
+          dispense_delay: float  # seconds
+          touch_tip: bool
+          air_gap: Optional[float]  # µL
+
+      # Recommended parameters by liquid class
+      LIQUID_PARAMS = {
+          LiquidClass.AQUEOUS: LiquidHandlingParams(
+              liquid_class=LiquidClass.AQUEOUS,
+              aspirate_rate=150,
+              dispense_rate=300,
+              blow_out_rate=300,
+              aspirate_delay=0.5,
+              dispense_delay=0.5,
+              touch_tip=True,
+              air_gap=None
+          ),
+          LiquidClass.VISCOUS: LiquidHandlingParams(
+              liquid_class=LiquidClass.VISCOUS,
+              aspirate_rate=50,  # Slow for viscous
+              dispense_rate=50,
+              blow_out_rate=50,
+              aspirate_delay=2.0,  # Wait for liquid to settle
+              dispense_delay=2.0,
+              touch_tip=True,
+              air_gap=5.0  # Prevent dripping
+          ),
+          LiquidClass.VOLATILE: LiquidHandlingParams(
+              liquid_class=LiquidClass.VOLATILE,
+              aspirate_rate=100,
+              dispense_rate=200,
+              blow_out_rate=300,
+              aspirate_delay=0.2,
+              dispense_delay=0.2,
+              touch_tip=False,  # Evaporation risk
+              air_gap=10.0  # Essential for volatiles
+          )
+      }
+
+      def transfer_with_liquid_class(
+          pipette,
+          source,
+          dest,
+          volume: float,
+          liquid_class: LiquidClass
+      ):
+          """Transfer with liquid-class-specific parameters."""
+          params = LIQUID_PARAMS[liquid_class]
+
+          if params.air_gap:
+              pipette.aspirate(params.air_gap, source.top())
+
+          pipette.aspirate(
+              volume,
+              source.bottom(1),
+              rate=params.aspirate_rate / pipette.max_volume
+          )
+
+          # Delay after aspirate
+          pipette.delay(seconds=params.aspirate_delay)
+
+          if params.touch_tip:
+              pipette.touch_tip(source)
+
+          pipette.dispense(
+              volume,
+              dest.bottom(1),
+              rate=params.dispense_rate / pipette.max_volume
+          )
+
+          pipette.delay(seconds=params.dispense_delay)
+          pipette.blow_out(dest.top(-2))
+
+          if params.touch_tip:
+              pipette.touch_tip(dest)
+
+      # Volume accuracy guidelines
+      ACCURACY_GUIDELINES = """
+      Pipette Volume Guidelines:
+      - Use pipette at 35-100% of max volume for best accuracy
+      - <10% of max volume: Accuracy degrades significantly
+      - Pre-wet tips for viscous liquids
+      - Use reverse pipetting for foamy liquids
+      - Change tips between different reagents
+      """
+    why: "Proper liquid handling prevents failed experiments"
+
+  lims_integration:
+    name: LIMS and Data Integration
+    description: Connect automation to laboratory information systems
+    pattern: |
+      import requests
+      from dataclasses import dataclass
+      from typing import Dict, List, Optional
+      import json
+      from datetime import datetime
+
+      @dataclass
+      class Sample:
+          """Sample tracking record."""
+          sample_id: str
+          barcode: str
+          sample_type: str
+          source_location: str
+          current_location: str
+          status: str
+          metadata: Dict
+
+      class LIMSClient:
+          """Client for LIMS API integration."""
+
+          def __init__(self, base_url: str, api_key: str):
+              self.base_url = base_url
+              self.headers = {
+                  'Authorization': f'Bearer {api_key}',
+                  'Content-Type': 'application/json'
+              }
+
+          def get_sample(self, barcode: str) -> Sample:
+              """Retrieve sample information from LIMS."""
+              response = requests.get(
+                  f"{self.base_url}/samples/{barcode}",
+                  headers=self.headers
+              )
+              response.raise_for_status()
+              data = response.json()
+              return Sample(**data)
+
+          def update_sample_location(
+              self,
+              sample_id: str,
+              location: str,
+              timestamp: Optional[datetime] = None
+          ):
+              """Update sample location in LIMS."""
+              payload = {
+                  'sample_id': sample_id,
+                  'location': location,
+                  'timestamp': (timestamp or datetime.now()).isoformat()
+              }
+              response = requests.put(
+                  f"{self.base_url}/samples/{sample_id}/location",
+                  headers=self.headers,
+                  json=payload
+              )
+              response.raise_for_status()
+
+          def log_protocol_run(
+              self,
+              protocol_name: str,
+              samples: List[str],
+              parameters: Dict,
+              results: Dict
+          ):
+              """Log protocol execution to LIMS."""
+              payload = {
+                  'protocol': protocol_name,
+                  'samples': samples,
+                  'parameters': parameters,
+                  'results': results,
+                  'timestamp': datetime.now().isoformat(),
+                  'instrument_id': self.get_instrument_id()
+              }
+              response = requests.post(
+                  f"{self.base_url}/runs",
+                  headers=self.headers,
+                  json=payload
+              )
+              response.raise_for_status()
+              return response.json()['run_id']
+
+          def get_worklist(self, plate_barcode: str) -> List[Dict]:
+              """Get worklist for a plate from LIMS."""
+              response = requests.get(
+                  f"{self.base_url}/worklists/{plate_barcode}",
+                  headers=self.headers
+              )
+              response.raise_for_status()
+              return response.json()['samples']
+
+      # Example: LIMS-driven protocol
+      def lims_driven_protocol(protocol, lims_client: LIMSClient):
+          """Protocol driven by LIMS worklist."""
+
+          # Scan plate barcode
+          plate_barcode = protocol.params.plate_barcode
+          worklist = lims_client.get_worklist(plate_barcode)
+
+          results = {}
+          for sample in worklist:
+              # Validate sample
+              sample_info = lims_client.get_sample(sample['barcode'])
+
+              # Process sample
+              # ...
+
+              # Update LIMS
+              lims_client.update_sample_location(
+                  sample_info.sample_id,
+                  f"Plate:{plate_barcode}:{sample['well']}"
+              )
+
+          # Log run
+          run_id = lims_client.log_protocol_run(
+              protocol_name="PCR Setup",
+              samples=[s['barcode'] for s in worklist],
+              parameters=protocol.params.as_dict(),
+              results=results
+          )
+
+          return run_id
+    why: "LIMS integration ensures data integrity and traceability"
+
+  quality_control:
+    name: Automation Quality Control
+    description: Monitor and validate automated processes
+    pattern: |
+      import numpy as np
+      import pandas as pd
+      from dataclasses import dataclass
+      from typing import List, Tuple
+
+      @dataclass
+      class QCResult:
+          """Quality control check result."""
+          check_name: str
+          passed: bool
+          measured_value: float
+          expected_value: float
+          tolerance: float
+          details: str
+
+      def check_pipetting_accuracy(
+          measured_volumes: List[float],
+          target_volume: float,
+          cv_threshold: float = 5.0,  # %CV
+          accuracy_threshold: float = 2.5  # % deviation
+      ) -> QCResult:
+          """
+          Check pipetting accuracy and precision.
+
+          CV < 5% for most applications
+          CV < 2% for critical applications (qPCR)
+          """
+          measured = np.array(measured_volumes)
+          mean_vol = np.mean(measured)
+          std_vol = np.std(measured)
+
+          cv = (std_vol / mean_vol) * 100
+          accuracy = abs((mean_vol - target_volume) / target_volume) * 100
+
+          passed = cv < cv_threshold and accuracy < accuracy_threshold
+
+          return QCResult(
+              check_name="Pipetting Accuracy",
+              passed=passed,
+              measured_value=mean_vol,
+              expected_value=target_volume,
+              tolerance=cv_threshold,
+              details=f"CV={cv:.2f}%, Accuracy={accuracy:.2f}%"
+          )
+
+      def gravimetric_verification(
+          empty_weight: float,
+          full_weight: float,
+          target_volume: float,
+          density: float = 1.0  # g/mL for water
+      ) -> QCResult:
+          """
+          Gravimetric verification of dispensed volume.
+
+          Gold standard for volume verification.
+          """
+          mass_dispensed = full_weight - empty_weight
+          volume_dispensed = mass_dispensed / density * 1000  # µL
+
+          deviation = abs(volume_dispensed - target_volume) / target_volume * 100
+
+          return QCResult(
+              check_name="Gravimetric Verification",
+              passed=deviation < 2.5,
+              measured_value=volume_dispensed,
+              expected_value=target_volume,
+              tolerance=2.5,
+              details=f"Deviation={deviation:.2f}%"
+          )
+
+      def dye_calibration_check(
+          absorbance_readings: List[float],
+          expected_concentrations: List[float]
+      ) -> QCResult:
+          """
+          Dye-based volume calibration check.
+
+          Uses tartrazine or fluorescein dye.
+          """
+          # Linear regression
+          slope, intercept = np.polyfit(
+              expected_concentrations,
+              absorbance_readings,
+              1
+          )
+
+          r_squared = np.corrcoef(
+              expected_concentrations,
+              absorbance_readings
+          )[0, 1] ** 2
+
+          return QCResult(
+              check_name="Dye Calibration",
+              passed=r_squared > 0.99,
+              measured_value=r_squared,
+              expected_value=1.0,
+              tolerance=0.01,
+              details=f"R²={r_squared:.4f}, Slope={slope:.4f}"
+          )
+
+      # Automated QC protocol
+      def run_qc_protocol(
+          protocol,
+          qc_plate,
+          pipette,
+          volumes_to_test: List[float] = [1, 5, 10, 20, 50, 100]
+      ):
+          """Run automated pipette QC protocol."""
+          results = []
+
+          for vol in volumes_to_test:
+              # Dispense to QC wells
+              measurements = []
+              for well in qc_plate.columns()[0][:8]:
+                  pipette.transfer(vol, reagent_reservoir['A1'], well)
+                  # Read with plate reader or weigh
+
+              result = check_pipetting_accuracy(
+                  measurements,
+                  target_volume=vol
+              )
+              results.append(result)
+
+          return results
+    why: "QC ensures reliable and reproducible automation"
+
+  workcell_integration:
+    name: Integrated Workcell Design
+    description: Connect multiple instruments into automated workflow
+    pattern: |
+      from dataclasses import dataclass
+      from typing import List, Dict, Callable
+      from enum import Enum
+      import asyncio
+
+      class InstrumentType(Enum):
+          LIQUID_HANDLER = "liquid_handler"
+          PLATE_READER = "plate_reader"
+          CENTRIFUGE = "centrifuge"
+          INCUBATOR = "incubator"
+          SEALER = "sealer"
+          BARCODE_READER = "barcode_reader"
+          ROBOTIC_ARM = "robotic_arm"
+
+      @dataclass
+      class Instrument:
+          """Instrument in automation workcell."""
+          name: str
+          type: InstrumentType
+          connection: str  # Serial, TCP/IP, etc.
+          driver: str
+          nest_positions: List[str]
+
+      @dataclass
+      class WorkcellStep:
+          """Single step in workcell workflow."""
+          name: str
+          instrument: str
+          action: str
+          parameters: Dict
+          requires: List[str]  # Previous steps
+
+      class WorkcellScheduler:
+          """Schedule and execute workcell workflows."""
+
+          def __init__(self, instruments: List[Instrument]):
+              self.instruments = {i.name: i for i in instruments}
+              self.instrument_locks = {i.name: asyncio.Lock() for i in instruments}
+
+          async def execute_step(
+              self,
+              step: WorkcellStep,
+              plate_barcode: str
+          ):
+              """Execute single workcell step."""
+              instrument = self.instruments[step.instrument]
+
+              async with self.instrument_locks[step.instrument]:
+                  # Move plate to instrument (if robotic arm available)
+                  if 'robotic_arm' in self.instruments:
+                      await self.move_plate(plate_barcode, instrument.nest_positions[0])
+
+                  # Execute instrument action
+                  driver = self.get_driver(instrument)
+                  result = await driver.execute(step.action, step.parameters)
+
+                  return result
+
+          async def execute_workflow(
+              self,
+              steps: List[WorkcellStep],
+              plate_barcode: str
+          ) -> Dict:
+              """Execute complete workflow."""
+              results = {}
+
+              # Topological sort based on dependencies
+              execution_order = self.sort_steps(steps)
+
+              for step_name in execution_order:
+                  step = next(s for s in steps if s.name == step_name)
+                  results[step_name] = await self.execute_step(step, plate_barcode)
+
+              return results
+
+      # Example integrated workflow
+      CELL_ASSAY_WORKFLOW = [
+          WorkcellStep(
+              name="dispense_cells",
+              instrument="hamilton_star",
+              action="dispense",
+              parameters={"volume": 50, "wells": "all"},
+              requires=[]
+          ),
+          WorkcellStep(
+              name="incubate_24h",
+              instrument="cytomat",
+              action="incubate",
+              parameters={"time_hours": 24, "temperature": 37, "co2": 5},
+              requires=["dispense_cells"]
+          ),
+          WorkcellStep(
+              name="add_compound",
+              instrument="hamilton_star",
+              action="compound_transfer",
+              parameters={"source": "compound_plate", "volume": 5},
+              requires=["incubate_24h"]
+          ),
+          WorkcellStep(
+              name="read_luminescence",
+              instrument="envision",
+              action="read",
+              parameters={"mode": "luminescence"},
+              requires=["add_compound"]
+          )
+      ]
+    why: "Integrated workcells maximize throughput and reduce errors"
+
+anti_patterns:
+
+  no_error_recovery:
+    name: No Error Recovery in Protocol
+    problem: "Protocol fails completely on minor error"
+    solution: "Implement pause, error handling, and recovery steps"
+
+  hardcoded_positions:
+    name: Hardcoded Labware Positions
+    problem: "Protocol breaks if deck layout changes"
+    solution: "Use labware labels and parameterized positions"
+
+  no_protocol_versioning:
+    name: Unversioned Protocols
+    problem: "Can't reproduce results with old protocol version"
+    solution: "Version control all protocols, track metadata"
+
+handoffs:
+  - to: genomics-pipelines
+    when: "Automating NGS library prep"
+    pass: "Workflow requirements, sample volumes"
+
+  - to: drug-discovery-informatics
+    when: "Automating HTS screening"
+    pass: "Compound library, assay parameters"
+
+ecosystem:
+  platforms:
+    - "Opentrons - Open source, accessible"
+    - "Hamilton - High-end precision"
+    - "Tecan - Flexible automation"
+    - "Beckman Coulter - Industrial scale"
+    - "PerkinElmer - Integrated workcells"
+
+  software:
+    - "Opentrons Protocol Designer"
+    - "Hamilton Venus"
+    - "Tecan FluentControl"
+    - "Biosero Green Button Go"
+
+  lims:
+    - "LabWare LIMS"
+    - "STARLIMS"
+    - "Benchling"
+    - "Sapio Sciences"
+
+  scheduling:
+    - "Biosero Green Button Go"
+    - "HighRes Biosolutions Cellario"
+    - "PAA Overlord"

@@ -1,0 +1,547 @@
+# Protein Structure Skill
+# Structure prediction, analysis, and visualization
+
+id: protein-structure
+name: Protein Structure Prediction
+category: biotech
+complexity: advanced
+requires_skills:
+  - scientific-method
+  - bioinformatics-workflows
+
+description: |
+  Patterns for protein structure prediction using AlphaFold2/ColabFold,
+  structural analysis, model quality assessment, and integration with
+  experimental data. Covers best practices and critical interpretation
+  of prediction confidence metrics.
+
+patterns:
+
+  alphafold_prediction:
+    name: AlphaFold2/ColabFold Structure Prediction
+    description: Run structure prediction with proper settings
+    when: "Need to predict protein 3D structure from sequence"
+    pattern: |
+      # Using ColabFold (accessible, fast)
+      # Install: pip install colabfold[alphafold]
+
+      from pathlib import Path
+      import subprocess
+      from dataclasses import dataclass
+      from typing import Optional, List
+
+      @dataclass
+      class PredictionConfig:
+          """Configuration for structure prediction."""
+          num_models: int = 5          # Number of models to generate
+          num_recycles: int = 3        # Recycle iterations (more = better for some)
+          use_amber: bool = True       # Amber relaxation (recommended)
+          use_templates: bool = True   # Use PDB templates if available
+          msa_mode: str = "mmseqs2"    # MSA generation method
+
+      def predict_structure_colabfold(
+          fasta_file: Path,
+          output_dir: Path,
+          config: PredictionConfig = PredictionConfig()
+      ) -> Path:
+          """
+          Run ColabFold structure prediction.
+
+          Returns path to best-ranked model.
+          """
+          output_dir.mkdir(parents=True, exist_ok=True)
+
+          cmd = [
+              "colabfold_batch",
+              "--num-models", str(config.num_models),
+              "--num-recycle", str(config.num_recycles),
+              "--msa-mode", config.msa_mode,
+          ]
+
+          if config.use_amber:
+              cmd.append("--amber")
+
+          if config.use_templates:
+              cmd.append("--templates")
+
+          cmd.extend([str(fasta_file), str(output_dir)])
+
+          subprocess.run(cmd, check=True)
+
+          # Return best-ranked model
+          return output_dir / "ranked_0.pdb"
+
+      # For complexes: Use multimer mode
+      def predict_complex(
+          sequences: dict[str, str],
+          output_dir: Path,
+          stoichiometry: Optional[str] = None
+      ) -> Path:
+          """
+          Predict protein complex structure.
+
+          sequences: {"chainA": "MVLSPADKTN...", "chainB": "MGHHHHH..."}
+          stoichiometry: "A2B1" for 2 copies of A, 1 copy of B
+          """
+          # Create combined FASTA with chain separators
+          fasta_content = ""
+          if stoichiometry:
+              # Parse stoichiometry and replicate sequences
+              pass
+          else:
+              # Simple concatenation with : separator
+              seqs = [f"{name}\t{seq}" for name, seq in sequences.items()]
+              fasta_content = "\n".join(seqs)
+
+          fasta_file = output_dir / "complex.fasta"
+          fasta_file.write_text(fasta_content)
+
+          return predict_structure_colabfold(
+              fasta_file, output_dir,
+              PredictionConfig(num_models=5, num_recycles=6)
+          )
+    why: "ColabFold is the fastest way to run AlphaFold2 predictions"
+
+  confidence_assessment:
+    name: Model Quality Assessment
+    description: Interpret pLDDT and PAE confidence metrics
+    critical: true
+    pattern: |
+      import numpy as np
+      from Bio.PDB import PDBParser
+      from dataclasses import dataclass
+      from typing import List, Tuple
+
+      @dataclass
+      class QualityAssessment:
+          """Model quality metrics."""
+          mean_plddt: float
+          plddt_by_residue: np.ndarray
+          pae_matrix: Optional[np.ndarray]
+          ptm_score: float
+          iptm_score: Optional[float]  # For complexes
+
+          def get_confident_regions(self, threshold: float = 70) -> List[Tuple[int, int]]:
+              """Get residue ranges with pLDDT above threshold."""
+              regions = []
+              in_region = False
+              start = 0
+
+              for i, plddt in enumerate(self.plddt_by_residue):
+                  if plddt >= threshold and not in_region:
+                      start = i
+                      in_region = True
+                  elif plddt < threshold and in_region:
+                      regions.append((start, i-1))
+                      in_region = False
+
+              if in_region:
+                  regions.append((start, len(self.plddt_by_residue)-1))
+
+              return regions
+
+      # pLDDT Interpretation Guide
+      PLDDT_INTERPRETATION = """
+      pLDDT (predicted Local Distance Difference Test) - LOCAL confidence
+
+      Score Ranges:
+      - 90-100 (dark blue): Very high confidence
+        → Structure reliable, can trust atomic positions
+      - 70-90 (light blue): Confident
+        → Overall fold correct, some uncertainty in details
+      - 50-70 (yellow): Low confidence
+        → Fold may be correct but position uncertain
+        → Often flexible loops or domain linkers
+      - <50 (orange/red): Very low confidence
+        → Likely disordered or intrinsically unstructured
+        → DO NOT interpret as structured!
+
+      CRITICAL: pLDDT only measures LOCAL confidence.
+      Two domains can each have high pLDDT but
+      their RELATIVE orientation may be wrong!
+      """
+
+      PAE_INTERPRETATION = """
+      PAE (Predicted Aligned Error) - DOMAIN RELATIONSHIPS
+
+      PAE Matrix Interpretation:
+      - Low PAE (blue): Confident in relative positions
+      - High PAE (red): Uncertain relative orientation
+
+      Reading the Matrix:
+      - Diagonal blocks (blue squares) = confident domains
+      - Off-diagonal (red) between domains = uncertain orientation
+      - If whole matrix is blue = single rigid domain
+
+      CRITICAL: For multi-domain proteins:
+      - Check PAE between domains
+      - High PAE means domains may move relative to each other
+      - Don't trust the predicted orientation!
+      """
+
+      def extract_plddt_from_pdb(pdb_file: Path) -> np.ndarray:
+          """
+          Extract pLDDT from B-factor column of AlphaFold PDB.
+
+          NOTE: AlphaFold stores pLDDT in B-factor column.
+          """
+          parser = PDBParser(QUIET=True)
+          structure = parser.get_structure("protein", pdb_file)
+
+          plddts = []
+          for model in structure:
+              for chain in model:
+                  for residue in chain:
+                      # Get CA atom B-factor (pLDDT)
+                      if 'CA' in residue:
+                          plddts.append(residue['CA'].get_bfactor())
+
+          return np.array(plddts)
+
+      def load_pae_from_json(json_file: Path) -> np.ndarray:
+          """Load PAE matrix from AlphaFold JSON output."""
+          import json
+          with open(json_file) as f:
+              data = json.load(f)
+          return np.array(data['predicted_aligned_error'])
+    why: "Correct interpretation of confidence is critical for valid conclusions"
+
+  structural_analysis:
+    name: Structural Bioinformatics Analysis
+    description: Analyze and compare protein structures
+    pattern: |
+      from Bio.PDB import PDBParser, Superimposer, DSSP
+      from Bio.PDB.SASA import ShrakeRupley
+      import numpy as np
+      from pathlib import Path
+
+      def calculate_rmsd(
+          pdb1: Path,
+          pdb2: Path,
+          align_atoms: str = "CA"
+      ) -> float:
+          """
+          Calculate RMSD between two structures.
+
+          align_atoms: "CA" for alpha-carbons, "backbone", or "all"
+          """
+          parser = PDBParser(QUIET=True)
+          structure1 = parser.get_structure("ref", pdb1)
+          structure2 = parser.get_structure("mobile", pdb2)
+
+          # Get atoms for alignment
+          atoms1 = []
+          atoms2 = []
+
+          for model1, model2 in zip(structure1, structure2):
+              for chain1, chain2 in zip(model1, model2):
+                  for res1, res2 in zip(chain1, chain2):
+                      if align_atoms == "CA":
+                          if 'CA' in res1 and 'CA' in res2:
+                              atoms1.append(res1['CA'])
+                              atoms2.append(res2['CA'])
+                      # Add other atom selections as needed
+
+          # Superimpose
+          sup = Superimposer()
+          sup.set_atoms(atoms1, atoms2)
+          return sup.rms
+
+      def run_dssp(
+          pdb_file: Path,
+          dssp_path: str = "mkdssp"
+      ) -> dict:
+          """
+          Run DSSP for secondary structure assignment.
+
+          Returns dict with per-residue SS and accessibility.
+          """
+          parser = PDBParser(QUIET=True)
+          structure = parser.get_structure("protein", pdb_file)
+          model = structure[0]
+
+          dssp = DSSP(model, str(pdb_file), dssp=dssp_path)
+
+          results = {}
+          for key in dssp:
+              chain_id, res_id = key
+              ss, acc, phi, psi = dssp[key][2], dssp[key][3], dssp[key][4], dssp[key][5]
+              results[key] = {
+                  'secondary_structure': ss,
+                  'accessibility': acc,
+                  'phi': phi,
+                  'psi': psi
+              }
+
+          return results
+
+      def calculate_sasa(
+          pdb_file: Path,
+          probe_radius: float = 1.4
+      ) -> dict:
+          """
+          Calculate Solvent Accessible Surface Area.
+          """
+          parser = PDBParser(QUIET=True)
+          structure = parser.get_structure("protein", pdb_file)
+
+          sr = ShrakeRupley()
+          sr.compute(structure, level="R")
+
+          sasa_by_residue = {}
+          for model in structure:
+              for chain in model:
+                  for residue in chain:
+                      sasa_by_residue[(chain.id, residue.id)] = residue.sasa
+
+          return sasa_by_residue
+
+      # Structural alignment with TM-align
+      def run_tmalign(
+          pdb1: Path,
+          pdb2: Path
+      ) -> dict:
+          """
+          Run TM-align for structural comparison.
+
+          TM-score: 0-1 scale, >0.5 suggests same fold
+          """
+          import subprocess
+          result = subprocess.run(
+              ["TMalign", str(pdb1), str(pdb2)],
+              capture_output=True, text=True
+          )
+
+          # Parse TM-score from output
+          for line in result.stdout.split('\n'):
+              if 'TM-score=' in line:
+                  tm_score = float(line.split('=')[1].split()[0])
+                  return {'tm_score': tm_score, 'output': result.stdout}
+
+          return {'output': result.stdout}
+    why: "Structural analysis validates predictions and reveals function"
+
+  model_refinement:
+    name: Model Refinement and Enhancement
+    description: Improve AlphaFold models with additional information
+    pattern: |
+      from pathlib import Path
+      import subprocess
+
+      def add_missing_atoms_modeller(
+          input_pdb: Path,
+          output_pdb: Path,
+          add_hydrogens: bool = True,
+          add_disulfides: bool = True
+      ) -> Path:
+          """
+          Use MODELLER to add missing atoms and disulfide bridges.
+
+          AlphaFold models lack:
+          - Hydrogen atoms
+          - Disulfide bonds between cysteines
+          - Alternative conformations
+          """
+          from modeller import Environ, Model
+          from modeller.scripts import complete_pdb
+
+          env = Environ()
+          env.io.atom_files_directory = ['.']
+
+          model = complete_pdb(env, str(input_pdb))
+
+          if add_disulfides:
+              # Add disulfide bonds based on cysteine proximity
+              model.patches(model.seq)
+
+          model.write(file=str(output_pdb))
+          return output_pdb
+
+      def add_cofactors_alphafill(
+          input_pdb: Path,
+          output_pdb: Path
+      ) -> Path:
+          """
+          Use AlphaFill to add cofactors and ligands.
+
+          Transplants ligands from homologous experimental structures.
+          https://alphafill.eu/
+          """
+          # AlphaFill is typically used via web interface
+          # or local installation
+          subprocess.run([
+              "alphafill",
+              "--input", str(input_pdb),
+              "--output", str(output_pdb)
+          ], check=True)
+          return output_pdb
+
+      def amber_relaxation(
+          input_pdb: Path,
+          output_pdb: Path,
+          max_iterations: int = 0  # 0 = until convergence
+      ) -> Path:
+          """
+          AMBER force field relaxation for energy minimization.
+
+          Removes steric clashes and improves geometry.
+          """
+          # Using OpenMM for AMBER relaxation
+          from openmm.app import PDBFile, ForceField, Simulation
+          from openmm import LangevinMiddleIntegrator
+          from openmm.unit import kelvin, picosecond
+
+          pdb = PDBFile(str(input_pdb))
+          forcefield = ForceField('amber14-all.xml', 'amber14/tip3p.xml')
+
+          system = forcefield.createSystem(pdb.topology)
+          integrator = LangevinMiddleIntegrator(300*kelvin, 1/picosecond, 0.002)
+          simulation = Simulation(pdb.topology, system, integrator)
+          simulation.context.setPositions(pdb.positions)
+
+          simulation.minimizeEnergy(maxIterations=max_iterations)
+
+          with open(output_pdb, 'w') as f:
+              PDBFile.writeFile(simulation.topology,
+                               simulation.context.getState(getPositions=True).getPositions(),
+                               f)
+
+          return output_pdb
+    why: "Refinement improves model quality for downstream applications"
+
+  visualization:
+    name: Structure Visualization
+    description: Visualize and annotate protein structures
+    pattern: |
+      # PyMOL for high-quality figures
+      # py3Dmol for Jupyter notebooks
+      # ChimeraX for interactive analysis
+
+      import py3Dmol
+      from pathlib import Path
+
+      def visualize_structure_notebook(
+          pdb_file: Path,
+          color_by: str = "plddt",
+          width: int = 800,
+          height: int = 600
+      ) -> py3Dmol.view:
+          """
+          Visualize structure in Jupyter notebook with py3Dmol.
+          """
+          pdb_data = pdb_file.read_text()
+
+          view = py3Dmol.view(width=width, height=height)
+          view.addModel(pdb_data, 'pdb')
+
+          if color_by == "plddt":
+              # Color by B-factor (pLDDT in AlphaFold)
+              view.setStyle({
+                  'cartoon': {
+                      'colorscheme': {
+                          'prop': 'b',
+                          'gradient': 'roygb',
+                          'min': 0,
+                          'max': 100
+                      }
+                  }
+              })
+          elif color_by == "chain":
+              view.setStyle({'cartoon': {'colorscheme': 'chainHetatm'}})
+          elif color_by == "secondary":
+              view.setStyle({'cartoon': {'colorscheme': 'ssPyMol'}})
+          else:
+              view.setStyle({'cartoon': {'color': 'spectrum'}})
+
+          view.zoomTo()
+          return view
+
+      def pymol_script_quality_figure(
+          pdb_file: Path,
+          output_png: Path,
+          color_by_plddt: bool = True
+      ) -> str:
+          """
+          Generate PyMOL script for publication-quality figure.
+          """
+          script = f"""
+          load {pdb_file}
+
+          # Set rendering quality
+          set ray_trace_mode, 1
+          set ray_shadows, 1
+          set antialias, 2
+
+          # Background
+          bg_color white
+
+          # Show as cartoon
+          show cartoon
+          hide lines
+
+          {"" if not color_by_plddt else '''
+          # Color by pLDDT (stored in B-factor)
+          spectrum b, blue_white_red, minimum=0, maximum=100
+          '''}
+
+          # Render
+          ray 2400, 1800
+          png {output_png}
+          """
+          return script
+    why: "Clear visualization communicates structural insights"
+
+anti_patterns:
+
+  trusting_low_plddt:
+    name: Interpreting Low-Confidence Regions as Structure
+    problem: |
+      # Treating predicted disorder as real structure
+      "The loop at residues 45-60 shows an interesting conformation..."
+      # When pLDDT < 50 - it's probably disordered!
+    solution: |
+      Check pLDDT before interpreting any region.
+      pLDDT < 50 means the region is likely unstructured.
+
+  ignoring_pae_for_domains:
+    name: Trusting Multi-Domain Orientation
+    problem: "Assuming domains are positioned correctly relative to each other"
+    solution: "Check PAE between domains. High PAE = uncertain orientation."
+
+  single_model_conclusions:
+    name: Drawing Conclusions from Single Model
+    problem: "Using only the top-ranked model"
+    solution: "Compare multiple models; different conformations may be sampled"
+
+handoffs:
+  - to: drug-discovery-informatics
+    when: "Using structure for drug design"
+    pass: "Validated structure, binding sites"
+
+  - to: bioinformatics-workflows
+    when: "Running many predictions at scale"
+    pass: "Sequence database, prediction parameters"
+
+ecosystem:
+  prediction:
+    - "AlphaFold2 - Gold standard prediction"
+    - "ColabFold - Fast AlphaFold access"
+    - "ESMFold - Single-sequence prediction"
+    - "RoseTTAFold - Alternative architecture"
+
+  analysis:
+    - "PyMOL - Visualization and analysis"
+    - "ChimeraX - Interactive exploration"
+    - "MDAnalysis - Trajectory analysis"
+    - "BioPython - Programmatic access"
+
+  refinement:
+    - "MODELLER - Homology modeling"
+    - "AlphaFill - Cofactor addition"
+    - "OpenMM - Molecular dynamics"
+    - "Rosetta - Energy optimization"
+
+  databases:
+    - "AlphaFold Database - Pre-computed structures"
+    - "PDB - Experimental structures"
+    - "UniProt - Sequence annotations"

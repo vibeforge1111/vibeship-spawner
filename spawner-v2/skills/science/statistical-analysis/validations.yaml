@@ -1,0 +1,120 @@
+# Statistical Analysis Validations
+# Automated checks for statistical analysis issues
+
+validations:
+
+  - id: ttest-without-assumption-check
+    name: T-test Without Assumption Verification
+    severity: warning
+    type: regex
+    pattern:
+      - "ttest_ind.*(?![\\s\\S]{0,300}shapiro|levene|normaltest)"
+      - "ttest_rel.*(?![\\s\\S]{0,300}shapiro)"
+    message: "T-tests assume normality and equal variances. Verify assumptions."
+    fix_action: |
+      Check assumptions:
+      stats.shapiro(data)  # Normality
+      stats.levene(group1, group2)  # Equal variances
+      Or use Welch's t-test (default in scipy) or non-parametric alternatives.
+    applies_to:
+      - "**/*.py"
+
+  - id: no-effect-size-reported
+    name: Statistical Test Without Effect Size
+    severity: warning
+    type: regex
+    pattern:
+      - "ttest.*pvalue(?![\\s\\S]{0,200}cohen|effect|hedges)"
+      - "mannwhitney.*pvalue(?![\\s\\S]{0,200}effect|rank)"
+    message: "Report effect sizes (Cohen's d, r, etc.) alongside p-values."
+    fix_action: |
+      def cohens_d(g1, g2):
+          return (g1.mean() - g2.mean()) / np.sqrt(((len(g1)-1)*g1.var() + (len(g2)-1)*g2.var()) / (len(g1)+len(g2)-2))
+    applies_to:
+      - "**/*.py"
+
+  - id: multiple-tests-no-correction
+    name: Multiple Statistical Tests Without Correction
+    severity: error
+    type: regex
+    pattern:
+      - "for.*ttest|ttest.*\\n.*ttest.*\\n.*ttest"
+      - "p_values\\.append.*for"
+    message: "Multiple tests inflate false positive rate. Apply correction."
+    fix_action: |
+      from statsmodels.stats.multitest import multipletests
+      reject, adjusted_p, _, _ = multipletests(p_values, method='fdr_bh')
+    applies_to:
+      - "**/*.py"
+
+  - id: anova-no-posthoc
+    name: ANOVA Without Post-hoc Tests
+    severity: warning
+    type: regex
+    pattern:
+      - "f_oneway.*(?![\\s\\S]{0,500}tukey|bonferroni|posthoc)"
+    message: "Significant ANOVA requires post-hoc tests to identify which groups differ."
+    fix_action: |
+      from statsmodels.stats.multicomp import pairwise_tukeyhsd
+      tukey = pairwise_tukeyhsd(data, groups, alpha=0.05)
+    applies_to:
+      - "**/*.py"
+
+  - id: correlation-as-causation
+    name: Correlation Interpreted as Causation
+    severity: warning
+    type: regex
+    pattern:
+      - "corr.*cause|correlation.*therefore"
+      - "corr.*recommend.*intervention"
+    message: "Correlation does not imply causation. Consider confounders."
+    applies_to:
+      - "**/*.py"
+      - "**/*.md"
+
+  - id: no-confidence-interval
+    name: Point Estimate Without Confidence Interval
+    severity: info
+    type: regex
+    pattern:
+      - "mean\\(\\).*print(?![\\s\\S]{0,100}ci|interval|±)"
+    message: "Report confidence intervals to show estimate precision."
+    fix_action: |
+      from scipy import stats
+      ci = stats.t.interval(0.95, len(data)-1, loc=np.mean(data), scale=stats.sem(data))
+    applies_to:
+      - "**/*.py"
+
+  - id: small-sample-parametric
+    name: Parametric Test With Small Sample
+    severity: warning
+    type: regex
+    pattern:
+      - "len.*<.*20.*ttest|n.*=.*1\\d.*ttest"
+    message: "Small samples may not meet parametric assumptions. Consider non-parametric tests."
+    applies_to:
+      - "**/*.py"
+
+  - id: wrong-test-direction
+    name: One-tailed Test Without Justification
+    severity: info
+    type: regex
+    pattern:
+      - "alternative.*=.*['\"]less|alternative.*=.*['\"]greater"
+    message: "One-tailed tests require a priori directional hypothesis. Document justification."
+    applies_to:
+      - "**/*.py"
+
+  - id: regression-no-diagnostics
+    name: Regression Without Diagnostics
+    severity: warning
+    type: regex
+    pattern:
+      - "OLS.*fit\\(\\)(?![\\s\\S]{0,500}resid|heteroscedasticity|vif)"
+    message: "Check regression assumptions: normality, homoscedasticity, multicollinearity."
+    fix_action: |
+      # Check residuals
+      from statsmodels.stats.diagnostic import het_breuschpagan
+      from statsmodels.stats.outliers_influence import variance_inflation_factor
+    applies_to:
+      - "**/*.py"

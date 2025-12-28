@@ -1,0 +1,119 @@
+validations:
+
+  - id: no-sensor-timeout
+    name: Sensor Read Without Timeout
+    severity: warning
+    type: regex
+    pattern:
+      - "await\\s+sensor\\.read\\(\\)(?!.*timeout)"
+      - "sensor\\.get_value\\(\\)(?!.*timeout)"
+    message: "Sensor reads should have timeouts to handle communication failures."
+    fix_action: "Add timeout: await asyncio.wait_for(sensor.read(), timeout=1.0)"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-data-quality-check
+    name: Sensor Data Used Without Quality Check
+    severity: warning
+    type: regex
+    pattern:
+      - "twin\\.update\\(.*reading\\.value(?!.*quality)"
+      - "state\\s*=.*sensor_value(?!.*valid|quality|fresh)"
+    message: "Sensor data should be validated for quality/freshness before use."
+    fix_action: "Check data quality: if reading.quality > 0.5 and reading.is_fresh()"
+    applies_to:
+      - "**/*.py"
+
+  - id: unbounded-history
+    name: Twin History Without Size Limit
+    severity: info
+    type: regex
+    pattern:
+      - "history\\.append\\(.*\\)(?!.*maxlen|limit|[-]\\d+:)"
+      - "state_history\\.append(?!.*deque)"
+    message: "History buffers should have size limits to prevent memory growth."
+    fix_action: "Use deque(maxlen=N) or trim: history = history[-1000:]"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-residual-monitoring
+    name: Twin Update Without Residual Check
+    severity: info
+    type: regex
+    pattern:
+      - "twin\\.update\\(.*\\)(?!.*residual|diverge|error)"
+    message: "Monitor residuals (predicted vs actual) to detect model divergence."
+    fix_action: "Check residuals: if abs(predicted - actual) > threshold: recalibrate()"
+    applies_to:
+      - "**/*.py"
+
+  - id: synchronous-sensor-loop
+    name: Synchronous Sensor Polling in Loop
+    severity: warning
+    type: regex
+    pattern:
+      - "for.*sensor.*in.*:\\s*\\n.*sensor\\.read\\(\\)(?!.*async|gather|parallel)"
+      - "while.*True.*sensor\\.poll\\(\\)(?!.*async)"
+    message: "Sequential sensor polling is slow. Use async/parallel reads."
+    fix_action: "Use asyncio.gather() for parallel sensor reads"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-timestamp-validation
+    name: Message Timestamp Not Validated
+    severity: warning
+    type: regex
+    pattern:
+      - "message\\.timestamp(?!.*now|age|stale|fresh|valid)"
+      - "data\\[['\"]timestamp['\"]\\](?!.*check|valid)"
+    message: "Validate message timestamps to detect stale or future-dated data."
+    fix_action: "Check: if abs(now - timestamp) > max_age: reject_or_flag()"
+    applies_to:
+      - "**/*.py"
+
+  - id: hardcoded-calibration
+    name: Hardcoded Model Calibration Parameters
+    severity: info
+    type: regex
+    pattern:
+      - "friction\\s*=\\s*0\\.\\d+\\s*(?!#.*config|env)"
+      - "efficiency\\s*=\\s*0\\.\\d+\\s*(?!#.*calibrat)"
+    message: "Calibration parameters should be configurable, not hardcoded."
+    fix_action: "Load from config: friction = config.get('friction', default=0.1)"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-latency-tracking
+    name: Twin Update Without Latency Measurement
+    severity: info
+    type: regex
+    pattern:
+      - "def\\s+update.*state.*:(?!.*latency|timing|perf)"
+    message: "Track end-to-end latency to ensure real-time requirements are met."
+    fix_action: "Measure: latency = time.time() - message_timestamp; log if > threshold"
+    applies_to:
+      - "**/*.py"
+
+  - id: global-twin-state
+    name: Global Mutable Twin State
+    severity: warning
+    type: regex
+    pattern:
+      - "^twin_state\\s*=\\s*\\{|^current_state\\s*=\\s*\\["
+      - "global\\s+twin|global\\s+state"
+    message: "Global mutable state causes race conditions in concurrent systems."
+    fix_action: "Use instance attributes or thread-safe state management"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-error-handling-sensor
+    name: Sensor Communication Without Error Handling
+    severity: warning
+    type: regex
+    pattern:
+      - "sensor\\.read\\(\\)(?!.*try|except|error)"
+      - "await\\s+mqtt.*publish(?!.*try|except)"
+    message: "Sensor communication can fail. Handle errors gracefully."
+    fix_action: "Wrap in try/except, use fallback or enter safe mode on failure"
+    applies_to:
+      - "**/*.py"

@@ -1,0 +1,158 @@
+validations:
+
+  - id: missing-volatile
+    name: Shared Variable Without Volatile
+    severity: warning
+    type: regex
+    pattern:
+      - "\\b(bool|uint\\d+_t|int\\d+_t)\\s+\\w+\\s*=.*//.*ISR|interrupt|IRQ"
+      - "static\\s+(bool|uint\\d+_t|int\\d+_t)\\s+(?!volatile)\\w+.*flag"
+    message: "Variable shared with ISR should be declared volatile."
+    fix_action: "Add 'volatile' qualifier to variables accessed from interrupts"
+    applies_to:
+      - "**/*.c"
+      - "**/*.cpp"
+      - "**/*.h"
+
+  - id: printf-in-interrupt
+    name: Printf or Malloc in Interrupt Handler
+    severity: error
+    type: regex
+    pattern:
+      - "void\\s+\\w+_IRQHandler.*\\{[^}]*printf"
+      - "void\\s+\\w+_IRQHandler.*\\{[^}]*malloc"
+      - "void\\s+\\w+_IRQHandler.*\\{[^}]*free\\("
+      - "void\\s+\\w+_IRQHandler.*\\{[^}]*sprintf"
+    message: "Never use printf, sprintf, malloc, or free in interrupt handlers - they are not reentrant."
+    fix_action: "Use buffer and process in main loop, or use SEGGER RTT for debug output"
+    applies_to:
+      - "**/*.c"
+      - "**/*.cpp"
+
+  - id: delay-in-interrupt
+    name: Blocking Delay in Interrupt Handler
+    severity: error
+    type: regex
+    pattern:
+      - "void\\s+\\w+_IRQHandler.*\\{[^}]*delay"
+      - "void\\s+\\w+_IRQHandler.*\\{[^}]*(HAL_Delay|vTaskDelay)"
+      - "void\\s+\\w+_IRQHandler.*\\{[^}]*while\\s*\\([^)]+\\)\\s*;"
+    message: "Avoid blocking delays in ISRs. They block all lower-priority interrupts."
+    fix_action: "Set flag in ISR, handle timing in main loop or use hardware timer"
+    applies_to:
+      - "**/*.c"
+      - "**/*.cpp"
+
+  - id: large-stack-array
+    name: Large Stack-Allocated Array
+    severity: warning
+    type: regex
+    pattern:
+      - "\\w+\\s+\\w+\\[\\s*(512|1024|2048|4096|[5-9]\\d{3}|\\d{5,})\\s*\\]\\s*[;=]"
+      - "uint8_t\\s+\\w+\\[\\s*([2-9]\\d{2}|\\d{4,})\\s*\\]"
+    message: "Large arrays on stack may cause overflow. Embedded stacks are typically 1-4KB."
+    fix_action: "Use 'static' keyword to place in .bss section, or allocate from heap with bounds checking"
+    applies_to:
+      - "**/*.c"
+      - "**/*.cpp"
+
+  - id: unprotected-critical-section
+    name: Multi-Word Access Without Critical Section
+    severity: warning
+    type: regex
+    pattern:
+      - "volatile\\s+(uint64_t|int64_t|double)\\s+\\w+(?![^;]*__disable_irq)"
+      - "volatile\\s+struct\\s+\\{[^}]+\\}\\s+\\w+"
+    message: "Multi-word volatile variables need critical section protection for atomic access."
+    fix_action: "Wrap reads/writes in __disable_irq()/__enable_irq() or use mutex"
+    applies_to:
+      - "**/*.c"
+      - "**/*.cpp"
+      - "**/*.h"
+
+  - id: no-clock-enable
+    name: Peripheral Access Pattern Without Clock Enable
+    severity: info
+    type: regex
+    pattern:
+      - "(USART|SPI|I2C|TIM|ADC|DAC)\\d*->\\w+\\s*=[^;]+(?<!(RCC|CLK))"
+    message: "Ensure peripheral clock is enabled before accessing registers."
+    fix_action: "Add RCC clock enable call before peripheral initialization"
+    applies_to:
+      - "**/*.c"
+      - "**/*.cpp"
+
+  - id: magic-register-value
+    name: Magic Number in Register Configuration
+    severity: info
+    type: regex
+    pattern:
+      - "->\\w+\\s*=\\s*0x[0-9A-Fa-f]{3,}\\s*;"
+      - "->\\w+\\s*\\|=\\s*0x[0-9A-Fa-f]{2,}\\s*;"
+    message: "Use named constants or bitfield macros instead of magic numbers in register configuration."
+    fix_action: "Replace with manufacturer-provided defines (e.g., USART_CR1_TE instead of 0x08)"
+    applies_to:
+      - "**/*.c"
+      - "**/*.cpp"
+
+  - id: recursive-function
+    name: Recursive Function in Embedded Code
+    severity: warning
+    type: regex
+    pattern:
+      - "(\\w+)\\s*\\([^)]*\\)\\s*\\{[^}]*\\1\\s*\\("
+    message: "Recursion can cause stack overflow in embedded systems with limited stack."
+    fix_action: "Convert to iterative implementation using explicit stack or state machine"
+    applies_to:
+      - "**/*.c"
+      - "**/*.cpp"
+
+  - id: pointer-cast-alignment
+    name: Potentially Unaligned Pointer Cast
+    severity: warning
+    type: regex
+    pattern:
+      - "\\(uint32_t\\s*\\*\\)\\s*\\w+(?!.*aligned)"
+      - "\\(uint16_t\\s*\\*\\)\\s*\\(\\s*&?\\s*\\w+\\[\\d+\\]\\s*\\)"
+    message: "Casting to wider type pointer may cause alignment fault on ARM."
+    fix_action: "Use memcpy() for safe unaligned access, or ensure buffer alignment with __attribute__((aligned(4)))"
+    applies_to:
+      - "**/*.c"
+      - "**/*.cpp"
+
+  - id: no-watchdog-feed
+    name: Long Function Without Watchdog Feed
+    severity: info
+    type: regex
+    pattern:
+      - "for\\s*\\([^;]+;[^;]+<\\s*(100|[2-9]\\d{2}|\\d{4,})[^)]+\\)[^}]{500,}(?!watchdog|wdt|iwdg)"
+    message: "Long loop may exceed watchdog timeout. Consider feeding watchdog periodically."
+    fix_action: "Add watchdog_feed() call inside long-running loops"
+    applies_to:
+      - "**/*.c"
+      - "**/*.cpp"
+
+  - id: float-in-isr
+    name: Floating Point in Interrupt Handler
+    severity: warning
+    type: regex
+    pattern:
+      - "void\\s+\\w+_IRQHandler.*\\{[^}]*(float|double)\\s+\\w+"
+      - "void\\s+\\w+_IRQHandler.*\\{[^}]*\\d+\\.\\d+"
+    message: "Floating point in ISR requires FPU context save/restore. Consider fixed-point math."
+    fix_action: "Use fixed-point arithmetic or ensure FPU lazy stacking is configured"
+    applies_to:
+      - "**/*.c"
+      - "**/*.cpp"
+
+  - id: assert-in-production
+    name: Assert Without Proper Handler
+    severity: info
+    type: regex
+    pattern:
+      - "assert\\s*\\([^)]+\\)(?!.*NDEBUG)"
+    message: "Standard assert() may not be suitable for embedded. Use custom assert with safe failure mode."
+    fix_action: "Implement custom assert that logs error and enters safe state, or define NDEBUG for production"
+    applies_to:
+      - "**/*.c"
+      - "**/*.cpp"

@@ -1,0 +1,129 @@
+validations:
+
+  - id: derivative-on-error
+    name: Derivative Computed on Error
+    severity: warning
+    type: regex
+    pattern:
+      - "error\\s*-\\s*prev_error|prev_error\\s*-\\s*error"
+      - "self\\.error\\s*-\\s*self\\.prev_error"
+      - "d_term.*error.*prev"
+    message: "Computing derivative on error causes derivative kick on setpoint change."
+    fix_action: "Use derivative on measurement: -(measurement - prev_measurement) / dt"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-anti-windup
+    name: PID Without Anti-Windup
+    severity: warning
+    type: regex
+    pattern:
+      - "integral\\s*\\+=.*error.*dt(?![\\s\\S]{0,200}(clip|clamp|windup|limit|saturate))"
+    message: "Integral accumulation without anti-windup causes overshoot when saturated."
+    fix_action: "Add clamping or back-calculation anti-windup"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-output-limits
+    name: PID Without Output Limits
+    severity: warning
+    type: regex
+    pattern:
+      - "class.*PID.*:(?![\\s\\S]{0,500}(output_max|u_max|limit|clip|clamp))"
+    message: "PID controller should have output limits matching actuator constraints."
+    fix_action: "Add output_limits parameter and clamp control output"
+    applies_to:
+      - "**/*.py"
+
+  - id: raw-derivative
+    name: Unfiltered Derivative Term
+    severity: info
+    type: regex
+    pattern:
+      - "/\\s*dt(?![\\s\\S]{0,50}(filter|alpha|tau|lpf))"
+      - "d_term\\s*=.*-.*prev.*(?!filter)"
+    message: "Unfiltered derivative amplifies high-frequency noise."
+    fix_action: "Add low-pass filter: d_filt = alpha * d_raw + (1-alpha) * d_prev"
+    applies_to:
+      - "**/*.py"
+
+  - id: euler-integration
+    name: Simple Euler Integration for Integral Term
+    severity: info
+    type: regex
+    pattern:
+      - "integral\\s*\\+=\\s*error\\s*\\*\\s*dt"
+    message: "Simple Euler integration can accumulate error. Consider trapezoidal integration."
+    fix_action: "Use: integral += 0.5 * (error + prev_error) * dt for better accuracy"
+    applies_to:
+      - "**/*.py"
+
+  - id: slow-control-loop
+    name: Control Loop with sleep() Call
+    severity: warning
+    type: regex
+    pattern:
+      - "time\\.sleep\\(0\\.[1-9]|time\\.sleep\\([1-9]"
+      - "rospy\\.sleep\\(0\\.[1-9]"
+    message: "Control loop may be too slow. Use hardware timer for consistent timing."
+    fix_action: "Use hardware timer interrupt or ROS2 timer for precise control loop"
+    applies_to:
+      - "**/*.py"
+
+  - id: mpc-no-constraints
+    name: MPC Without Input Constraints
+    severity: warning
+    type: regex
+    pattern:
+      - "class.*MPC.*:(?![\\s\\S]{0,800}(u_min|u_max|bounds|constraint))"
+    message: "MPC without constraints loses main advantage. Add actuator limits."
+    fix_action: "Add u_min/u_max constraints matching physical actuator limits"
+    applies_to:
+      - "**/*.py"
+
+  - id: hardcoded-gains
+    name: Hardcoded PID Gains Without Comments
+    severity: info
+    type: regex
+    pattern:
+      - "kp\\s*=\\s*\\d+\\.?\\d*\\s*(?!#)"
+      - "ki\\s*=\\s*\\d+\\.?\\d*\\s*(?!#)"
+      - "PIDGains\\(kp=\\d+.*\\)\\s*$"
+    message: "Document tuning rationale for PID gains, or load from config."
+    fix_action: "Add comment explaining tuning method, or use parameter server"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-trajectory-filter
+    name: Step Setpoint Without Trajectory Generation
+    severity: info
+    type: regex
+    pattern:
+      - "setpoint\\s*=\\s*target(?![\\s\\S]{0,100}(filter|ramp|trajectory|profile))"
+    message: "Sudden setpoint changes stress mechanical systems."
+    fix_action: "Use trajectory generator (minimum-jerk, trapezoidal) for smooth motion"
+    applies_to:
+      - "**/*.py"
+
+  - id: floating-point-comparison
+    name: Float Equality in Control Logic
+    severity: warning
+    type: regex
+    pattern:
+      - "if.*error\\s*==\\s*0"
+      - "if.*position\\s*==\\s*setpoint"
+    message: "Floating-point equality rarely holds. Use tolerance-based comparison."
+    fix_action: "Use: if abs(error) < tolerance or np.isclose()"
+    applies_to:
+      - "**/*.py"
+
+  - id: jacobian-missing
+    name: LQR/MPC Without Explicit Jacobian
+    severity: info
+    type: regex
+    pattern:
+      - "lqr|LQR|design_lqr(?![\\s\\S]{0,300}jacobian)"
+    message: "Ensure linearization Jacobian is computed correctly for nonlinear systems."
+    fix_action: "Verify Jacobian analytically or use automatic differentiation"
+    applies_to:
+      - "**/*.py"

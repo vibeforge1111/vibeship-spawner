@@ -1,0 +1,832 @@
+# Statistical Analysis Skill
+# Rigorous statistical methods for research and data science
+
+id: statistical-analysis
+name: Statistical Analysis
+category: science
+complexity: advanced
+requires_skills:
+  - scientific-method
+
+description: |
+  Comprehensive statistical analysis for research, experiments, and data science.
+  Covers hypothesis testing, effect sizes, confidence intervals, Bayesian methods,
+  regression, and advanced techniques. Emphasizes correct interpretation and
+  avoiding common statistical mistakes.
+
+# ============================================================================
+# CORE PATTERNS
+# ============================================================================
+patterns:
+
+  # --- Choosing the Right Test ---
+
+  test_selection:
+    name: Selecting the Appropriate Statistical Test
+    description: Match statistical test to data and research question
+    when: "Need to analyze data statistically"
+    pattern: |
+      from typing import Literal, List
+      from dataclasses import dataclass
+
+      @dataclass
+      class DataCharacteristics:
+          """Characteristics that determine appropriate test."""
+          sample_size: int
+          n_groups: int
+          paired: bool
+          data_type: Literal['continuous', 'ordinal', 'nominal', 'count']
+          distribution: Literal['normal', 'non-normal', 'unknown']
+          homoscedastic: bool  # Equal variances
+          independent: bool
+
+      def select_test(chars: DataCharacteristics, goal: str) -> str:
+          """
+          Select appropriate statistical test.
+
+          Decision Tree:
+          1. What's the goal? (compare, correlate, predict, classify)
+          2. How many groups?
+          3. What type of data?
+          4. Parametric assumptions met?
+          """
+
+          if goal == "compare_means":
+              if chars.n_groups == 2:
+                  if chars.paired:
+                      if chars.distribution == 'normal':
+                          return "Paired t-test"
+                      else:
+                          return "Wilcoxon signed-rank test"
+                  else:  # Independent samples
+                      if chars.distribution == 'normal' and chars.homoscedastic:
+                          return "Independent t-test"
+                      elif chars.distribution == 'normal':
+                          return "Welch's t-test"
+                      else:
+                          return "Mann-Whitney U test"
+
+              elif chars.n_groups > 2:
+                  if chars.paired:
+                      if chars.distribution == 'normal':
+                          return "Repeated measures ANOVA"
+                      else:
+                          return "Friedman test"
+                  else:
+                      if chars.distribution == 'normal':
+                          return "One-way ANOVA + post-hoc"
+                      else:
+                          return "Kruskal-Wallis test"
+
+          elif goal == "compare_proportions":
+              if chars.n_groups == 2:
+                  if chars.sample_size > 30:
+                      return "Chi-square test or Z-test for proportions"
+                  else:
+                      return "Fisher's exact test"
+              else:
+                  return "Chi-square test of independence"
+
+          elif goal == "correlation":
+              if chars.distribution == 'normal':
+                  return "Pearson correlation"
+              else:
+                  return "Spearman rank correlation"
+
+          elif goal == "prediction":
+              if chars.data_type == 'continuous':
+                  return "Linear regression"
+              else:
+                  return "Logistic regression"
+
+          return "Consult statistician"
+
+      # Quick reference table
+      TEST_REFERENCE = """
+      | Data Type   | 2 Groups Independent | 2 Groups Paired | 3+ Groups |
+      |-------------|---------------------|-----------------|-----------|
+      | Normal      | t-test              | Paired t-test   | ANOVA     |
+      | Non-normal  | Mann-Whitney U      | Wilcoxon        | Kruskal-W |
+      | Proportions | Chi-square/Fisher   | McNemar         | Chi-square|
+      """
+    why: "Wrong test leads to invalid conclusions"
+
+  # --- Effect Sizes ---
+
+  effect_sizes:
+    name: Calculating and Interpreting Effect Sizes
+    description: Measure practical significance beyond p-values
+    when: "Reporting statistical results"
+    pattern: |
+      import numpy as np
+      from scipy import stats
+      from typing import Tuple
+
+      # Cohen's d for t-tests
+      def cohens_d(
+          group1: np.ndarray,
+          group2: np.ndarray,
+          pooled: bool = True
+      ) -> float:
+          """
+          Cohen's d effect size for comparing two groups.
+
+          Interpretation:
+          - |d| < 0.2: Negligible
+          - |d| 0.2-0.5: Small
+          - |d| 0.5-0.8: Medium
+          - |d| > 0.8: Large
+          """
+          n1, n2 = len(group1), len(group2)
+          m1, m2 = group1.mean(), group2.mean()
+          s1, s2 = group1.std(ddof=1), group2.std(ddof=1)
+
+          if pooled:
+              # Pooled standard deviation
+              sp = np.sqrt(((n1-1)*s1**2 + (n2-1)*s2**2) / (n1+n2-2))
+              return (m1 - m2) / sp
+          else:
+              # Glass's delta (use control group SD)
+              return (m1 - m2) / s2
+
+      # Hedges' g (bias-corrected Cohen's d)
+      def hedges_g(group1: np.ndarray, group2: np.ndarray) -> float:
+          """Hedges' g - bias-corrected for small samples."""
+          d = cohens_d(group1, group2)
+          n = len(group1) + len(group2)
+          # Correction factor
+          j = 1 - (3 / (4*(n-2) - 1))
+          return d * j
+
+      # Effect size for correlation
+      def correlation_effect_size(r: float) -> str:
+          """
+          Interpret Pearson r effect size.
+
+          Cohen's conventions:
+          - |r| < 0.1: Negligible
+          - |r| 0.1-0.3: Small
+          - |r| 0.3-0.5: Medium
+          - |r| > 0.5: Large
+          """
+          r = abs(r)
+          if r < 0.1:
+              return "negligible"
+          elif r < 0.3:
+              return "small"
+          elif r < 0.5:
+              return "medium"
+          else:
+              return "large"
+
+      # Eta-squared for ANOVA
+      def eta_squared(ss_between: float, ss_total: float) -> float:
+          """
+          Eta-squared effect size for ANOVA.
+
+          Interpretation:
+          - eta^2 < 0.01: Negligible
+          - eta^2 0.01-0.06: Small
+          - eta^2 0.06-0.14: Medium
+          - eta^2 > 0.14: Large
+          """
+          return ss_between / ss_total
+
+      # Omega-squared (less biased than eta-squared)
+      def omega_squared(
+          ss_between: float,
+          ss_total: float,
+          df_between: int,
+          ms_error: float
+      ) -> float:
+          """Omega-squared - less biased for ANOVA."""
+          return (ss_between - df_between * ms_error) / (ss_total + ms_error)
+
+      # Effect size for Chi-square
+      def cramers_v(chi2: float, n: int, min_dim: int) -> float:
+          """
+          Cramer's V for chi-square tests.
+
+          min_dim = min(rows - 1, cols - 1)
+          """
+          return np.sqrt(chi2 / (n * min_dim))
+
+      # Odds ratio for 2x2 tables
+      def odds_ratio(table: np.ndarray) -> Tuple[float, Tuple[float, float]]:
+          """
+          Odds ratio with 95% CI for 2x2 contingency table.
+
+          Table layout:
+          [[a, b],
+           [c, d]]
+          """
+          a, b, c, d = table.flatten()
+          or_value = (a * d) / (b * c)
+
+          # 95% CI
+          log_or = np.log(or_value)
+          se = np.sqrt(1/a + 1/b + 1/c + 1/d)
+          ci_low = np.exp(log_or - 1.96 * se)
+          ci_high = np.exp(log_or + 1.96 * se)
+
+          return or_value, (ci_low, ci_high)
+
+      # Number Needed to Treat (NNT)
+      def nnt(
+          event_rate_control: float,
+          event_rate_treatment: float
+      ) -> float:
+          """
+          Number Needed to Treat - clinically meaningful effect size.
+
+          How many patients need treatment for one additional success?
+          """
+          ard = abs(event_rate_treatment - event_rate_control)  # Absolute risk difference
+          return 1 / ard if ard > 0 else float('inf')
+    why: "P-values don't tell you if the effect matters practically"
+
+  # --- Confidence Intervals ---
+
+  confidence_intervals:
+    name: Calculating and Reporting Confidence Intervals
+    description: Quantify uncertainty in estimates
+    when: "Reporting any statistical estimate"
+    pattern: |
+      import numpy as np
+      from scipy import stats
+
+      def mean_ci(
+          data: np.ndarray,
+          confidence: float = 0.95
+      ) -> tuple:
+          """
+          Confidence interval for the mean.
+          """
+          n = len(data)
+          mean = np.mean(data)
+          se = stats.sem(data)
+          h = se * stats.t.ppf((1 + confidence) / 2, n - 1)
+          return (mean - h, mean + h)
+
+      def proportion_ci(
+          successes: int,
+          n: int,
+          confidence: float = 0.95,
+          method: str = 'wilson'
+      ) -> tuple:
+          """
+          Confidence interval for a proportion.
+
+          Methods:
+          - 'normal': Wald interval (inaccurate for extreme p)
+          - 'wilson': Wilson score interval (recommended)
+          - 'clopper-pearson': Exact (conservative)
+          """
+          from statsmodels.stats.proportion import proportion_confint
+          return proportion_confint(successes, n, alpha=1-confidence, method=method)
+
+      def difference_ci(
+          group1: np.ndarray,
+          group2: np.ndarray,
+          confidence: float = 0.95
+      ) -> tuple:
+          """
+          CI for difference between means (independent samples).
+          """
+          diff = np.mean(group1) - np.mean(group2)
+          n1, n2 = len(group1), len(group2)
+          s1, s2 = np.std(group1, ddof=1), np.std(group2, ddof=1)
+
+          # Pooled SE
+          se = np.sqrt(s1**2/n1 + s2**2/n2)
+
+          # Welch's df
+          df = ((s1**2/n1 + s2**2/n2)**2 /
+                ((s1**2/n1)**2/(n1-1) + (s2**2/n2)**2/(n2-1)))
+
+          t_crit = stats.t.ppf((1 + confidence) / 2, df)
+          margin = t_crit * se
+
+          return (diff - margin, diff + margin)
+
+      def bootstrap_ci(
+          data: np.ndarray,
+          stat_func: callable,
+          n_bootstrap: int = 10000,
+          confidence: float = 0.95
+      ) -> tuple:
+          """
+          Bootstrap confidence interval (works for any statistic).
+          """
+          np.random.seed(42)  # For reproducibility
+          n = len(data)
+          bootstrap_stats = []
+
+          for _ in range(n_bootstrap):
+              sample = np.random.choice(data, size=n, replace=True)
+              bootstrap_stats.append(stat_func(sample))
+
+          alpha = (1 - confidence) / 2
+          return (
+              np.percentile(bootstrap_stats, alpha * 100),
+              np.percentile(bootstrap_stats, (1 - alpha) * 100)
+          )
+
+      # Reporting template
+      def format_result(
+          estimate: float,
+          ci_low: float,
+          ci_high: float,
+          p_value: float = None,
+          effect_name: str = "estimate"
+      ) -> str:
+          """Format statistical result for reporting."""
+          result = f"{effect_name} = {estimate:.3f}, 95% CI [{ci_low:.3f}, {ci_high:.3f}]"
+          if p_value is not None:
+              if p_value < 0.001:
+                  result += ", p < .001"
+              else:
+                  result += f", p = {p_value:.3f}"
+          return result
+    why: "CIs show precision and are more informative than p-values alone"
+
+  # --- Bayesian Methods ---
+
+  bayesian_analysis:
+    name: Bayesian Statistical Analysis
+    description: Alternative to frequentist testing with probability statements
+    when: "Want probability of hypothesis or need to incorporate prior knowledge"
+    pattern: |
+      import numpy as np
+      from scipy import stats
+      import pymc as pm  # Bayesian modeling
+
+      # Bayesian A/B test for conversion rates
+      def bayesian_ab_test(
+          successes_a: int,
+          total_a: int,
+          successes_b: int,
+          total_b: int,
+          prior_alpha: float = 1,
+          prior_beta: float = 1,
+          n_samples: int = 100000
+      ) -> dict:
+          """
+          Bayesian A/B test using Beta-Binomial model.
+
+          Returns probability that B > A and credible intervals.
+          """
+          # Posterior distributions (conjugate prior)
+          # Beta(prior_alpha, prior_beta) is the prior (uniform if both = 1)
+          post_alpha_a = prior_alpha + successes_a
+          post_beta_a = prior_beta + (total_a - successes_a)
+          post_alpha_b = prior_alpha + successes_b
+          post_beta_b = prior_beta + (total_b - successes_b)
+
+          # Sample from posteriors
+          samples_a = np.random.beta(post_alpha_a, post_beta_a, n_samples)
+          samples_b = np.random.beta(post_alpha_b, post_beta_b, n_samples)
+
+          # Probability B > A
+          prob_b_better = np.mean(samples_b > samples_a)
+
+          # Expected lift
+          lift = (samples_b - samples_a) / samples_a
+          expected_lift = np.mean(lift)
+
+          # Credible intervals
+          ci_a = np.percentile(samples_a, [2.5, 97.5])
+          ci_b = np.percentile(samples_b, [2.5, 97.5])
+          ci_lift = np.percentile(lift, [2.5, 97.5])
+
+          return {
+              'prob_b_better': prob_b_better,
+              'expected_lift': expected_lift,
+              'ci_lift': ci_lift,
+              'posterior_a': {'mean': samples_a.mean(), 'ci': ci_a},
+              'posterior_b': {'mean': samples_b.mean(), 'ci': ci_b},
+          }
+
+      # Bayes factor for hypothesis testing
+      def bayes_factor_t_test(
+          group1: np.ndarray,
+          group2: np.ndarray,
+          prior_scale: float = 0.707
+      ) -> float:
+          """
+          Bayes Factor for two-sample comparison.
+
+          BF10 > 3: Moderate evidence for H1
+          BF10 > 10: Strong evidence for H1
+          BF10 > 30: Very strong evidence
+          BF10 > 100: Extreme evidence
+
+          1/3 < BF < 3: Inconclusive
+          BF10 < 1/3: Moderate evidence for H0
+          """
+          # Using Rouder's JZS Bayes Factor
+          from scipy.special import gamma
+
+          n1, n2 = len(group1), len(group2)
+          n = n1 + n2
+          t, _ = stats.ttest_ind(group1, group2)
+          df = n - 2
+
+          # Calculate Bayes Factor (simplified approximation)
+          r = prior_scale
+          numerator = (1 + t**2/df)**(-(df+1)/2)
+          denominator = (1 + t**2/(df*(1+n*r**2)))**(-(df+1)/2)
+
+          bf10 = numerator / denominator
+          return bf10
+
+      # PyMC model for regression
+      def bayesian_regression(X, y):
+          """
+          Bayesian linear regression with credible intervals.
+          """
+          with pm.Model() as model:
+              # Priors
+              intercept = pm.Normal('intercept', mu=0, sigma=10)
+              coefficients = pm.Normal('coefficients', mu=0, sigma=10, shape=X.shape[1])
+              sigma = pm.HalfNormal('sigma', sigma=1)
+
+              # Linear model
+              mu = intercept + pm.math.dot(X, coefficients)
+
+              # Likelihood
+              likelihood = pm.Normal('y', mu=mu, sigma=sigma, observed=y)
+
+              # Posterior sampling
+              trace = pm.sample(2000, return_inferencedata=True)
+
+          return trace
+
+      # Interpretation helper
+      def interpret_bayes_factor(bf: float) -> str:
+          """Interpret Bayes Factor evidence strength."""
+          if bf > 100:
+              return "Extreme evidence for H1"
+          elif bf > 30:
+              return "Very strong evidence for H1"
+          elif bf > 10:
+              return "Strong evidence for H1"
+          elif bf > 3:
+              return "Moderate evidence for H1"
+          elif bf > 1:
+              return "Anecdotal evidence for H1"
+          elif bf > 1/3:
+              return "Inconclusive"
+          elif bf > 1/10:
+              return "Moderate evidence for H0"
+          elif bf > 1/30:
+              return "Strong evidence for H0"
+          else:
+              return "Very strong evidence for H0"
+    why: "Bayesian methods give probability statements about hypotheses"
+
+  # --- Regression Analysis ---
+
+  regression_analysis:
+    name: Regression Analysis and Model Diagnostics
+    description: Predict outcomes and understand relationships
+    when: "Modeling relationships between variables"
+    pattern: |
+      import numpy as np
+      import pandas as pd
+      from scipy import stats
+      import statsmodels.api as sm
+      from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+      def linear_regression_with_diagnostics(
+          X: pd.DataFrame,
+          y: pd.Series
+      ) -> dict:
+          """
+          Comprehensive linear regression with diagnostics.
+          """
+          # Add constant for intercept
+          X_const = sm.add_constant(X)
+
+          # Fit model
+          model = sm.OLS(y, X_const).fit()
+
+          # Diagnostics
+          diagnostics = {}
+
+          # 1. Normality of residuals
+          _, normality_p = stats.shapiro(model.resid)
+          diagnostics['normality'] = {
+              'test': 'Shapiro-Wilk',
+              'p_value': normality_p,
+              'passed': normality_p > 0.05
+          }
+
+          # 2. Homoscedasticity (Breusch-Pagan test)
+          from statsmodels.stats.diagnostic import het_breuschpagan
+          _, bp_p, _, _ = het_breuschpagan(model.resid, X_const)
+          diagnostics['homoscedasticity'] = {
+              'test': 'Breusch-Pagan',
+              'p_value': bp_p,
+              'passed': bp_p > 0.05
+          }
+
+          # 3. Multicollinearity (VIF)
+          vif_data = pd.DataFrame()
+          vif_data['variable'] = X.columns
+          vif_data['VIF'] = [
+              variance_inflation_factor(X.values, i)
+              for i in range(X.shape[1])
+          ]
+          diagnostics['multicollinearity'] = {
+              'VIF': vif_data.to_dict('records'),
+              'passed': all(vif_data['VIF'] < 10)
+          }
+
+          # 4. Autocorrelation (Durbin-Watson)
+          from statsmodels.stats.stattools import durbin_watson
+          dw = durbin_watson(model.resid)
+          diagnostics['autocorrelation'] = {
+              'test': 'Durbin-Watson',
+              'statistic': dw,
+              'passed': 1.5 < dw < 2.5
+          }
+
+          # 5. Influential observations (Cook's Distance)
+          influence = model.get_influence()
+          cooks_d = influence.cooks_distance[0]
+          threshold = 4 / len(y)
+          diagnostics['influential_points'] = {
+              'threshold': threshold,
+              'flagged': np.where(cooks_d > threshold)[0].tolist()
+          }
+
+          return {
+              'model': model,
+              'summary': model.summary(),
+              'r_squared': model.rsquared,
+              'adj_r_squared': model.rsquared_adj,
+              'coefficients': model.params.to_dict(),
+              'p_values': model.pvalues.to_dict(),
+              'confidence_intervals': model.conf_int().to_dict(),
+              'diagnostics': diagnostics
+          }
+
+      # Robust regression for outliers
+      def robust_regression(X, y):
+          """
+          Robust regression using Huber's method.
+          Less sensitive to outliers.
+          """
+          from statsmodels.robust.robust_linear_model import RLM
+          X_const = sm.add_constant(X)
+          model = RLM(y, X_const, M=sm.robust.norms.HuberT()).fit()
+          return model
+
+      # Model comparison
+      def compare_models(models: list, names: list) -> pd.DataFrame:
+          """
+          Compare multiple regression models.
+          """
+          comparison = []
+          for model, name in zip(models, names):
+              comparison.append({
+                  'model': name,
+                  'R²': model.rsquared,
+                  'Adj R²': model.rsquared_adj,
+                  'AIC': model.aic,
+                  'BIC': model.bic,
+                  'n_params': len(model.params)
+              })
+          return pd.DataFrame(comparison).sort_values('AIC')
+    why: "Regression reveals relationships but requires diagnostic validation"
+
+  # --- Multiple Comparison Corrections ---
+
+  multiple_comparisons:
+    name: Correcting for Multiple Comparisons
+    description: Control false positive rate when running multiple tests
+    when: "Running more than one statistical test"
+    pattern: |
+      import numpy as np
+      from statsmodels.stats.multitest import multipletests
+      from scipy import stats
+
+      def bonferroni_correction(p_values: list, alpha: float = 0.05) -> dict:
+          """
+          Bonferroni correction - most conservative.
+
+          Adjusted alpha = alpha / n_tests
+          """
+          n = len(p_values)
+          adjusted_alpha = alpha / n
+          adjusted_p = [min(p * n, 1.0) for p in p_values]
+          significant = [p < adjusted_alpha for p in p_values]
+
+          return {
+              'method': 'Bonferroni',
+              'original_p': p_values,
+              'adjusted_p': adjusted_p,
+              'adjusted_alpha': adjusted_alpha,
+              'significant': significant,
+              'n_significant': sum(significant)
+          }
+
+      def holm_bonferroni(p_values: list, alpha: float = 0.05) -> dict:
+          """
+          Holm-Bonferroni step-down procedure.
+          More powerful than Bonferroni while still controlling FWER.
+          """
+          rejected, adjusted_p, _, _ = multipletests(
+              p_values, alpha=alpha, method='holm'
+          )
+
+          return {
+              'method': 'Holm-Bonferroni',
+              'original_p': p_values,
+              'adjusted_p': adjusted_p.tolist(),
+              'significant': rejected.tolist(),
+              'n_significant': sum(rejected)
+          }
+
+      def benjamini_hochberg(p_values: list, alpha: float = 0.05) -> dict:
+          """
+          Benjamini-Hochberg FDR control.
+          Controls False Discovery Rate - appropriate for exploratory analyses.
+          """
+          rejected, adjusted_p, _, _ = multipletests(
+              p_values, alpha=alpha, method='fdr_bh'
+          )
+
+          return {
+              'method': 'Benjamini-Hochberg (FDR)',
+              'original_p': p_values,
+              'adjusted_p': adjusted_p.tolist(),
+              'significant': rejected.tolist(),
+              'n_significant': sum(rejected)
+          }
+
+      def tukey_hsd(groups: list, group_labels: list) -> pd.DataFrame:
+          """
+          Tukey's HSD for pairwise comparisons after ANOVA.
+          """
+          from statsmodels.stats.multicomp import pairwise_tukeyhsd
+
+          # Flatten data
+          data = np.concatenate(groups)
+          labels = np.repeat(group_labels, [len(g) for g in groups])
+
+          result = pairwise_tukeyhsd(data, labels, alpha=0.05)
+          return pd.DataFrame(
+              data=result._results_table.data[1:],
+              columns=result._results_table.data[0]
+          )
+
+      # Decision guide
+      CORRECTION_GUIDE = """
+      | Situation | Method | Rationale |
+      |-----------|--------|-----------|
+      | Few tests, confirmatory | Bonferroni | Conservative, controls FWER |
+      | Many tests, confirmatory | Holm-Bonferroni | Less conservative than Bonferroni |
+      | Exploratory analysis | Benjamini-Hochberg | Controls FDR, more discoveries |
+      | Post-hoc ANOVA | Tukey HSD | Designed for pairwise comparisons |
+      | Dependent tests | Šidák | Slightly more power than Bonferroni |
+      """
+    why: "Without correction, 20 tests at alpha=0.05 → 64% false positive rate"
+
+# ============================================================================
+# ANTI-PATTERNS
+# ============================================================================
+anti_patterns:
+
+  dichotomizing_continuous:
+    name: Dichotomizing Continuous Variables
+    description: Converting continuous variables to categories
+    problem: |
+      # Splitting age into "young" vs "old"
+      df['age_group'] = df['age'].apply(lambda x: 'old' if x > 40 else 'young')
+      ttest_ind(df[df.age_group == 'old'].outcome,
+                df[df.age_group == 'young'].outcome)
+
+      # Problems:
+      # - Loses information (40 year old vs 41 year old now "different")
+      # - Reduces statistical power
+      # - Creates arbitrary cutoffs
+      # - Assumes effect is discontinuous at cutoff
+    solution: |
+      # Keep continuous, use regression
+      model = sm.OLS(df['outcome'], sm.add_constant(df['age'])).fit()
+
+      # Or if you must categorize, use multiple categories
+      df['age_group'] = pd.cut(df['age'], bins=[0, 30, 45, 60, 100])
+    impact: "Reduces power by up to 60%, creates false discontinuities"
+
+  stepwise_regression:
+    name: Stepwise Variable Selection
+    description: Automatic variable selection based on p-values
+    problem: |
+      # Letting algorithm choose variables
+      from sklearn.feature_selection import RFE
+      model = RFE(estimator, n_features_to_select=5)
+
+      # Or manual stepwise based on significance
+      while any(pvalues > 0.05):
+          remove_variable_with_highest_p()
+
+      # Problems:
+      # - Inflated Type I errors
+      # - Biased coefficient estimates
+      # - Overfitting to training data
+      # - Ignores subject-matter knowledge
+    solution: |
+      # Choose variables based on:
+      # 1. Theory and prior knowledge
+      # 2. Pre-registration
+      # 3. If data-driven needed, use:
+      #    - Cross-validation
+      #    - LASSO with proper tuning
+      #    - Report all models tried
+    impact: "Inflated false positives, overfitting, irreproducible results"
+
+  ignoring_assumptions:
+    name: Ignoring Test Assumptions
+    description: Running parametric tests without checking assumptions
+    problem: |
+      # Just running t-test without checking
+      ttest_ind(group1, group2)
+
+      # Ignoring:
+      # - Normality (especially for small n)
+      # - Homoscedasticity
+      # - Independence
+      # - Outliers
+    solution: |
+      # Check assumptions first
+      # 1. Visual inspection
+      plt.hist(group1)
+      stats.probplot(group1, plot=plt)
+
+      # 2. Formal tests (for small n)
+      stats.shapiro(group1)  # Normality
+      stats.levene(group1, group2)  # Equal variances
+
+      # 3. Use robust alternatives if violated
+      stats.mannwhitneyu(group1, group2)  # Non-parametric
+    impact: "Invalid p-values, wrong conclusions"
+
+# ============================================================================
+# DECISION FRAMEWORK
+# ============================================================================
+decision_tree:
+  start: "What is your research question?"
+  nodes:
+    goal:
+      question: "What do you want to know?"
+      options:
+        - answer: "Compare groups"
+          next: "How many groups?"
+        - answer: "Find relationships"
+          next: "Correlation or prediction?"
+        - answer: "Probability of hypothesis"
+          next: "Use Bayesian methods"
+
+    n_groups:
+      question: "How many groups?"
+      options:
+        - answer: "2 groups"
+          next: "Independent or paired?"
+        - answer: "3+ groups"
+          next: "ANOVA or Kruskal-Wallis"
+
+# ============================================================================
+# HANDOFFS
+# ============================================================================
+handoffs:
+  - to: scientific-method
+    when: "Need proper experimental design before analysis"
+    pass: "Research question, available resources"
+
+  - to: data-reproducibility
+    when: "Need to share analysis code and data"
+    pass: "Analysis scripts, data files, environment"
+
+  - to: ml-ops
+    when: "Moving from statistical analysis to ML modeling"
+    pass: "Feature importance, baseline metrics"
+
+ecosystem:
+  python:
+    - "scipy.stats - Hypothesis tests"
+    - "statsmodels - Regression, ANOVA"
+    - "pingouin - Effect sizes, Bayesian tests"
+    - "PyMC - Bayesian modeling"
+
+  r:
+    - "Base R - Fundamental tests"
+    - "BayesFactor - Bayes factors"
+    - "effectsize - Effect size calculations"
+
+  visualization:
+    - "matplotlib - Basic plots"
+    - "seaborn - Statistical visualizations"
+    - "raincloud plots - Distribution + raw data"

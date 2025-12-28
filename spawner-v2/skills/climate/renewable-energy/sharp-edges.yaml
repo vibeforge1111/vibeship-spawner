@@ -1,0 +1,263 @@
+id: renewable-energy-sharp-edges
+skill: renewable-energy
+version: 1.0.0
+
+sharp_edges:
+
+  - id: single-year-resource
+    severity: high
+    title: "Resource Assessment Based on Single Year"
+    summary: "Year-to-year variability makes single year unreliable"
+    symptoms:
+      - "Production differs 20-30% from estimate"
+      - "Bank won't finance based on limited data"
+      - "P90 estimate is too optimistic"
+    why: |
+      Solar and wind resources vary year-to-year.
+      Solar: 5-10% interannual variability
+      Wind: 10-15% interannual variability
+
+      Single year might be high or low.
+      Financial models need P50, P90, P99.
+
+      10+ years needed for reliable statistics.
+      Shorter periods need measure-correlate-predict (MCP).
+    gotcha: |
+      # 1 year of wind data
+      wind_data = load_data('2023_wind_speeds.csv')
+      avg_speed = wind_data.mean()
+      capacity_factor = estimate_cf(avg_speed)
+
+      # Project financed on this estimate
+      # 2024 is 15% lower wind year - project underperforms
+      # Debt service coverage ratio violated
+    solution: |
+      # 1. Use long-term dataset
+      wind_data = load_data('2010-2023_wind_speeds.csv')
+
+      # 2. Compute P50, P90 production
+      annual_production = compute_annual_production(wind_data)
+      p50 = np.percentile(annual_production, 50)
+      p90 = np.percentile(annual_production, 10)  # Exceedance probability
+
+      # 3. For short campaigns, use MCP
+      def mcp_adjustment(short_term, reference):
+          # Correlate with long-term reference
+          # Adjust short-term to long-term basis
+          correlation = np.corrcoef(short_term, reference)[0, 1]
+          if correlation < 0.8:
+              raise Warning("Poor correlation, MCP unreliable")
+          # Regression and adjustment
+          return adjusted_long_term_estimate
+
+      # 4. Report uncertainty
+      print(f"P50: {p50:.0f} MWh/year")
+      print(f"P90: {p90:.0f} MWh/year")
+      print(f"P99: {p99:.0f} MWh/year")
+
+  - id: stc-output-assumed
+    severity: high
+    title: "PV Output Assumed at STC Conditions"
+    summary: "Real conditions differ from Standard Test Conditions"
+    symptoms:
+      - "Actual output 10-25% less than nameplate"
+      - "Hot climate systems underperform"
+      - "Customers disappointed in production"
+    why: |
+      STC: 1000 W/m² irradiance, 25°C cell temperature, AM 1.5
+      Real conditions: rarely at STC.
+
+      Cell temperature in field: 40-70°C typical.
+      Temperature coefficient: -0.35 to -0.45%/°C typical.
+      At 55°C: 10-15% power loss.
+
+      Also: soiling, shading, wiring, inverter losses.
+      Total DC-to-AC derate: 14-25%.
+    gotcha: |
+      # Nameplate calculation
+      system_size_kw = 10  # 10 kW STC
+      hours_sun = 5  # "5 sun hours" per day
+      daily_production = system_size_kw * hours_sun  # 50 kWh
+
+      # Reality: cell temp 55°C, soiling, losses
+      # Actual: ~35-40 kWh/day
+      # Customer: "I was promised 50 kWh!"
+    solution: |
+      # 1. Model cell temperature
+      def cell_temperature(poa, ambient, wind=1.0):
+          noct = 45  # Typical NOCT
+          return ambient + (noct - 20) * (poa / 800)
+
+      # 2. Apply temperature derating
+      def derate_power(p_stc, t_cell, coeff=-0.004):
+          return p_stc * (1 + coeff * (t_cell - 25))
+
+      # 3. Apply all loss factors
+      losses = {
+          'soiling': 0.02,
+          'shading': 0.03,
+          'mismatch': 0.02,
+          'wiring_dc': 0.02,
+          'inverter': 0.04,
+          'wiring_ac': 0.01,
+          'availability': 0.02
+      }
+      total_derate = 1 - sum(losses.values())  # ~0.84
+
+      # 4. Use hourly simulation for accurate estimate
+      # Don't use simple "peak sun hours" approximation
+
+  - id: no-wake-losses
+    severity: high
+    title: "Wind Farm Without Wake Loss Modeling"
+    summary: "Turbine spacing ignored, production overestimated"
+    symptoms:
+      - "Farm produces 15-25% less than sum of turbines"
+      - "Downwind turbines underperform"
+      - "Annual production falls short of predictions"
+    why: |
+      Upwind turbines extract energy, create wake.
+      Wake: reduced wind speed, increased turbulence.
+      10-15% loss typical for well-spaced farms.
+      Poorly spaced: 25%+ losses possible.
+
+      Wake depends on:
+      - Turbine spacing (5-10 rotor diameters typical)
+      - Wind direction distribution
+      - Atmospheric stability
+    gotcha: |
+      # Simple sum of turbine production
+      n_turbines = 10
+      single_turbine_cf = 0.35
+      rated_power = 3000  # kW
+      farm_production = n_turbines * rated_power * 8760 * single_turbine_cf
+
+      # Reality: wake losses reduce to ~30% CF
+      # 15% less production than predicted
+    solution: |
+      # 1. Model wake effects
+      from windpowerlib import wake_losses
+
+      def jensen_wake(d_rotor, distance, ct=0.8, k=0.04):
+          """Jensen/Park wake model."""
+          if distance <= 0:
+              return 0
+          wake_radius = d_rotor + 2 * k * distance
+          deficit = (1 - np.sqrt(1 - ct)) * (d_rotor / wake_radius) ** 2
+          return deficit
+
+      # 2. Account for all wind directions
+      # Wake loss varies with direction
+
+      # 3. Use industry tools
+      # OpenWind, WindPRO, WAsP for detailed modeling
+
+      # 4. Apply wake loss factor to simple estimates
+      wake_loss_factor = 0.85  # 15% typical
+      adjusted_production = farm_production * wake_loss_factor
+
+  - id: battery-round-trip
+    severity: medium
+    title: "100% Battery Efficiency Assumed"
+    summary: "Round-trip losses not accounted for"
+    symptoms:
+      - "Less energy out than expected"
+      - "Economics don't match projections"
+      - "Storage value overestimated"
+    why: |
+      Lithium-ion round-trip efficiency: 85-95%
+      Meaning: store 100 kWh, get 85-95 kWh back.
+
+      Losses in:
+      - Battery internal resistance
+      - Inverter conversion (DC-AC-DC)
+      - Battery management system
+      - Thermal management
+
+      Over time: degradation further reduces efficiency.
+    gotcha: |
+      # Arbitrage calculation
+      cheap_energy = 100  # kWh bought at $0.05
+      expensive_sell = 100 * 0.15  # Sell at $0.15
+
+      profit = expensive_sell - (100 * 0.05)  # $10 profit?
+
+      # Reality at 90% efficiency:
+      actual_sell = 90 * 0.15  # Only 90 kWh out
+      actual_profit = 13.5 - 5 = 8.5  # 15% less profit
+    solution: |
+      # 1. Use one-way efficiency for calculations
+      efficiency_oneway = np.sqrt(0.90)  # ~0.95 each way
+
+      energy_stored = charge_energy * efficiency_oneway
+      energy_out = energy_stored * efficiency_oneway
+      # Total: 90% of input
+
+      # 2. Model efficiency vs power
+      def inverter_efficiency(power, rated_power):
+          loading = power / rated_power
+          # Efficiency curve (typical)
+          return 0.98 - 0.05 * (1 - loading) ** 2
+
+      # 3. Include auxiliary loads
+      # BMS, cooling consume 1-3% of capacity per day
+
+      # 4. Model degradation over time
+      # Year 10: capacity at 80%, efficiency slightly lower
+
+  - id: grid-curtailment
+    severity: medium
+    title: "No Consideration of Grid Curtailment"
+    summary: "Assuming all produced energy is sold"
+    symptoms:
+      - "Revenue less than production × price"
+      - "PPA shortfall penalties"
+      - "Capacity factor drops as more renewables added"
+    why: |
+      Grid can't always accept all renewable output.
+      Causes:
+      - Transmission constraints
+      - Minimum conventional generation
+      - Negative prices
+      - Frequency/voltage issues
+
+      High renewable grids: 5-15% curtailment common.
+      Project economics must account for this.
+    gotcha: |
+      # Simple revenue calculation
+      annual_production = 100000  # MWh
+      ppa_price = 50  # $/MWh
+      expected_revenue = annual_production * ppa_price  # $5M
+
+      # Reality: 10% curtailed
+      actual_revenue = 90000 * 50  # $4.5M
+      # Or negative pricing: paid to produce less
+    solution: |
+      # 1. Model curtailment risk
+      def estimate_curtailment(penetration_level):
+          # Simplified: curtailment increases with penetration
+          if penetration_level < 0.2:
+              return 0.02
+          elif penetration_level < 0.4:
+              return 0.05 + 0.15 * (penetration_level - 0.2)
+          else:
+              return 0.10 + 0.25 * (penetration_level - 0.4)
+
+      # 2. Value curtailed energy at zero or negative
+      revenue = sum(
+          min(price, 0) * curtailed + price * (1 - curtailed) * production
+          for price, production in zip(prices, productions)
+      )
+
+      # 3. Consider storage to capture curtailed energy
+
+      # 4. PPA structure: take-or-pay vs merchant risk
+
+detection:
+  file_patterns:
+    - "**/*solar*.py"
+    - "**/*pv*.py"
+    - "**/*wind*.py"
+    - "**/*renewable*.py"
+    - "**/*storage*.py"
+    - "**/*battery*.py"

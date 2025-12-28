@@ -1,0 +1,395 @@
+id: energy-systems-sharp-edges
+skill: energy-systems
+version: 1.0.0
+
+sharp_edges:
+
+  - id: dc-for-voltage
+    severity: high
+    title: "Using DC Power Flow for Voltage Analysis"
+    summary: "DC approximation ignores reactive power and voltage magnitudes"
+    symptoms:
+      - "Voltage violations not detected"
+      - "VAR support needs missed"
+      - "Capacitor/reactor sizing wrong"
+      - "Transformer tap settings ineffective"
+    why: |
+      DC power flow assumes:
+      - All voltages = 1.0 per unit
+      - Angle differences small (sin θ ≈ θ)
+      - No reactive power flows
+      - No losses
+
+      Good for: Fast contingency screening, market dispatch
+      Bad for: Voltage stability, VAR planning, loss calculation
+
+      Errors can be 10-20% for heavily loaded lines.
+      Voltage collapse scenarios completely missed.
+    gotcha: |
+      # DC power flow for transmission planning
+      import pandapower as pp
+
+      net = create_network()
+      pp.rundcpp(net)  # DC approximation
+
+      # Check for overloads
+      overloaded = net.res_line[net.res_line['loading_percent'] > 100]
+
+      # Looks fine! But wait...
+      # What about voltage at remote bus?
+      # DC flow says 1.0 pu everywhere
+      # Reality: could be 0.92 pu, needing VAR support
+    solution: |
+      # 1. Use AC power flow for planning studies
+      import pandapower as pp
+
+      net = create_network()
+
+      # AC power flow - captures voltage and reactive power
+      pp.runpp(net, algorithm='nr', numba=True)
+
+      if not net.converged:
+          print("Power flow did not converge - check model")
+          return
+
+      # 2. Check voltage violations
+      voltage_violations = net.res_bus[
+          (net.res_bus['vm_pu'] < 0.95) |
+          (net.res_bus['vm_pu'] > 1.05)
+      ]
+
+      # 3. Check reactive power margins
+      for i, gen in net.gen.iterrows():
+          q_actual = net.res_gen.loc[i, 'q_mvar']
+          q_max = gen['max_q_mvar']
+          q_min = gen['min_q_mvar']
+
+          if q_actual > 0.9 * q_max or q_actual < 0.9 * q_min:
+              print(f"Gen {i} near reactive power limit")
+
+      # 4. Use DC only for screening, then AC for detailed
+      def contingency_screening(net, contingencies):
+          # DC screening (fast)
+          dc_overloads = []
+          for c in contingencies:
+              net_temp = net.deepcopy()
+              apply_contingency(net_temp, c)
+              pp.rundcpp(net_temp)
+              if has_overload(net_temp):
+                  dc_overloads.append(c)
+
+          # AC analysis (accurate) on flagged cases
+          ac_violations = []
+          for c in dc_overloads:
+              net_temp = net.deepcopy()
+              apply_contingency(net_temp, c)
+              pp.runpp(net_temp)
+              if has_violations(net_temp):
+                  ac_violations.append(c)
+
+          return ac_violations
+
+  - id: storage-degradation-ignored
+    severity: high
+    title: "Battery Dispatch Without Degradation Modeling"
+    summary: "Cycle life and capacity fade not in optimization"
+    symptoms:
+      - "Battery degrades faster than expected"
+      - "Warranty violated by excessive cycling"
+      - "Replacement costs underestimated"
+      - "NPV of storage project negative"
+    why: |
+      Li-ion battery degradation depends on:
+      - Cycle depth (deeper = more degradation)
+      - Temperature (higher = faster fade)
+      - State of charge (high SOC = faster calendar aging)
+      - C-rate (faster charging = more stress)
+
+      Ignoring degradation leads to:
+      - Aggressive cycling that kills battery early
+      - Underestimated levelized storage cost
+      - Warranty issues (cycle count limits)
+    gotcha: |
+      # Arbitrage optimization
+      def optimize_arbitrage(prices, battery):
+          # Maximize revenue
+          dispatch = solve_lp(prices, battery.power, battery.capacity)
+          cycles_per_day = calculate_cycles(dispatch)
+
+          # Result: 2 full cycles per day = 730 cycles/year
+          annual_revenue = sum(dispatch * prices)
+
+          # Looks great! $50k/year revenue!
+          # But battery rated for 3000 cycles over 10 years
+          # At 730/year, battery dead in 4 years
+          # Replacement cost: $200k
+          # Actually losing money
+    solution: |
+      # 1. Include degradation cost in optimization
+      class BatteryWithDegradation:
+          def __init__(self, capacity_mwh, power_mw, efficiency=0.90,
+                       replacement_cost=200000, cycle_life=3000):
+              self.capacity = capacity_mwh
+              self.power = power_mw
+              self.efficiency = efficiency
+              self.replacement_cost = replacement_cost
+              self.cycle_life = cycle_life
+
+              # Cost per kWh throughput
+              self.degradation_cost = replacement_cost / (cycle_life * capacity_mwh * 1000)
+
+          def cost_per_cycle(self, depth_of_discharge):
+              """Non-linear degradation - deeper cycles cost more."""
+              # Empirical: DoD^1.5 relationship
+              return self.degradation_cost * depth_of_discharge ** 1.5
+
+      # 2. Include in dispatch optimization
+      def optimize_with_degradation(prices, battery):
+          n = len(prices)
+
+          def objective(dispatch):
+              revenue = np.sum(dispatch * prices)
+
+              # Calculate cycle degradation cost
+              energy_throughput = np.sum(np.abs(dispatch))
+              equivalent_cycles = energy_throughput / (2 * battery.capacity)
+              degradation_cost = equivalent_cycles * battery.replacement_cost / battery.cycle_life
+
+              return -(revenue - degradation_cost)  # Maximize net value
+
+          # Solve with degradation in objective
+          result = minimize(objective, ...)
+          return result
+
+      # 3. Enforce SOC limits to reduce calendar aging
+      # Keeping SOC between 20-80% reduces stress
+
+      # 4. Temperature-aware dispatch
+      # Limit power in high ambient temperatures
+
+  - id: ramp-constraints-ignored
+    severity: high
+    title: "Dispatch Without Ramp Rate Constraints"
+    summary: "Generators can't change output instantaneously"
+    symptoms:
+      - "Infeasible schedules"
+      - "Frequency deviations"
+      - "ACE violations"
+      - "Operator manual interventions"
+    why: |
+      Generator ramp rates (typical):
+      - Coal: 1-3% of capacity per minute
+      - CCGT: 5-8% per minute
+      - Simple cycle GT: 10-15% per minute
+      - Hydro: 50%+ per minute
+
+      Ignoring ramp rates leads to:
+      - Scheduled output physically impossible
+      - Need for expensive balancing reserves
+      - Reliability standard violations
+    gotcha: |
+      # 5-minute dispatch
+      demand = [100, 150, 200, 180, 120]  # MW per period
+
+      # Simple economic dispatch
+      for t, d in enumerate(demand):
+          dispatch[t] = economic_dispatch(generators, d)
+
+      # Result:
+      # t=0: Coal=100
+      # t=1: Coal=100, CCGT=50 (CCGT ramped 50 MW in 5 min - impossible!)
+      # CCGT can only ramp 15 MW in 5 minutes
+    solution: |
+      # 1. Include ramp constraints in optimization
+      import pyomo.environ as pyo
+
+      def unit_commitment_with_ramps(generators, demand, timesteps):
+          model = pyo.ConcreteModel()
+
+          # Sets
+          model.G = pyo.Set(initialize=range(len(generators)))
+          model.T = pyo.Set(initialize=range(timesteps))
+
+          # Variables
+          model.p = pyo.Var(model.G, model.T, domain=pyo.NonNegativeReals)
+          model.u = pyo.Var(model.G, model.T, domain=pyo.Binary)  # On/off
+
+          # Ramp constraints
+          def ramp_up_rule(m, g, t):
+              if t == 0:
+                  return pyo.Constraint.Skip
+              return m.p[g,t] - m.p[g,t-1] <= generators[g].ramp_up_mw
+
+          def ramp_down_rule(m, g, t):
+              if t == 0:
+                  return pyo.Constraint.Skip
+              return m.p[g,t-1] - m.p[g,t] <= generators[g].ramp_down_mw
+
+          model.ramp_up = pyo.Constraint(model.G, model.T, rule=ramp_up_rule)
+          model.ramp_down = pyo.Constraint(model.G, model.T, rule=ramp_down_rule)
+
+          # Min up/down time constraints
+          # ... (additional constraints)
+
+          return model
+
+      # 2. Look-ahead dispatch
+      # Consider ramp needs for future periods
+
+      # 3. Include startup/shutdown trajectories
+      # Generators have specific ramp profiles during transitions
+
+  - id: single-contingency-only
+    severity: high
+    title: "N-1 Only for Critical Infrastructure"
+    summary: "Single contingency analysis misses cascading failures"
+    symptoms:
+      - "Cascading outages"
+      - "Multiple element failures cause blackouts"
+      - "NERC Category D events"
+      - "Wide-area disturbances"
+    why: |
+      N-1 contingency standard:
+      - System must survive loss of any single element
+      - Standard for normal planning
+
+      But critical systems need N-1-1:
+      - Loss of element, then loss of another before restoration
+      - Common mode failures (same corridor, same weather)
+      - Protection system failures
+
+      2003 Northeast blackout: N-1-1 would have flagged issues.
+    gotcha: |
+      # Standard N-1 contingency analysis
+      def n1_analysis(net, elements):
+          violations = []
+          for element in elements:
+              net_temp = net.deepcopy()
+              trip_element(net_temp, element)
+
+              if not is_secure(net_temp):
+                  violations.append(element)
+
+          return violations
+
+      # Result: No violations! System is N-1 secure.
+      # But what if line A trips, then line B (parallel path)?
+      # Both overload, cascade begins...
+    solution: |
+      # 1. N-1-1 for critical infrastructure
+      def n1_1_analysis(net, elements, critical_elements):
+          violations = []
+
+          for first in critical_elements:
+              net_temp = net.deepcopy()
+              trip_element(net_temp, first)
+
+              # System must be secure after first contingency
+              if not is_secure(net_temp):
+                  violations.append((first, None))
+                  continue
+
+              # Now check second contingency
+              for second in elements:
+                  if second == first:
+                      continue
+
+                  net_temp2 = net_temp.deepcopy()
+                  trip_element(net_temp2, second)
+
+                  if not is_secure(net_temp2):
+                      violations.append((first, second))
+
+          return violations
+
+      # 2. Common mode contingencies
+      # Elements in same corridor, subject to same weather
+      def identify_common_mode(net):
+          corridors = group_by_corridor(net.line)
+          weather_zones = group_by_weather_zone(net)
+
+          common_mode_groups = []
+          for corridor, lines in corridors.items():
+              if len(lines) > 1:
+                  common_mode_groups.append(lines)
+
+          return common_mode_groups
+
+      # 3. Protection system failures
+      # Analyze breaker failure contingencies
+
+      # 4. Extreme event analysis
+      # Beyond N-1-1 for rare but high-impact events
+
+  - id: static-load-models
+    severity: medium
+    title: "Using Static Load Models for Dynamic Studies"
+    summary: "Loads change with voltage and frequency"
+    symptoms:
+      - "Simulation doesn't match field events"
+      - "Voltage recovery too fast or slow"
+      - "Frequency response inaccurate"
+      - "Motor stalling not captured"
+    why: |
+      Real loads are voltage/frequency dependent:
+      - Resistive loads: P ∝ V²
+      - Motor loads: Complex P-V characteristic, can stall
+      - Electronic loads: Constant power (bad for voltage stability)
+
+      ZIP model:
+      P = P0 * (Z*V² + I*V + P*1)
+      where Z + I + P = 1
+
+      WECC composite load model includes:
+      - Motor dynamics
+      - Electronic load fraction
+      - Distributed generation
+    gotcha: |
+      # Dynamic simulation
+      pp.create_load(net, bus=1, p_mw=100, q_mvar=30)
+
+      # Fault simulation
+      apply_fault(net, bus=2, duration=0.1)
+      simulate_dynamics(net)
+
+      # Result shows voltage recovers nicely
+      # But in reality, with 40% motor load:
+      # - Motors decelerate during fault
+      # - Draw high current on recovery
+      # - Possible motor stalling → delayed recovery
+    solution: |
+      # 1. Use ZIP load model
+      def create_zip_load(net, bus, p_mw, q_mvar,
+                          zip_p=(0.3, 0.4, 0.3),  # Constant Z, I, P fractions
+                          zip_q=(0.3, 0.4, 0.3)):
+          """Create voltage-dependent load."""
+          # During simulation, P scales with voltage
+          # P = P0 * (z*V² + i*V + p)
+          pass  # Depends on simulation tool
+
+      # 2. Include motor models for industrial loads
+      class MotorLoad:
+          def __init__(self, p_mw, power_factor=0.85):
+              self.p_mw = p_mw
+              self.pf = power_factor
+              self.stall_voltage = 0.7  # Stalls below 70%
+
+          def current(self, voltage_pu):
+              if voltage_pu < self.stall_voltage:
+                  return self.locked_rotor_current()
+              return self.normal_current(voltage_pu)
+
+      # 3. Use composite load models for bulk system
+      # WECC CLM, EPRI LOADSYN
+
+      # 4. Validate against actual events
+      # Compare simulation to recorded disturbances
+
+detection:
+  file_patterns:
+    - "**/*power*.py"
+    - "**/*grid*.py"
+    - "**/*dispatch*.py"
+    - "**/*storage*.py"
+    - "**/*battery*.py"
+    - "**/*energy*.py"

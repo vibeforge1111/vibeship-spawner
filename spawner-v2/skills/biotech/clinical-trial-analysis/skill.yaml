@@ -1,0 +1,536 @@
+# Clinical Trial Analysis Skill
+# Statistical methods and best practices for clinical trial design and analysis
+
+id: clinical-trial-analysis
+name: Clinical Trial Analysis
+category: biotech
+complexity: advanced
+requires_skills:
+  - statistical-analysis
+  - experimental-design
+
+description: |
+  Patterns for designing and analyzing clinical trials, including survival
+  analysis, endpoint selection, sample size calculation, interim analyses,
+  and regulatory considerations. Covers FDA/EMA guidelines and modern
+  adaptive designs.
+
+patterns:
+
+  survival_analysis:
+    name: Survival Analysis Methods
+    description: Time-to-event analysis for clinical endpoints
+    critical: true
+    pattern: |
+      import numpy as np
+      import pandas as pd
+      from lifelines import KaplanMeierFitter, CoxPHFitter
+      from lifelines.statistics import logrank_test
+      from typing import Tuple, Optional
+
+      def kaplan_meier_analysis(
+          data: pd.DataFrame,
+          time_col: str,
+          event_col: str,
+          group_col: Optional[str] = None
+      ) -> dict:
+          """
+          Kaplan-Meier survival analysis.
+
+          Parameters:
+          - time_col: Time to event or censoring
+          - event_col: 1 = event occurred, 0 = censored
+          - group_col: Treatment group column (optional)
+
+          Returns median survival, confidence intervals, curves.
+          """
+          results = {}
+
+          if group_col is None:
+              # Single-arm analysis
+              kmf = KaplanMeierFitter()
+              kmf.fit(data[time_col], data[event_col])
+
+              results['median_survival'] = kmf.median_survival_time_
+              results['confidence_interval'] = kmf.confidence_interval_median_survival_time_
+              results['survival_function'] = kmf.survival_function_
+
+          else:
+              # Multi-arm comparison
+              groups = data[group_col].unique()
+              results['groups'] = {}
+
+              for group in groups:
+                  group_data = data[data[group_col] == group]
+                  kmf = KaplanMeierFitter()
+                  kmf.fit(group_data[time_col], group_data[event_col], label=group)
+
+                  results['groups'][group] = {
+                      'median_survival': kmf.median_survival_time_,
+                      'survival_function': kmf.survival_function_
+                  }
+
+              # Log-rank test for comparison
+              if len(groups) == 2:
+                  g1, g2 = groups
+                  d1 = data[data[group_col] == g1]
+                  d2 = data[data[group_col] == g2]
+
+                  test_result = logrank_test(
+                      d1[time_col], d2[time_col],
+                      d1[event_col], d2[event_col]
+                  )
+                  results['logrank_pvalue'] = test_result.p_value
+                  results['logrank_statistic'] = test_result.test_statistic
+
+          return results
+
+      def cox_proportional_hazards(
+          data: pd.DataFrame,
+          time_col: str,
+          event_col: str,
+          covariates: list
+      ) -> dict:
+          """
+          Cox Proportional Hazards regression.
+
+          Estimates hazard ratios for covariates.
+          """
+          cph = CoxPHFitter()
+          cph.fit(
+              data[[time_col, event_col] + covariates],
+              duration_col=time_col,
+              event_col=event_col
+          )
+
+          return {
+              'hazard_ratios': np.exp(cph.params_),
+              'confidence_intervals': np.exp(cph.confidence_intervals_),
+              'p_values': cph.summary['p'],
+              'concordance': cph.concordance_index_,
+              'summary': cph.summary
+          }
+
+      # CRITICAL: Check proportional hazards assumption
+      def check_ph_assumption(
+          cph_model,
+          data: pd.DataFrame,
+          time_col: str,
+          event_col: str
+      ) -> dict:
+          """
+          Test proportional hazards assumption.
+
+          Violation suggests time-varying effects.
+          """
+          results = cph_model.check_assumptions(data, show_plots=False)
+          return results
+    why: "Survival analysis is the primary method for oncology trial endpoints"
+
+  endpoint_design:
+    name: Endpoint Selection and Design
+    description: Choose appropriate primary and secondary endpoints
+    critical: true
+    pattern: |
+      from dataclasses import dataclass
+      from typing import List, Optional
+      from enum import Enum
+
+      class EndpointType(Enum):
+          OVERALL_SURVIVAL = "OS"
+          PROGRESSION_FREE_SURVIVAL = "PFS"
+          RESPONSE_RATE = "ORR"
+          DISEASE_FREE_SURVIVAL = "DFS"
+          TIME_TO_PROGRESSION = "TTP"
+          PATIENT_REPORTED_OUTCOME = "PRO"
+          COMPOSITE = "composite"
+
+      @dataclass
+      class TrialEndpoint:
+          """Clinical trial endpoint specification."""
+          name: str
+          type: EndpointType
+          definition: str
+          assessment_schedule: str
+          primary: bool = False
+          regulatory_accepted: bool = True
+
+      # FDA-recommended endpoint hierarchy for oncology
+      ONCOLOGY_ENDPOINT_HIERARCHY = """
+      1. Overall Survival (OS)
+         - Gold standard, direct clinical benefit
+         - Requires longer follow-up
+         - Can be confounded by crossover
+
+      2. Progression-Free Survival (PFS)
+         - Earlier readout than OS
+         - Surrogacy for OS varies by disease
+         - Subject to assessment bias
+
+      3. Objective Response Rate (ORR)
+         - Accelerated approval pathway
+         - Requires confirmatory trial with OS/PFS
+
+      4. Patient-Reported Outcomes (PRO)
+         - Increasingly important
+         - Must be validated instrument
+      """
+
+      def design_primary_endpoint(
+          disease_setting: str,
+          trial_phase: int,
+          expected_survival: float,
+          crossover_expected: bool = False
+      ) -> TrialEndpoint:
+          """
+          Recommend primary endpoint based on trial characteristics.
+          """
+          if trial_phase == 1:
+              return TrialEndpoint(
+                  name="Maximum Tolerated Dose",
+                  type=EndpointType.COMPOSITE,
+                  definition="Highest dose with DLT rate < 33%",
+                  assessment_schedule="Per dose cohort",
+                  primary=True
+              )
+
+          elif trial_phase == 2:
+              return TrialEndpoint(
+                  name="Objective Response Rate",
+                  type=EndpointType.RESPONSE_RATE,
+                  definition="CR + PR per RECIST 1.1",
+                  assessment_schedule="Every 8 weeks",
+                  primary=True
+              )
+
+          elif trial_phase == 3:
+              if expected_survival > 24 and not crossover_expected:
+                  return TrialEndpoint(
+                      name="Overall Survival",
+                      type=EndpointType.OVERALL_SURVIVAL,
+                      definition="Time from randomization to death",
+                      assessment_schedule="Every 12 weeks after progression",
+                      primary=True,
+                      regulatory_accepted=True
+                  )
+              else:
+                  return TrialEndpoint(
+                      name="Progression-Free Survival",
+                      type=EndpointType.PROGRESSION_FREE_SURVIVAL,
+                      definition="Time to progression or death per RECIST 1.1",
+                      assessment_schedule="Every 8 weeks",
+                      primary=True
+                  )
+
+          return None
+
+      # OS as safety endpoint per FDA 2024 guidance
+      OS_SAFETY_ENDPOINT = """
+      Per FDA 2024 Guidance:
+      When OS is not the primary efficacy endpoint, it should be
+      pre-specified as a safety endpoint with:
+      - Planned analysis timepoints
+      - Stopping boundaries for harm
+      - Independent DMC review
+      """
+    why: "Endpoint selection determines trial success and regulatory path"
+
+  sample_size:
+    name: Sample Size and Power Calculation
+    description: Calculate required sample size for clinical trials
+    pattern: |
+      from scipy import stats
+      import numpy as np
+      from typing import Tuple
+
+      def sample_size_survival(
+          median_control: float,
+          hazard_ratio: float,
+          alpha: float = 0.05,
+          power: float = 0.80,
+          enrollment_time: float = 24,
+          followup_time: float = 12,
+          dropout_rate: float = 0.10,
+          allocation_ratio: float = 1.0
+      ) -> dict:
+          """
+          Sample size for survival endpoint trial.
+
+          Uses Schoenfeld method for event-driven design.
+          """
+          # Required number of events
+          z_alpha = stats.norm.ppf(1 - alpha/2)
+          z_beta = stats.norm.ppf(power)
+
+          theta = np.log(hazard_ratio)
+          r = allocation_ratio / (1 + allocation_ratio)
+
+          num_events = ((z_alpha + z_beta) ** 2) / (r * (1-r) * theta ** 2)
+          num_events = int(np.ceil(num_events))
+
+          # Convert to sample size
+          # Assuming exponential survival
+          lambda_control = np.log(2) / median_control
+          lambda_treatment = lambda_control * hazard_ratio
+
+          # Average hazard
+          lambda_avg = r * lambda_treatment + (1-r) * lambda_control
+
+          # Probability of event
+          total_time = enrollment_time + followup_time
+          # This is simplified - real calculation more complex
+          p_event = 1 - np.exp(-lambda_avg * followup_time)
+          p_event = p_event * (1 - dropout_rate)
+
+          n_total = int(np.ceil(num_events / p_event))
+
+          return {
+              'events_required': num_events,
+              'sample_size_total': n_total,
+              'sample_size_control': int(np.ceil(n_total / (1 + allocation_ratio))),
+              'sample_size_treatment': int(np.ceil(n_total * allocation_ratio / (1 + allocation_ratio))),
+              'power': power,
+              'alpha': alpha
+          }
+
+      def sample_size_proportion(
+          p_control: float,
+          p_treatment: float,
+          alpha: float = 0.05,
+          power: float = 0.80,
+          allocation_ratio: float = 1.0
+      ) -> dict:
+          """
+          Sample size for binary endpoint (response rate).
+          """
+          from statsmodels.stats.power import NormalIndPower
+
+          effect_size = (p_treatment - p_control) / np.sqrt(
+              p_control * (1-p_control) / 2 + p_treatment * (1-p_treatment) / 2
+          )
+
+          analysis = NormalIndPower()
+          n_per_group = analysis.solve_power(
+              effect_size=effect_size,
+              alpha=alpha,
+              power=power,
+              ratio=allocation_ratio
+          )
+
+          return {
+              'n_per_group': int(np.ceil(n_per_group)),
+              'n_total': int(np.ceil(n_per_group * (1 + allocation_ratio))),
+              'effect_size': effect_size
+          }
+    why: "Proper sample size ensures adequate power to detect effects"
+
+  interim_analysis:
+    name: Interim Analysis and Data Monitoring
+    description: Planned interim looks with alpha spending
+    pattern: |
+      import numpy as np
+      from scipy import stats
+      from dataclasses import dataclass
+      from typing import List
+
+      @dataclass
+      class InterimAnalysis:
+          """Interim analysis specification."""
+          analysis_number: int
+          information_fraction: float
+          efficacy_boundary: float
+          futility_boundary: float
+          is_binding_futility: bool = False
+
+      def obrien_fleming_boundaries(
+          num_analyses: int,
+          alpha: float = 0.025  # One-sided
+      ) -> List[float]:
+          """
+          O'Brien-Fleming spending function boundaries.
+
+          Conservative early, liberal late.
+          """
+          boundaries = []
+          for k in range(1, num_analyses + 1):
+              info_frac = k / num_analyses
+              boundary = stats.norm.ppf(1 - alpha/2) / np.sqrt(info_frac)
+              boundaries.append(boundary)
+          return boundaries
+
+      def pocock_boundaries(
+          num_analyses: int,
+          alpha: float = 0.025
+      ) -> List[float]:
+          """
+          Pocock spending function boundaries.
+
+          Constant boundary across analyses.
+          """
+          # Iteratively solve for constant boundary
+          # Simplified version
+          boundary = stats.norm.ppf(1 - alpha / num_analyses)
+          return [boundary] * num_analyses
+
+      def lan_demets_spending(
+          information_fraction: float,
+          alpha: float = 0.025,
+          spending_function: str = "obrien_fleming"
+      ) -> float:
+          """
+          Lan-DeMets alpha spending.
+
+          Allows flexible analysis timing.
+          """
+          if spending_function == "obrien_fleming":
+              spent = 2 * (1 - stats.norm.cdf(
+                  stats.norm.ppf(1 - alpha/2) / np.sqrt(information_fraction)
+              ))
+          elif spending_function == "pocock":
+              spent = alpha * np.log(1 + (np.e - 1) * information_fraction)
+          else:
+              spent = alpha * information_fraction  # Linear
+
+          return spent
+
+      # Independent Data Monitoring Committee guidance
+      DMC_RESPONSIBILITIES = """
+      DMC Responsibilities (per FDA guidance):
+      1. Review unblinded efficacy and safety data
+      2. Monitor OS as safety endpoint even when not primary
+      3. Recommend stopping for:
+         - Overwhelming efficacy
+         - Futility
+         - Safety concerns (OS detriment)
+      4. Protect trial integrity
+      5. Maintain confidentiality
+      """
+    why: "Interim analyses allow early stopping while controlling type I error"
+
+  adaptive_design:
+    name: Adaptive Trial Designs
+    description: Modify trial based on accumulating data
+    pattern: |
+      from dataclasses import dataclass
+      from typing import List, Optional
+      from enum import Enum
+
+      class AdaptationType(Enum):
+          SAMPLE_SIZE = "sample_size_reestimation"
+          DOSE_SELECTION = "seamless_phase2_3"
+          POPULATION = "enrichment"
+          TREATMENT_ARM = "response_adaptive"
+          ENDPOINT = "endpoint_selection"
+
+      @dataclass
+      class AdaptiveDesign:
+          """Adaptive trial design specification."""
+          adaptation_type: AdaptationType
+          adaptation_timing: List[float]  # Information fractions
+          decision_rules: dict
+          preserves_type1: bool = True
+
+      # Sample size re-estimation
+      def sample_size_reestimation(
+          observed_effect: float,
+          initial_assumed_effect: float,
+          current_n: int,
+          target_power: float = 0.80,
+          max_increase: float = 2.0  # Cap at 2x original
+      ) -> int:
+          """
+          Blinded sample size re-estimation.
+
+          Adjusts sample size based on observed nuisance parameters.
+          """
+          # Recalculate based on observed variance
+          # Preserves type I error if properly blinded
+          adjustment_factor = (initial_assumed_effect / observed_effect) ** 2
+          new_n = int(np.ceil(current_n * adjustment_factor))
+          new_n = min(new_n, int(current_n * max_increase))
+          return new_n
+
+      # Seamless Phase 2/3 design
+      @dataclass
+      class SeamlessDesign:
+          """Phase 2/3 seamless design."""
+          phase2_endpoints: List[str]
+          phase3_endpoint: str
+          dose_selection_criteria: str
+          pooling_phase2_data: bool = True
+
+      def select_dose_for_phase3(
+          dose_response_data: pd.DataFrame,
+          efficacy_col: str,
+          safety_col: str,
+          min_efficacy_threshold: float
+      ) -> str:
+          """
+          Select dose for Phase 3 based on Phase 2 data.
+          """
+          # Find dose with best benefit-risk
+          candidates = dose_response_data[
+              dose_response_data[efficacy_col] >= min_efficacy_threshold
+          ]
+
+          if len(candidates) == 0:
+              return None  # No dose meets efficacy threshold
+
+          # Select dose with best safety among efficacious
+          best_dose = candidates.loc[candidates[safety_col].idxmin(), 'dose']
+          return best_dose
+
+      # Biomarker-driven enrichment
+      @dataclass
+      class EnrichmentDesign:
+          """Biomarker-driven enrichment design."""
+          biomarker: str
+          initial_population: str  # "all" or "biomarker_positive"
+          enrichment_decision_timing: float  # Information fraction
+          enrichment_criteria: dict
+    why: "Adaptive designs improve efficiency without compromising validity"
+
+anti_patterns:
+
+  p_hacking_subgroups:
+    name: Post-Hoc Subgroup Mining
+    problem: "Finding 'significant' subgroups after trial fails overall"
+    solution: "Pre-specify subgroups; adjust for multiplicity"
+
+  ignoring_crossover:
+    name: Not Planning for Crossover Effects
+    problem: "OS analysis confounded by control arm crossover"
+    solution: "Pre-specify crossover handling: RPSFT, ITT, per-protocol"
+
+  underpowered_safety:
+    name: Inadequate Power for Safety Endpoints
+    problem: "Can't detect safety signals with trial sample size"
+    solution: "Meta-analysis, longer follow-up, pre-specified OS safety"
+
+handoffs:
+  - to: drug-discovery-informatics
+    when: "Need preclinical data for trial planning"
+    pass: "Required efficacy, safety profile expectations"
+
+  - to: statistical-analysis
+    when: "Need specific statistical methods"
+    pass: "Data structure, analysis requirements"
+
+ecosystem:
+  software:
+    - "nQuery - Sample size calculation"
+    - "EAST - Adaptive designs, group sequential"
+    - "R survival package - Kaplan-Meier, Cox"
+    - "lifelines (Python) - Survival analysis"
+    - "SAS PROC LIFETEST - Industry standard"
+
+  regulatory:
+    - "FDA Clinical Trial Guidance documents"
+    - "ICH E9 Statistical Principles"
+    - "ICH E9(R1) Estimands Framework"
+    - "EMA Scientific Guidelines"
+
+  standards:
+    - "CDISC SDTM - Data standards"
+    - "CDISC ADaM - Analysis datasets"
+    - "RECIST 1.1 - Tumor response criteria"

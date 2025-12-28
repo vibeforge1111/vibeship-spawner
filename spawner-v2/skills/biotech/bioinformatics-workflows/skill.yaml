@@ -1,0 +1,533 @@
+# Bioinformatics Workflows Skill
+# Workflow management and orchestration for computational biology
+
+id: bioinformatics-workflows
+name: Bioinformatics Workflows
+category: biotech
+complexity: advanced
+requires_skills:
+  - genomics-pipelines
+  - data-reproducibility
+
+description: |
+  Patterns for building, maintaining, and scaling bioinformatics workflows.
+  Covers Nextflow, Snakemake, WDL/Cromwell, container orchestration,
+  and best practices for reproducible computational biology.
+
+patterns:
+
+  nextflow_dsl2:
+    name: Nextflow DSL2 Pipeline Structure
+    description: Modern Nextflow pipeline with modules
+    when: "Building production genomics pipeline"
+    pattern: |
+      // Project structure:
+      // my-pipeline/
+      // ├── main.nf
+      // ├── nextflow.config
+      // ├── modules/
+      // │   ├── fastqc.nf
+      // │   ├── trimming.nf
+      // │   └── alignment.nf
+      // ├── subworkflows/
+      // │   └── preprocessing.nf
+      // └── conf/
+      //     ├── base.config
+      //     └── test.config
+
+      // main.nf
+      #!/usr/bin/env nextflow
+      nextflow.enable.dsl = 2
+
+      // Import modules
+      include { FASTQC } from './modules/fastqc'
+      include { TRIM_GALORE } from './modules/trimming'
+      include { BWA_MEM } from './modules/alignment'
+      include { MULTIQC } from './modules/multiqc'
+
+      // Import subworkflows
+      include { PREPROCESSING } from './subworkflows/preprocessing'
+
+      // Main workflow
+      workflow {
+          // Create input channel from sample sheet
+          Channel
+              .fromPath(params.input)
+              .splitCsv(header: true)
+              .map { row ->
+                  def meta = [id: row.sample, single_end: row.single_end.toBoolean()]
+                  def reads = row.single_end.toBoolean() ?
+                      [file(row.fastq_1)] :
+                      [file(row.fastq_1), file(row.fastq_2)]
+                  [meta, reads]
+              }
+              .set { reads_ch }
+
+          // Run preprocessing subworkflow
+          PREPROCESSING(reads_ch)
+
+          // Alignment
+          BWA_MEM(
+              PREPROCESSING.out.trimmed_reads,
+              params.genome_index
+          )
+
+          // Aggregate QC reports
+          MULTIQC(
+              FASTQC.out.zip.collect(),
+              TRIM_GALORE.out.log.collect()
+          )
+      }
+
+      // modules/fastqc.nf
+      process FASTQC {
+          tag "$meta.id"
+          label 'process_low'
+
+          container 'biocontainers/fastqc:0.11.9'
+
+          input:
+          tuple val(meta), path(reads)
+
+          output:
+          tuple val(meta), path("*.html"), emit: html
+          tuple val(meta), path("*.zip"),  emit: zip
+          path "versions.yml",             emit: versions
+
+          script:
+          """
+          fastqc --threads $task.cpus $reads
+
+          cat <<-END_VERSIONS > versions.yml
+          "${task.process}":
+              fastqc: \$(fastqc --version | sed 's/FastQC v//')
+          END_VERSIONS
+          """
+      }
+    why: "DSL2 enables modular, reusable, testable pipeline components"
+
+  snakemake_pipeline:
+    name: Snakemake Pipeline Structure
+    description: Python-based workflow management
+    when: "Team prefers Python or needs Conda integration"
+    pattern: |
+      # Snakefile
+      configfile: "config/config.yaml"
+
+      # Load sample sheet
+      import pandas as pd
+      samples = pd.read_csv(config["samples"]).set_index("sample", drop=False)
+
+      # Define final outputs
+      rule all:
+          input:
+              expand("results/aligned/{sample}.bam", sample=samples.index),
+              "results/multiqc/multiqc_report.html"
+
+      # Include rules from separate files
+      include: "rules/qc.smk"
+      include: "rules/alignment.smk"
+      include: "rules/calling.smk"
+
+      # rules/qc.smk
+      rule fastqc:
+          input:
+              "data/{sample}_{read}.fastq.gz"
+          output:
+              html="results/qc/fastqc/{sample}_{read}_fastqc.html",
+              zip="results/qc/fastqc/{sample}_{read}_fastqc.zip"
+          log:
+              "logs/fastqc/{sample}_{read}.log"
+          threads: 4
+          conda:
+              "../envs/fastqc.yaml"
+          shell:
+              "fastqc -t {threads} {input} -o results/qc/fastqc 2> {log}"
+
+      rule trim_galore:
+          input:
+              r1="data/{sample}_1.fastq.gz",
+              r2="data/{sample}_2.fastq.gz"
+          output:
+              r1="results/trimmed/{sample}_1_val_1.fq.gz",
+              r2="results/trimmed/{sample}_2_val_2.fq.gz"
+          log:
+              "logs/trim_galore/{sample}.log"
+          threads: 4
+          conda:
+              "../envs/trim_galore.yaml"
+          shell:
+              """
+              trim_galore --paired --cores {threads} \
+                  -o results/trimmed {input.r1} {input.r2} 2> {log}
+              """
+
+      # rules/alignment.smk
+      rule bwa_mem:
+          input:
+              reads=["results/trimmed/{sample}_1_val_1.fq.gz",
+                     "results/trimmed/{sample}_2_val_2.fq.gz"],
+              idx=config["reference"]["index"]
+          output:
+              "results/aligned/{sample}.bam"
+          log:
+              "logs/bwa_mem/{sample}.log"
+          threads: 8
+          params:
+              rg=r"@RG\tID:{sample}\tSM:{sample}\tPL:ILLUMINA"
+          conda:
+              "../envs/alignment.yaml"
+          shell:
+              """
+              bwa mem -t {threads} -R '{params.rg}' {input.idx} {input.reads} \
+              | samtools sort -@ {threads} -o {output} - 2> {log}
+              samtools index {output}
+              """
+
+      # envs/fastqc.yaml
+      # channels:
+      #   - bioconda
+      #   - conda-forge
+      # dependencies:
+      #   - fastqc=0.11.9
+    why: "Snakemake integrates well with Python and Conda environments"
+
+  wdl_pipeline:
+    name: WDL (Workflow Description Language)
+    description: Broad Institute standard for Terra/Cromwell
+    when: "Running on Terra, AnVIL, or GATK workflows"
+    pattern: |
+      version 1.0
+
+      # workflow.wdl
+      workflow VariantCalling {
+          input {
+              File input_bam
+              File input_bam_index
+              File ref_fasta
+              File ref_fasta_index
+              File ref_dict
+              String sample_name
+          }
+
+          call HaplotypeCaller {
+              input:
+                  input_bam = input_bam,
+                  input_bam_index = input_bam_index,
+                  ref_fasta = ref_fasta,
+                  ref_fasta_index = ref_fasta_index,
+                  ref_dict = ref_dict,
+                  sample_name = sample_name
+          }
+
+          call FilterVariants {
+              input:
+                  input_vcf = HaplotypeCaller.output_vcf,
+                  ref_fasta = ref_fasta,
+                  sample_name = sample_name
+          }
+
+          output {
+              File final_vcf = FilterVariants.filtered_vcf
+          }
+      }
+
+      task HaplotypeCaller {
+          input {
+              File input_bam
+              File input_bam_index
+              File ref_fasta
+              File ref_fasta_index
+              File ref_dict
+              String sample_name
+          }
+
+          command {
+              gatk HaplotypeCaller \
+                  -R ~{ref_fasta} \
+                  -I ~{input_bam} \
+                  -O ~{sample_name}.raw.vcf.gz \
+                  --emit-ref-confidence GVCF
+          }
+
+          output {
+              File output_vcf = "~{sample_name}.raw.vcf.gz"
+          }
+
+          runtime {
+              docker: "broadinstitute/gatk:4.4.0.0"
+              memory: "8 GB"
+              cpu: 4
+              disks: "local-disk 100 HDD"
+          }
+      }
+
+      task FilterVariants {
+          input {
+              File input_vcf
+              File ref_fasta
+              String sample_name
+          }
+
+          command {
+              gatk VariantFiltration \
+                  -R ~{ref_fasta} \
+                  -V ~{input_vcf} \
+                  -O ~{sample_name}.filtered.vcf.gz \
+                  --filter-expression "QD < 2.0" \
+                  --filter-name "QD2"
+          }
+
+          output {
+              File filtered_vcf = "~{sample_name}.filtered.vcf.gz"
+          }
+
+          runtime {
+              docker: "broadinstitute/gatk:4.4.0.0"
+              memory: "4 GB"
+              cpu: 2
+          }
+      }
+    why: "WDL is required for Terra, AnVIL, and Broad pipelines"
+
+  container_strategy:
+    name: Container Strategy for Reproducibility
+    description: Manage tool versions with containers
+    pattern: |
+      # Strategy 1: Use BioContainers (recommended for single tools)
+      # https://biocontainers.pro
+
+      # nextflow.config
+      process {
+          withName: 'FASTQC' {
+              container = 'biocontainers/fastqc:0.11.9--hdfd78af_1'
+          }
+          withName: 'BWA_MEM' {
+              container = 'biocontainers/bwa:0.7.17--h5bf99c6_8'
+          }
+          withName: 'SAMTOOLS' {
+              container = 'biocontainers/samtools:1.17--hd87286a_1'
+          }
+      }
+
+      # Strategy 2: Build custom multi-tool container
+      # Dockerfile
+      FROM mambaorg/micromamba:1.4.9
+
+      COPY --chown=$MAMBA_USER:$MAMBA_USER env.yaml /tmp/env.yaml
+      RUN micromamba install -y -n base -f /tmp/env.yaml && \
+          micromamba clean --all --yes
+
+      # Strategy 3: Conda environments (fallback when containers not available)
+      # envs/alignment.yaml
+      name: alignment
+      channels:
+        - bioconda
+        - conda-forge
+        - defaults
+      dependencies:
+        - bwa=0.7.17
+        - samtools=1.17
+        - picard=3.0.0
+
+      # Lock environment for reproducibility
+      # conda-lock -f env.yaml -p linux-64
+
+      # nextflow.config with conda
+      profiles {
+          conda {
+              conda.enabled = true
+              process.conda = "${projectDir}/envs/pipeline.yaml"
+          }
+      }
+    why: "Containers ensure identical software versions across systems"
+
+  scaling_hpc:
+    name: Scaling to HPC and Cloud
+    description: Run pipelines on clusters and cloud
+    pattern: |
+      // Nextflow executor configs
+      // conf/slurm.config
+      process {
+          executor = 'slurm'
+          queue = 'normal'
+          clusterOptions = '--account=mylab'
+
+          withLabel: 'process_low' {
+              cpus = 2
+              memory = '4 GB'
+              time = '1h'
+          }
+          withLabel: 'process_medium' {
+              cpus = 8
+              memory = '32 GB'
+              time = '8h'
+          }
+          withLabel: 'process_high' {
+              cpus = 16
+              memory = '64 GB'
+              time = '24h'
+          }
+      }
+
+      // conf/aws_batch.config
+      process {
+          executor = 'awsbatch'
+          queue = 'nextflow-queue'
+      }
+
+      aws {
+          region = 'us-east-1'
+          batch {
+              cliPath = '/home/ec2-user/miniconda/bin/aws'
+          }
+      }
+
+      // conf/google.config
+      process {
+          executor = 'google-lifesciences'
+      }
+
+      google {
+          project = 'my-project'
+          zone = 'us-central1-f'
+      }
+
+      // Snakemake cluster execution
+      # snakemake --cluster "sbatch -A mylab -t {resources.time} \
+      #   -c {threads} --mem={resources.mem_mb}" \
+      #   --jobs 100 --use-conda
+
+      # Snakemake profiles (recommended)
+      # ~/.config/snakemake/slurm/config.yaml
+      executor: slurm
+      jobs: 100
+      default-resources:
+        - mem_mb=4000
+        - time=60
+        - cpus=1
+    why: "Production genomics requires HPC or cloud for scalability"
+
+  testing_pipelines:
+    name: Testing Bioinformatics Pipelines
+    description: Test-driven pipeline development
+    pattern: |
+      // Nextflow testing with nf-test
+      // tests/main.nf.test
+      nextflow_pipeline {
+          name "Test full pipeline"
+          script "../main.nf"
+          profile "test,docker"
+
+          test("Should run with test data") {
+              when {
+                  params {
+                      input = "tests/data/samplesheet.csv"
+                      outdir = "results"
+                  }
+              }
+
+              then {
+                  assert workflow.success
+                  assert path("results/multiqc/multiqc_report.html").exists()
+                  assert path("results/aligned/sample1.bam").exists()
+              }
+          }
+      }
+
+      // Snakemake testing with pytest
+      # tests/test_pipeline.py
+      import subprocess
+      import pytest
+      from pathlib import Path
+
+      @pytest.fixture
+      def test_data_dir():
+          return Path(__file__).parent / "data"
+
+      def test_dry_run(test_data_dir):
+          """Test that pipeline parses correctly."""
+          result = subprocess.run(
+              ["snakemake", "-n", "--configfile", "config/test.yaml"],
+              capture_output=True, text=True
+          )
+          assert result.returncode == 0, result.stderr
+
+      def test_full_pipeline(test_data_dir, tmp_path):
+          """Run pipeline with test data."""
+          result = subprocess.run(
+              [
+                  "snakemake",
+                  "--configfile", "config/test.yaml",
+                  "--directory", str(tmp_path),
+                  "--cores", "4",
+                  "--use-conda"
+              ],
+              capture_output=True, text=True
+          )
+          assert result.returncode == 0, result.stderr
+          assert (tmp_path / "results" / "multiqc_report.html").exists()
+
+      # CI/CD with GitHub Actions
+      # .github/workflows/test.yml
+      name: Pipeline Tests
+      on: [push, pull_request]
+      jobs:
+        test:
+          runs-on: ubuntu-latest
+          steps:
+            - uses: actions/checkout@v4
+            - uses: mamba-org/setup-micromamba@v1
+            - name: Run tests
+              run: |
+                micromamba install -y snakemake pytest
+                pytest tests/
+    why: "Tested pipelines are reliable and maintainable"
+
+anti_patterns:
+
+  monolithic_workflow:
+    name: Monolithic Workflow File
+    problem: "All rules/processes in one file"
+    solution: "Split into modules/includes by function"
+
+  no_version_tracking:
+    name: No Software Version Tracking
+    problem: "Can't reproduce results with different tool versions"
+    solution: "Pin versions in containers or conda environments"
+
+  hardcoded_resources:
+    name: Hardcoded Resource Specifications
+    problem: "Pipeline only works on one cluster"
+    solution: "Use labels/profiles for resource allocation"
+
+handoffs:
+  - to: genomics-pipelines
+    when: "Need specific analysis patterns"
+    pass: "Tool requirements, input data types"
+
+  - to: docker-containerization
+    when: "Need custom container builds"
+    pass: "Tool list, environment specs"
+
+  - to: cloud-architecture
+    when: "Deploying to cloud"
+    pass: "Pipeline requirements, data volumes"
+
+ecosystem:
+  workflow_managers:
+    - "Nextflow - Containerized, cloud-native"
+    - "Snakemake - Python-based, Conda integration"
+    - "WDL/Cromwell - Broad Institute, Terra"
+    - "CWL - Common Workflow Language (interoperable)"
+
+  registries:
+    - "nf-core - Curated Nextflow pipelines"
+    - "Snakemake Workflow Catalog"
+    - "Dockstore - WDL/CWL workflows"
+
+  execution_platforms:
+    - "Terra - Cloud genomics platform"
+    - "AWS Batch - Serverless batch computing"
+    - "Google Cloud Life Sciences"
+    - "Seqera Platform (Nextflow Tower)"

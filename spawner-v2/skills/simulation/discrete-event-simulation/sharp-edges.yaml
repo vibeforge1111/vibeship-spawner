@@ -1,0 +1,334 @@
+id: discrete-event-simulation-sharp-edges
+skill: discrete-event-simulation
+version: 1.0.0
+
+sharp_edges:
+
+  - id: floating-point-time
+    severity: critical
+    title: "Floating Point Time Causes Event Ordering Errors"
+    summary: "Accumulated floating point errors corrupt event sequence"
+    symptoms:
+      - "Events processed in wrong order"
+      - "Same time events have inconsistent ordering"
+      - "Simulation results change with compiler/platform"
+    why: |
+      Floating point arithmetic is not exact.
+      0.1 + 0.2 != 0.3 in IEEE 754.
+
+      After thousands of additions:
+      event_time += delta  # Accumulates error
+
+      Events scheduled for "same time" may differ by epsilon.
+      Comparison event.time == target fails.
+
+      Priority queue ordering becomes undefined for near-equal times.
+    gotcha: |
+      # Accumulating time with floats
+      time = 0.0
+      for i in range(10000):
+          time += 0.1  # Each addition adds ~1e-16 error
+
+      # time is now 999.9999999999999... not 1000.0
+
+      # Scheduling event at time 1000.0
+      schedule_at(1000.0, "event_a")
+      # But time == 1000.0 is False!
+    solution: |
+      # 1. Use integer time units
+      TIME_SCALE = 1000  # 1000 units per second
+
+      def to_sim_time(seconds: float) -> int:
+          return int(round(seconds * TIME_SCALE))
+
+      def schedule_at(time_sec: float, event):
+          time_int = to_sim_time(time_sec)
+          event_queue.push((time_int, event))
+
+      # 2. Add small tolerance for comparisons
+      def time_equal(t1: float, t2: float, eps: float = 1e-9) -> bool:
+          return abs(t1 - t2) < eps
+
+      # 3. Use Decimal for exact arithmetic
+      from decimal import Decimal
+      time = Decimal('0.0')
+
+      # 4. Use secondary sort key for tiebreaking
+      @dataclass(order=True)
+      class Event:
+          time: float
+          sequence: int  # Tiebreaker: order of scheduling
+          data: Any = field(compare=False)
+
+  - id: initialization-bias
+    severity: high
+    title: "Warm-up Period Not Removed, Biased Results"
+    summary: "Initial transient contaminates steady-state statistics"
+    symptoms:
+      - "Average queue length depends on initial state"
+      - "Results differ with empty vs full initial system"
+      - "Mean slowly drifts as run length increases"
+    why: |
+      Simulation starts in arbitrary state (usually empty).
+      Takes time to reach steady state.
+      Statistics collected during warm-up are biased.
+
+      For stable systems: bias decreases with run length.
+      For unstable systems: never reaches steady state.
+
+      Warm-up can be 10-30% of run for complex systems.
+    gotcha: |
+      # Run simulation from empty start
+      queue = Queue()  # Empty
+      stats = []
+      for t in range(1000):
+          step()
+          stats.append(queue.length)
+
+      avg_length = mean(stats)  # BIASED!
+      # Early observations (queue building up) included
+    solution: |
+      # 1. Detect warm-up with MSER
+      def mser_truncation(observations):
+          n = len(observations)
+          best_d = 0
+          min_mser = float('inf')
+
+          for d in range(n // 4):
+              truncated = observations[d:]
+              mser = np.var(truncated) / len(truncated)
+              if mser < min_mser:
+                  min_mser = mser
+                  best_d = d
+
+          return best_d
+
+      # 2. Use rule of thumb: truncate first 10-20%
+      warmup = int(0.1 * run_length)
+      stats = observations[warmup:]
+
+      # 3. Start in "typical" state if known
+      # Initialize queue with expected steady-state length
+
+      # 4. Welch's graphical method for visual inspection
+      def welch_plot(reps):
+          # Average across replications
+          # Look for where mean stabilizes
+
+  - id: single-replication
+    severity: high
+    title: "Drawing Conclusions from One Run"
+    summary: "No estimate of output variability"
+    symptoms:
+      - "Results not reproducible"
+      - "No confidence intervals"
+      - "Can't distinguish signal from noise"
+    why: |
+      DES outputs are random variables.
+      One run = one sample from distribution.
+
+      Without replications:
+      - Can't estimate variance
+      - Can't compute confidence intervals
+      - Can't detect if difference is significant
+
+      30+ replications for reliable statistics.
+    gotcha: |
+      # Single run comparison
+      result_a = run_system_a()  # Returns 42.3
+      result_b = run_system_b()  # Returns 39.1
+
+      print("System B is better!")  # Maybe... maybe not
+      # Could just be random variation
+    solution: |
+      # 1. Run multiple replications
+      def compare_systems(n_reps=30):
+          results_a = [run_system_a(seed=i) for i in range(n_reps)]
+          results_b = [run_system_b(seed=i) for i in range(n_reps)]
+
+          mean_a = np.mean(results_a)
+          mean_b = np.mean(results_b)
+
+          # Paired t-test (with CRN)
+          diffs = [a - b for a, b in zip(results_a, results_b)]
+          t_stat, p_value = stats.ttest_1samp(diffs, 0)
+
+          print(f"Mean A: {mean_a:.2f}, Mean B: {mean_b:.2f}")
+          print(f"Difference significant: {p_value < 0.05}")
+
+      # 2. Confidence intervals
+      mean = np.mean(results)
+      se = np.std(results, ddof=1) / np.sqrt(len(results))
+      ci = (mean - 1.96*se, mean + 1.96*se)
+
+  - id: simultaneous-events
+    severity: medium
+    title: "Arbitrary Tiebreaking for Same-Time Events"
+    summary: "Event ordering at same time affects results"
+    symptoms:
+      - "Results depend on event scheduling order"
+      - "Different runs handle ties differently"
+      - "Race conditions in what happens first"
+    why: |
+      Real systems: truly simultaneous events are rare.
+      Models: often schedule events at same time:
+      - End of time period events
+      - Batch arrivals
+      - Synchronized processes
+
+      Priority queue needs tiebreaker.
+      If arbitrary: results are non-deterministic.
+      If wrong order: causality violated.
+    gotcha: |
+      # Two events at same time
+      schedule(time=10.0, type='arrival', customer_id=1)
+      schedule(time=10.0, type='arrival', customer_id=2)
+
+      # Who arrives first? Depends on heap implementation!
+      # Python heapq is stable for same key, but...
+      # ... if inserted in different order, different result
+    solution: |
+      # 1. Define explicit priority
+      @dataclass(order=True)
+      class Event:
+          time: float
+          priority: int  # 0 = highest
+          sequence: int  # Tiebreaker: insertion order
+          data: Any = field(compare=False)
+
+      # Priority scheme:
+      # 0: End-of-simulation
+      # 1: Departures (free resources first)
+      # 2: Arrivals
+      # 3: Measurements
+
+      # 2. Use infinitesimal offsets
+      EPSILON = 1e-10
+      schedule(time=10.0, ...)  # Arrival 1
+      schedule(time=10.0 + EPSILON, ...)  # Arrival 2
+
+      # 3. Document assumptions
+      # "Ties broken by event type, then insertion order"
+
+  - id: resource-deadlock
+    severity: medium
+    title: "Deadlock from Circular Resource Requests"
+    summary: "Entities wait forever for resources held by each other"
+    symptoms:
+      - "Simulation hangs"
+      - "Queue lengths grow unbounded"
+      - "Throughput drops to zero"
+    why: |
+      Classic deadlock: A holds X, wants Y; B holds Y, wants X.
+
+      In DES:
+      - Entity 1 has machine A, waiting for machine B
+      - Entity 2 has machine B, waiting for machine A
+      - Neither can proceed
+
+      More complex cycles possible with multiple resources.
+    gotcha: |
+      def process(job):
+          with machine_a.request() as req_a:
+              yield req_a
+              with machine_b.request() as req_b:  # While holding A!
+                  yield req_b
+                  # Do work
+
+      # If Job1 gets A, Job2 gets B simultaneously:
+      # Job1 waits for B (held by Job2)
+      # Job2 waits for A (held by Job1)
+      # DEADLOCK
+    solution: |
+      # 1. Order resource acquisition
+      # Always acquire in same order (A before B)
+      def process_safe(job):
+          with machine_a.request() as req_a:
+              yield req_a
+          # Release A
+          with machine_b.request() as req_b:
+              yield req_b
+          # Now reacquire A if needed
+
+      # 2. Acquire all at once
+      def process_atomic(job):
+          # Request both, wait for both
+          req_a = machine_a.request()
+          req_b = machine_b.request()
+          yield req_a & req_b  # SimPy all-of
+          # Now have both
+
+      # 3. Timeout and retry
+      def process_with_timeout(job):
+          while True:
+              try:
+                  with machine_a.request() as req_a:
+                      yield req_a | env.timeout(10)
+                      if not req_a.triggered:
+                          continue  # Retry
+                      # Got A, try B with timeout
+                      ...
+              except simpy.Interrupt:
+                  # Release and retry
+                  continue
+
+      # 4. Deadlock detection
+      # Monitor wait-for graph for cycles
+
+  - id: unbounded-queues
+    severity: medium
+    title: "Infinite Queue Assumption Hides Blocking"
+    summary: "Real systems have finite buffers, model assumes infinite"
+    symptoms:
+      - "Model shows zero blocking, real system blocks"
+      - "Queue lengths grow unrealistically"
+      - "No backpressure in model"
+    why: |
+      Easy to model infinite queues: just a list.
+      But real systems have limits:
+      - Buffer space is finite
+      - Customers abandon long queues
+      - Upstream blocked by downstream full
+
+      Blocking creates complex dynamics missed by infinite model.
+    gotcha: |
+      # Infinite queue model
+      queue = []  # No limit!
+      def arrival():
+          queue.append(customer)  # Always succeeds
+
+      # Real system: buffer of 10
+      # When full: arrivals blocked or lost
+      # Affects upstream utilization
+    solution: |
+      # 1. Finite capacity queue
+      queue = simpy.Store(env, capacity=10)
+
+      def arrival(customer):
+          if len(queue.items) < queue.capacity:
+              yield queue.put(customer)
+          else:
+              # Blocked or balked
+              lost_customers += 1
+
+      # 2. Model abandonment
+      def arrival_with_patience(customer):
+          with queue.request() as req:
+              result = yield req | env.timeout(patience)
+              if req in result:
+                  # Got service
+                  yield service_time
+              else:
+                  # Abandoned
+                  abandoned += 1
+
+      # 3. Blocking protocols
+      # When downstream full, upstream stops producing
+
+detection:
+  file_patterns:
+    - "**/*simpy*.py"
+    - "**/*simulation*.py"
+    - "**/*queue*.py"
+    - "**/*event*.py"
+    - "**/*des*.py"

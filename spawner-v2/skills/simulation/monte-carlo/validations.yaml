@@ -1,0 +1,117 @@
+validations:
+
+  - id: global-random-state
+    name: Using Global Random State
+    severity: warning
+    type: regex
+    pattern:
+      - "np\\.random\\.seed\\(|random\\.seed\\("
+      - "np\\.random\\.(rand|randn|uniform|normal)\\("
+    message: "Global random state is not thread-safe and hard to reproduce. Use Generator."
+    fix_action: "Use rng = np.random.Generator(np.random.PCG64(seed)) with rng.uniform()"
+    applies_to:
+      - "**/*.py"
+
+  - id: fixed-sample-size
+    name: Fixed Sample Size Without Convergence Check
+    severity: info
+    type: regex
+    pattern:
+      - "for\\s+_\\s+in\\s+range\\(\\d+\\):\\s*\\n.*sample"
+      - "n_samples\\s*=\\s*\\d+(?!.*converge|error|std)"
+    message: "Fixed sample size may waste computation or stop before convergence."
+    fix_action: "Use adaptive sampling with target error: while std_error > target: sample more"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-burn-in-mcmc
+    name: MCMC Without Burn-in
+    severity: warning
+    type: regex
+    pattern:
+      - "mcmc\\.sample\\(.*\\)(?!.*burn|warm)"
+      - "metropolis.*\\(.*\\)(?!.*burn)"
+    message: "MCMC chains need burn-in to reach equilibrium."
+    fix_action: "Add burn_in parameter: mcmc.sample(n_samples, burn_in=1000)"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-ess-check
+    name: MCMC Without Effective Sample Size Check
+    severity: info
+    type: regex
+    pattern:
+      - "samples\\s*=.*mcmc(?!.*ess|effective)"
+    message: "MCMC effective sample size may be much less than nominal."
+    fix_action: "Compute ESS: if ess < 100: warn or run longer"
+    applies_to:
+      - "**/*.py"
+
+  - id: importance-no-weight-check
+    name: Importance Sampling Without Weight Diagnostics
+    severity: warning
+    type: regex
+    pattern:
+      - "weight.*=.*density.*\\/.*density(?!.*ess|max|var)"
+      - "importance_weight(?!.*check|valid|ess)"
+    message: "Importance weights can have huge variance. Check ESS and max weights."
+    fix_action: "Check: ess = 1/sum(w_norm**2); if ess < n/10: proposal is poor"
+    applies_to:
+      - "**/*.py"
+
+  - id: halton-high-dim
+    name: Halton Sequence in High Dimensions
+    severity: info
+    type: regex
+    pattern:
+      - "halton.*dim\\s*=\\s*[1-9]\\d+|halton.*d\\s*=\\s*[1-9]\\d+"
+    message: "Halton sequences show correlation patterns in d > 10. Use Sobol instead."
+    fix_action: "For high dimensions: sampler = qmc.Sobol(d=dim, scramble=True)"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-seed-parallel
+    name: Parallel MC Without Proper Seeding
+    severity: warning
+    type: regex
+    pattern:
+      - "Pool\\(.*\\)\\.map.*random(?!.*SeedSequence|spawn)"
+      - "parallel.*random(?!.*seed.*sequence)"
+    message: "Parallel random streams may overlap without proper seeding."
+    fix_action: "Use SeedSequence.spawn() for independent parallel streams"
+    applies_to:
+      - "**/*.py"
+
+  - id: single-chain-mcmc
+    name: MCMC With Single Chain Only
+    severity: info
+    type: regex
+    pattern:
+      - "mcmc\\.sample\\(.*\\)(?!.*chain|n_chain|multiple)"
+    message: "Single MCMC chain can't detect convergence issues. Run multiple chains."
+    fix_action: "Run 4+ chains from dispersed starts, compute R-hat diagnostic"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-variance-estimate
+    name: MC Estimate Without Error Bound
+    severity: info
+    type: regex
+    pattern:
+      - "np\\.mean\\(.*sample.*\\)(?!.*std|var|error|ci)"
+    message: "Monte Carlo estimates should include uncertainty quantification."
+    fix_action: "Compute std error: stderr = np.std(samples) / np.sqrt(n)"
+    applies_to:
+      - "**/*.py"
+
+  - id: qmc-without-scramble
+    name: QMC Sequence Without Scrambling
+    severity: info
+    type: regex
+    pattern:
+      - "Sobol\\(.*scramble\\s*=\\s*False"
+      - "Halton\\((?!.*scramble)"
+    message: "Unscrambled QMC sequences can show bias. Enable scrambling."
+    fix_action: "Use scramble=True: qmc.Sobol(d=dim, scramble=True)"
+    applies_to:
+      - "**/*.py"
