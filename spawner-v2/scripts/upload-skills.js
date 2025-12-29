@@ -83,65 +83,23 @@ const SKILL_CATEGORIES = [
   
   // Legacy (if any)
   'pattern',
-];// END_CATEGORIES
-// REMOVE_OLD_START
-  'frameworks',
-  'development',
-  'design',
-  'marketing',
-  'strategy',
-  'product',
-  'communications',
-  'integration',
-  'pattern',
-  'startup',      // YC/founder skills
-  'mind',         // AI memory specialists
 ];
-
 /**
  * Upload a key-value pair to KV using REST API (production) or wrangler (local)
  */
 async function uploadToKV(binding, key, value) {
   const valueStr = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
 
-  if (isLocal) {
-    // Local dev: use wrangler
-    const tempFile = path.join(__dirname, '.temp-kv-value');
-    await fs.writeFile(tempFile, valueStr);
-    try {
-      const cmd = `npx wrangler kv key put "${key}" --binding ${binding} --path "${tempFile}" --local`;
-      await execAsync(cmd, { cwd: path.join(__dirname, '..') });
-      console.log(`  ✓ ${key}`);
-    } finally {
-      await fs.unlink(tempFile).catch(() => {});
-    }
-  } else {
-    // Production: use REST API directly (wrangler API tokens don't support PUT)
-    const apiToken = process.env.CLOUDFLARE_API_TOKEN;
-    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || 'bbe40a1869cd5c07782c6fda94b38999';
-    const namespaceId = process.env[`${binding}_KV_ID`] || binding;
-
-    if (!apiToken) {
-      throw new Error('CLOUDFLARE_API_TOKEN environment variable required for production upload');
-    }
-
-    const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/values/${encodeURIComponent(key)}`;
-
-    const response = await fetch(url, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${apiToken}`,
-        'Content-Type': 'text/plain',
-      },
-      body: valueStr,
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(`KV upload failed: ${JSON.stringify(error)}`);
-    }
-
+  // Use wrangler for both local and production (OAuth authenticated)
+  const tempFile = path.join(__dirname, '.temp-kv-value');
+  await fs.writeFile(tempFile, valueStr);
+  try {
+    const localFlag = isLocal ? '--local' : '';
+    const cmd = `npx wrangler kv key put "${key}" --binding ${binding} --path "${tempFile}" ${localFlag}`;
+    await execAsync(cmd, { cwd: path.join(__dirname, '..') });
     console.log(`  ✓ ${key}`);
+  } finally {
+    await fs.unlink(tempFile).catch(() => {});
   }
 }
 
