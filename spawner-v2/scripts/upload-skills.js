@@ -45,6 +45,46 @@ config({ path: path.join(__dirname, '..', '.env') });
 const SKILLS_DIR = path.join(__dirname, '..', 'skills');
 // Skill categories (directories containing skill folders)
 const SKILL_CATEGORIES = [
+  // Core Development
+  'development',
+  'frameworks',
+  'data',
+  'integration',
+  'integrations',
+  
+  // AI & ML
+  'ai',
+  'ai-ml',
+  'agents',
+  
+  // Design & Product
+  'design',
+  'product',
+  'marketing',
+  
+  // Business & Strategy
+  'startup',
+  'strategy',
+  'communications',
+  
+  // Specialized Domains
+  'biotech',
+  'climate',
+  'enterprise',
+  'finance',
+  'hardware',
+  'legal',
+  'science',
+  'simulation',
+  'space',
+  
+  // Meta Skills
+  'mind',
+  
+  // Legacy (if any)
+  'pattern',
+];// END_CATEGORIES
+// REMOVE_OLD_START
   'frameworks',
   'development',
   'design',
