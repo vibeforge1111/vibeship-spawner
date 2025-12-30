@@ -5,7 +5,7 @@
 <footer class="footer">
   <div class="footer-install">
     <code class="install-cmd">npx github:vibeforge1111/vibeship-spawner-skills install --mcp</code>
-    <button class="copy-install" onclick="navigator.clipboard.writeText('npx github:vibeforge1111/vibeship-spawner-skills install --mcp')">
+    <button class="copy-install" onclick={() => navigator.clipboard.writeText('npx github:vibeforge1111/vibeship-spawner-skills install --mcp')}>
       Copy
     </button>
   </div>
