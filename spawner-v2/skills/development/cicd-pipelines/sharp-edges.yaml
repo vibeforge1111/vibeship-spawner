@@ -1,0 +1,503 @@
+# Sharp Edges - CI/CD Pipelines
+# The gotchas that cause failed deployments and security issues
+
+version: 1.0.0
+skill_id: cicd-pipelines
+
+sharp_edges:
+  - id: secrets-exposure
+    summary: Secrets can leak through logs, artifacts, or environment
+    severity: critical
+    situation: |
+      Your workflow logs print environment variables for debugging. Someone
+      runs env or printenv. Your AWS keys appear in the logs. Anyone with
+      repo read access now has your production credentials.
+    why: |
+      CI environments are powerful. They have secrets for deployment. Logs
+      are often public or widely accessible. Even GitHub's masking isn't
+      perfect - if you echo a secret's substring, it won't be masked.
+    solution: |
+      # PROTECT YOUR SECRETS
+
+      # 1. Never echo secrets
+      # WRONG:
+      - run: echo "API_KEY is ${{ secrets.API_KEY }}"
+      - run: printenv
+      - run: env | sort
+
+      # RIGHT:
+      - run: ./deploy.sh
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+
+
+      # 2. Mask custom values
+      - run: |
+          TOKEN=$(generate-token)
+          echo "::add-mask::$TOKEN"
+          echo "Using masked token"
+
+
+      # 3. Don't pass secrets to untrusted code
+      # WRONG: PR from fork runs with secrets
+      on:
+        pull_request_target:  # Dangerous!
+
+      # RIGHT: Separate workflow for PRs
+      on:
+        pull_request:  # No secrets for forks
+
+
+      # 4. Use OIDC instead of long-lived secrets
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456:role/github-actions
+          aws-region: us-east-1
+          # No AWS_ACCESS_KEY_ID needed
+
+
+      # 5. Audit secret access
+      # Review who can trigger workflows
+      # Use environment protection rules
+    symptoms:
+      - Secrets visible in logs
+      - Unexpected AWS/GCP charges
+      - Security audit failures
+    detection_pattern: 'echo.*secrets\\.|printenv|env\\s*$'
+
+  - id: fork-prs-trust
+    summary: pull_request_target runs with secrets on fork PRs
+    severity: critical
+    situation: |
+      You use pull_request_target to build PRs with repo secrets. An
+      attacker opens a PR that modifies the workflow file to exfiltrate
+      secrets. Their code runs with your secrets.
+    why: |
+      pull_request_target uses the workflow from the BASE branch but runs
+      in context of the PR. If you checkout the PR code (actions/checkout
+      with ref), that untrusted code has access to your secrets.
+    solution: |
+      # PULL_REQUEST VS PULL_REQUEST_TARGET
+
+      # SAFE: pull_request (no secrets for forks)
+      on:
+        pull_request:
+          branches: [main]
+      # Fork PRs have read-only GITHUB_TOKEN, no secrets
+
+
+      # DANGEROUS: pull_request_target with checkout
+      on:
+        pull_request_target:
+      steps:
+        - uses: actions/checkout@v4
+          with:
+            ref: ${{ github.event.pull_request.head.sha }}  # DANGER!
+        # This code has secrets access
+
+
+      # SAFE: pull_request_target for labeling only
+      on:
+        pull_request_target:
+          types: [opened]
+      jobs:
+        label:
+          runs-on: ubuntu-latest
+          steps:
+            - uses: actions/labeler@v5  # Doesn't checkout untrusted code
+
+
+      # PATTERN: Two-workflow approach
+      # 1. Build without secrets on PR
+      on:
+        pull_request:
+      jobs:
+        build:
+          # No secrets needed for build/test
+
+      # 2. Comment/deploy with secrets after approval
+      on:
+        workflow_run:
+          workflows: ["Build"]
+          types: [completed]
+      jobs:
+        comment:
+          if: github.event.workflow_run.conclusion == 'success'
+          # Has secrets, but runs approved code
+    symptoms:
+      - Secrets in fork PR logs
+      - Unexpected deployments from forks
+      - Security advisories
+    detection_pattern: 'pull_request_target'
+
+  - id: cache-poisoning
+    summary: Cache can be poisoned by malicious PRs
+    severity: high
+    situation: |
+      Your workflow caches npm/pip dependencies. A fork PR modifies
+      package-lock.json to include malicious packages. The cache is
+      poisoned. Main branch builds now use the malicious cache.
+    why: |
+      Caches are shared across branches by default. A PR can write to
+      cache. If cache key matches, main branch uses the poisoned cache.
+    solution: |
+      # PREVENT CACHE POISONING
+
+      # 1. Use branch-specific cache keys
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ github.ref }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-${{ github.ref }}-
+            # Don't restore from other branches
+
+
+      # 2. Separate cache for PRs
+      - uses: actions/cache@v4
+        if: github.event_name == 'push'  # Only cache on push
+        with:
+          path: ~/.npm
+          key: npm-${{ hashFiles('**/package-lock.json') }}
+
+
+      # 3. Use cache read-only for PRs
+      - uses: actions/cache/restore@v4  # Restore only
+        if: github.event_name == 'pull_request'
+        with:
+          path: ~/.npm
+          key: npm-${{ hashFiles('**/package-lock.json') }}
+
+
+      # 4. Verify cache integrity
+      - run: npm ci --ignore-scripts  # Don't run postinstall from cache
+      - run: npm audit
+    symptoms:
+      - Different builds on main vs PR
+      - Unexpected dependencies
+      - Security warnings after merge
+    detection_pattern: null
+
+  - id: concurrency-races
+    summary: Concurrent deployments cause race conditions
+    severity: high
+    situation: |
+      Two developers push to main within seconds. Two deployments start.
+      The first one finishes, deploys v1.0.1. The second one finishes,
+      deploys v1.0.0. Production is now running older code.
+    why: |
+      Without concurrency control, workflows run independently. There's
+      no ordering guarantee. Slower builds might finish after newer ones.
+    solution: |
+      # CONTROL CONCURRENCY
+
+      # Option 1: Cancel previous runs (for CI)
+      concurrency:
+        group: ${{ github.workflow }}-${{ github.ref }}
+        cancel-in-progress: true
+
+
+      # Option 2: Queue deployments (for CD)
+      concurrency:
+        group: deploy-${{ github.event.inputs.environment }}
+        cancel-in-progress: false  # Wait, don't cancel
+
+
+      # Option 3: Lock deployments with environment
+      jobs:
+        deploy:
+          environment: production  # Only one can run at a time
+          concurrency: production-deploy
+
+
+      # GitLab CI:
+      resource_group: production
+
+
+      # Manual lock pattern:
+      - uses: github/lock@v2
+        with:
+          key: deploy-production
+          timeout: 3600  # Wait up to 1 hour
+    symptoms:
+      - Wrong version in production
+      - Deploys out of order
+      - Rollback issues
+    detection_pattern: 'deploy(?!.*concurrency)'
+
+  - id: missing-timeouts
+    summary: Workflows without timeouts can run forever
+    severity: medium
+    situation: |
+      Your test suite hangs on a flaky test. The job runs for 6 hours
+      until GitHub kills it. You've burned 6 hours of compute and
+      developers waited all day for a "pass".
+    why: |
+      GitHub's default timeout is 6 hours. Most jobs should complete
+      in minutes. A hanging job wastes money and blocks merges.
+    solution: |
+      # SET TIMEOUTS
+
+      # Job-level timeout
+      jobs:
+        test:
+          runs-on: ubuntu-latest
+          timeout-minutes: 15  # Kill if not done in 15 min
+
+
+      # Step-level timeout
+      steps:
+        - run: npm test
+          timeout-minutes: 10
+
+
+      # GitLab CI:
+      test:
+        timeout: 15 minutes
+
+
+      # Reasonable defaults:
+      # - Lint: 5 minutes
+      # - Unit tests: 15 minutes
+      # - Integration tests: 30 minutes
+      # - E2E tests: 30 minutes
+      # - Build: 15 minutes
+      # - Deploy: 10 minutes
+    symptoms:
+      - Jobs running for hours
+      - High CI costs
+      - Blocked merge queues
+    detection_pattern: 'jobs:[^}]*(?!timeout-minutes)'
+
+  - id: flaky-tests
+    summary: Tests that sometimes pass, sometimes fail
+    severity: medium
+    situation: |
+      A test fails on CI but passes locally. You re-run, it passes.
+      Next PR, it fails again. Developers learn to just re-run failures.
+      One day, a real bug gets through.
+    why: |
+      Flaky tests erode trust. If people expect random failures, they
+      stop investigating. Real bugs get ignored. CI becomes theater.
+    solution: |
+      # HANDLE FLAKY TESTS
+
+      # 1. Quarantine flaky tests
+      describe.skip('Flaky: File upload', () => {
+        // TODO: Fix race condition
+      });
+
+
+      # 2. Retry mechanism (last resort)
+      - uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: npm test
+
+
+      # 3. Track flakiness
+      - uses: dorny/test-reporter@v1
+        with:
+          list-tests: all  # See which tests failed
+
+
+      # 4. Fix root causes
+      # - Add explicit waits, not sleep
+      # - Mock external dependencies
+      # - Use deterministic data
+      # - Isolate test databases
+
+
+      # 5. Run flaky tests separately
+      jobs:
+        stable-tests:
+          # ...
+        flaky-tests:
+          continue-on-error: true
+          # Alert but don't block
+    symptoms:
+      - "Re-run" being clicked often
+      - Same tests failing randomly
+      - Developers ignoring failures
+    detection_pattern: null
+
+  - id: hardcoded-versions
+    summary: Action versions not pinned to SHA
+    severity: medium
+    situation: |
+      You use actions/checkout@v4. The action gets compromised. All your
+      workflows now run malicious code. Or the action has a breaking change.
+      Your previously working pipeline suddenly fails.
+    why: |
+      @v4 is a mutable tag. It can be moved to point to different code.
+      Tags can be deleted and recreated. SHA is the only immutable reference.
+    solution: |
+      # PIN ACTION VERSIONS
+
+      # RISKY: Mutable tag
+      - uses: actions/checkout@v4
+
+      # BETTER: Full version
+      - uses: actions/checkout@v4.1.1
+
+      # BEST: SHA (immutable)
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+
+      # Renovate/Dependabot can update SHAs
+      # .github/renovate.json
+      {
+        "extends": ["config:base"],
+        "github-actions": {
+          "enabled": true,
+          "pinDigests": true
+        }
+      }
+
+      # For internal actions, always use SHA
+      - uses: org/internal-action@abc123def
+
+      # Verify action source before use
+      # Check https://github.com/actions/checkout/releases
+    symptoms:
+      - Unexpected workflow behavior
+      - Security vulnerabilities
+      - "Workflow worked yesterday"
+    detection_pattern: 'uses:\\s*[^@]+@v\\d+\\s*$'
+
+  - id: environment-drift
+    summary: CI environment differs from production
+    severity: medium
+    situation: |
+      Tests pass in CI but app crashes in production. The Node version
+      is different. The database version is different. CI uses SQLite,
+      production uses Postgres.
+    why: |
+      Any difference between CI and production is a potential bug that
+      won't be caught. Different OS, different versions, different
+      configs all lead to "works in CI, breaks in prod".
+    solution: |
+      # MATCH ENVIRONMENTS
+
+      # 1. Use containers matching production
+      jobs:
+        test:
+          container:
+            image: node:20.10-alpine  # Match Dockerfile
+
+        test-db:
+          services:
+            postgres:
+              image: postgres:16-alpine  # Match production
+
+
+      # 2. Use matrix for version compatibility
+      strategy:
+        matrix:
+          node: ['18', '20', '22']  # Test all supported
+
+
+      # 3. Pin versions explicitly
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'  # Same as local
+
+
+      # 4. Run integration tests with production config
+      - run: docker-compose -f docker-compose.ci.yml up -d
+      - run: npm run test:integration
+        env:
+          DATABASE_URL: postgresql://...
+
+
+      # 5. Use the same Docker image
+      jobs:
+        build:
+          outputs:
+            image: ${{ steps.build.outputs.image }}
+          steps:
+            - id: build
+              run: docker build -t myapp:${{ github.sha }} .
+
+        test:
+          needs: build
+          container:
+            image: myapp:${{ needs.build.outputs.image }}
+    symptoms:
+      - "Works in CI, fails in prod"
+      - Different behavior across environments
+      - Subtle bugs only in production
+    detection_pattern: null
+
+  - id: long-running-workflows
+    summary: Workflows that take too long
+    severity: medium
+    situation: |
+      Your CI takes 45 minutes. Developers push and go to lunch. They
+      forget about the PR. By the time CI finishes, they're on something
+      else. Bugs get found days later.
+    why: |
+      Fast feedback is the whole point of CI. If it's not fast, developers
+      won't wait for it. They'll merge without checking. They'll skip CI.
+    solution: |
+      # OPTIMIZE BUILD TIME
+
+      # 1. Cache everything
+      - uses: actions/setup-node@v4
+        with:
+          cache: 'npm'  # Built-in caching
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            **/node_modules
+            ~/.cache/Cypress
+          key: deps-${{ hashFiles('**/package-lock.json') }}
+
+
+      # 2. Parallelize
+      jobs:
+        lint:  # 2 min
+        test:  # 5 min
+        build:  # 3 min
+        # All run in parallel = 5 min total
+
+
+      # 3. Run expensive checks only when needed
+      jobs:
+        changes:
+          outputs:
+            frontend: ${{ steps.filter.outputs.frontend }}
+          steps:
+            - uses: dorny/paths-filter@v3
+              id: filter
+              with:
+                filters: |
+                  frontend:
+                    - 'src/frontend/**'
+
+        e2e:
+          needs: changes
+          if: needs.changes.outputs.frontend == 'true'
+
+
+      # 4. Use larger runners for faster builds
+      jobs:
+        build:
+          runs-on: ubuntu-latest-4-cores  # Faster
+
+
+      # 5. Split test suites
+      jobs:
+        test:
+          strategy:
+            matrix:
+              shard: [1, 2, 3, 4]
+          steps:
+            - run: npm test -- --shard=${{ matrix.shard }}/4
+    symptoms:
+      - >30 minute CI runs
+      - Developers not waiting for CI
+      - Low PR throughput
+    detection_pattern: null

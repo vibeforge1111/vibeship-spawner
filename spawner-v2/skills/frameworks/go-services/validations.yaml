@@ -1,0 +1,220 @@
+# Validations - Go Services
+# Automated checks that run on Go code
+
+version: 1.0.0
+skill_id: go-services
+
+validations:
+  # Critical - Will cause bugs or crashes
+  - id: error-ignored
+    name: Error return value ignored
+    severity: error
+    type: regex
+    pattern:
+      - '^\s*\w+\([^)]*\)\s*$'
+      - '_\s*,?\s*=\s*\w+\([^)]*\)(?!\s*//)'
+    message: "Error return value ignored - errors should be handled explicitly"
+    fix_action: "Handle the error: if err != nil { return err }"
+    applies_to:
+      - "*.go"
+
+  - id: naked-panic
+    name: Naked panic without recovery
+    severity: error
+    type: regex
+    pattern:
+      - 'panic\([^)]+\)'
+    message: "Panic in production code - use error returns instead"
+    fix_action: "Return an error instead of panicking: return fmt.Errorf(...)"
+    applies_to:
+      - "*.go"
+
+  - id: hardcoded-timeout
+    name: HTTP client with no timeout
+    severity: error
+    type: regex
+    pattern:
+      - 'http\.DefaultClient'
+      - '&http\.Client\{\s*\}'
+    message: "HTTP client without timeout will block forever on slow responses"
+    fix_action: "Set explicit timeout: &http.Client{Timeout: 30*time.Second}"
+    applies_to:
+      - "*.go"
+
+  - id: hardcoded-credentials
+    name: Hardcoded credentials in code
+    severity: error
+    type: regex
+    pattern:
+      - 'password\s*:?=\s*"[^"]+"'
+      - 'apiKey\s*:?=\s*"[^"]+"'
+      - 'secret\s*:?=\s*"[^"]+"'
+    message: "Hardcoded credentials - use environment variables"
+    fix_action: "Use os.Getenv() or a secrets manager"
+    applies_to:
+      - "*.go"
+
+  - id: fmt-print-in-production
+    name: fmt.Print used instead of logging
+    severity: warning
+    type: regex
+    pattern:
+      - 'fmt\.Print(ln|f)?\('
+    message: "fmt.Print lacks timestamps and levels - use structured logging"
+    fix_action: "Use slog, log/slog, or zerolog for structured logging"
+    applies_to:
+      - "*.go"
+
+  - id: context-background-in-handler
+    name: context.Background() in HTTP handler
+    severity: warning
+    type: regex
+    pattern:
+      - 'context\.Background\(\)'
+    message: "Use r.Context() in HTTP handlers, not context.Background()"
+    fix_action: "Pass the request context: ctx := r.Context()"
+    applies_to:
+      - "*.go"
+
+  - id: goroutine-without-recovery
+    name: Goroutine without panic recovery
+    severity: warning
+    type: regex
+    pattern:
+      - 'go\s+func\s*\([^)]*\)\s*\{(?![\s\S]*defer[\s\S]*recover)'
+    message: "Goroutine without recover() - uncaught panic will crash service"
+    fix_action: "Add defer with recover: defer func() { if r := recover(); r != nil { log.Error(...) } }()"
+    applies_to:
+      - "*.go"
+
+  - id: mutex-not-deferred
+    name: Mutex unlock not deferred
+    severity: warning
+    type: regex
+    pattern:
+      - '\.Lock\(\)[^}]*\.Unlock\(\)(?!\s*defer)'
+    message: "Mutex unlock not deferred - may not unlock on panic"
+    fix_action: "Use defer: mu.Lock(); defer mu.Unlock()"
+    applies_to:
+      - "*.go"
+
+  - id: empty-interface
+    name: Overuse of interface{}
+    severity: info
+    type: regex
+    pattern:
+      - 'interface\{\}'
+      - '\bany\b'
+    message: "interface{}/any loses type safety - consider generics or specific types"
+    fix_action: "Use generics [T any] or define a specific interface"
+    applies_to:
+      - "*.go"
+
+  - id: time-sleep-in-production
+    name: time.Sleep used for timing
+    severity: warning
+    type: regex
+    pattern:
+      - 'time\.Sleep\('
+    message: "time.Sleep blocks goroutine - use time.After with select for cancellation"
+    fix_action: "Use select with time.After and context.Done()"
+    applies_to:
+      - "*.go"
+
+  - id: strconv-instead-of-fmt
+    name: fmt.Sprintf for simple conversions
+    severity: info
+    type: regex
+    pattern:
+      - 'fmt\.Sprintf\("%d",\s*\w+\)'
+      - 'fmt\.Sprintf\("%s",\s*\w+\)'
+    message: "Use strconv for simple conversions - faster than fmt"
+    fix_action: "Use strconv.Itoa() or strconv.FormatInt()"
+    applies_to:
+      - "*.go"
+
+  - id: sql-string-concat
+    name: SQL query with string concatenation
+    severity: error
+    type: regex
+    pattern:
+      - '(Query|Exec)\s*\([^,]*\+\s*\w+'
+      - '(Query|Exec)\s*\(\s*fmt\.Sprintf'
+    message: "SQL injection vulnerability - use parameterized queries"
+    fix_action: "Use $1, $2 placeholders: db.Query(\"SELECT * FROM users WHERE id = $1\", id)"
+    applies_to:
+      - "*.go"
+
+code_smells:
+  - id: too-many-parameters
+    name: Function with too many parameters
+    description: "Functions with 5+ parameters are hard to use correctly"
+    pattern: 'func\s+\w+\s*\([^)]{100,}\)'
+    suggestion: "Use a config struct or functional options pattern"
+
+  - id: deeply-nested-logic
+    name: Deep nesting
+    description: "Deeply nested if/for blocks are hard to follow"
+    pattern: '\{\s*\n\s*\{\s*\n\s*\{\s*\n\s*\{'
+    suggestion: "Extract functions or use early returns to flatten logic"
+
+  - id: long-function
+    name: Function too long
+    description: "Functions over 50 lines often do too much"
+    pattern: null
+    suggestion: "Extract helper functions with single responsibilities"
+
+best_practices:
+  structured_logging:
+    recommendation: |
+      Use Go 1.21+ slog for structured logging:
+
+      import "log/slog"
+
+      logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+      logger.Info("user logged in",
+          slog.String("user_id", userID),
+          slog.Int("attempt", attempt),
+      )
+
+  error_types:
+    recommendation: |
+      Define domain-specific error types:
+
+      type NotFoundError struct {
+          Resource string
+          ID       string
+      }
+
+      func (e *NotFoundError) Error() string {
+          return fmt.Sprintf("%s not found: %s", e.Resource, e.ID)
+      }
+
+      // Check with errors.As
+      var notFound *NotFoundError
+      if errors.As(err, &notFound) {
+          // Handle not found
+      }
+
+  testing:
+    recommendation: |
+      Use parallel tests and t.Helper():
+
+      func TestUser(t *testing.T) {
+          t.Parallel()  // Run tests in parallel
+
+          tests := []struct{...}
+          for _, tt := range tests {
+              t.Run(tt.name, func(t *testing.T) {
+                  t.Parallel()  // Subtests can also be parallel
+                  // ...
+              })
+          }
+      }
+
+      func assertEqual(t testing.TB, got, want string) {
+          t.Helper()  // Report caller's line, not this function
+          if got != want {
+              t.Errorf("got %q, want %q", got, want)
+          }
+      }

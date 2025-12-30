@@ -1,0 +1,491 @@
+# Sharp Edges - Firebase
+# The gotchas that cause security breaches and surprise bills
+
+version: 1.0.0
+skill_id: firebase
+
+sharp_edges:
+  - id: security-rules-allow-all
+    summary: "allow read, write: if true" exposes your entire database
+    severity: critical
+    situation: |
+      You're prototyping fast, so you set security rules to allow everything.
+      Or you copied rules from a tutorial that says "for testing only."
+      You forget to fix them before launch.
+    why: |
+      Anyone can read all your data. Anyone can delete everything. Anyone can
+      write anything. Your users' private data is public. This is not theoretical -
+      databases get scraped within hours of being discovered.
+    solution: |
+      # SECURE RULES FROM DAY ONE
+
+      rules_version = '2';
+      service cloud.firestore {
+        match /databases/{database}/documents {
+          // DEFAULT DENY - nothing gets through unless explicitly allowed
+          match /{document=**} {
+            allow read, write: if false;
+          }
+
+          // Explicitly allow what's needed
+          match /users/{userId} {
+            allow read: if request.auth != null;
+            allow write: if request.auth.uid == userId;
+          }
+
+          match /posts/{postId} {
+            allow read: if resource.data.published == true;
+            allow create: if request.auth != null
+                          && request.resource.data.authorId == request.auth.uid;
+            allow update, delete: if request.auth.uid == resource.data.authorId;
+          }
+        }
+      }
+
+      # Test your rules!
+      npm install -g firebase-tools
+      firebase emulators:start
+      # Run @firebase/rules-unit-testing tests
+    symptoms:
+      - Unknown users in your database
+      - Data appears deleted or modified
+      - Complaints about leaked data
+    detection_pattern: 'allow\s+(read|write)[^;]*:\s*if\s+true'
+
+  - id: firestore-query-cost-explosion
+    summary: Listeners on large collections cause massive read costs
+    severity: critical
+    situation: |
+      You attach an onSnapshot listener to a collection without filters.
+      The collection grows to 100k documents. Every time any document
+      changes, your listener fires. Your bill explodes.
+    why: |
+      Firestore charges per document read. When you attach a listener to a
+      collection, you're billed for reading every document. If the collection
+      has 100k docs, that's 100k reads. Each time a document changes, you pay
+      for the read. With active data, this compounds.
+    solution: |
+      # ALWAYS LIMIT AND FILTER LISTENERS
+
+      // DANGEROUS: No limits
+      onSnapshot(collection(db, 'messages'), callback);
+
+      // SAFE: Scoped and limited
+      const q = query(
+        collection(db, 'messages'),
+        where('roomId', '==', currentRoom),  // Filter to relevant docs
+        orderBy('createdAt', 'desc'),
+        limit(50)  // Cap the reads
+      );
+      onSnapshot(q, callback);
+
+      // For large datasets, use pagination
+      const first = query(
+        collection(db, 'posts'),
+        orderBy('createdAt'),
+        limit(25)
+      );
+
+      // Get next page
+      const next = query(
+        collection(db, 'posts'),
+        orderBy('createdAt'),
+        startAfter(lastDoc),
+        limit(25)
+      );
+
+      # Monitor usage in Firebase Console
+      # Set up billing alerts!
+    symptoms:
+      - Unexpectedly high Firebase bill
+      - Console shows millions of reads
+      - App slows down with data growth
+    detection_pattern: 'onSnapshot\s*\(\s*collection\s*\([^)]+\)\s*,'
+
+  - id: no-unsubscribe-memory-leak
+    summary: Firestore listeners without cleanup leak memory and cost money
+    severity: high
+    situation: |
+      You set up onSnapshot listeners but don't unsubscribe when the
+      component unmounts. Listeners accumulate. Memory usage grows.
+      You're paying for reads on components that don't exist anymore.
+    why: |
+      onSnapshot returns an unsubscribe function. If you don't call it,
+      the listener stays active forever. In React, every mount without
+      unmount cleanup creates another listener. After navigating around,
+      you might have dozens of duplicate listeners.
+    solution: |
+      # ALWAYS UNSUBSCRIBE
+
+      // React with useEffect
+      useEffect(() => {
+        const unsubscribe = onSnapshot(docRef, (snapshot) => {
+          setData(snapshot.data());
+        });
+
+        // Cleanup on unmount
+        return () => unsubscribe();
+      }, [docRef]);
+
+      // Class component
+      componentDidMount() {
+        this.unsubscribe = onSnapshot(docRef, ...);
+      }
+
+      componentWillUnmount() {
+        this.unsubscribe?.();
+      }
+
+      // Vue with onUnmounted
+      onMounted(() => {
+        unsubscribe = onSnapshot(docRef, ...);
+      });
+
+      onUnmounted(() => {
+        unsubscribe();
+      });
+    symptoms:
+      - Memory usage grows over time
+      - Duplicate data updates
+      - Reads continue after navigating away
+    detection_pattern: 'onSnapshot\s*\([^)]+\)(?!.*unsubscribe)'
+
+  - id: admin-sdk-in-client
+    summary: Firebase Admin SDK credentials exposed in client code
+    severity: critical
+    situation: |
+      You need to do something that requires admin access. You import
+      firebase-admin in your client code and include the service account
+      key. Your app works, but anyone can extract those credentials.
+    why: |
+      Admin SDK has unlimited access. It bypasses all security rules.
+      With admin credentials, an attacker can: read all data, delete
+      everything, impersonate any user, modify authentication. Game over.
+    solution: |
+      # ADMIN SDK = SERVER ONLY
+
+      // CLIENT CODE - use regular SDK
+      import { initializeApp } from 'firebase/app';
+      import { getFirestore } from 'firebase/firestore';
+
+      const app = initializeApp({
+        apiKey: "...",  // This is OK to expose
+        // ...client config
+      });
+
+      // SERVER CODE (Cloud Functions, Node.js backend)
+      import { initializeApp, cert } from 'firebase-admin/app';
+      import { getFirestore } from 'firebase-admin/firestore';
+
+      // In Cloud Functions, auto-initializes
+      initializeApp();
+
+      // In other servers, use service account
+      initializeApp({
+        credential: cert(serviceAccount)  // NEVER in client!
+      });
+
+      # For operations requiring admin access:
+      # 1. Create a Cloud Function
+      # 2. Call it from client with user's auth token
+      # 3. Verify token in function
+      # 4. Perform admin operation
+    symptoms:
+      - Service account JSON in client bundle
+      - firebase-admin in client dependencies
+      - Full database access without rules
+    detection_pattern: 'firebase-admin|credential.*cert\s*\('
+
+  - id: no-auth-verification-functions
+    summary: Cloud Functions don't verify authentication
+    severity: critical
+    situation: |
+      You create an HTTP Cloud Function. You assume only your app calls
+      it. You don't verify the auth token. Anyone who finds the URL can
+      call your function with any data.
+    why: |
+      Cloud Function URLs are public. Anyone can call them. Without auth
+      verification, there's no way to know who's calling. Attackers can
+      abuse your function, access other users' data, or rack up your bill.
+    solution: |
+      # VERIFY AUTH IN EVERY FUNCTION
+
+      import { onRequest } from 'firebase-functions/v2/https';
+      import { getAuth } from 'firebase-admin/auth';
+
+      export const secureEndpoint = onRequest(
+        { cors: true },
+        async (req, res) => {
+          // Extract token from Authorization header
+          const authHeader = req.headers.authorization;
+          if (!authHeader?.startsWith('Bearer ')) {
+            res.status(401).json({ error: 'No token provided' });
+            return;
+          }
+
+          const token = authHeader.split('Bearer ')[1];
+
+          try {
+            // Verify the token
+            const decoded = await getAuth().verifyIdToken(token);
+
+            // Now you know who's calling
+            const userId = decoded.uid;
+
+            // Proceed with operation
+            res.json({ userId, message: 'Authenticated!' });
+
+          } catch (error) {
+            res.status(401).json({ error: 'Invalid token' });
+          }
+        }
+      );
+
+      // Client-side: include token in requests
+      const token = await getAuth().currentUser.getIdToken();
+      const response = await fetch(functionUrl, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+    symptoms:
+      - Function accessible without login
+      - Unknown users triggering functions
+      - Abuse of function endpoints
+    detection_pattern: 'onRequest\s*\([^)]*\)[^{]*\{(?!.*verifyIdToken)'
+
+  - id: firestore-relational-thinking
+    summary: Designing Firestore like a relational database
+    severity: high
+    situation: |
+      You design your Firestore schema with normalized data, expecting
+      to JOIN collections like SQL. Then you realize Firestore can't
+      join. You're stuck with N+1 queries or a complete redesign.
+    why: |
+      Firestore has no joins. Period. If you need data from two
+      collections, that's two queries. If you need to get a post and
+      its author separately for every post, that's N+1 reads. This is
+      slow and expensive.
+    solution: |
+      # DENORMALIZE FOR QUERIES
+
+      // WRONG: Normalized (SQL thinking)
+      // posts/{postId}: { title, authorId }
+      // users/{userId}: { name, avatar }
+      // To display: 2 queries per post
+
+      // RIGHT: Embed frequently-needed data
+      // posts/{postId}
+      {
+        title: "My Post",
+        content: "...",
+        author: {
+          id: "user123",
+          name: "Jane Doe",
+          avatar: "https://..."
+        },
+        createdAt: Timestamp
+      }
+
+      // Trade-off: When author updates profile,
+      // update all their posts too
+
+      async function updateUserName(userId, newName) {
+        const batch = writeBatch(db);
+
+        // Update user document
+        batch.update(doc(db, 'users', userId), { name: newName });
+
+        // Update all user's posts
+        const posts = await getDocs(
+          query(collection(db, 'posts'),
+            where('author.id', '==', userId))
+        );
+
+        posts.docs.forEach(post => {
+          batch.update(post.ref, { 'author.name': newName });
+        });
+
+        await batch.commit();
+      }
+    symptoms:
+      - Many sequential reads
+      - Can't query across collections
+      - Slow list views
+    detection_pattern: null
+
+  - id: emulator-not-used
+    summary: Testing against production instead of emulators
+    severity: medium
+    situation: |
+      You're developing and testing directly against your production
+      Firebase project. Your test data mixes with real data. A bug in
+      your test code deletes production documents.
+    why: |
+      Production data is precious. Test data is garbage. When they mix,
+      you can't tell them apart. When your tests delete "all documents
+      in collection," they might delete real user data.
+    solution: |
+      # USE FIREBASE EMULATORS
+
+      # Install Firebase CLI
+      npm install -g firebase-tools
+
+      # Initialize emulators
+      firebase init emulators
+
+      # Start emulators
+      firebase emulators:start
+
+      // Connect to emulators in development
+      import { connectFirestoreEmulator } from 'firebase/firestore';
+      import { connectAuthEmulator } from 'firebase/auth';
+
+      if (process.env.NODE_ENV === 'development') {
+        connectFirestoreEmulator(db, 'localhost', 8080);
+        connectAuthEmulator(auth, 'http://localhost:9099');
+      }
+
+      // In tests
+      import { initializeTestEnvironment } from '@firebase/rules-unit-testing';
+
+      const testEnv = await initializeTestEnvironment({
+        projectId: 'test-project',
+        firestore: {
+          rules: fs.readFileSync('firestore.rules', 'utf8')
+        }
+      });
+
+      // Clean up after tests
+      await testEnv.clearFirestore();
+    symptoms:
+      - Test data in production
+      - Accidentally deleted real data
+      - No local development possible offline
+    detection_pattern: null
+
+  - id: timestamp-confusion
+    summary: Using JavaScript Date instead of Firestore Timestamp
+    severity: medium
+    situation: |
+      You store timestamps as JavaScript Date objects or ISO strings.
+      Firestore queries on date ranges don't work as expected. Timezone
+      issues appear. Ordering is wrong.
+    why: |
+      Firestore has a native Timestamp type. It's what you should use.
+      JavaScript Dates get serialized as strings or maps, not Timestamps.
+      Queries like where('createdAt', '>', someDate) may not work.
+    solution: |
+      # USE FIRESTORE TIMESTAMPS
+
+      import { serverTimestamp, Timestamp } from 'firebase/firestore';
+
+      // WRONG: JavaScript Date
+      await setDoc(docRef, {
+        createdAt: new Date()  // Serialized inconsistently
+      });
+
+      // RIGHT: Server timestamp (set by server)
+      await setDoc(docRef, {
+        createdAt: serverTimestamp()  // Always accurate
+      });
+
+      // RIGHT: Explicit Timestamp
+      await setDoc(docRef, {
+        scheduledFor: Timestamp.fromDate(new Date('2024-12-31'))
+      });
+
+      // Querying with timestamps
+      const yesterday = Timestamp.fromDate(
+        new Date(Date.now() - 24 * 60 * 60 * 1000)
+      );
+
+      const recentPosts = await getDocs(
+        query(
+          collection(db, 'posts'),
+          where('createdAt', '>', yesterday),
+          orderBy('createdAt', 'desc')
+        )
+      );
+
+      // Converting to JavaScript Date
+      const createdAt = doc.data().createdAt.toDate();
+    symptoms:
+      - Date queries return wrong results
+      - Timezone inconsistencies
+      - orderBy on dates doesn't work
+    detection_pattern: 'new Date\s*\(\s*\)|Date\.now\s*\(\s*\)'
+
+framework_specific:
+  react:
+    - id: no-usememo-on-queries
+      summary: Query objects recreated on every render
+      situation: |
+        You define a Firestore query inside a component without useMemo.
+        The query object is recreated every render, causing useEffect
+        to re-subscribe constantly.
+      solution: |
+        // WRONG: Query recreated every render
+        function Posts({ userId }) {
+          const q = query(
+            collection(db, 'posts'),
+            where('authorId', '==', userId)
+          );
+
+          useEffect(() => {
+            const unsub = onSnapshot(q, setData);
+            return unsub;
+          }, [q]);  // q is new every render!
+        }
+
+        // RIGHT: Memoize the query
+        function Posts({ userId }) {
+          const q = useMemo(() =>
+            query(
+              collection(db, 'posts'),
+              where('authorId', '==', userId)
+            ),
+            [userId]  // Only recreate when userId changes
+          );
+
+          useEffect(() => {
+            const unsub = onSnapshot(q, setData);
+            return unsub;
+          }, [q]);
+        }
+
+  nextjs:
+    - id: firebase-in-server-components
+      summary: Using Firebase client SDK in Server Components
+      situation: |
+        You import Firebase in a Server Component. Firebase relies on
+        browser APIs (localStorage, WebSocket). The component errors or
+        behaves unexpectedly.
+      solution: |
+        // WRONG: Firebase in Server Component
+        // app/page.tsx (Server Component by default)
+        import { getFirestore } from 'firebase/firestore';
+
+        export default function Page() {
+          const db = getFirestore();  // Error!
+          // ...
+        }
+
+        // RIGHT: Firebase in Client Component
+        // app/page.tsx
+        import Posts from './Posts';
+        export default function Page() {
+          return <Posts />;
+        }
+
+        // app/Posts.tsx
+        'use client';
+        import { getFirestore } from 'firebase/firestore';
+
+        export default function Posts() {
+          const db = getFirestore(app);
+          // ...
+        }
+
+        // For server-side data fetching, use Admin SDK
+        // in API routes or Server Actions

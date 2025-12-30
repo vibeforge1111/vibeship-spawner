@@ -1,0 +1,469 @@
+# Sharp Edges - GraphQL
+# The gotchas that cause performance issues and security vulnerabilities
+
+version: 1.0.0
+skill_id: graphql
+
+sharp_edges:
+  - id: n-plus-one-queries
+    summary: Each resolver makes separate database queries
+    severity: critical
+    situation: |
+      You write resolvers that fetch data individually. A query for
+      10 posts with authors makes 11 database queries. For 100 posts,
+      that's 101 queries. Response time becomes seconds.
+    why: |
+      GraphQL resolvers run independently. Without batching, the author
+      resolver runs separately for each post. The database gets hammered
+      with repeated similar queries.
+    solution: |
+      # USE DATALOADER
+
+      import DataLoader from 'dataloader';
+
+      // Create loader per request
+      const userLoader = new DataLoader(async (ids) => {
+        const users = await db.user.findMany({
+          where: { id: { in: ids } }
+        });
+        // IMPORTANT: Return in same order as input ids
+        const userMap = new Map(users.map(u => [u.id, u]));
+        return ids.map(id => userMap.get(id));
+      });
+
+      // Use in resolver
+      const resolvers = {
+        Post: {
+          author: (post, _, { loaders }) =>
+            loaders.userLoader.load(post.authorId)
+        }
+      };
+
+      # Key points:
+      # 1. Create new loaders per request (for caching scope)
+      # 2. Return results in same order as input IDs
+      # 3. Handle missing items (return null, not skip)
+    symptoms:
+      - Slow API responses
+      - Many similar database queries in logs
+      - Performance degrades with list size
+    detection_pattern: 'findUnique|findOne|findById(?!.*DataLoader)'
+
+  - id: no-query-depth-limit
+    summary: Deeply nested queries can DoS your server
+    severity: critical
+    situation: |
+      Your schema has circular relationships (user.posts.author.posts...).
+      A client sends a query 20 levels deep. Your server tries to resolve
+      it and either times out or crashes.
+    why: |
+      GraphQL allows clients to request any valid query shape. Without
+      limits, a malicious or buggy client can craft queries that require
+      exponential work. Even legitimate queries can accidentally be too deep.
+    solution: |
+      # LIMIT QUERY DEPTH AND COMPLEXITY
+
+      import depthLimit from 'graphql-depth-limit';
+      import { createComplexityLimitRule } from 'graphql-validation-complexity';
+
+      const server = new ApolloServer({
+        typeDefs,
+        resolvers,
+        validationRules: [
+          // Limit nesting depth
+          depthLimit(10),
+
+          // Limit query complexity
+          createComplexityLimitRule(1000, {
+            scalarCost: 1,
+            objectCost: 2,
+            listFactor: 10
+          })
+        ]
+      });
+
+      # Also consider:
+      # - Query timeout limits
+      # - Rate limiting per client
+      # - Persisted queries (only allow pre-registered queries)
+    symptoms:
+      - Server timeouts on certain queries
+      - Memory exhaustion
+      - Slow response for nested queries
+    detection_pattern: null
+
+  - id: exposed-introspection
+    summary: Introspection enabled in production exposes your schema
+    severity: high
+    situation: |
+      You deploy to production with introspection enabled. Anyone can
+      query your schema, discover all types, mutations, and field names.
+      Attackers know exactly what to target.
+    why: |
+      Introspection is essential for development and tooling, but in
+      production it's a roadmap for attackers. They can find admin
+      mutations, internal fields, and deprecated but still working APIs.
+    solution: |
+      # DISABLE INTROSPECTION IN PRODUCTION
+
+      const server = new ApolloServer({
+        typeDefs,
+        resolvers,
+        introspection: process.env.NODE_ENV !== 'production',
+        plugins: [
+          process.env.NODE_ENV === 'production'
+            ? ApolloServerPluginLandingPageDisabled()
+            : ApolloServerPluginLandingPageLocalDefault()
+        ]
+      });
+
+      # Better: Use persisted queries
+      # Only allow pre-registered queries in production
+      const server = new ApolloServer({
+        typeDefs,
+        resolvers,
+        persistedQueries: {
+          cache: new InMemoryLRUCache()
+        }
+      });
+    symptoms:
+      - Schema visible via introspection query
+      - GraphQL Playground accessible in production
+      - Full type information exposed
+    detection_pattern: 'introspection:\s*true'
+
+  - id: authorization-at-wrong-layer
+    summary: Authorization only in schema directives, not resolvers
+    severity: high
+    situation: |
+      You rely entirely on @auth directives for authorization. Someone
+      finds a way around the directive, or complex business rules don't
+      fit in a simple directive. Authorization fails.
+    why: |
+      Directives are good for simple checks but can't handle complex
+      business logic. "User can edit their own posts, or any post in
+      groups they moderate" doesn't fit in a directive.
+    solution: |
+      # AUTHORIZE IN RESOLVERS
+
+      // Simple check in resolver
+      Mutation: {
+        deletePost: async (_, { id }, { user, db }) => {
+          if (!user) {
+            throw new AuthenticationError('Must be logged in');
+          }
+
+          const post = await db.post.findUnique({ where: { id } });
+
+          if (!post) {
+            throw new NotFoundError('Post not found');
+          }
+
+          // Business logic authorization
+          const canDelete =
+            post.authorId === user.id ||
+            user.role === 'ADMIN' ||
+            await userModeratesGroup(user.id, post.groupId);
+
+          if (!canDelete) {
+            throw new ForbiddenError('Cannot delete this post');
+          }
+
+          return db.post.delete({ where: { id } });
+        }
+      }
+
+      // Helper for field-level authorization
+      User: {
+        email: (user, _, { currentUser }) => {
+          // Only show email to self or admin
+          if (currentUser?.id === user.id || currentUser?.role === 'ADMIN') {
+            return user.email;
+          }
+          return null;
+        }
+      }
+    symptoms:
+      - Unauthorized access to data
+      - Business rules not enforced
+      - Directive-only security bypassed
+    detection_pattern: null
+
+  - id: missing-field-level-auth
+    summary: Authorization on queries but not on fields
+    severity: high
+    situation: |
+      You check if a user can access a resource, but not individual
+      fields. User A can see User B's public profile, and accidentally
+      also sees their private email and phone number.
+    why: |
+      Field resolvers run after the parent is returned. If the parent
+      query returns a user, all fields are resolved - including sensitive
+      ones. Each sensitive field needs its own auth check.
+    solution: |
+      # FIELD-LEVEL AUTHORIZATION
+
+      const resolvers = {
+        User: {
+          // Public fields - no check needed
+          id: (user) => user.id,
+          name: (user) => user.name,
+
+          // Private fields - check access
+          email: (user, _, { currentUser }) => {
+            if (!currentUser) return null;
+            if (currentUser.id === user.id) return user.email;
+            if (currentUser.role === 'ADMIN') return user.email;
+            return null;
+          },
+
+          phoneNumber: (user, _, { currentUser }) => {
+            if (currentUser?.id !== user.id) return null;
+            return user.phoneNumber;
+          },
+
+          // Or throw instead of returning null
+          privateData: (user, _, { currentUser }) => {
+            if (currentUser?.id !== user.id) {
+              throw new ForbiddenError('Not authorized');
+            }
+            return user.privateData;
+          }
+        }
+      };
+    symptoms:
+      - Sensitive data exposed
+      - Privacy violations
+      - Field data visible to wrong users
+    detection_pattern: null
+
+  - id: null-propagation-surprise
+    summary: Non-null field failure nullifies entire parent
+    severity: medium
+    situation: |
+      You make fields non-null for convenience. A resolver throws or
+      returns null. The error propagates up, nullifying parent objects,
+      until the whole query response is null or errors out.
+    why: |
+      GraphQL's null propagation means if a non-null field can't resolve,
+      its parent becomes null. If that parent is also non-null, it
+      propagates further. One failing field can break an entire response.
+    solution: |
+      # DESIGN NULLABILITY INTENTIONALLY
+
+      # WRONG: Everything non-null
+      type User {
+        id: ID!
+        name: String!
+        email: String!
+        avatar: String!      # What if no avatar?
+        lastLogin: DateTime! # What if never logged in?
+      }
+
+      # RIGHT: Nullable where appropriate
+      type User {
+        id: ID!              # Always exists
+        name: String!        # Required field
+        email: String!       # Required field
+        avatar: String       # Optional - may not exist
+        lastLogin: DateTime  # Nullable - may be null
+      }
+
+      # For lists:
+      # [User!]! - Non-null list of non-null users (recommended)
+      # [User!]  - Nullable list of non-null users
+      # [User]!  - Non-null list of nullable users (rarely useful)
+      # [User]   - Nullable list of nullable users (avoid)
+
+      # Rule of thumb:
+      # - Non-null if always present and failure should fail query
+      # - Nullable if optional or failure shouldn't break response
+    symptoms:
+      - Queries return null unexpectedly
+      - One error affects unrelated fields
+      - Partial data can't be returned
+    detection_pattern: null
+
+  - id: no-cost-analysis
+    summary: Expensive queries treated same as cheap ones
+    severity: medium
+    situation: |
+      Every query is processed the same. A simple user(id) query uses
+      the same resources as users(first: 1000) { posts { comments } }.
+      Expensive queries starve out cheap ones.
+    why: |
+      Not all GraphQL operations are equal. Fetching 1000 users with
+      nested data is orders of magnitude more expensive than fetching
+      one user. Without cost analysis, you can't rate limit properly.
+    solution: |
+      # QUERY COST ANALYSIS
+
+      import { createComplexityLimitRule } from 'graphql-validation-complexity';
+
+      // Define complexity per field
+      const complexityRules = createComplexityLimitRule(1000, {
+        scalarCost: 1,
+        objectCost: 10,
+        listFactor: 10,
+        // Custom field costs
+        fieldCost: {
+          'Query.searchUsers': 100,
+          'Query.analytics': 500,
+          'User.posts': ({ args }) => args.limit || 10
+        }
+      });
+
+      // For rate limiting by cost
+      const costPlugin = {
+        requestDidStart() {
+          return {
+            didResolveOperation({ request, document }) {
+              const cost = calculateQueryCost(document);
+              if (cost > 1000) {
+                throw new Error(`Query too expensive: ${cost}`);
+              }
+              // Track cost for rate limiting
+              rateLimiter.consume(request.userId, cost);
+            }
+          };
+        }
+      };
+    symptoms:
+      - Expensive queries slow everything
+      - No way to prioritize queries
+      - Rate limiting is ineffective
+    detection_pattern: null
+
+  - id: subscription-memory-leak
+    summary: Subscriptions not properly cleaned up
+    severity: medium
+    situation: |
+      Clients subscribe but don't unsubscribe cleanly. Network issues
+      leave orphaned subscriptions. Server memory grows as dead
+      subscriptions accumulate.
+    why: |
+      Each subscription holds server resources. Without proper cleanup
+      on disconnect, resources accumulate. Long-running servers
+      eventually run out of memory.
+    solution: |
+      # PROPER SUBSCRIPTION CLEANUP
+
+      import { PubSub, withFilter } from 'graphql-subscriptions';
+      import { WebSocketServer } from 'ws';
+      import { useServer } from 'graphql-ws/lib/use/ws';
+
+      const pubsub = new PubSub();
+
+      // Track active subscriptions
+      const activeSubscriptions = new Map();
+
+      const wsServer = new WebSocketServer({
+        server: httpServer,
+        path: '/graphql'
+      });
+
+      useServer({
+        schema,
+        context: (ctx) => ({
+          pubsub,
+          userId: ctx.connectionParams?.userId
+        }),
+        onConnect: (ctx) => {
+          console.log('Client connected');
+        },
+        onDisconnect: (ctx) => {
+          // Clean up resources for this connection
+          const userId = ctx.connectionParams?.userId;
+          activeSubscriptions.delete(userId);
+        }
+      }, wsServer);
+
+      // Subscription resolver with cleanup
+      Subscription: {
+        messageReceived: {
+          subscribe: withFilter(
+            (_, { roomId }, { pubsub, userId }) => {
+              // Track subscription
+              activeSubscriptions.set(userId, roomId);
+              return pubsub.asyncIterator(`ROOM_${roomId}`);
+            },
+            (payload, { roomId }) => {
+              return payload.roomId === roomId;
+            }
+          )
+        }
+      }
+    symptoms:
+      - Memory usage grows over time
+      - Dead connections accumulate
+      - Server slows down
+    detection_pattern: null
+
+client_specific:
+  apollo_client:
+    - id: cache-not-updating
+      summary: Mutations don't update Apollo cache automatically
+      situation: |
+        You run a mutation, it succeeds, but the UI doesn't update.
+        You have to refresh to see changes.
+      solution: |
+        // Option 1: Return updated data (simplest)
+        const CREATE_USER = gql`
+          mutation CreateUser($input: CreateUserInput!) {
+            createUser(input: $input) {
+              id  # Must return id for cache
+              name
+              email
+            }
+          }
+        `;
+
+        // Option 2: Update cache manually
+        useMutation(CREATE_USER, {
+          update(cache, { data }) {
+            cache.modify({
+              fields: {
+                users(existing = []) {
+                  return [...existing, cache.writeFragment({
+                    data: data.createUser,
+                    fragment: gql`fragment NewUser on User { id name email }`
+                  })];
+                }
+              }
+            });
+          }
+        });
+
+        // Option 3: Refetch queries
+        useMutation(CREATE_USER, {
+          refetchQueries: [{ query: GET_USERS }]
+        });
+
+  urql:
+    - id: stale-cache
+      summary: Document cache doesn't update related queries
+      situation: |
+        urql's document cache doesn't normalize. A mutation updates
+        a user, but other queries showing that user don't update.
+      solution: |
+        // Use graphcache for normalized caching
+        import { cacheExchange } from '@urql/exchange-graphcache';
+
+        const client = createClient({
+          url: '/graphql',
+          exchanges: [
+            cacheExchange({
+              keys: {
+                User: (data) => data.id
+              },
+              updates: {
+                Mutation: {
+                  updateUser(result, args, cache) {
+                    // Cache automatically updates
+                  }
+                }
+              }
+            }),
+            fetchExchange
+          ]
+        });

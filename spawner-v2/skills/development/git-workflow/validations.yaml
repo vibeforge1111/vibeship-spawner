@@ -1,0 +1,196 @@
+# Validations - Git Workflow
+# Checks for git hygiene and commit quality
+
+version: 1.0.0
+skill_id: git-workflow
+
+validations:
+  # Critical - Dangerous commands
+  - id: force-push-without-lease
+    name: Force push without --force-with-lease
+    severity: error
+    type: regex
+    pattern:
+      - 'git\s+push\s+(-f|--force)(?!\s*--force-with-lease)'
+    message: "Force push can overwrite others' work - use --force-with-lease instead"
+    fix_action: "Replace -f/--force with --force-with-lease"
+    applies_to:
+      - "*.sh"
+      - "*.bash"
+      - "*.md"
+      - "*.yml"
+      - "*.yaml"
+
+  - id: reset-hard-to-remote
+    name: Hard reset to remote branch
+    severity: warning
+    type: regex
+    pattern:
+      - 'git\s+reset\s+--hard\s+origin/'
+    message: "Hard reset discards local commits - make sure this is intentional"
+    fix_action: "Consider git rebase or git merge instead"
+    applies_to:
+      - "*.sh"
+      - "*.bash"
+
+  - id: direct-push-to-main
+    name: Direct push to main/master
+    severity: warning
+    type: regex
+    pattern:
+      - 'git\s+push\s+(origin\s+)?(main|master)(?!\s*:)'
+    message: "Pushing directly to main bypasses code review"
+    fix_action: "Create a feature branch and open a PR"
+    applies_to:
+      - "*.sh"
+      - "*.bash"
+
+  # Commit message checks
+  - id: short-commit-message
+    name: Commit message too short
+    severity: warning
+    type: regex
+    pattern:
+      - 'git\s+commit\s+-m\s+["\'][^"\']{1,10}["\']'
+    message: "Commit message is too short - explain what and why"
+    fix_action: "Write a descriptive message: what changed and why"
+    applies_to:
+      - "*.sh"
+      - "*.bash"
+
+  - id: wip-commit-message
+    name: WIP commit message
+    severity: info
+    type: regex
+    pattern:
+      - 'git\s+commit\s+-m\s+["\']([Ww][Ii][Pp]|wip|WIP)["\']'
+    message: "WIP commits should be squashed before merge"
+    fix_action: "Use git rebase -i to squash WIP commits"
+    applies_to:
+      - "*.sh"
+      - "*.bash"
+
+  - id: generic-commit-message
+    name: Generic commit message
+    severity: warning
+    type: regex
+    pattern:
+      - 'git\s+commit\s+-m\s+["\'](fix|update|change|modify|misc|stuff)["\']'
+    message: "Commit message is too generic - describe what was changed"
+    fix_action: "Describe the specific change: 'fix(auth): prevent session timeout'"
+    applies_to:
+      - "*.sh"
+      - "*.bash"
+
+  # Gitignore checks
+  - id: sensitive-files-not-ignored
+    name: Sensitive files should be gitignored
+    severity: error
+    type: file
+    pattern:
+      - '.env'
+      - '.env.local'
+      - '*.pem'
+      - '*.key'
+      - 'credentials.json'
+    message: "Sensitive files should be in .gitignore"
+    fix_action: "Add to .gitignore and remove from tracking: git rm --cached filename"
+    applies_to:
+      - ".gitignore"
+
+  - id: node-modules-committed
+    name: node_modules should be gitignored
+    severity: error
+    type: regex
+    pattern:
+      - 'node_modules/'
+    message: "node_modules should not be committed"
+    fix_action: "Add 'node_modules/' to .gitignore and run: git rm -r --cached node_modules"
+    applies_to:
+      - ".gitignore"
+
+  # Branch naming
+  - id: branch-naming-convention
+    name: Branch doesn't follow naming convention
+    severity: info
+    type: regex
+    pattern:
+      - 'checkout\s+-b\s+[a-z]+(?!/)'
+    message: "Branch names should follow pattern: type/description"
+    fix_action: "Use: feature/AUTH-123-description, fix/BUG-456-issue, etc."
+    applies_to:
+      - "*.sh"
+      - "*.bash"
+
+  # Conflict markers
+  - id: conflict-markers-in-code
+    name: Merge conflict markers in code
+    severity: error
+    type: regex
+    pattern:
+      - '<<<<<<< HEAD'
+      - '======='
+      - '>>>>>>> \w+'
+    message: "Unresolved merge conflict markers in file"
+    fix_action: "Resolve the conflict by editing the file and removing markers"
+    applies_to:
+      - "*"
+
+code_smells:
+  - id: many-commits-same-message
+    name: Repeated commit messages
+    description: "Multiple commits with same message suggests poor hygiene"
+    pattern: null
+    suggestion: "Each commit should be distinct with a unique, descriptive message"
+
+  - id: friday-force-push
+    name: Force push on Friday
+    description: "Risky operations before the weekend"
+    pattern: null
+    suggestion: "Avoid force pushes late in the week"
+
+best_practices:
+  commit_messages:
+    recommendation: |
+      Follow Conventional Commits format:
+
+      <type>(<scope>): <description>
+
+      [optional body]
+
+      [optional footer]
+
+      Types: feat, fix, docs, style, refactor, perf, test, chore
+
+      Examples:
+      feat(auth): add OAuth2 login with Google
+      fix(cart): prevent duplicate items on rapid clicks
+      docs(readme): add installation instructions
+
+  pre_commit_hooks:
+    recommendation: |
+      Set up pre-commit hooks with husky:
+
+      npm install husky lint-staged --save-dev
+      npx husky init
+
+      # .husky/pre-commit
+      npx lint-staged
+
+      # package.json
+      {
+        "lint-staged": {
+          "*.{js,ts}": ["eslint --fix", "prettier --write"],
+          "*.{json,md}": ["prettier --write"]
+        }
+      }
+
+  branch_protection:
+    recommendation: |
+      Configure branch protection in GitHub/GitLab:
+
+      - Require pull request reviews
+      - Require status checks to pass
+      - Require linear history (squash or rebase)
+      - Restrict who can push to main
+      - Require signed commits (optional)

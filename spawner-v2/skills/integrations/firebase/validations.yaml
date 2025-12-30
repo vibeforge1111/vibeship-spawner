@@ -1,0 +1,294 @@
+# Validations - Firebase
+# Automated checks for common Firebase issues
+
+version: 1.0.0
+skill_id: firebase
+
+validations:
+  # Critical - Security issues
+  - id: allow-all-rules
+    name: Security rules allow all access
+    severity: error
+    type: regex
+    pattern:
+      - 'allow\s+(read|write)\s*:\s*if\s+true\s*;'
+      - 'allow\s+(read|write)\s*:\s*if\s+true$'
+    message: "Security rules allow all access - your database is public"
+    fix_action: "Replace with proper authentication checks"
+    applies_to:
+      - "*.rules"
+      - "firestore.rules"
+      - "storage.rules"
+
+  - id: admin-sdk-client
+    name: Firebase Admin SDK in client code
+    severity: error
+    type: regex
+    pattern:
+      - 'from\s+["\']firebase-admin'
+      - "require\\s*\\(\\s*['\"]firebase-admin"
+      - 'import.*firebase-admin'
+    message: "Admin SDK should never be used in client-side code"
+    fix_action: "Use regular Firebase SDK for client, Admin SDK only in Cloud Functions"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.jsx"
+      - "*.tsx"
+    exclude:
+      - "**/functions/**"
+      - "**/api/**"
+      - "**/server/**"
+
+  - id: service-account-exposed
+    name: Service account credentials in code
+    severity: error
+    type: regex
+    pattern:
+      - '"type"\s*:\s*"service_account"'
+      - 'private_key.*-----BEGIN'
+      - 'client_email.*@.*\.iam\.gserviceaccount\.com'
+    message: "Service account credentials found in code - critical security risk"
+    fix_action: "Remove credentials, use environment variables or secret manager"
+    applies_to:
+      - "*.json"
+      - "*.js"
+      - "*.ts"
+
+  # High - Cost and performance issues
+  - id: unfiltered-collection-listener
+    name: Listener on entire collection without filter
+    severity: warning
+    type: regex
+    pattern:
+      - 'onSnapshot\s*\(\s*collection\s*\([^)]+\)\s*,'
+      - 'onSnapshot\s*\(\s*db\.collection\s*\([^)]+\)\s*,'
+    message: "Listener on collection without query filters - may cause high read costs"
+    fix_action: "Add where() and limit() clauses to scope the listener"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.jsx"
+      - "*.tsx"
+
+  - id: no-limit-on-query
+    name: Query without limit clause
+    severity: info
+    type: regex
+    pattern:
+      - 'getDocs\s*\(\s*collection\s*\('
+      - 'getDocs\s*\(\s*query\s*\([^)]*\)\s*\)(?!.*limit)'
+    message: "Query without limit - may read more documents than needed"
+    fix_action: "Add limit() to prevent reading entire collection"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.jsx"
+      - "*.tsx"
+
+  - id: sequential-reads
+    name: Sequential document reads in loop
+    severity: warning
+    type: regex
+    pattern:
+      - 'for\s*\([^)]*\)\s*\{[^}]*await\s+getDoc'
+      - 'forEach\s*\([^)]*\)\s*\{[^}]*await\s+getDoc'
+      - '\.map\s*\(\s*async[^)]*=>[^}]*getDoc'
+    message: "Sequential document reads - use Promise.all for parallel reads"
+    fix_action: "Collect document refs, then Promise.all(refs.map(ref => getDoc(ref)))"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.jsx"
+      - "*.tsx"
+
+  # Medium - Code quality issues
+  - id: missing-unsubscribe
+    name: onSnapshot without cleanup
+    severity: warning
+    type: regex
+    pattern:
+      - 'onSnapshot\s*\([^)]+\)(?!.*unsubscribe)'
+      - 'onSnapshot\s*\([^)]+\)\s*;(?!.*return\s*\(\s*\)\s*=>)'
+    message: "onSnapshot listener may not be properly cleaned up"
+    fix_action: "Store unsubscribe function and call it on component unmount"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.jsx"
+      - "*.tsx"
+
+  - id: javascript-date-instead-of-timestamp
+    name: Using JavaScript Date for Firestore timestamps
+    severity: info
+    type: regex
+    pattern:
+      - 'createdAt\s*:\s*new\s+Date\s*\('
+      - 'updatedAt\s*:\s*new\s+Date\s*\('
+      - 'timestamp\s*:\s*Date\.now\s*\('
+    message: "Use serverTimestamp() or Timestamp.fromDate() instead of Date"
+    fix_action: "import { serverTimestamp } from 'firebase/firestore' and use serverTimestamp()"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.jsx"
+      - "*.tsx"
+
+  - id: compat-sdk-import
+    name: Using compatibility (v8) SDK instead of modular
+    severity: info
+    type: regex
+    pattern:
+      - 'from\s+["\']firebase/compat'
+      - "require\\s*\\(\\s*['\"]firebase/compat"
+      - 'firebase\\.firestore\\(\\)'
+      - 'firebase\\.auth\\(\\)'
+    message: "Using v8 compat SDK - modular v9+ is smaller and tree-shakeable"
+    fix_action: "Migrate to modular imports: import { getFirestore } from 'firebase/firestore'"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.jsx"
+      - "*.tsx"
+
+  - id: hardcoded-collection-path
+    name: Collection paths duplicated across codebase
+    severity: info
+    type: regex
+    pattern:
+      - "collection\\s*\\(\\s*db\\s*,\\s*['\"]\\w+['\"]\\s*\\)"
+    message: "Consider centralizing collection paths in constants"
+    fix_action: "Create a collections.ts file with exported path constants"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: cloud-function-no-auth
+    name: HTTP Cloud Function without authentication check
+    severity: warning
+    type: regex
+    pattern:
+      - 'onRequest\s*\([^)]*,\s*async\s*\([^)]*\)\s*=>\s*\{(?!.*verifyIdToken)'
+      - 'https\.onRequest\s*\([^)]*\{(?!.*verifyIdToken)'
+    message: "HTTP function may not verify authentication"
+    fix_action: "Add token verification with getAuth().verifyIdToken(token)"
+    applies_to:
+      - "**/functions/**/*.js"
+      - "**/functions/**/*.ts"
+
+  # Rules-specific validations
+  - id: no-request-auth-check
+    name: Security rule without auth check
+    severity: warning
+    type: regex
+    pattern:
+      - 'allow\s+(read|write|create|update|delete)\s*:\s*if(?!.*request\.auth)'
+    message: "Security rule doesn't check request.auth - may allow unauthenticated access"
+    fix_action: "Add request.auth != null or request.auth.uid == userId checks"
+    applies_to:
+      - "*.rules"
+      - "firestore.rules"
+
+  - id: no-data-validation
+    name: Write rule without data validation
+    severity: info
+    type: regex
+    pattern:
+      - 'allow\s+(create|update)\s*:\s*if\s+request\.auth\s*!=\s*null\s*;'
+    message: "Write rule allows any data - consider validating request.resource.data"
+    fix_action: "Add data validation like request.resource.data.keys().hasAll(['field1', 'field2'])"
+    applies_to:
+      - "*.rules"
+      - "firestore.rules"
+
+code_smells:
+  - id: mixed-sync-async
+    name: Mixing synchronous and async Firestore operations
+    description: "Using .then() and async/await inconsistently"
+    pattern: 'getDoc.*\.then.*await'
+    suggestion: "Use async/await consistently throughout your Firebase code"
+
+  - id: callback-hell
+    name: Nested Firestore callbacks
+    description: "Deeply nested .then() chains with Firestore operations"
+    pattern: '\.then\s*\([^)]*\)\s*\{[^}]*\.then'
+    suggestion: "Refactor to async/await for cleaner code"
+
+  - id: no-error-handling
+    name: Firestore operations without error handling
+    description: "Missing try/catch or .catch() on Firestore operations"
+    pattern: 'await\s+(getDoc|setDoc|updateDoc|deleteDoc)\s*\([^)]+\)(?!.*catch)'
+    suggestion: "Wrap Firestore operations in try/catch blocks"
+
+best_practices:
+  security:
+    recommendation: |
+      Firebase security checklist:
+
+      1. Security rules:
+         - Never use allow read, write: if true
+         - Always validate authentication
+         - Validate data structure on writes
+         - Test with @firebase/rules-unit-testing
+
+      2. Client-side:
+         - Never expose Admin SDK or service accounts
+         - Use Firebase App Check for additional protection
+         - Validate data before sending to Firestore
+
+      3. Cloud Functions:
+         - Always verify auth tokens for HTTP functions
+         - Use secrets for API keys (firebase functions:secrets)
+         - Set appropriate CORS policies
+
+      4. Monitoring:
+         - Enable Firebase App Check
+         - Set up billing alerts
+         - Monitor Security Rules evaluation in console
+
+  data_modeling:
+    recommendation: |
+      Firestore data modeling guidelines:
+
+      1. Design for queries, not relationships:
+         - What queries will the app need?
+         - Structure data to support those queries
+         - Denormalize for read performance
+
+      2. Document size limits:
+         - Max 1 MB per document
+         - Max 20,000 fields per document
+         - Keep documents small, use subcollections
+
+      3. Query limitations:
+         - No joins across collections
+         - Max 30 disjunctions (array-contains-any, in, or)
+         - Compound queries need composite indexes
+
+      4. Subcollections vs root collections:
+         - Subcollections: When data is owned by parent
+         - Root collections: When data needs independent queries
+
+  cost_optimization:
+    recommendation: |
+      Firebase cost optimization:
+
+      1. Reduce reads:
+         - Use listeners with proper limits
+         - Cache data client-side
+         - Implement pagination
+
+      2. Reduce writes:
+         - Batch related writes
+         - Don't write unchanged data
+         - Use increment() for counters
+
+      3. Storage optimization:
+         - Compress images before upload
+         - Use Firebase Extensions for image resizing
+         - Set lifecycle rules for old files
+
+      4. Functions optimization:
+         - Use minInstances for cold start reduction
+         - Set appropriate timeout and memory
+         - Avoid unnecessary function invocations

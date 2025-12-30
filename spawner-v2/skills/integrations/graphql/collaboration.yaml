@@ -1,0 +1,454 @@
+# Collaboration - GraphQL
+# How this skill works with other skills
+
+version: 1.0.0
+skill_id: graphql
+
+prerequisites:
+  required: []
+
+  recommended:
+    - skill: backend
+      reason: "Server-side implementation patterns"
+      what_to_know:
+        - "Node.js async patterns"
+        - "API design principles"
+        - "Authentication/authorization"
+
+    - skill: typescript-advanced
+      reason: "Type-safe schema and resolvers"
+      what_to_know:
+        - "Generics"
+        - "Type inference"
+        - "Code generation tools"
+
+  knowledge:
+    - "HTTP and API concepts"
+    - "Database query patterns"
+    - "JSON data structures"
+    - "Type systems"
+
+delegation_triggers:
+  - trigger: "user needs database optimization"
+    delegate_to: postgres-wizard
+    context: "Optimize queries for GraphQL resolvers"
+
+  - trigger: "user needs authentication system"
+    delegate_to: authentication-oauth
+    context: "Auth for GraphQL context"
+
+  - trigger: "user needs caching layer"
+    delegate_to: caching-strategies
+    context: "Response caching, DataLoader caching"
+
+  - trigger: "user needs real-time infrastructure"
+    delegate_to: backend
+    context: "WebSocket setup for subscriptions"
+
+receives_context_from:
+  - skill: postgres-wizard
+    receives:
+      - "Database schema for type generation"
+      - "Query optimization patterns"
+      - "N+1 solutions at DB level"
+
+  - skill: authentication-oauth
+    receives:
+      - "JWT verification patterns"
+      - "User context for resolvers"
+      - "Permission structures"
+
+  - skill: backend
+    receives:
+      - "Business logic services"
+      - "Validation patterns"
+      - "Error handling standards"
+
+provides_context_to:
+  - skill: nextjs-app-router
+    provides:
+      - "Schema for client type generation"
+      - "Apollo/urql integration patterns"
+      - "SSR data fetching"
+
+  - skill: react-patterns
+    provides:
+      - "Query/mutation hooks"
+      - "Cache management patterns"
+      - "Optimistic updates"
+
+  - skill: testing
+    provides:
+      - "API testing patterns"
+      - "Mock resolvers"
+      - "Integration test setup"
+
+escalation_paths:
+  - situation: "Distributed schema across services"
+    escalate_to: microservices-patterns
+    context: "GraphQL Federation setup"
+
+  - situation: "Performance issues with complex queries"
+    escalate_to: performance-profiling
+    context: "Query analysis, DataLoader optimization"
+
+  - situation: "Real-time features at scale"
+    escalate_to: backend
+    context: "Subscription infrastructure, PubSub"
+
+workflow_integration:
+  typical_sequence:
+    1:
+      step: "Design schema"
+      skills: [graphql]
+      output: "Type definitions with operations"
+
+    2:
+      step: "Set up server"
+      skills: [graphql, backend]
+      output: "Apollo/Yoga server configured"
+
+    3:
+      step: "Implement resolvers"
+      skills: [graphql, postgres-wizard]
+      output: "Resolvers with DataLoader"
+
+    4:
+      step: "Add authorization"
+      skills: [graphql, authentication-oauth]
+      output: "Secured resolvers"
+
+    5:
+      step: "Generate types"
+      skills: [graphql]
+      output: "Client types via codegen"
+
+    6:
+      step: "Build client"
+      skills: [graphql, react-patterns]
+      output: "Apollo/urql integration"
+
+    7:
+      step: "Test"
+      skills: [testing]
+      output: "Integration and E2E tests"
+
+  decision_points:
+    - question: "GraphQL or REST?"
+      guidance: |
+        Use GraphQL when:
+        - Multiple clients with different data needs
+        - Complex, nested data relationships
+        - Rapid frontend iteration
+        - Type safety is priority
+
+        Use REST when:
+        - Simple CRUD operations
+        - Public APIs with caching needs
+        - File uploads/downloads
+        - Team unfamiliar with GraphQL
+
+    - question: "Apollo Server or alternatives?"
+      guidance: |
+        Apollo Server:
+        - Most popular, extensive ecosystem
+        - Plugins for tracing, caching
+        - Federation support
+
+        GraphQL Yoga:
+        - Lighter weight
+        - Good for serverless
+        - Envelop plugin system
+
+        Mercurius (Fastify):
+        - Fast, JIT compilation
+        - Great for performance-critical
+
+    - question: "Apollo Client or urql?"
+      guidance: |
+        Apollo Client:
+        - Normalized cache
+        - More features
+        - Larger bundle
+
+        urql:
+        - Smaller, simpler
+        - Document cache by default
+        - Graphcache for normalization
+
+        graphql-request:
+        - Minimal, no caching
+        - Good for simple use cases
+
+collaboration_patterns:
+  with_nextjs:
+    when: "GraphQL with Next.js"
+    approach: |
+      Next.js + GraphQL patterns:
+
+      # Server Components (no Apollo Client needed)
+      // app/users/page.tsx
+      async function UsersPage() {
+        const { data } = await fetch(process.env.GRAPHQL_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: `query { users { id name } }`
+          }),
+          next: { revalidate: 60 }
+        }).then(r => r.json());
+
+        return <UserList users={data.users} />;
+      }
+
+      # Client Components (Apollo Client)
+      // lib/apollo-client.ts
+      import { ApolloClient, InMemoryCache } from '@apollo/client';
+
+      export const client = new ApolloClient({
+        uri: '/api/graphql',
+        cache: new InMemoryCache()
+      });
+
+      // providers/apollo-provider.tsx
+      'use client';
+      import { ApolloProvider } from '@apollo/client';
+      import { client } from '@/lib/apollo-client';
+
+      export function ApolloWrapper({ children }) {
+        return <ApolloProvider client={client}>{children}</ApolloProvider>;
+      }
+
+      # API Route for GraphQL
+      // app/api/graphql/route.ts
+      import { startServerAndCreateNextHandler } from '@as-integrations/next';
+      import { server } from '@/graphql/server';
+
+      const handler = startServerAndCreateNextHandler(server);
+      export { handler as GET, handler as POST };
+
+  with_prisma:
+    when: "Prisma as data layer"
+    approach: |
+      Prisma + GraphQL patterns:
+
+      // Context with Prisma
+      import { PrismaClient } from '@prisma/client';
+      import DataLoader from 'dataloader';
+
+      const prisma = new PrismaClient();
+
+      function createContext() {
+        return {
+          prisma,
+          loaders: {
+            userLoader: new DataLoader(async (ids) => {
+              const users = await prisma.user.findMany({
+                where: { id: { in: ids as string[] } }
+              });
+              return ids.map(id => users.find(u => u.id === id));
+            })
+          }
+        };
+      }
+
+      // Type-safe resolvers with Prisma
+      const resolvers = {
+        Query: {
+          users: (_, { first, skip }, { prisma }) =>
+            prisma.user.findMany({ take: first, skip }),
+
+          user: (_, { id }, { loaders }) =>
+            loaders.userLoader.load(id)
+        },
+
+        Mutation: {
+          createUser: async (_, { input }, { prisma }) => {
+            try {
+              const user = await prisma.user.create({ data: input });
+              return { user, errors: [] };
+            } catch (e) {
+              return { user: null, errors: [{ message: e.message }] };
+            }
+          }
+        }
+      };
+
+  with_federation:
+    when: "Microservices with GraphQL"
+    approach: |
+      Apollo Federation:
+
+      # User subgraph
+      import { buildSubgraphSchema } from '@apollo/subgraph';
+      import gql from 'graphql-tag';
+
+      const typeDefs = gql`
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.0",
+                import: ["@key", "@shareable"])
+
+        type Query {
+          me: User
+        }
+
+        type User @key(fields: "id") {
+          id: ID!
+          name: String!
+          email: String!
+        }
+      `;
+
+      # Orders subgraph (references User)
+      const typeDefs = gql`
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.0",
+                import: ["@key", "@external"])
+
+        type Query {
+          orders: [Order!]!
+        }
+
+        type Order @key(fields: "id") {
+          id: ID!
+          user: User!
+          items: [OrderItem!]!
+        }
+
+        type User @key(fields: "id", resolvable: false) {
+          id: ID! @external
+        }
+      `;
+
+      # Router composes subgraphs
+      # supergraph.yaml
+      federation_version: 2
+      subgraphs:
+        users:
+          routing_url: http://users:4001/graphql
+          schema:
+            subgraph_url: http://users:4001/graphql
+        orders:
+          routing_url: http://orders:4002/graphql
+          schema:
+            subgraph_url: http://orders:4002/graphql
+
+platform_integration:
+  codegen:
+    setup: |
+      # GraphQL Code Generator
+
+      npm install -D @graphql-codegen/cli
+      npm install -D @graphql-codegen/typescript
+      npm install -D @graphql-codegen/typescript-operations
+      npm install -D @graphql-codegen/typescript-react-apollo
+
+      # codegen.ts
+      import { CodegenConfig } from '@graphql-codegen/cli';
+
+      const config: CodegenConfig = {
+        schema: './src/graphql/schema.graphql',
+        documents: ['src/**/*.tsx', 'src/**/*.graphql'],
+        generates: {
+          './src/generated/': {
+            preset: 'client',
+            plugins: []
+          }
+        }
+      };
+
+      export default config;
+
+      # package.json
+      "scripts": {
+        "codegen": "graphql-codegen",
+        "codegen:watch": "graphql-codegen --watch"
+      }
+    considerations:
+      - "Run codegen after schema changes"
+      - "Commit generated files or generate in CI"
+      - "Use fragment colocation for components"
+
+  subscriptions:
+    setup: |
+      # WebSocket subscriptions
+
+      // Server setup
+      import { createServer } from 'http';
+      import { WebSocketServer } from 'ws';
+      import { useServer } from 'graphql-ws/lib/use/ws';
+      import { ApolloServer } from '@apollo/server';
+
+      const httpServer = createServer(app);
+      const wsServer = new WebSocketServer({
+        server: httpServer,
+        path: '/graphql'
+      });
+
+      useServer({ schema }, wsServer);
+
+      // Client setup
+      import { GraphQLWsLink } from '@apollo/client/link/subscriptions';
+      import { createClient } from 'graphql-ws';
+      import { split, HttpLink } from '@apollo/client';
+      import { getMainDefinition } from '@apollo/client/utilities';
+
+      const wsLink = new GraphQLWsLink(
+        createClient({ url: 'ws://localhost:4000/graphql' })
+      );
+
+      const httpLink = new HttpLink({ uri: '/graphql' });
+
+      const splitLink = split(
+        ({ query }) => {
+          const def = getMainDefinition(query);
+          return def.kind === 'OperationDefinition' &&
+                 def.operation === 'subscription';
+        },
+        wsLink,
+        httpLink
+      );
+
+      const client = new ApolloClient({
+        link: splitLink,
+        cache: new InMemoryCache()
+      });
+    considerations:
+      - "Use graphql-ws (not subscriptions-transport-ws)"
+      - "Handle reconnection on client"
+      - "Clean up subscriptions on unmount"
+
+ecosystem:
+  primary_tools:
+    - "GraphQL Playground / Apollo Studio"
+    - "GraphQL Code Generator"
+    - "Apollo DevTools (browser extension)"
+    - "GraphiQL"
+
+  libraries:
+    - name: DataLoader
+      use_when: "N+1 query prevention"
+    - name: graphql-shield
+      use_when: "Authorization layer"
+    - name: graphql-scalars
+      use_when: "Custom scalar types (DateTime, Email)"
+    - name: envelop
+      use_when: "Plugin system for any server"
+
+  alternatives:
+    - name: REST
+      use_when: "Simple CRUD, public caching"
+      avoid_when: "Complex relationships, multiple clients"
+
+    - name: tRPC
+      use_when: "TypeScript full-stack, no schema needed"
+      avoid_when: "Non-TypeScript clients, public API"
+
+    - name: gRPC
+      use_when: "Internal microservices, high performance"
+      avoid_when: "Browser clients, developer experience"
+
+  deprecated:
+    - "graphql-tools merge (use @graphql-tools/merge)"
+    - "apollo-server-express (use @apollo/server)"
+    - "subscriptions-transport-ws (use graphql-ws)"

@@ -1,0 +1,436 @@
+# Collaboration - Kubernetes
+# How this skill works with other skills
+
+version: 1.0.0
+skill_id: kubernetes
+
+prerequisites:
+  required:
+    - skill: docker
+      reason: "Must understand containers before orchestrating them"
+      what_to_know:
+        - "Container images"
+        - "Dockerfile basics"
+        - "Container networking concepts"
+
+  recommended:
+    - skill: devops
+      reason: "CI/CD integration for GitOps"
+      what_to_know:
+        - "Pipeline concepts"
+        - "Infrastructure as code"
+        - "Deployment strategies"
+
+    - skill: backend
+      reason: "Understanding what you're deploying"
+      what_to_know:
+        - "Application health endpoints"
+        - "Configuration management"
+        - "Graceful shutdown"
+
+  knowledge:
+    - "YAML syntax"
+    - "Basic networking (TCP/IP, DNS)"
+    - "Linux fundamentals"
+    - "Container concepts"
+
+delegation_triggers:
+  - trigger: "user needs container images"
+    delegate_to: docker
+    context: "Build Dockerfile for application"
+
+  - trigger: "user needs CI/CD pipeline"
+    delegate_to: devops
+    context: "GitOps workflow with ArgoCD/Flux"
+
+  - trigger: "user needs AWS EKS setup"
+    delegate_to: aws-services
+    context: "EKS cluster, IAM roles, ECR"
+
+  - trigger: "user needs database StatefulSet"
+    delegate_to: postgres-wizard
+    context: "Database Kubernetes deployment"
+
+  - trigger: "user needs service mesh"
+    delegate_to: microservices-patterns
+    context: "Istio/Linkerd configuration"
+
+receives_context_from:
+  - skill: docker
+    receives:
+      - "Container images to deploy"
+      - "Port mappings"
+      - "Environment variable requirements"
+      - "Health check endpoints"
+
+  - skill: backend
+    receives:
+      - "Application requirements"
+      - "Scaling characteristics"
+      - "Resource usage patterns"
+      - "Configuration needs"
+
+  - skill: devops
+    receives:
+      - "Deployment pipeline requirements"
+      - "Environment structure"
+      - "Secrets management approach"
+
+provides_context_to:
+  - skill: devops
+    provides:
+      - "Manifest structure for GitOps"
+      - "Helm charts for deployment"
+      - "Kustomize overlays"
+
+  - skill: aws-services
+    provides:
+      - "EKS requirements"
+      - "ALB Ingress configuration"
+      - "IAM role requirements (IRSA)"
+
+  - skill: microservices-patterns
+    provides:
+      - "Service topology"
+      - "Network policies"
+      - "Service discovery patterns"
+
+escalation_paths:
+  - situation: "Complex multi-cluster setup"
+    escalate_to: devops
+    context: "Federation, multi-region deployment"
+
+  - situation: "Service mesh requirements"
+    escalate_to: microservices-patterns
+    context: "Istio, Linkerd, traffic management"
+
+  - situation: "Cloud-specific features needed"
+    escalate_to: aws-services
+    context: "EKS add-ons, IAM integration"
+
+  - situation: "Advanced networking needs"
+    escalate_to: backend
+    context: "Custom CNI, network policies"
+
+workflow_integration:
+  typical_sequence:
+    1:
+      step: "Containerize application"
+      skills: [docker]
+      output: "Container image in registry"
+
+    2:
+      step: "Create base manifests"
+      skills: [kubernetes]
+      output: "Deployment, Service, ConfigMap"
+
+    3:
+      step: "Add production configs"
+      skills: [kubernetes]
+      output: "Resource limits, probes, HPA"
+
+    4:
+      step: "Create Helm chart or Kustomize"
+      skills: [kubernetes]
+      output: "Templated deployment"
+
+    5:
+      step: "Set up GitOps"
+      skills: [kubernetes, devops]
+      output: "ArgoCD/Flux configuration"
+
+    6:
+      step: "Configure observability"
+      skills: [devops]
+      output: "Monitoring, alerting"
+
+  decision_points:
+    - question: "Helm or Kustomize?"
+      guidance: |
+        Use Helm when:
+        - Complex templating needed
+        - Using third-party charts
+        - Need lifecycle hooks
+        - Want package management
+
+        Use Kustomize when:
+        - Simple overlay patches
+        - Want to stay close to raw YAML
+        - GitOps with less abstraction
+        - Built into kubectl
+
+        Use both:
+        - Helm for third-party
+        - Kustomize for custom apps
+
+    - question: "Managed or self-hosted K8s?"
+      guidance: |
+        Managed (EKS, GKE, AKS):
+        - Almost always the right choice
+        - No control plane maintenance
+        - Automatic upgrades available
+        - Cloud integrations built-in
+
+        Self-hosted:
+        - Specific compliance requirements
+        - Cost optimization at scale
+        - Need cutting-edge features
+        - Have dedicated platform team
+
+    - question: "Namespace per environment or per team?"
+      guidance: |
+        Per environment (staging, prod):
+        - Simpler RBAC
+        - Easy to understand
+        - Works for small teams
+
+        Per team (team-a, team-b):
+        - Better for large organizations
+        - Team autonomy
+        - Cost allocation
+        - Requires more RBAC work
+
+        Hybrid:
+        - team-a-staging, team-a-prod
+        - Best of both worlds
+        - More namespaces to manage
+
+collaboration_patterns:
+  with_argocd:
+    when: "GitOps deployment"
+    approach: |
+      ArgoCD + Kubernetes:
+
+      # Application manifest
+      apiVersion: argoproj.io/v1alpha1
+      kind: Application
+      metadata:
+        name: my-app
+        namespace: argocd
+      spec:
+        project: default
+        source:
+          repoURL: https://github.com/org/my-app
+          targetRevision: HEAD
+          path: k8s/overlays/production
+        destination:
+          server: https://kubernetes.default.svc
+          namespace: production
+        syncPolicy:
+          automated:
+            prune: true
+            selfHeal: true
+          syncOptions:
+            - CreateNamespace=true
+
+
+      # Directory structure for GitOps:
+      my-app/
+      ├── k8s/
+      │   ├── base/
+      │   │   ├── kustomization.yaml
+      │   │   ├── deployment.yaml
+      │   │   ├── service.yaml
+      │   │   └── configmap.yaml
+      │   └── overlays/
+      │       ├── staging/
+      │       │   └── kustomization.yaml
+      │       └── production/
+      │           └── kustomization.yaml
+      └── argocd/
+          └── application.yaml
+
+  with_helm:
+    when: "Package and deploy applications"
+    approach: |
+      Helm Chart Best Practices:
+
+      # Chart.yaml
+      apiVersion: v2
+      name: my-app
+      version: 1.0.0
+      appVersion: "1.0.0"
+      dependencies:
+        - name: postgresql
+          version: "12.x"
+          repository: https://charts.bitnami.com/bitnami
+          condition: postgresql.enabled
+
+
+      # values.yaml with sensible defaults
+      replicaCount: 2
+
+      image:
+        repository: myregistry/my-app
+        pullPolicy: IfNotPresent
+        tag: ""  # Overridden by CI
+
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+
+      autoscaling:
+        enabled: true
+        minReplicas: 2
+        maxReplicas: 10
+
+
+      # Install commands:
+      helm install my-app ./chart -f values-production.yaml
+      helm upgrade my-app ./chart -f values-production.yaml --set image.tag=v1.2.3
+
+  with_prometheus:
+    when: "Monitoring and alerting"
+    approach: |
+      Prometheus + Kubernetes:
+
+      # ServiceMonitor for Prometheus Operator
+      apiVersion: monitoring.coreos.com/v1
+      kind: ServiceMonitor
+      metadata:
+        name: my-app
+        labels:
+          release: prometheus  # Must match Prometheus selector
+      spec:
+        selector:
+          matchLabels:
+            app: my-app
+        endpoints:
+          - port: http
+            path: /metrics
+            interval: 30s
+
+
+      # Pod annotations (alternative to ServiceMonitor)
+      metadata:
+        annotations:
+          prometheus.io/scrape: "true"
+          prometheus.io/port: "8080"
+          prometheus.io/path: "/metrics"
+
+
+      # PrometheusRule for alerts
+      apiVersion: monitoring.coreos.com/v1
+      kind: PrometheusRule
+      metadata:
+        name: my-app-alerts
+      spec:
+        groups:
+          - name: my-app
+            rules:
+              - alert: HighErrorRate
+                expr: |
+                  rate(http_requests_total{status=~"5.."}[5m])
+                  / rate(http_requests_total[5m]) > 0.05
+                for: 5m
+                labels:
+                  severity: critical
+                annotations:
+                  summary: "High error rate in {{ $labels.service }}"
+
+platform_integration:
+  eks:
+    setup: |
+      # EKS with eksctl
+
+      # Create cluster
+      eksctl create cluster \
+        --name my-cluster \
+        --region us-east-1 \
+        --nodegroup-name standard \
+        --node-type t3.medium \
+        --nodes 3 \
+        --nodes-min 2 \
+        --nodes-max 5 \
+        --managed
+
+      # Enable IRSA (IAM Roles for Service Accounts)
+      eksctl utils associate-iam-oidc-provider \
+        --cluster my-cluster \
+        --approve
+
+      # Create service account with IAM role
+      eksctl create iamserviceaccount \
+        --cluster my-cluster \
+        --namespace production \
+        --name my-app \
+        --attach-policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess \
+        --approve
+    considerations:
+      - "Use managed node groups"
+      - "Enable cluster autoscaler"
+      - "Use Fargate for serverless pods"
+      - "Configure aws-load-balancer-controller"
+
+  gke:
+    setup: |
+      # GKE with gcloud
+
+      gcloud container clusters create my-cluster \
+        --zone us-central1-a \
+        --num-nodes 3 \
+        --enable-autoscaling \
+        --min-nodes 2 \
+        --max-nodes 10 \
+        --enable-autorepair \
+        --enable-autoupgrade
+
+      # Workload Identity (GCP's IRSA equivalent)
+      gcloud container clusters update my-cluster \
+        --workload-pool=my-project.svc.id.goog
+
+      # Get credentials
+      gcloud container clusters get-credentials my-cluster
+    considerations:
+      - "GKE Autopilot for hands-off management"
+      - "Workload Identity for GCP access"
+      - "Cloud NAT for egress"
+
+ecosystem:
+  primary_tools:
+    - "kubectl - CLI"
+    - "k9s - Terminal UI"
+    - "Lens - Desktop IDE"
+    - "Helm - Package manager"
+    - "Kustomize - Manifest patching"
+
+  debugging:
+    - name: stern
+      use_when: "Multi-pod log tailing"
+    - name: k9s
+      use_when: "Interactive debugging"
+    - name: kubectl debug
+      use_when: "Ephemeral debug containers"
+    - name: kubectx/kubens
+      use_when: "Switching contexts/namespaces"
+
+  gitops:
+    - name: ArgoCD
+      use_when: "Pull-based GitOps with UI"
+    - name: Flux
+      use_when: "Pull-based GitOps, lightweight"
+    - name: Tekton
+      use_when: "Kubernetes-native CI/CD"
+
+  alternatives:
+    - name: Docker Compose
+      use_when: "Local development, simple deployments"
+      avoid_when: "Need scaling, HA, or cloud-native features"
+
+    - name: Docker Swarm
+      use_when: "Simple orchestration without K8s complexity"
+      avoid_when: "Need ecosystem, community, or advanced features"
+
+    - name: Nomad
+      use_when: "Multi-workload orchestration (containers + VMs + raw exec)"
+      avoid_when: "Need Kubernetes ecosystem"
+
+  deprecated:
+    - "kubectl run for deployments (use create/apply)"
+    - "Helm 2 (use Helm 3)"
+    - "Ingress v1beta1 (use v1)"
+    - "PodSecurityPolicy (use PodSecurityAdmission)"

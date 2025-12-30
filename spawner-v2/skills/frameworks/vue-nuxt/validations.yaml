@@ -1,0 +1,225 @@
+# Validations - Vue & Nuxt
+# Automated checks that run on Vue/Nuxt code
+
+version: 1.0.0
+skill_id: vue-nuxt
+
+validations:
+  # Critical - Will cause bugs
+  - id: reactive-destructure
+    name: Destructuring reactive without toRefs
+    severity: error
+    type: regex
+    pattern:
+      - 'const\s*\{[^}]+\}\s*=\s*reactive\('
+      - 'const\s*\{[^}]+\}\s*=\s*use\w+Store\(\)(?!\s*\.)'
+    message: "Destructuring reactive loses reactivity - use toRefs() or storeToRefs()"
+    fix_action: "Wrap with toRefs(): const { foo } = toRefs(reactive({...}))"
+    applies_to:
+      - "*.vue"
+      - "*.ts"
+
+  - id: mutating-props
+    name: Direct prop mutation
+    severity: error
+    type: regex
+    pattern:
+      - 'props\.\w+\s*='
+      - 'props\.\w+\.push\('
+      - 'props\.\w+\.splice\('
+    message: "Props are read-only - emit an event for the parent to handle"
+    fix_action: "Use emit('update:propName', newValue) for v-model or custom events"
+    applies_to:
+      - "*.vue"
+
+  - id: options-api-in-vue3
+    name: Options API in Vue 3 project
+    severity: warning
+    type: regex
+    pattern:
+      - 'export\s+default\s*\{[^}]*data\s*\(\s*\)'
+      - 'export\s+default\s*\{[^}]*methods\s*:'
+    message: "Options API detected - prefer Composition API with <script setup>"
+    fix_action: "Migrate to <script setup> with ref(), computed(), etc."
+    applies_to:
+      - "*.vue"
+
+  - id: watch-without-immediate
+    name: Watch on route param without immediate
+    severity: warning
+    type: regex
+    pattern:
+      - 'watch\s*\(\s*\(\)\s*=>\s*route\.(params|query)\.\w+[^{]*\{[^}]*\}\s*\)'
+    message: "Route param watch should have immediate: true for initial load"
+    fix_action: "Add { immediate: true } as third argument"
+    applies_to:
+      - "*.vue"
+
+  - id: v-if-with-v-for
+    name: v-if used with v-for on same element
+    severity: warning
+    type: regex
+    pattern:
+      - 'v-for="[^"]*"\s+v-if='
+      - 'v-if="[^"]*"\s+v-for='
+    message: "v-if with v-for has implicit precedence - use computed or wrapper"
+    fix_action: "Filter in computed property or wrap with <template v-for>"
+    applies_to:
+      - "*.vue"
+
+  - id: missing-key-in-v-for
+    name: v-for without :key
+    severity: warning
+    type: regex
+    pattern:
+      - 'v-for="[^"]*"(?!\s+:key=)'
+    message: "v-for without :key can cause rendering issues"
+    fix_action: "Add :key with unique identifier: v-for=\"item in items\" :key=\"item.id\""
+    applies_to:
+      - "*.vue"
+
+  - id: ref-value-comparison
+    name: Ref compared without .value
+    severity: error
+    type: regex
+    pattern:
+      - 'if\s*\(\s*\w+\s*===?\s*(true|false|null|undefined|[0-9]+|"[^"]*"|\'[^\']*\')\s*\)'
+    message: "Possible ref comparison without .value - refs need .value in script"
+    fix_action: "Use .value: if (myRef.value === true)"
+    applies_to:
+      - "*.vue"
+      - "*.ts"
+
+  - id: nuxt-fetch-in-mounted
+    name: Data fetching in onMounted instead of useFetch
+    severity: info
+    type: regex
+    pattern:
+      - 'onMounted\s*\(\s*async\s*\(\s*\)\s*=>\s*\{[^}]*fetch\('
+      - 'onMounted\s*\(\s*async\s*\(\s*\)\s*=>\s*\{[^}]*axios'
+    message: "Use useFetch() or useAsyncData() for SSR-compatible data fetching"
+    fix_action: "Replace with useFetch('/api/...') for automatic SSR handling"
+    applies_to:
+      - "*.vue"
+
+  - id: window-access-without-check
+    name: Direct window/document access
+    severity: warning
+    type: regex
+    pattern:
+      - '(?<!if\s*\()[^?]window\.'
+      - '(?<!if\s*\()[^?]document\.'
+    message: "Direct browser API access fails on server - use ClientOnly or onMounted"
+    fix_action: "Wrap in onMounted() or <ClientOnly> component"
+    applies_to:
+      - "*.vue"
+
+  - id: store-outside-setup
+    name: Store accessed at module level
+    severity: error
+    type: regex
+    pattern:
+      - '^const\s+\w+\s*=\s*use\w+Store\(\)'
+      - '^let\s+\w+\s*=\s*use\w+Store\(\)'
+    message: "Store must be accessed inside setup() or Nuxt plugin context"
+    fix_action: "Move useStore() inside component setup or a function"
+    applies_to:
+      - "*.ts"
+
+  - id: computed-with-side-effects
+    name: Side effects in computed
+    severity: warning
+    type: regex
+    pattern:
+      - 'computed\s*\(\s*\(\s*\)\s*=>\s*\{[^}]*(console\.|fetch\(|emit\()'
+    message: "Computed should be pure - no side effects"
+    fix_action: "Move side effects to watch() or methods"
+    applies_to:
+      - "*.vue"
+
+  - id: unused-await-usefetch
+    name: useFetch without await
+    severity: warning
+    type: regex
+    pattern:
+      - '(?<!await\s+)useFetch\s*\('
+      - '(?<!await\s+)useAsyncData\s*\('
+    message: "useFetch/useAsyncData should be awaited to prevent hydration issues"
+    fix_action: "Add await: const { data } = await useFetch(...)"
+    applies_to:
+      - "*.vue"
+
+code_smells:
+  - id: too-many-refs
+    name: Component with many refs
+    description: "More than 10 refs suggests component does too much"
+    pattern: '(ref\s*\(|ref<)[^)]*\)'
+    suggestion: "Split into smaller components or extract composables"
+
+  - id: deep-prop-drilling
+    name: Props passed through many levels
+    description: "Props appearing in 4+ components suggests provide/inject"
+    pattern: null
+    suggestion: "Use provide/inject or Pinia for deeply shared state"
+
+  - id: inline-styles
+    name: Inline styles in template
+    description: "Inline :style should be CSS classes when possible"
+    pattern: ':style="[^"]*\{[^}]*\}"'
+    suggestion: "Use CSS classes, scoped styles, or CSS variables"
+
+best_practices:
+  script_setup:
+    recommendation: |
+      Always use <script setup> for new components:
+
+      <script setup lang="ts">
+      // Automatic imports with Nuxt
+      // defineProps and defineEmits are compiler macros
+
+      const props = defineProps<{
+        title: string
+        count?: number
+      }>()
+
+      const emit = defineEmits<{
+        (e: 'update', value: number): void
+      }>()
+
+      // Rest of composition API code
+      const doubled = computed(() => (props.count ?? 0) * 2)
+      </script>
+
+  composable_naming:
+    recommendation: |
+      Name composables with "use" prefix:
+
+      // composables/useAuth.ts
+      export function useAuth() {
+        const user = ref<User | null>(null)
+        const isLoggedIn = computed(() => !!user.value)
+
+        return { user, isLoggedIn }
+      }
+
+      // composables/useCounter.ts
+      export function useCounter(initial = 0) {
+        const count = ref(initial)
+        const increment = () => count.value++
+        return { count, increment }
+      }
+
+  nuxt_directory_structure:
+    recommendation: |
+      Follow Nuxt 3 conventions:
+
+      components/     # Auto-imported components
+      composables/    # Auto-imported composables (use*.ts)
+      pages/          # File-based routing
+      layouts/        # Shared layouts
+      middleware/     # Route middleware
+      plugins/        # App plugins
+      server/
+        api/          # API routes
+        middleware/   # Server middleware
+      stores/         # Pinia stores

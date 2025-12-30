@@ -1,0 +1,490 @@
+# Sharp Edges - Angular
+# The gotchas that cause performance issues and bugs
+
+version: 1.0.0
+skill_id: angular
+
+sharp_edges:
+  - id: change-detection-default
+    summary: Default change detection causes performance problems at scale
+    severity: high
+    situation: |
+      You leave components with the default change detection strategy. Your
+      app has 100+ components. Every click, every keystroke, every HTTP
+      response triggers checking ALL components.
+    why: |
+      Default change detection runs on every browser event across all components.
+      In a component tree of 200 components, that's 200 checks per click. With
+      OnPush, only components with changed inputs or events are checked.
+    solution: |
+      # USE ONPUSH CHANGE DETECTION
+
+      import { ChangeDetectionStrategy, Component } from '@angular/core';
+
+      // Default: checks on every event (avoid for leaf components)
+      @Component({ ... })
+
+      // OnPush: checks only when inputs change or events fire
+      @Component({
+        changeDetection: ChangeDetectionStrategy.OnPush,
+        ...
+      })
+      export class UserCardComponent {
+        @Input() user!: User;  // Changes trigger detection
+      }
+
+      // Rules for OnPush:
+      // 1. Inputs must be immutable (new reference to trigger)
+      // 2. Use async pipe for observables
+      // 3. Events from template trigger detection
+
+      // WRONG: Mutating input
+      this.user.name = 'New Name';  // Won't trigger change detection!
+
+      // RIGHT: New reference
+      this.user = { ...this.user, name: 'New Name' };
+    symptoms:
+      - App slows down as it grows
+      - High CPU usage on user interactions
+      - Lag when typing in forms
+    detection_pattern: '@Component\s*\(\s*\{(?!.*changeDetection)'
+
+  - id: memory-leak-subscriptions
+    summary: Subscriptions not unsubscribed cause memory leaks
+    severity: high
+    situation: |
+      You subscribe to observables in ngOnInit but forget to unsubscribe
+      in ngOnDestroy. The component is destroyed, but the subscription
+      lives on, holding references and executing callbacks.
+    why: |
+      Subscriptions to long-lived observables (services, timers, HTTP with
+      intervals) don't automatically clean up. The callback function holds
+      a reference to the component, preventing garbage collection. Memory
+      usage grows with each navigation.
+    solution: |
+      # ALWAYS CLEAN UP SUBSCRIPTIONS
+
+      // Option 1: async pipe (BEST - auto-unsubscribes)
+      @Component({
+        template: `
+          @if (user$ | async; as user) {
+            <div>{{ user.name }}</div>
+          }
+        `
+      })
+      export class UserComponent {
+        user$ = this.userService.getUser();
+      }
+
+      // Option 2: toSignal (converts to signal, auto-cleans up)
+      user = toSignal(this.userService.getUser());
+
+      // Option 3: takeUntilDestroyed (Angular 16+)
+      export class UserComponent {
+        private destroyRef = inject(DestroyRef);
+
+        ngOnInit() {
+          this.userService.getUser()
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe(user => this.user = user);
+        }
+      }
+
+      // Option 4: Subject for multiple subscriptions
+      export class UserComponent implements OnDestroy {
+        private destroy$ = new Subject<void>();
+
+        ngOnInit() {
+          this.obs1$.pipe(takeUntil(this.destroy$)).subscribe(...);
+          this.obs2$.pipe(takeUntil(this.destroy$)).subscribe(...);
+        }
+
+        ngOnDestroy() {
+          this.destroy$.next();
+          this.destroy$.complete();
+        }
+      }
+    symptoms:
+      - Memory usage grows during navigation
+      - Old callbacks execute on destroyed components
+      - Console errors about destroyed views
+    detection_pattern: '\.subscribe\s*\([^)]+\)(?!.*takeUntil|.*takeUntilDestroyed)'
+
+  - id: template-method-calls
+    summary: Methods called in templates run on every change detection
+    severity: high
+    situation: |
+      You call a method in your template to compute a value. It works, so
+      you don't think about it. But the method runs 50 times per second
+      during a scroll or animation.
+    why: |
+      Templates re-evaluate on every change detection cycle. A method call
+      `{{ getTotal() }}` runs every time Angular checks the component. With
+      Default change detection, that's every event. Even simple calculations
+      add up across hundreds of components.
+    solution: |
+      # AVOID METHOD CALLS IN TEMPLATES
+
+      // WRONG: Method runs every change detection
+      @Component({
+        template: `<div>{{ getFullName() }}</div>`
+      })
+      export class UserComponent {
+        getFullName() {
+          console.log('called!');  // See how often this runs
+          return `${this.firstName} ${this.lastName}`;
+        }
+      }
+
+      // RIGHT: Use computed signal
+      @Component({
+        template: `<div>{{ fullName() }}</div>`
+      })
+      export class UserComponent {
+        firstName = signal('John');
+        lastName = signal('Doe');
+
+        fullName = computed(() => `${this.firstName()} ${this.lastName()}`);
+      }
+
+      // RIGHT: Use pipe for transformations
+      @Pipe({ name: 'fullName', standalone: true, pure: true })
+      export class FullNamePipe implements PipeTransform {
+        transform(user: User): string {
+          return `${user.firstName} ${user.lastName}`;
+        }
+      }
+
+      <div>{{ user | fullName }}</div>
+
+      // RIGHT: Pre-compute in setter/ngOnChanges
+      @Input() set user(value: User) {
+        this._user = value;
+        this.fullName = `${value.firstName} ${value.lastName}`;
+      }
+    symptoms:
+      - Slow rendering, especially during scroll
+      - Console logs repeat excessively
+      - Profiler shows many function calls
+    detection_pattern: '\{\{\s*\w+\s*\([^)]*\)\s*\}\}'
+
+  - id: rxjs-nested-subscribes
+    summary: Nested subscribes create callback hell and race conditions
+    severity: medium
+    situation: |
+      You need data from one API call to make another. You subscribe to
+      the first, then subscribe to the second inside. The code becomes
+      a pyramid of doom, and errors are hard to handle.
+    why: |
+      Nested subscribes lose the power of RxJS operators. You can't cancel
+      inner subscriptions easily. Error handling is duplicated. Race
+      conditions appear when the outer observable emits again before
+      the inner completes.
+    solution: |
+      # USE RXJS OPERATORS INSTEAD
+
+      // WRONG: Nested subscribes
+      this.userService.getUser().subscribe(user => {
+        this.orderService.getOrders(user.id).subscribe(orders => {
+          this.user = user;
+          this.orders = orders;
+        });
+      });
+
+      // RIGHT: Use switchMap/mergeMap/concatMap
+      this.userService.getUser().pipe(
+        switchMap(user => this.orderService.getOrders(user.id).pipe(
+          map(orders => ({ user, orders }))
+        ))
+      ).subscribe(({ user, orders }) => {
+        this.user = user;
+        this.orders = orders;
+      });
+
+      // RIGHT: Use forkJoin for parallel requests
+      forkJoin({
+        user: this.userService.getUser(),
+        settings: this.settingsService.getSettings()
+      }).subscribe(({ user, settings }) => {
+        this.user = user;
+        this.settings = settings;
+      });
+
+      // RIGHT: Use combineLatest for multiple streams
+      combineLatest({
+        user: this.user$,
+        permissions: this.permissions$
+      }).subscribe(({ user, permissions }) => { ... });
+
+      // Choosing the right operator:
+      // switchMap: Cancel previous, use latest (autocomplete)
+      // mergeMap: Run all in parallel (bulk operations)
+      // concatMap: Run sequentially (order matters)
+      // exhaustMap: Ignore until current completes (form submit)
+    symptoms:
+      - Deeply nested callbacks
+      - Race conditions with rapid clicks
+      - Memory leaks from orphaned subscriptions
+    detection_pattern: '\.subscribe\s*\([^}]*\.subscribe\s*\('
+
+  - id: circular-dependency
+    summary: Services that inject each other cause runtime errors
+    severity: medium
+    situation: |
+      ServiceA injects ServiceB, and ServiceB injects ServiceA. Angular
+      can't resolve the dependency and throws a cryptic error about
+      circular dependencies.
+    why: |
+      Angular's DI resolves dependencies when a class is instantiated.
+      If A needs B and B needs A, neither can be created first. This is
+      a code smell indicating poor separation of concerns.
+    solution: |
+      # BREAK CIRCULAR DEPENDENCIES
+
+      // WRONG: Circular injection
+      @Injectable({ providedIn: 'root' })
+      export class AuthService {
+        constructor(private userService: UserService) {}
+      }
+
+      @Injectable({ providedIn: 'root' })
+      export class UserService {
+        constructor(private authService: AuthService) {}  // Circular!
+      }
+
+      // SOLUTION 1: Extract shared logic
+      @Injectable({ providedIn: 'root' })
+      export class TokenService {
+        // Shared logic used by both
+      }
+
+      @Injectable({ providedIn: 'root' })
+      export class AuthService {
+        constructor(private tokenService: TokenService) {}
+      }
+
+      @Injectable({ providedIn: 'root' })
+      export class UserService {
+        constructor(private tokenService: TokenService) {}
+      }
+
+      // SOLUTION 2: Inject lazily with forwardRef
+      @Injectable({ providedIn: 'root' })
+      export class UserService {
+        constructor(
+          @Inject(forwardRef(() => AuthService))
+          private authService: AuthService
+        ) {}
+      }
+
+      // SOLUTION 3: Use an event bus/subject
+      @Injectable({ providedIn: 'root' })
+      export class EventBus {
+        private events$ = new Subject<AppEvent>();
+        emit(event: AppEvent) { this.events$.next(event); }
+        on(type: string) { return this.events$.pipe(filter(e => e.type === type)); }
+      }
+    symptoms:
+      - "Error: Circular dependency" at runtime
+      - DI resolution fails
+      - Hard to trace dependency chains
+    detection_pattern: null
+
+  - id: async-validator-spam
+    summary: Async validators fire on every keystroke without debounce
+    severity: medium
+    situation: |
+      You add an async validator to check if a username is taken. It fires
+      on every keystroke, making 10 API calls for a 10-character username.
+      Your server gets hammered.
+    why: |
+      By default, validators run on every value change. For sync validators,
+      this is fine. For async validators that hit an API, it's disastrous.
+      You need to debounce or use updateOn: 'blur'.
+    solution: |
+      # DEBOUNCE ASYNC VALIDATORS
+
+      // WRONG: Fires on every keystroke
+      this.form = this.fb.group({
+        username: ['', [], [this.usernameValidator.validate.bind(this)]]
+      });
+
+      // RIGHT: Use updateOn blur
+      this.form = this.fb.group({
+        username: ['', {
+          validators: [Validators.required],
+          asyncValidators: [this.usernameValidator.validate.bind(this)],
+          updateOn: 'blur'  // Only validate on blur
+        }]
+      });
+
+      // RIGHT: Debounce in the validator itself
+      @Injectable({ providedIn: 'root' })
+      export class UsernameValidator {
+        constructor(private http: HttpClient) {}
+
+        validate(control: AbstractControl): Observable<ValidationErrors | null> {
+          return timer(300).pipe(  // Debounce
+            switchMap(() =>
+              this.http.get<boolean>(`/api/check-username/${control.value}`)
+            ),
+            map(exists => exists ? { usernameTaken: true } : null),
+            catchError(() => of(null))
+          );
+        }
+      }
+    symptoms:
+      - Many API calls per form field
+      - Server rate limiting triggered
+      - Slow form response
+    detection_pattern: 'asyncValidators.*http\.get'
+
+  - id: zone-js-external-async
+    summary: Async operations outside Angular zone don't trigger updates
+    severity: medium
+    situation: |
+      You use a third-party library or raw setTimeout/Promise that runs
+      outside Angular's zone. The data updates, but the view doesn't.
+      You add random click handlers to "fix" it.
+    why: |
+      Angular uses Zone.js to detect async operations and trigger change
+      detection. Some libraries patch these methods before Angular, or
+      explicitly run outside the zone. When this happens, Angular doesn't
+      know to update.
+    solution: |
+      # RUN IN ANGULAR ZONE
+
+      import { NgZone, inject } from '@angular/core';
+
+      @Component({ ... })
+      export class MapComponent {
+        private ngZone = inject(NgZone);
+
+        initMap() {
+          // Third-party library callback
+          this.map.on('click', (event) => {
+            // WRONG: Won't trigger change detection
+            this.selectedLocation = event.latlng;
+
+            // RIGHT: Run in Angular zone
+            this.ngZone.run(() => {
+              this.selectedLocation = event.latlng;
+            });
+          });
+        }
+
+        // For performance, run OUTSIDE zone intentionally
+        startAnimation() {
+          this.ngZone.runOutsideAngular(() => {
+            // High-frequency updates that don't need view updates
+            requestAnimationFrame(this.animate.bind(this));
+          });
+        }
+      }
+
+      // With signals, this is less of an issue
+      // Signals update regardless of zone
+      selectedLocation = signal<LatLng | null>(null);
+
+      initMap() {
+        this.map.on('click', (event) => {
+          this.selectedLocation.set(event.latlng);  // Works!
+        });
+      }
+    symptoms:
+      - View doesn't update after async operation
+      - Click anywhere "fixes" the display
+      - Data is correct but UI is stale
+    detection_pattern: null
+
+  - id: router-resolver-blocking
+    summary: Route resolvers block navigation and frustrate users
+    severity: medium
+    situation: |
+      You add a resolver to fetch data before navigating. It takes 3 seconds.
+      Users click a link and nothing happens. They click again. Nothing.
+      They think the app is broken.
+    why: |
+      Resolvers block navigation until they complete. The user sees no
+      feedback. If the API is slow or fails, the navigation hangs. This is
+      the opposite of a good UX.
+    solution: |
+      # AVOID BLOCKING RESOLVERS
+
+      // WRONG: Blocking resolver
+      export const userResolver: ResolveFn<User> = (route) => {
+        return inject(UserService).getUser(route.params['id']);
+        // Navigation waits until this completes
+      };
+
+      // RIGHT: Load in component with loading state
+      @Component({
+        template: `
+          @if (loading()) {
+            <app-spinner />
+          } @else {
+            <app-user-profile [user]="user()" />
+          }
+        `
+      })
+      export class UserPageComponent {
+        private route = inject(ActivatedRoute);
+        private userService = inject(UserService);
+
+        loading = signal(true);
+        user = signal<User | null>(null);
+
+        constructor() {
+          // Load after navigation
+          const id = this.route.snapshot.params['id'];
+          this.userService.getUser(id).subscribe(user => {
+            this.user.set(user);
+            this.loading.set(false);
+          });
+        }
+      }
+
+      // If resolver is needed, return observable that emits immediately
+      export const userResolver: ResolveFn<Observable<User>> = (route) => {
+        // Return observable, let component handle loading
+        return of(inject(UserService).getUser(route.params['id']));
+      };
+    symptoms:
+      - Navigation appears frozen
+      - No loading feedback
+      - Users click multiple times
+    detection_pattern: 'resolve:\s*\{[^}]+\}'
+
+framework_specific:
+  ngrx:
+    - id: mutable-state-update
+      summary: Mutating state directly instead of returning new state
+      situation: |
+        You modify state directly in a reducer instead of returning
+        a new state object. NgRx expects immutable updates.
+      solution: |
+        // WRONG: Mutating state
+        on(addItem, (state, { item }) => {
+          state.items.push(item);  // Mutation!
+          return state;
+        })
+
+        // RIGHT: Return new state
+        on(addItem, (state, { item }) => ({
+          ...state,
+          items: [...state.items, item]
+        }))
+
+  angular-material:
+    - id: missing-typography
+      summary: Angular Material styles look wrong without typography
+      situation: |
+        You import Angular Material modules but forget to add the
+        typography class. Text looks off, sizing is wrong.
+      solution: |
+        // In styles.scss
+        @use '@angular/material' as mat;
+        @include mat.typography-hierarchy(mat.define-typography-config());
+
+        // In index.html
+        <body class="mat-typography">

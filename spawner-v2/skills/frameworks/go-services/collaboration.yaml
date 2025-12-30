@@ -1,0 +1,360 @@
+# Collaboration - Go Services
+# How this skill works with other skills
+
+version: 1.0.0
+skill_id: go-services
+
+prerequisites:
+  required: []
+
+  recommended:
+    - skill: backend
+      reason: "General backend patterns and API design"
+      what_to_know:
+        - "REST API conventions"
+        - "Error handling patterns"
+        - "Authentication flows"
+
+    - skill: postgres-wizard
+      reason: "Database integration for Go services"
+      what_to_know:
+        - "SQL query patterns"
+        - "Connection pooling"
+        - "Transaction management"
+
+    - skill: devops
+      reason: "Deployment and containerization"
+      what_to_know:
+        - "Docker basics"
+        - "Health checks"
+        - "Graceful shutdown"
+
+  knowledge:
+    - "Understanding of concurrent programming concepts"
+    - "Familiarity with HTTP request/response lifecycle"
+    - "Basic understanding of memory management"
+
+delegation_triggers:
+  - trigger: "user needs database design or complex queries"
+    delegate_to: postgres-wizard
+    context: "Database schema and query optimization"
+
+  - trigger: "user needs Docker, Kubernetes, or deployment"
+    delegate_to: devops
+    context: "Containerization and orchestration"
+
+  - trigger: "user needs API design or OpenAPI spec"
+    delegate_to: api-design
+    context: "API contracts and documentation"
+
+  - trigger: "user needs security audit or hardening"
+    delegate_to: security-specialist
+    context: "Security review and vulnerability assessment"
+
+  - trigger: "user needs performance optimization"
+    delegate_to: performance-thinker
+    context: "Profiling and optimization strategies"
+
+  - trigger: "user needs gRPC or Protocol Buffers"
+    delegate_to: api-design
+    context: "RPC patterns and service definitions"
+
+receives_context_from:
+  - skill: backend
+    receives:
+      - "API specifications and endpoints"
+      - "Authentication requirements"
+      - "Business logic requirements"
+
+  - skill: api-design
+    receives:
+      - "OpenAPI/Swagger specifications"
+      - "API versioning strategy"
+      - "Error response formats"
+
+  - skill: postgres-wizard
+    receives:
+      - "Database schema and models"
+      - "Query patterns and indexes"
+      - "Migration strategies"
+
+provides_context_to:
+  - skill: devops
+    provides:
+      - "Dockerfile for Go service"
+      - "Health check endpoints"
+      - "Graceful shutdown implementation"
+
+  - skill: security-specialist
+    provides:
+      - "Code for security review"
+      - "Authentication implementation"
+      - "Input validation patterns"
+
+  - skill: frontend
+    provides:
+      - "API endpoints and contracts"
+      - "Response schemas"
+      - "WebSocket handlers"
+
+escalation_paths:
+  - situation: "Performance bottleneck identified"
+    escalate_to: performance-thinker
+    context: "CPU profiling, memory optimization, concurrency tuning"
+
+  - situation: "Security vulnerability discovered"
+    escalate_to: security-specialist
+    context: "Authentication, authorization, input validation"
+
+  - situation: "Database queries slow or inefficient"
+    escalate_to: postgres-wizard
+    context: "Query optimization, indexing, connection pooling"
+
+  - situation: "Need distributed system patterns"
+    escalate_to: backend
+    context: "Microservices communication, event-driven architecture"
+
+workflow_integration:
+  typical_sequence:
+    1:
+      step: "Define API contract"
+      skills: [api-design]
+      output: "OpenAPI spec, endpoint definitions"
+
+    2:
+      step: "Design data model"
+      skills: [postgres-wizard]
+      output: "Database schema, migrations"
+
+    3:
+      step: "Implement Go service"
+      skills: [go-services]
+      output: "Working HTTP handlers, business logic"
+
+    4:
+      step: "Add authentication"
+      skills: [backend, security-specialist]
+      output: "Auth middleware, JWT handling"
+
+    5:
+      step: "Write tests"
+      skills: [go-services]
+      output: "Unit tests, integration tests"
+
+    6:
+      step: "Containerize and deploy"
+      skills: [devops]
+      output: "Dockerfile, k8s manifests, CI/CD"
+
+  decision_points:
+    - question: "Which HTTP framework to use?"
+      guidance: |
+        Standard library (net/http):
+        - Most Go services, especially internal
+        - Go 1.22+ has path parameters
+        - Maximum compatibility
+
+        Chi:
+        - Need middleware chaining
+        - Large API with many routes
+        - Compatible with net/http
+
+        Gin:
+        - High-performance public APIs
+        - Need lots of middleware
+        - Coming from other frameworks
+
+        Fiber:
+        - Express.js familiarity
+        - Extreme performance needs
+        - Accept net/http incompatibility
+
+    - question: "How to structure the project?"
+      guidance: |
+        Small service (single main.go):
+        - < 500 lines
+        - Single responsibility
+        - Quick to understand
+
+        Package-based:
+        - handlers/, models/, services/
+        - Clear separation
+        - Most common choice
+
+        Domain-driven:
+        - user/, order/, payment/
+        - Each domain self-contained
+        - Better for large codebases
+
+        Avoid:
+        - "Clean architecture" with 50 packages for simple services
+        - Interfaces for everything
+        - Over-abstraction
+
+    - question: "Database driver choice?"
+      guidance: |
+        database/sql + driver:
+        - Standard library approach
+        - Maximum control
+        - Good for simple queries
+
+        sqlx:
+        - Named parameters
+        - Struct scanning
+        - Good balance
+
+        GORM:
+        - Full ORM
+        - Migrations
+        - Adds complexity
+
+        sqlc:
+        - Generated type-safe code
+        - Best for production
+        - Requires SQL knowledge
+
+collaboration_patterns:
+  with_database:
+    when: "Building data layer"
+    approach: |
+      1. Define models in Go
+      2. Use sqlc or database/sql
+      3. Connection pooling (sql.DB handles this)
+      4. Context for cancellation
+
+      type UserRepository struct {
+          db *sql.DB
+      }
+
+      func (r *UserRepository) GetByID(ctx context.Context, id string) (*User, error) {
+          row := r.db.QueryRowContext(ctx,
+              "SELECT id, email, name FROM users WHERE id = $1", id)
+          var u User
+          err := row.Scan(&u.ID, &u.Email, &u.Name)
+          if err == sql.ErrNoRows {
+              return nil, ErrNotFound
+          }
+          return &u, err
+      }
+
+  with_http:
+    when: "Building HTTP handlers"
+    approach: |
+      1. Handler functions accept (w, r)
+      2. Extract context from request
+      3. Return JSON with proper status codes
+      4. Centralized error handling
+
+      func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
+          ctx := r.Context()
+          id := r.PathValue("id")  // Go 1.22+
+
+          user, err := h.users.GetByID(ctx, id)
+          if err != nil {
+              h.handleError(w, err)
+              return
+          }
+
+          w.Header().Set("Content-Type", "application/json")
+          json.NewEncoder(w).Encode(user)
+      }
+
+  with_testing:
+    when: "Writing tests"
+    approach: |
+      1. Table-driven tests
+      2. Test HTTP handlers with httptest
+      3. Mock dependencies with interfaces
+      4. Run with -race flag
+
+      func TestGetUser(t *testing.T) {
+          // Setup
+          mockRepo := &MockUserRepo{
+              users: map[string]*User{"1": {ID: "1", Email: "test@test.com"}},
+          }
+          handler := NewHandler(mockRepo)
+
+          // Create request
+          req := httptest.NewRequest("GET", "/users/1", nil)
+          w := httptest.NewRecorder()
+
+          // Execute
+          handler.GetUser(w, req)
+
+          // Assert
+          if w.Code != 200 {
+              t.Errorf("got status %d, want 200", w.Code)
+          }
+      }
+
+platform_integration:
+  docker:
+    setup: |
+      # Multi-stage build for small images
+      FROM golang:1.22-alpine AS builder
+      WORKDIR /app
+      COPY go.mod go.sum ./
+      RUN go mod download
+      COPY . .
+      RUN CGO_ENABLED=0 go build -o /server ./cmd/server
+
+      FROM alpine:3.19
+      RUN apk add --no-cache ca-certificates
+      COPY --from=builder /server /server
+      EXPOSE 8080
+      CMD ["/server"]
+    considerations:
+      - "Use multi-stage builds for small images"
+      - "CGO_ENABLED=0 for static binary"
+      - "Include ca-certificates for HTTPS"
+      - "Run as non-root user in production"
+
+  kubernetes:
+    setup: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: go-service
+      spec:
+        replicas: 3
+        template:
+          spec:
+            containers:
+            - name: go-service
+              image: myapp:latest
+              ports:
+              - containerPort: 8080
+              livenessProbe:
+                httpGet:
+                  path: /health
+                  port: 8080
+                initialDelaySeconds: 5
+              readinessProbe:
+                httpGet:
+                  path: /ready
+                  port: 8080
+              resources:
+                limits:
+                  memory: "256Mi"
+                  cpu: "500m"
+    considerations:
+      - "Implement /health and /ready endpoints"
+      - "Set resource limits"
+      - "Use graceful shutdown"
+      - "Configure proper probe delays"
+
+cost_optimization:
+  resource_efficiency:
+    - "Go binaries are small - use scratch or distroless images"
+    - "Memory usage is predictable - size containers accordingly"
+    - "Goroutines are cheap but not free - limit concurrent work"
+
+  cloud_costs:
+    - "Go cold starts fast - good for serverless"
+    - "Low memory footprint - smaller instances work"
+    - "Compile once, run anywhere - reduce build costs"
+
+  monitoring:
+    - "Use runtime/pprof for profiling"
+    - "Export Prometheus metrics"
+    - "Track goroutine count over time"

@@ -1,0 +1,558 @@
+# Sharp Edges - Kubernetes
+# The gotchas that cause production incidents
+
+version: 1.0.0
+skill_id: kubernetes
+
+sharp_edges:
+  - id: secrets-not-encrypted
+    summary: Kubernetes Secrets are base64 encoded, not encrypted
+    severity: critical
+    situation: |
+      You create a Secret, thinking it's encrypted. You give cluster access
+      to developers. They run kubectl get secret -o yaml and see base64
+      that decodes instantly. Your database password is now on their laptop.
+    why: |
+      Secrets are just base64 encoded by default. The "secret" is that they're
+      stored separately from ConfigMaps and can have RBAC restrictions, but
+      the data itself is visible to anyone who can read the secret.
+    solution: |
+      # SECRETS ARE NOT ENCRYPTED BY DEFAULT
+
+      # Check what's in a secret:
+      kubectl get secret my-secret -o jsonpath='{.data.password}' | base64 -d
+      # Anyone with read access sees the value
+
+      # Option 1: Enable encryption at rest (etcd)
+      # Create EncryptionConfiguration and restart API server
+      apiVersion: apiserver.config.k8s.io/v1
+      kind: EncryptionConfiguration
+      resources:
+        - resources:
+            - secrets
+          providers:
+            - aescbc:
+                keys:
+                  - name: key1
+                    secret: <base64-encoded-32-byte-key>
+            - identity: {}
+
+      # Option 2: Use external secrets (RECOMMENDED)
+      # External Secrets Operator + AWS Secrets Manager/Vault
+      apiVersion: external-secrets.io/v1beta1
+      kind: ExternalSecret
+      metadata:
+        name: my-secret
+      spec:
+        refreshInterval: 1h
+        secretStoreRef:
+          name: aws-secrets-manager
+          kind: ClusterSecretStore
+        target:
+          name: my-secret
+        data:
+          - secretKey: password
+            remoteRef:
+              key: prod/my-app
+              property: password
+
+      # Option 3: Sealed Secrets (GitOps friendly)
+      # Encrypt secrets that only cluster can decrypt
+      kubeseal --format yaml < secret.yaml > sealed-secret.yaml
+      # sealed-secret.yaml is safe to commit to Git
+    symptoms:
+      - Base64 values visible in kubectl output
+      - Secrets in Git history
+      - Developers asking for cluster access "just to check configs"
+    detection_pattern: 'kind:\\s*Secret'
+
+  - id: no-resource-limits
+    summary: Missing resource limits causes node instability
+    severity: critical
+    situation: |
+      You deploy without resource limits. One pod has a memory leak. It consumes
+      all node memory. The kubelet starts killing random pods. Your whole node
+      becomes unstable. Other apps on the same node crash.
+    why: |
+      Without limits, pods can use unlimited resources. Kubernetes can't protect
+      other workloads. The scheduler can't make good decisions. You're one memory
+      leak away from cascading failures.
+    solution: |
+      # ALWAYS SET RESOURCE LIMITS
+
+      resources:
+        # Requests: What scheduler uses for placement
+        requests:
+          cpu: 100m      # 0.1 CPU cores
+          memory: 128Mi  # Megabytes
+
+        # Limits: Enforced at runtime
+        limits:
+          cpu: 500m      # Throttled if exceeded
+          memory: 512Mi  # OOMKilled if exceeded
+
+      # Good starting point for web apps:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+
+      # For APIs with variable load:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: 2000m
+        memory: 1Gi
+
+      # Use LimitRange to enforce defaults per namespace:
+      apiVersion: v1
+      kind: LimitRange
+      metadata:
+        name: default-limits
+        namespace: production
+      spec:
+        limits:
+          - default:
+              cpu: 500m
+              memory: 512Mi
+            defaultRequest:
+              cpu: 100m
+              memory: 128Mi
+            type: Container
+
+      # Use ResourceQuota for namespace-wide limits:
+      apiVersion: v1
+      kind: ResourceQuota
+      metadata:
+        name: compute-quota
+        namespace: production
+      spec:
+        hard:
+          requests.cpu: "10"
+          requests.memory: 20Gi
+          limits.cpu: "20"
+          limits.memory: 40Gi
+    symptoms:
+      - Nodes going NotReady
+      - Random pod evictions
+      - OOMKilled pods
+      - "Cannot schedule pod" errors
+    detection_pattern: 'containers:[^}]*(?!resources:)'
+
+  - id: missing-health-checks
+    summary: No probes means Kubernetes can't manage your app
+    severity: high
+    situation: |
+      Your app has no probes. It starts, but takes 30 seconds to be ready.
+      Kubernetes sends traffic immediately. Users get 503s. Or your app
+      deadlocks but the process is still running. Kubernetes thinks it's
+      fine. Traffic keeps coming to a dead app.
+    why: |
+      Probes are how Kubernetes knows your app's state. Without them, it can
+      only check if the process is running. A running process doesn't mean
+      a healthy app.
+    solution: |
+      # THREE TYPES OF PROBES
+
+      # 1. Startup Probe: Is the app started?
+      # Use for slow-starting apps (JVM, large caches)
+      startupProbe:
+        httpGet:
+          path: /health
+          port: 8080
+        failureThreshold: 30    # 30 * 10s = 5 minutes to start
+        periodSeconds: 10
+
+      # 2. Liveness Probe: Is the process alive?
+      # Failing = restart the container
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8080
+        initialDelaySeconds: 0   # Starts after startup probe passes
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3      # 3 failures = restart
+
+      # 3. Readiness Probe: Can it handle traffic?
+      # Failing = remove from service endpoints (no traffic)
+      readinessProbe:
+        httpGet:
+          path: /ready
+          port: 8080
+        initialDelaySeconds: 5
+        periodSeconds: 5
+        timeoutSeconds: 3
+        failureThreshold: 3
+
+      # PROBE ENDPOINTS IN APP:
+      # /health - Basic: returns 200 if process is alive
+      # /ready  - Checks dependencies (DB, Redis) before accepting traffic
+
+      // Node.js example
+      app.get('/health', (req, res) => res.status(200).send('OK'));
+
+      app.get('/ready', async (req, res) => {
+        try {
+          await db.query('SELECT 1');
+          await redis.ping();
+          res.status(200).send('Ready');
+        } catch (e) {
+          res.status(503).send('Not Ready');
+        }
+      });
+    symptoms:
+      - 503 errors during deployment
+      - Traffic to dead pods
+      - Pods stuck in "Running" but not working
+    detection_pattern: 'containers:[^}]*(?!livenessProbe|readinessProbe)'
+
+  - id: latest-tag
+    summary: Using :latest tag breaks deployments
+    severity: high
+    situation: |
+      You use :latest tag. You push a new image. You run kubectl rollout restart.
+      Nothing changes - the same old image runs. Or worse, different pods run
+      different versions because some nodes cached the old :latest.
+    why: |
+      :latest is a mutable tag. ImagePullPolicy defaults can mean the cached
+      image is used. Even with Always pull policy, different nodes might pull
+      at different times and get different images.
+    solution: |
+      # USE IMMUTABLE TAGS
+
+      # WRONG
+      image: myregistry/myapp:latest
+      image: myregistry/myapp         # Implies :latest
+
+      # RIGHT: Semantic versioning
+      image: myregistry/myapp:v1.2.3
+
+      # BETTER: Git SHA for traceability
+      image: myregistry/myapp:abc123def
+
+      # BEST: Digest for immutability
+      image: myregistry/myapp@sha256:abc123...
+
+
+      # Force pull with specific tag:
+      imagePullPolicy: Always  # Still not great with :latest
+
+      # In CI/CD, tag with Git SHA:
+      docker build -t myregistry/myapp:${GIT_SHA} .
+      docker push myregistry/myapp:${GIT_SHA}
+
+      # Helm values:
+      image:
+        repository: myregistry/myapp
+        tag: "{{ .Values.image.tag }}"  # Set in CI
+
+      # Deploy:
+      helm upgrade myapp ./chart --set image.tag=$GIT_SHA
+    symptoms:
+      - "I pushed a new image but nothing changed"
+      - Different pods running different versions
+      - Can't rollback to known version
+    detection_pattern: 'image:\\s*[^:]+:latest|image:\\s*[^:\\s]+\\s*$'
+
+  - id: namespace-security
+    summary: Namespaces provide isolation, not security
+    severity: high
+    situation: |
+      You put different teams in different namespaces, thinking they're isolated.
+      A developer in team-a can kubectl get pods -n team-b. They can exec into
+      team-b's pods. Network traffic flows freely between namespaces.
+    why: |
+      Namespaces are an organizational boundary, not a security boundary.
+      By default, all pods can talk to all pods. All users with cluster
+      access can see all namespaces.
+    solution: |
+      # NAMESPACES NEED ADDITIONAL SECURITY
+
+      # 1. RBAC: Limit who can access what
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: Role
+      metadata:
+        name: developer
+        namespace: team-a
+      rules:
+        - apiGroups: ["", "apps"]
+          resources: ["pods", "deployments", "services"]
+          verbs: ["get", "list", "watch", "create", "update", "delete"]
+      ---
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: developer-binding
+        namespace: team-a
+      subjects:
+        - kind: User
+          name: alice
+      roleRef:
+        kind: Role
+        name: developer
+        apiGroup: rbac.authorization.k8s.io
+
+
+      # 2. NetworkPolicy: Limit pod-to-pod traffic
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: deny-all
+        namespace: team-a
+      spec:
+        podSelector: {}  # All pods in namespace
+        policyTypes:
+          - Ingress
+          - Egress
+        ingress: []      # Deny all ingress
+        egress: []       # Deny all egress
+
+      # Allow specific traffic:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: allow-web
+        namespace: team-a
+      spec:
+        podSelector:
+          matchLabels:
+            app: web
+        ingress:
+          - from:
+              - namespaceSelector:
+                  matchLabels:
+                    name: ingress  # Only from ingress namespace
+            ports:
+              - port: 80
+
+
+      # 3. For true multi-tenancy: Use separate clusters
+      # Namespaces are not meant for hostile multi-tenancy
+    symptoms:
+      - Users seeing pods in other namespaces
+      - Cross-namespace network traffic
+      - Secrets readable across namespaces
+    detection_pattern: null
+
+  - id: cpu-throttling
+    summary: CPU limits cause latency spikes
+    severity: medium
+    situation: |
+      You set CPU limits. Your app normally uses 100m but sometimes spikes to
+      500m. With a 200m limit, those spikes are throttled. Your P99 latency
+      goes from 50ms to 500ms. Users complain about "random slowness."
+    why: |
+      CPU limits use CFS (Completely Fair Scheduler) throttling. When your
+      container exceeds its limit, it's paused until the next scheduling
+      period. This causes latency spikes, not gradual degradation.
+    solution: |
+      # CPU LIMITS CAUSE THROTTLING
+
+      # Option 1: Set higher limits or no limits
+      resources:
+        requests:
+          cpu: 100m     # Scheduler guarantee
+          memory: 256Mi
+        limits:
+          # cpu: 500m   # Consider removing CPU limit
+          memory: 512Mi  # Keep memory limit (OOM is worse than throttling)
+
+      # Option 2: Set limits high enough for spikes
+      resources:
+        requests:
+          cpu: 100m     # Normal usage
+        limits:
+          cpu: 2000m    # Allow for spikes
+
+      # Check for throttling:
+      kubectl top pod my-pod
+      # Or check container metrics:
+      # container_cpu_cfs_throttled_periods_total
+
+      # Recommended for most workloads:
+      # - Always set memory limits (OOM kills are bad)
+      # - Set CPU requests (scheduler needs them)
+      # - Only set CPU limits if you need strict isolation
+    symptoms:
+      - High P99 latency with low average
+      - "Random" slowness
+      - container_cpu_cfs_throttled high
+    detection_pattern: 'limits:[^}]*cpu:'
+
+  - id: service-dns
+    summary: Service discovery DNS caching issues
+    severity: medium
+    situation: |
+      Your pods can't find a service. Or they connect to old IPs after a
+      deployment. DNS lookups fail intermittently. Your app has stale
+      connections to pods that no longer exist.
+    why: |
+      Kubernetes uses CoreDNS for service discovery. Apps often cache DNS
+      results. When pods are replaced, the cached IPs become stale.
+      Connection pools hold onto old connections.
+    solution: |
+      # DNS AND SERVICE DISCOVERY
+
+      # Service DNS format:
+      # <service>.<namespace>.svc.cluster.local
+      # Example: my-db.production.svc.cluster.local
+
+      # Common issue: App caches DNS
+      # Solution: Short DNS TTL in CoreDNS config
+      # Or use headless service for direct pod IPs
+
+      # Headless service (no cluster IP):
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: my-db
+      spec:
+        clusterIP: None  # Headless
+        selector:
+          app: my-db
+        ports:
+          - port: 5432
+
+
+      # Connection pooling with refresh:
+      // Node.js example
+      const pool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        max: 20,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 5000,
+      });
+
+      // Verify connection on checkout
+      pool.on('connect', (client) => {
+        client.query('SELECT 1');
+      });
+
+
+      # Debug DNS:
+      kubectl run debug --rm -it --image=busybox -- nslookup my-service
+      kubectl run debug --rm -it --image=busybox -- nslookup my-service.my-namespace
+
+      # Check endpoints (what IPs service points to):
+      kubectl get endpoints my-service
+    symptoms:
+      - "Connection refused" after deployments
+      - Intermittent connection failures
+      - Stale connections to old pods
+    detection_pattern: null
+
+  - id: pod-disruption
+    summary: Deployments cause downtime without PodDisruptionBudget
+    severity: medium
+    situation: |
+      You have 3 replicas. Kubernetes decides to drain a node. It evicts all
+      3 pods at once (they were all on that node). Your service has zero
+      replicas for 30 seconds. Users get 503s.
+    why: |
+      Without PodDisruptionBudget, Kubernetes doesn't know how many pods you
+      need running. Node drains, cluster autoscaler, or deployments can
+      remove too many pods at once.
+    solution: |
+      # PODDISRUPTIONBUDGET
+
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: my-app-pdb
+        namespace: production
+      spec:
+        # Option 1: Minimum available
+        minAvailable: 2  # Always keep at least 2 running
+
+        # Option 2: Maximum unavailable
+        # maxUnavailable: 1  # At most 1 pod down at a time
+
+        selector:
+          matchLabels:
+            app: my-app
+
+
+      # ALSO: Spread pods across nodes:
+      spec:
+        topologySpreadConstraints:
+          - maxSkew: 1
+            topologyKey: kubernetes.io/hostname
+            whenUnsatisfiable: DoNotSchedule
+            labelSelector:
+              matchLabels:
+                app: my-app
+
+
+      # ALSO: Use anti-affinity:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - my-app
+                topologyKey: kubernetes.io/hostname
+    symptoms:
+      - Brief outages during deployments
+      - All pods scheduled on same node
+      - Downtime during node maintenance
+    detection_pattern: null
+
+  - id: configmap-update
+    summary: ConfigMap updates don't restart pods
+    severity: medium
+    situation: |
+      You update a ConfigMap. Your pods don't reload the config. They're
+      still running with old values. You expected them to pick up changes
+      automatically.
+    why: |
+      Kubernetes doesn't restart pods when ConfigMaps change. If you mount
+      as a volume, the files update eventually (kubelet sync period). If
+      you use envFrom, environment variables never update.
+    solution: |
+      # CONFIGMAP UPDATE PATTERNS
+
+      # Option 1: Include hash in deployment (triggers rollout)
+      metadata:
+        annotations:
+          checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+
+      # Option 2: Immutable ConfigMaps with versioned names
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: my-app-config-v2  # Change name on update
+      ---
+      # Update deployment to use new ConfigMap name
+
+
+      # Option 3: Use Reloader (auto-restart on change)
+      # https://github.com/stakater/Reloader
+      metadata:
+        annotations:
+          reloader.stakater.com/auto: "true"
+
+
+      # Option 4: App watches mounted files
+      // Node.js with chokidar
+      const chokidar = require('chokidar');
+      chokidar.watch('/etc/config').on('change', () => {
+        reloadConfiguration();
+      });
+
+
+      # If using volumes, files update eventually (~1 min)
+      # If using envFrom, pods must be restarted
+    symptoms:
+      - Config changes not taking effect
+      - Old values after ConfigMap update
+      - "I updated the config but nothing changed"
+    detection_pattern: null

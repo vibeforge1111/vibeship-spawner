@@ -1,0 +1,270 @@
+# Validations - GraphQL
+# Automated checks for common GraphQL issues
+
+version: 1.0.0
+skill_id: graphql
+
+validations:
+  # Security
+  - id: introspection-enabled
+    name: Introspection enabled in production
+    severity: warning
+    type: regex
+    pattern:
+      - 'introspection:\s*true'
+    message: "Introspection should be disabled in production"
+    fix_action: "Set introspection: process.env.NODE_ENV !== 'production'"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  # Performance
+  - id: no-dataloader
+    name: Direct database query in resolver
+    severity: warning
+    type: regex
+    pattern:
+      - 'findUnique\s*\(\s*\{\s*where.*id'
+      - 'findOne\s*\(\s*\{\s*where.*id'
+      - 'findById\s*\('
+    message: "Consider using DataLoader to batch and cache queries"
+    fix_action: "Create DataLoader and use .load() instead of direct query"
+    applies_to:
+      - "**/resolvers/**"
+      - "*.resolver.ts"
+      - "*.resolvers.ts"
+
+  - id: no-depth-limit
+    name: No query depth limiting
+    severity: warning
+    type: regex
+    pattern:
+      - 'new ApolloServer\s*\(\s*\{(?![\s\S]*depthLimit)'
+    message: "Consider adding depth limiting to prevent DoS"
+    fix_action: "Add validationRules: [depthLimit(10)]"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  # Best practices
+  - id: resolver-without-error-handling
+    name: Resolver without try-catch
+    severity: info
+    type: regex
+    pattern:
+      - 'async\s*\([^)]*\)\s*=>\s*\{(?![\s\S]*try\s*\{)'
+    message: "Consider wrapping resolver logic in try-catch"
+    fix_action: "Add error handling to provide better error messages"
+    applies_to:
+      - "**/resolvers/**"
+      - "*.resolver.ts"
+
+  - id: any-type-in-schema
+    name: JSON or Any type in schema
+    severity: info
+    type: regex
+    pattern:
+      - 'scalar\s+JSON'
+      - 'scalar\s+Any'
+      - ':\s*JSON\s*[!\]\)]'
+    message: "Avoid JSON/Any types - they bypass GraphQL's type safety"
+    fix_action: "Define proper input/output types"
+    applies_to:
+      - "*.graphql"
+      - "*.gql"
+
+  # Schema design
+  - id: mutation-no-payload
+    name: Mutation returns bare type instead of payload
+    severity: info
+    type: regex
+    pattern:
+      - 'type\s+Mutation\s*\{[^}]*:\s*\w+\s*!'
+    message: "Consider using payload types for mutations (includes errors)"
+    fix_action: "Create CreateUserPayload type with user and errors fields"
+    applies_to:
+      - "*.graphql"
+      - "*.gql"
+
+  - id: list-without-pagination
+    name: List field without pagination arguments
+    severity: info
+    type: regex
+    pattern:
+      - ':\s*\[\w+!?\]!?\s*$'
+    message: "List fields should have pagination (limit, first, after)"
+    fix_action: "Add arguments: field(limit: Int, offset: Int): [Type!]!"
+    applies_to:
+      - "*.graphql"
+      - "*.gql"
+
+  # Client
+  - id: no-error-handling-query
+    name: Query hook without error handling
+    severity: info
+    type: regex
+    pattern:
+      - 'useQuery\s*\([^)]+\)(?![\s\S]{0,50}error)'
+    message: "Handle query errors in UI"
+    fix_action: "Destructure and handle error: const { error } = useQuery(...)"
+    applies_to:
+      - "*.tsx"
+      - "*.jsx"
+
+  - id: refetch-instead-of-cache
+    name: Using refetch instead of cache update
+    severity: info
+    type: regex
+    pattern:
+      - 'refetchQueries:\s*\['
+    message: "Consider cache update instead of refetch for better UX"
+    fix_action: "Use update function to modify cache directly"
+    applies_to:
+      - "*.tsx"
+      - "*.jsx"
+      - "*.ts"
+
+code_smells:
+  - id: giant-resolver
+    name: Resolver with too much logic
+    description: "Resolver doing database queries, business logic, and formatting"
+    pattern: null
+    suggestion: "Extract business logic to services, use DataLoader for data"
+
+  - id: non-nullable-everything
+    name: All fields marked non-null
+    description: "Every field in schema is non-null"
+    pattern: null
+    suggestion: "Use nullable for optional fields to allow partial responses"
+
+  - id: no-fragments
+    name: Repeated field selections in queries
+    description: "Same fields selected in multiple queries"
+    pattern: null
+    suggestion: "Extract common selections into fragments"
+
+best_practices:
+  schema_design:
+    recommendation: |
+      GraphQL schema best practices:
+
+      # 1. Use specific mutations, not generic update
+      type Mutation {
+        updateUserProfile(input: UpdateProfileInput!): UpdateProfilePayload!
+        updateUserEmail(input: UpdateEmailInput!): UpdateEmailPayload!
+        # NOT: updateUser(id: ID!, data: JSON!): User
+      }
+
+      # 2. Payload types for mutations
+      type CreateUserPayload {
+        user: User
+        errors: [UserError!]!
+      }
+
+      type UserError {
+        field: String
+        message: String!
+      }
+
+      # 3. Pagination for lists
+      type Query {
+        users(first: Int, after: String): UserConnection!
+      }
+
+      type UserConnection {
+        edges: [UserEdge!]!
+        pageInfo: PageInfo!
+        totalCount: Int!
+      }
+
+      # 4. Intentional nullability
+      type User {
+        id: ID!           # Always exists
+        email: String!    # Required
+        avatar: String    # Optional, may be null
+        deletedAt: DateTime  # Null means not deleted
+      }
+
+  resolver_organization:
+    recommendation: |
+      Resolver file organization:
+
+      // resolvers/index.ts
+      import { Query } from './Query';
+      import { Mutation } from './Mutation';
+      import { User } from './User';
+      import { Post } from './Post';
+      import { scalars } from './scalars';
+
+      export const resolvers = {
+        ...scalars,
+        Query,
+        Mutation,
+        User,
+        Post
+      };
+
+      // resolvers/Query.ts
+      export const Query = {
+        user: (_, { id }, { loaders }) =>
+          loaders.userLoader.load(id),
+
+        users: (_, { first, after }, { db }) =>
+          paginateUsers(db, { first, after })
+      };
+
+      // resolvers/User.ts
+      export const User = {
+        posts: (user, { limit }, { loaders }) =>
+          loaders.postsByAuthorLoader.load({ authorId: user.id, limit }),
+
+        email: (user, _, { currentUser }) =>
+          currentUser?.id === user.id ? user.email : null
+      };
+
+  testing:
+    recommendation: |
+      GraphQL testing patterns:
+
+      // Integration test
+      import { createTestClient } from 'apollo-server-testing';
+
+      describe('User queries', () => {
+        const { query, mutate } = createTestClient(server);
+
+        it('fetches user by id', async () => {
+          const res = await query({
+            query: GET_USER,
+            variables: { id: '1' }
+          });
+
+          expect(res.data.user).toEqual({
+            id: '1',
+            name: 'Test User'
+          });
+        });
+
+        it('creates user', async () => {
+          const res = await mutate({
+            mutation: CREATE_USER,
+            variables: {
+              input: { email: 'test@test.com', name: 'Test' }
+            }
+          });
+
+          expect(res.data.createUser.user).toBeDefined();
+          expect(res.data.createUser.errors).toHaveLength(0);
+        });
+      });
+
+      // Unit test resolver
+      describe('User.posts resolver', () => {
+        it('loads posts via dataloader', async () => {
+          const mockLoader = { load: jest.fn().mockResolvedValue([]) };
+          const context = { loaders: { postsByAuthorLoader: mockLoader } };
+
+          await User.posts({ id: '1' }, {}, context);
+
+          expect(mockLoader.load).toHaveBeenCalledWith('1');
+        });
+      });

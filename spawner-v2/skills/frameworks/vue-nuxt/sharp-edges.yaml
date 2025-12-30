@@ -1,0 +1,423 @@
+# Sharp Edges - Vue & Nuxt
+# The gotchas that cause late-night debugging sessions
+
+version: 1.0.0
+skill_id: vue-nuxt
+
+sharp_edges:
+  - id: reactivity-loss-destructure
+    summary: Destructuring reactive objects loses reactivity
+    severity: critical
+    situation: |
+      You destructure a reactive object or props to make code cleaner,
+      but the values are now plain JavaScript with no reactivity.
+    why: |
+      Vue's reactivity works by tracking property access on the reactive
+      proxy. Destructuring extracts plain values, bypassing the proxy.
+      UI won't update when these values change. You'll spend hours wondering
+      why your component isn't re-rendering.
+    solution: |
+      # REACTIVITY LOSS
+
+      // WRONG: Destructured values lose reactivity
+      const state = reactive({ count: 0, name: 'Vue' })
+      const { count, name } = state  // Plain values!
+      count++  // Won't trigger updates
+
+      // RIGHT: Use toRefs to maintain reactivity
+      const state = reactive({ count: 0, name: 'Vue' })
+      const { count, name } = toRefs(state)  // Refs that stay connected
+      count.value++  // Triggers updates
+
+      // Props: Use toRefs or toRef
+      const props = defineProps<{ user: User }>()
+      const { user } = toRefs(props)
+
+      // Store: Use storeToRefs
+      const store = useUserStore()
+      const { user, isLoggedIn } = storeToRefs(store)
+
+      // Alternative: Use computed
+      const count = computed(() => state.count)
+    symptoms:
+      - UI doesn't update when values change
+      - Console.log shows updated values but template shows old
+      - Works with @click but not watch
+    detection_pattern: 'const\s*\{[^}]+\}\s*=\s*(reactive|defineProps|use\w+Store)\('
+
+  - id: ref-value-forgotten
+    summary: Forgetting .value when accessing ref in script
+    severity: high
+    situation: |
+      You access a ref directly instead of using .value in script,
+      comparing or using the Ref wrapper object instead of its value.
+    why: |
+      In script, refs require .value access. Templates auto-unwrap,
+      but script doesn't. Comparing ref to a value compares object to primitive,
+      always false. Logic silently fails.
+    solution: |
+      # REF VALUE ACCESS
+
+      const count = ref(0)
+
+      // WRONG: Comparing ref object to number
+      if (count === 0) { }  // Always false!
+      if (count == 0) { }   // Always false!
+
+      // RIGHT: Use .value in script
+      if (count.value === 0) { }
+
+      // Template auto-unwraps (no .value needed)
+      <template>
+        <span>{{ count }}</span>  <!-- Correct, auto-unwrapped -->
+      </template>
+
+      // Watch also needs .value for comparisons
+      watch(count, (newVal, oldVal) => {
+        // newVal and oldVal are already unwrapped here
+        if (newVal > oldVal) { }
+      })
+    symptoms:
+      - Conditions never trigger
+      - Comparisons always false
+      - "Cannot read property of [object Object]" errors
+    detection_pattern: 'if\s*\(\s*\w+\s*[=!]==?\s*[0-9"\'true|false|null]'
+
+  - id: async-setup-blocking
+    summary: Async operations in setup() block component mounting
+    severity: high
+    situation: |
+      You use top-level await in <script setup> or make setup() async,
+      causing the component to suspend until the promise resolves.
+    why: |
+      Vue 3 supports async setup, but the component won't mount until the
+      promise resolves. Without Suspense, you'll see nothing. In Nuxt,
+      this blocks navigation. The page feels frozen.
+    solution: |
+      # ASYNC SETUP
+
+      // BLOCKING: Component won't mount until fetch completes
+      <script setup>
+      const data = await fetch('/api/data').then(r => r.json())
+      </script>
+
+      // RIGHT: Use composables that handle loading states
+      <script setup>
+      const { data, pending, error } = useFetch('/api/data')
+      </script>
+
+      <template>
+        <div v-if="pending">Loading...</div>
+        <div v-else>{{ data }}</div>
+      </template>
+
+      // RIGHT: Use onMounted for client-side fetching
+      <script setup>
+      const data = ref(null)
+      const loading = ref(true)
+
+      onMounted(async () => {
+        data.value = await fetchData()
+        loading.value = false
+      })
+      </script>
+
+      // With Suspense (if you must use top-level await)
+      <template>
+        <Suspense>
+          <AsyncComponent />
+          <template #fallback>Loading...</template>
+        </Suspense>
+      </template>
+    symptoms:
+      - Blank page on navigation
+      - Component never appears
+      - Slow initial load
+    detection_pattern: '<script setup[^>]*>[^]*await\s+(?!useFetch|useAsyncData)'
+
+  - id: stale-closure-in-watch
+    summary: Closures in watch/computed capture stale values
+    severity: high
+    situation: |
+      You reference a variable inside watch or computed that was captured
+      at creation time and never updates.
+    why: |
+      JavaScript closures capture variables by reference, but if you're
+      accessing a plain value (not a ref), it won't update. The watcher
+      keeps using the old value forever.
+    solution: |
+      # STALE CLOSURE
+
+      // WRONG: config captured once
+      let config = { multiplier: 2 }
+
+      const doubled = computed(() => count.value * config.multiplier)
+      // config.multiplier changes won't trigger recompute!
+
+      // RIGHT: Make it reactive
+      const config = reactive({ multiplier: 2 })
+      const doubled = computed(() => count.value * config.multiplier)
+
+      // OR: Use ref
+      const multiplier = ref(2)
+      const doubled = computed(() => count.value * multiplier.value)
+
+      // WRONG: Props accessed directly in callback
+      const props = defineProps(['id'])
+      watch(() => props.id, async (id) => {
+        // id is fresh here, good
+        await fetch(`/api/${id}`)
+      })
+
+      // But this is wrong:
+      const fetchData = async () => {
+        await fetch(`/api/${props.id}`)  // OK - props is reactive
+      }
+    symptoms:
+      - Computed doesn't update when it should
+      - Watch uses old values
+      - Works on first load, breaks on navigation
+    detection_pattern: 'computed\s*\(\s*\(\s*\)\s*=>\s*[^)]*\b(?!\.value)\b\w+\s*[+\-*/]'
+
+  - id: nuxt-hydration-mismatch
+    summary: Server HTML doesn't match client-rendered DOM
+    severity: high
+    situation: |
+      Nuxt renders HTML on the server, but when Vue hydrates on the client,
+      the DOM is different, causing hydration mismatches.
+    why: |
+      SSR renders at request time, but client renders after hydration.
+      Date/time, random values, browser-only APIs, or conditional rendering
+      based on client state cause mismatches. Vue warns and re-renders,
+      losing SSR benefits.
+    solution: |
+      # HYDRATION MISMATCH
+
+      // WRONG: Date differs between server and client
+      <template>
+        <span>{{ new Date().toLocaleString() }}</span>
+      </template>
+
+      // WRONG: Random values differ
+      <template>
+        <span>{{ Math.random() }}</span>
+      </template>
+
+      // WRONG: Browser-only check
+      <template>
+        <span v-if="window.innerWidth > 768">Desktop</span>
+      </template>
+
+      // RIGHT: Use ClientOnly component
+      <template>
+        <ClientOnly>
+          <span>{{ new Date().toLocaleString() }}</span>
+          <template #fallback>Loading...</template>
+        </ClientOnly>
+      </template>
+
+      // RIGHT: Use useNuxtApp for client check
+      <script setup>
+      const { $client } = useNuxtApp()
+      const width = ref(0)
+
+      onMounted(() => {
+        width.value = window.innerWidth
+      })
+      </script>
+
+      // RIGHT: Use useState for SSR-safe state
+      const count = useState('count', () => 0)
+    symptoms:
+      - Console warning about hydration mismatch
+      - Content flashes/changes on page load
+      - Different content on refresh vs navigation
+    detection_pattern: '(new Date\(\)|Math\.random\(\)|window\.|document\.)'
+
+  - id: pinia-store-outside-setup
+    summary: Using Pinia store outside of setup context
+    severity: high
+    situation: |
+      You call useStore() outside of a Vue component's setup function
+      or Nuxt plugin, where there's no active Pinia instance.
+    why: |
+      Pinia needs an active Vue app instance to work. Calling useStore()
+      in a plain JS module, utility function, or at module scope fails
+      silently or throws an error.
+    solution: |
+      # STORE OUTSIDE SETUP
+
+      // WRONG: Module-level store access
+      import { useUserStore } from '@/stores/user'
+      const store = useUserStore()  // No active Pinia!
+
+      export function doSomething() {
+        store.doAction()  // Will fail
+      }
+
+      // RIGHT: Pass store to functions
+      export function doSomething(store) {
+        store.doAction()
+      }
+
+      // In component
+      const store = useUserStore()
+      doSomething(store)
+
+      // RIGHT: Access store inside the function
+      export function doSomething() {
+        const store = useUserStore()  // Gets current instance
+        store.doAction()
+      }
+
+      // Nuxt: Use in plugins
+      export default defineNuxtPlugin(() => {
+        const store = useUserStore()
+        // Safe here
+      })
+
+      // For utilities that need store, use a factory
+      export function createHelper() {
+        const store = useUserStore()
+        return {
+          doSomething() { store.doAction() }
+        }
+      }
+    symptoms:
+      - "getActivePinia was called with no active Pinia"
+      - Store returns undefined
+      - Works in components, fails in utils
+    detection_pattern: 'const\s+\w+\s*=\s*use\w+Store\(\)\s*\n\s*\n\s*export'
+
+  - id: vmodel-modifier-ignored
+    summary: v-model modifiers not handled in custom component
+    severity: medium
+    situation: |
+      You use v-model.trim or v-model.number on a custom component,
+      but the component doesn't handle these modifiers.
+    why: |
+      v-model modifiers are passed to components but not automatically
+      applied. Your component receives the raw value. Users expect .trim
+      and .number to work like on native inputs.
+    solution: |
+      # V-MODEL MODIFIERS
+
+      // Parent using modifiers
+      <MyInput v-model.trim.number="value" />
+
+      // Child must handle modifiers
+      <script setup>
+      const [model, modifiers] = defineModel({
+        set(value) {
+          if (modifiers.trim && typeof value === 'string') {
+            value = value.trim()
+          }
+          if (modifiers.number) {
+            value = Number(value)
+          }
+          return value
+        }
+      })
+      </script>
+
+      // Or with defineProps/defineEmits
+      <script setup>
+      const props = defineProps({
+        modelValue: String,
+        modelModifiers: { default: () => ({}) }
+      })
+      const emit = defineEmits(['update:modelValue'])
+
+      function handleInput(e) {
+        let value = e.target.value
+        if (props.modelModifiers.trim) {
+          value = value.trim()
+        }
+        emit('update:modelValue', value)
+      }
+      </script>
+    symptoms:
+      - .trim doesn't trim whitespace
+      - .number returns string instead of number
+      - Modifiers silently ignored
+    detection_pattern: 'v-model\.\w+\s*='
+
+  - id: watch-immediate-missing
+    summary: Watch callback doesn't run on initial value
+    severity: medium
+    situation: |
+      You set up a watcher expecting it to run immediately with the
+      current value, but watchers only trigger on changes by default.
+    why: |
+      Watch is designed for reacting to changes, not initialization.
+      Your initialization logic in the callback never runs. The component
+      renders with uninitialized derived state.
+    solution: |
+      # WATCH IMMEDIATE
+
+      // WRONG: Watcher doesn't run on mount
+      watch(userId, async (id) => {
+        user.value = await fetchUser(id)
+      })
+      // user.value is still null on first render!
+
+      // RIGHT: Use immediate: true
+      watch(userId, async (id) => {
+        user.value = await fetchUser(id)
+      }, { immediate: true })
+
+      // Alternative: Use watchEffect for immediate + reactive tracking
+      watchEffect(async () => {
+        user.value = await fetchUser(userId.value)
+      })
+
+      // For Nuxt data fetching, useFetch handles this
+      const { data: user } = useFetch(() => `/api/users/${userId.value}`)
+    symptoms:
+      - Initial render shows undefined/null
+      - Have to wait for first change to see data
+      - Works after navigation, not on first load
+    detection_pattern: 'watch\s*\([^,]+,\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{[^}]*\}\s*\)'
+
+  - id: template-ref-timing
+    summary: Template ref is null during setup
+    severity: medium
+    situation: |
+      You try to access a template ref in setup, but it's null because
+      the template hasn't rendered yet.
+    why: |
+      Template refs are only populated after the component mounts.
+      In setup or before onMounted, refs to DOM elements are null.
+    solution: |
+      # TEMPLATE REF TIMING
+
+      // WRONG: Ref is null during setup
+      <script setup>
+      const inputRef = ref<HTMLInputElement | null>(null)
+      inputRef.value?.focus()  // null - template not mounted yet!
+      </script>
+
+      // RIGHT: Access in onMounted
+      <script setup>
+      const inputRef = ref<HTMLInputElement | null>(null)
+
+      onMounted(() => {
+        inputRef.value?.focus()  // Element exists now
+      })
+      </script>
+
+      <template>
+        <input ref="inputRef" />
+      </template>
+
+      // RIGHT: Watch for ref to be populated
+      watch(inputRef, (el) => {
+        if (el) {
+          el.focus()
+        }
+      })
+    symptoms:
+      - "Cannot read property of null" on ref.value
+      - DOM manipulation fails silently
+      - Works after interaction, not on mount
+    detection_pattern: 'const\s+\w+\s*=\s*ref\s*<\s*HTML\w+Element'

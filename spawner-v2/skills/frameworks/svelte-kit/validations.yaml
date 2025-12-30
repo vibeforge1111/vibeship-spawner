@@ -1,0 +1,310 @@
+# Validations - Svelte/SvelteKit
+# Automated checks for common Svelte issues
+
+version: 1.0.0
+skill_id: svelte-kit
+
+validations:
+  # SSR issues
+  - id: browser-api-without-check
+    name: Browser API used without environment check
+    severity: error
+    type: regex
+    pattern:
+      - '(?<!if\s*\(browser\)\s*)(?<!browser\s*&&\s*)localStorage\.'
+      - '(?<!if\s*\(browser\)\s*)(?<!browser\s*&&\s*)sessionStorage\.'
+      - '(?<!if\s*\(browser\)\s*)(?<!browser\s*&&\s*)window\.'
+    message: "Browser APIs will crash during SSR - check browser environment first"
+    fix_action: "Wrap in 'if (browser)' or use onMount"
+    applies_to:
+      - "*.svelte"
+      - "+page.ts"
+      - "+layout.ts"
+
+  # Reactivity issues
+  - id: each-without-key
+    name: "#each block without key for stateful items"
+    severity: warning
+    type: regex
+    pattern:
+      - '\{#each\s+\w+\s+as\s+\w+\s*\}(?!\s*\()'
+    message: "List without key may cause update bugs - add (item.id) key"
+    fix_action: "Add key: {#each items as item (item.id)}"
+    applies_to:
+      - "*.svelte"
+
+  - id: store-subscribe-no-cleanup
+    name: Manual store subscription without unsubscribe
+    severity: warning
+    type: regex
+    pattern:
+      - '\.subscribe\s*\([^)]+\)(?![\s\S]*onDestroy)'
+    message: "Manual subscription needs cleanup to prevent memory leak"
+    fix_action: "Use $ auto-subscription or call unsubscribe in onDestroy"
+    applies_to:
+      - "*.svelte"
+
+  # Form action issues
+  - id: return-redirect
+    name: Returning redirect instead of throwing
+    severity: error
+    type: regex
+    pattern:
+      - 'return\s+redirect\s*\('
+    message: "Redirects must be thrown, not returned"
+    fix_action: "Change 'return redirect()' to 'throw redirect()'"
+    applies_to:
+      - "+page.server.ts"
+      - "+page.server.js"
+
+  - id: return-error
+    name: Returning error instead of throwing
+    severity: error
+    type: regex
+    pattern:
+      - 'return\s+error\s*\(\s*\d'
+    message: "Errors must be thrown, not returned"
+    fix_action: "Change 'return error()' to 'throw error()'"
+    applies_to:
+      - "+page.server.ts"
+      - "+page.server.js"
+
+  # Load function issues
+  - id: sensitive-in-universal-load
+    name: Sensitive operations in universal load
+    severity: warning
+    type: regex
+    pattern:
+      - 'prisma\.'
+      - 'db\.'
+      - 'process\.env\.'
+    message: "Sensitive operations should be in +page.server.ts, not +page.ts"
+    fix_action: "Move to +page.server.ts for server-only execution"
+    applies_to:
+      - "+page.ts"
+      - "+layout.ts"
+
+  # Svelte 5 migration
+  - id: svelte4-reactive-declaration
+    name: Svelte 4 reactive declaration ($:)"
+    severity: info
+    type: regex
+    pattern:
+      - '^\s*\$:\s+\w+\s*='
+    message: "Consider migrating to Svelte 5 $derived rune"
+    fix_action: "Replace '$: x = y' with 'let x = $derived(y)'"
+    applies_to:
+      - "*.svelte"
+
+  - id: svelte4-reactive-statement
+    name: Svelte 4 reactive statement ($:)"
+    severity: info
+    type: regex
+    pattern:
+      - '^\s*\$:\s+[^=]'
+    message: "Consider migrating to Svelte 5 $effect rune"
+    fix_action: "Replace '$: statement' with '$effect(() => { statement })'"
+    applies_to:
+      - "*.svelte"
+
+  # Await block issues
+  - id: await-without-catch
+    name: "#await block without error handling"
+    severity: warning
+    type: regex
+    pattern:
+      - '\{#await[\s\S]+?\{:then[\s\S]+?\{/await\}(?!\s*\{:catch)'
+    message: "#await should handle errors with {:catch} block"
+    fix_action: "Add {:catch error} block to handle failures"
+    applies_to:
+      - "*.svelte"
+
+  # Security
+  - id: html-without-sanitize
+    name: "@html used without sanitization mention"
+    severity: warning
+    type: regex
+    pattern:
+      - '\{@html\s'
+    message: "@html can be an XSS vector - ensure content is trusted/sanitized"
+    fix_action: "Sanitize HTML content before rendering"
+    applies_to:
+      - "*.svelte"
+
+  # Best practices
+  - id: console-log-in-production
+    name: Console.log statements
+    severity: info
+    type: regex
+    pattern:
+      - 'console\.log\s*\('
+    message: "Remove console.log before production"
+    fix_action: "Remove or use proper logging"
+    applies_to:
+      - "*.svelte"
+      - "*.ts"
+      - "*.js"
+
+code_smells:
+  - id: component-too-large
+    name: Component with too many lines
+    description: "Components over 200 lines often do too much"
+    pattern: null
+    suggestion: "Extract child components or move logic to .svelte.ts files"
+
+  - id: props-drilling
+    name: Props passed through many levels
+    description: "Same prop passed through intermediate components"
+    pattern: null
+    suggestion: "Use context API with setContext/getContext"
+
+  - id: store-for-local-state
+    name: Store used for component-local state
+    description: "Creating a store for state that doesn't need to be shared"
+    pattern: null
+    suggestion: "Use $state for local state, stores for shared state"
+
+best_practices:
+  component_structure:
+    recommendation: |
+      Svelte component organization:
+
+      <script lang="ts">
+        // 1. Imports
+        import { page } from '$app/stores';
+        import Button from '$lib/components/Button.svelte';
+
+        // 2. Props
+        let { userId, onSave } = $props();
+
+        // 3. State
+        let loading = $state(false);
+        let user = $state(null);
+
+        // 4. Derived values
+        let fullName = $derived(
+          user ? `${user.firstName} ${user.lastName}` : ''
+        );
+
+        // 5. Effects
+        $effect(() => {
+          console.log('User changed:', user);
+        });
+
+        // 6. Functions
+        async function save() {
+          loading = true;
+          await onSave(user);
+          loading = false;
+        }
+      </script>
+
+      <!-- Template -->
+      <div class="user-form">
+        <!-- content -->
+      </div>
+
+      <style>
+        /* Scoped styles */
+        .user-form { }
+      </style>
+
+  file_naming:
+    recommendation: |
+      SvelteKit file structure:
+
+      src/
+        lib/
+          components/         # Reusable components
+            Button.svelte
+            Modal.svelte
+          stores/             # Svelte stores
+            cart.ts
+            user.ts
+          server/             # Server-only code
+            db.ts
+            auth.ts
+          utils/              # Shared utilities
+            format.ts
+
+        routes/
+          +page.svelte        # Home page
+          +page.server.ts     # Home page data
+          +layout.svelte      # Root layout
+          +layout.server.ts   # Root layout data
+          +error.svelte       # Error page
+
+          users/
+            +page.svelte      # /users
+            [id]/
+              +page.svelte    # /users/:id
+              +page.server.ts
+              edit/
+                +page.svelte  # /users/:id/edit
+
+          api/
+            users/
+              +server.ts      # API: /api/users
+
+  form_handling:
+    recommendation: |
+      SvelteKit form patterns:
+
+      // +page.server.ts
+      import { fail, redirect } from '@sveltejs/kit';
+      import type { Actions } from './$types';
+
+      export const actions: Actions = {
+        default: async ({ request, locals }) => {
+          const data = await request.formData();
+
+          // Validate
+          const email = data.get('email')?.toString();
+          if (!email) {
+            return fail(400, {
+              error: 'Email is required',
+              values: Object.fromEntries(data)
+            });
+          }
+
+          // Process
+          try {
+            await db.user.create({ data: { email } });
+          } catch (e) {
+            return fail(500, { error: 'Failed to create user' });
+          }
+
+          // Redirect on success
+          throw redirect(303, '/success');
+        }
+      };
+
+      // +page.svelte
+      <script>
+        import { enhance } from '$app/forms';
+
+        let { form } = $props();
+        let loading = $state(false);
+      </script>
+
+      <form
+        method="POST"
+        use:enhance={() => {
+          loading = true;
+          return async ({ update }) => {
+            loading = false;
+            await update();
+          };
+        }}
+      >
+        <input
+          name="email"
+          value={form?.values?.email ?? ''}
+        />
+        {#if form?.error}
+          <p class="error">{form.error}</p>
+        {/if}
+        <button disabled={loading}>
+          {loading ? 'Saving...' : 'Save'}
+        </button>
+      </form>

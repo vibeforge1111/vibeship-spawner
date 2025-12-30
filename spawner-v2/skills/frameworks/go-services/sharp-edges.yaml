@@ -1,0 +1,443 @@
+# Sharp Edges - Go Services
+# The gotchas that cost you 3 AM debugging sessions
+
+version: 1.0.0
+skill_id: go-services
+
+sharp_edges:
+  - id: goroutine-leak
+    summary: Goroutines that never terminate consume memory forever
+    severity: critical
+    situation: |
+      You spawn goroutines in a loop or for each request, but they block on
+      a channel or network call that never completes. Memory grows until OOM.
+    why: |
+      Goroutines are cheap to create but never garbage collected until they exit.
+      A goroutine blocked on a channel read forever will live forever. At scale,
+      this means thousands of leaked goroutines per hour. We've seen services
+      with 500k+ goroutines that should have 100.
+    solution: |
+      # ALWAYS have an exit path for goroutines
+
+      // WRONG: Goroutine blocks forever if channel is abandoned
+      go func() {
+          result := <-resultChan  // Blocked forever if sender dies
+          process(result)
+      }()
+
+      // RIGHT: Context cancellation provides exit path
+      go func() {
+          select {
+          case result := <-resultChan:
+              process(result)
+          case <-ctx.Done():
+              return  // Exit when context cancelled
+          }
+      }()
+
+      // RIGHT: Timeout ensures eventual exit
+      go func() {
+          select {
+          case result := <-resultChan:
+              process(result)
+          case <-time.After(30 * time.Second):
+              log.Warn("timed out waiting for result")
+              return
+          }
+      }()
+    symptoms:
+      - Memory usage growing over time
+      - runtime.NumGoroutine() increasing without bound
+      - OOM kills after hours/days of runtime
+      - pprof goroutine dump shows thousands blocked on same line
+    detection_pattern: 'go\s+func\s*\([^)]*\)\s*\{[^}]*<-[^}]*\}(?!.*select)'
+
+  - id: nil-channel-block
+    summary: Sending or receiving on nil channel blocks forever
+    severity: high
+    situation: |
+      You have a channel variable that might be nil (uninitialized or set to nil
+      conditionally), and you try to send or receive on it.
+    why: |
+      Unlike nil maps (panic on write) or nil slices (work fine), nil channels
+      block forever on both send and receive. This is by design for select
+      statements but a footgun for regular use.
+    solution: |
+      # NIL CHANNEL BEHAVIOR
+
+      var ch chan int  // ch is nil
+
+      ch <- 1   // BLOCKS FOREVER (not panic!)
+      <-ch      // BLOCKS FOREVER (not panic!)
+
+      // RIGHT: Initialize channels before use
+      ch := make(chan int)
+
+      // Using nil channel in select (intentionally disable a case)
+      var enabled chan int
+      if shouldEnable {
+          enabled = make(chan int, 1)
+      }
+
+      select {
+      case v := <-enabled:  // Disabled if enabled is nil
+          process(v)
+      case <-ctx.Done():
+          return
+      }
+    symptoms:
+      - Goroutine appears to hang
+      - pprof shows goroutine blocked on channel operation
+      - Code after channel operation never executes
+    detection_pattern: 'var\s+\w+\s+chan\s+\w+'
+
+  - id: defer-in-loop
+    summary: Deferred calls in loops execute at function end, not iteration end
+    severity: high
+    situation: |
+      You use defer inside a for loop expecting cleanup after each iteration,
+      but all defers stack up and execute when the function returns.
+    why: |
+      Defer is function-scoped, not block-scoped. In a loop processing 10,000
+      files, you'll have 10,000 open file handles until the function returns.
+      This causes "too many open files" errors and resource exhaustion.
+    solution: |
+      # DEFER IN LOOPS
+
+      // WRONG: All files stay open until function returns
+      for _, path := range paths {
+          f, err := os.Open(path)
+          if err != nil {
+              continue
+          }
+          defer f.Close()  // Won't close until function ends!
+          process(f)
+      }
+
+      // RIGHT: Extract to function for per-iteration defer
+      for _, path := range paths {
+          if err := processFile(path); err != nil {
+              log.Error(err)
+          }
+      }
+
+      func processFile(path string) error {
+          f, err := os.Open(path)
+          if err != nil {
+              return err
+          }
+          defer f.Close()  // Closes when this function returns
+          return process(f)
+      }
+
+      // RIGHT: Explicit close without defer
+      for _, path := range paths {
+          f, err := os.Open(path)
+          if err != nil {
+              continue
+          }
+          process(f)
+          f.Close()  // Immediate close
+      }
+    symptoms:
+      - "too many open files" errors
+      - Memory usage spikes during loops
+      - Resources not released as expected
+    detection_pattern: 'for\s+[^{]*\{[^}]*defer\s+'
+
+  - id: range-variable-capture
+    summary: Loop variable captured by reference in goroutines
+    severity: critical
+    situation: |
+      You spawn goroutines inside a range loop, and they all see the same
+      (final) value of the loop variable.
+    why: |
+      Prior to Go 1.22, the loop variable was reused each iteration. Goroutines
+      capture by reference, so they all see the final value. Go 1.22+ fixed this
+      by default, but legacy code and older versions still have the bug.
+    solution: |
+      # LOOP VARIABLE CAPTURE (Pre Go 1.22)
+
+      // WRONG: All goroutines see the last item
+      for _, item := range items {
+          go func() {
+              process(item)  // item is the same (last) for all goroutines!
+          }()
+      }
+
+      // RIGHT: Pass as parameter (works in all Go versions)
+      for _, item := range items {
+          go func(item Item) {
+              process(item)
+          }(item)  // Pass by value
+      }
+
+      // RIGHT: Shadow the variable (pre-1.22 idiom)
+      for _, item := range items {
+          item := item  // Shadow with new variable
+          go func() {
+              process(item)
+          }()
+      }
+
+      // Go 1.22+: Fixed by default with GOEXPERIMENT=loopvar
+      // But still good practice to be explicit
+    symptoms:
+      - All goroutines process the same (last) item
+      - Race condition warnings from race detector
+      - Intermittent wrong results
+    detection_pattern: 'for\s+\w*,?\s*(\w+)\s*:?=\s*range[^{]*\{[^}]*go\s+func\s*\([^)]*\)\s*\{[^}]*\1'
+
+  - id: sync-mutex-copy
+    summary: Copying a mutex copies its lock state
+    severity: critical
+    situation: |
+      You pass a struct containing a mutex by value, or embed a mutex in
+      a struct that gets copied.
+    why: |
+      Copying a locked mutex creates a new locked mutex. Copying an unlocked
+      mutex is a data race waiting to happen. The go vet tool catches this
+      but many codebases don't run vet in CI.
+    solution: |
+      # MUTEX COPY
+
+      type Cache struct {
+          mu    sync.Mutex  // Embedded mutex
+          items map[string]string
+      }
+
+      // WRONG: Passing by value copies the mutex
+      func processCache(c Cache) {
+          c.mu.Lock()  // Operating on a COPY of the mutex!
+          // ...
+      }
+
+      // RIGHT: Pass by pointer
+      func processCache(c *Cache) {
+          c.mu.Lock()
+          defer c.mu.Unlock()
+          // ...
+      }
+
+      // Run go vet to catch these
+      // go vet ./...
+    symptoms:
+      - Data races detected by -race flag
+      - Deadlocks that seem impossible
+      - go vet warnings about copying locks
+    detection_pattern: 'func\s+\w+\([^)]*\w+\s+\w*sync\.(Mutex|RWMutex|WaitGroup)'
+
+  - id: empty-select-block
+    summary: Empty select{} blocks forever and is hard to debug
+    severity: medium
+    situation: |
+      You use `select {}` to block a main goroutine or as a placeholder,
+      making debugging difficult when things hang.
+    why: |
+      An empty select blocks forever and gives no indication why. When
+      your service hangs, the stack trace just shows "blocked in select".
+      Use explicit channel waits or signal handling instead.
+    solution: |
+      # BLOCKING PATTERNS
+
+      // BAD: Empty select blocks with no explanation
+      func main() {
+          go startServer()
+          select {}  // Blocks forever, but why?
+      }
+
+      // GOOD: Signal handling makes intent clear
+      func main() {
+          go startServer()
+
+          quit := make(chan os.Signal, 1)
+          signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+          <-quit  // Clear: waiting for shutdown signal
+
+          log.Println("Shutting down...")
+      }
+
+      // GOOD: Use sync.WaitGroup for waiting on goroutines
+      var wg sync.WaitGroup
+      wg.Add(1)
+      go func() {
+          defer wg.Done()
+          startServer()
+      }()
+      wg.Wait()
+    symptoms:
+      - Service hangs with no clear cause
+      - Stack trace shows "select (no cases)"
+      - Can't gracefully shut down
+    detection_pattern: 'select\s*\{\s*\}'
+
+  - id: http-body-not-closed
+    summary: HTTP response body not closed causes connection leak
+    severity: high
+    situation: |
+      You make HTTP requests but don't read and close the response body,
+      or you return early after error checking the response.
+    why: |
+      HTTP/1.1 connections can be reused, but only if the body is fully read
+      and closed. Unclosed bodies leak connections until the connection pool
+      is exhausted, then requests start failing.
+    solution: |
+      # HTTP BODY HANDLING
+
+      // WRONG: Body never closed on success
+      resp, err := http.Get(url)
+      if err != nil {
+          return err
+      }
+      // Body never closed!
+
+      // WRONG: Body never closed on status error
+      resp, err := http.Get(url)
+      if err != nil {
+          return err
+      }
+      if resp.StatusCode != 200 {
+          return errors.New("bad status")  // Body never closed!
+      }
+
+      // RIGHT: Always close body
+      resp, err := http.Get(url)
+      if err != nil {
+          return err
+      }
+      defer resp.Body.Close()
+
+      if resp.StatusCode != 200 {
+          io.Copy(io.Discard, resp.Body)  // Drain to allow reuse
+          return fmt.Errorf("bad status: %d", resp.StatusCode)
+      }
+
+      // Read body
+      data, err := io.ReadAll(resp.Body)
+    symptoms:
+      - "connection reset by peer" errors
+      - Requests timing out after running fine initially
+      - Connection pool exhaustion
+    detection_pattern: 'http\.(Get|Post|Do)\([^)]*\)[^}]*(return|continue|break)[^}]*(?!defer\s+\w*\.Body\.Close)'
+
+  - id: json-time-format
+    summary: time.Time JSON marshaling defaults to RFC3339 with nanoseconds
+    severity: medium
+    situation: |
+      You expect a specific time format in JSON (ISO 8601, Unix timestamp) but
+      time.Time marshals to RFC3339Nano format by default.
+    why: |
+      Frontend JavaScript or external APIs often expect specific formats.
+      The default format works but may not match expectations. Worse, parsing
+      inconsistent formats causes silent data corruption.
+    solution: |
+      # TIME FORMAT HANDLING
+
+      type Event struct {
+          Name      string    `json:"name"`
+          CreatedAt time.Time `json:"created_at"`  // RFC3339Nano default
+      }
+
+      // Default output: "2024-01-15T10:30:00.123456789Z"
+
+      // For custom format, use custom type:
+      type UnixTime time.Time
+
+      func (t UnixTime) MarshalJSON() ([]byte, error) {
+          return json.Marshal(time.Time(t).Unix())
+      }
+
+      func (t *UnixTime) UnmarshalJSON(data []byte) error {
+          var unix int64
+          if err := json.Unmarshal(data, &unix); err != nil {
+              return err
+          }
+          *t = UnixTime(time.Unix(unix, 0))
+          return nil
+      }
+
+      type Event struct {
+          Name      string   `json:"name"`
+          CreatedAt UnixTime `json:"created_at"`  // Unix timestamp
+      }
+    symptoms:
+      - Frontend can't parse dates
+      - API clients complain about format
+      - Time zone confusion
+    detection_pattern: null
+
+  - id: unbuffered-channel-deadlock
+    summary: Send and receive on unbuffered channel in same goroutine deadlocks
+    severity: high
+    situation: |
+      You try to send on an unbuffered channel and then receive from it
+      (or vice versa) in the same goroutine.
+    why: |
+      Unbuffered channels block until both sender and receiver are ready.
+      A single goroutine can't be both simultaneously. The code deadlocks
+      instantly but silently if there's no other goroutine to detect it.
+    solution: |
+      # UNBUFFERED CHANNEL DEADLOCK
+
+      ch := make(chan int)  // Unbuffered
+
+      // DEADLOCK: Blocks on send, never reaches receive
+      ch <- 1
+      <-ch
+
+      // RIGHT: Use goroutine for one side
+      ch := make(chan int)
+      go func() {
+          ch <- 1
+      }()
+      value := <-ch
+
+      // RIGHT: Use buffered channel for send-then-receive
+      ch := make(chan int, 1)  // Buffer of 1
+      ch <- 1
+      value := <-ch
+    symptoms:
+      - Program hangs immediately
+      - "fatal error: all goroutines are asleep - deadlock!"
+    detection_pattern: 'make\(chan\s+\w+\)[^,)]'
+
+framework_gotchas:
+  gin:
+    - id: gin-context-reuse
+      summary: Gin context is reused between requests
+      severity: high
+      why: |
+        Gin reuses context objects from a pool. If you store the context
+        in a goroutine for later use, it may be overwritten by the next request.
+      solution: |
+        // WRONG: Context reused
+        func handler(c *gin.Context) {
+            go func() {
+                time.Sleep(time.Second)
+                c.JSON(200, gin.H{"message": "done"})  // Context may be recycled!
+            }()
+        }
+
+        // RIGHT: Copy what you need
+        func handler(c *gin.Context) {
+            param := c.Param("id")
+            go func() {
+                time.Sleep(time.Second)
+                // Use param, not c
+            }()
+            c.JSON(200, gin.H{"message": "processing"})
+        }
+
+  fiber:
+    - id: fiber-not-net-http
+      summary: Fiber is not net/http compatible
+      severity: medium
+      why: |
+        Fiber uses fasthttp, not net/http. Standard library HTTP middleware,
+        handlers, and utilities don't work. This includes many popular packages.
+      solution: |
+        // Check package compatibility before using with Fiber
+        // Look for fasthttp adapters or Fiber-specific packages
+
+        // Example: gorilla/sessions won't work
+        // Use: gofiber/storage instead

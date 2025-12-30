@@ -1,0 +1,420 @@
+# Collaboration - CI/CD Pipelines
+# How this skill works with other skills
+
+version: 1.0.0
+skill_id: cicd-pipelines
+
+prerequisites:
+  required: []
+
+  recommended:
+    - skill: docker
+      reason: "Container builds in pipelines"
+      what_to_know:
+        - "Dockerfile basics"
+        - "Multi-stage builds"
+        - "Registry authentication"
+
+    - skill: backend
+      reason: "Application build requirements"
+      what_to_know:
+        - "Build commands"
+        - "Test commands"
+        - "Environment variables"
+
+  knowledge:
+    - "Git workflows (branches, PRs)"
+    - "YAML syntax"
+    - "Basic shell scripting"
+    - "Environment variables"
+
+delegation_triggers:
+  - trigger: "user needs container builds"
+    delegate_to: docker
+    context: "Dockerfile and multi-stage builds"
+
+  - trigger: "user needs Kubernetes deployment"
+    delegate_to: kubernetes
+    context: "Manifest deployment strategy"
+
+  - trigger: "user needs AWS deployment"
+    delegate_to: aws-services
+    context: "ECS, Lambda, or S3 deployment"
+
+  - trigger: "user needs test strategy"
+    delegate_to: testing
+    context: "Test suite design and coverage"
+
+  - trigger: "user needs infrastructure as code"
+    delegate_to: devops
+    context: "Terraform, Pulumi integration"
+
+receives_context_from:
+  - skill: backend
+    receives:
+      - "Build commands and requirements"
+      - "Test commands"
+      - "Environment variable needs"
+      - "Deployment targets"
+
+  - skill: frontend
+    receives:
+      - "Build process (Vite, webpack)"
+      - "Static asset output"
+      - "CDN deployment needs"
+
+  - skill: docker
+    receives:
+      - "Dockerfile for builds"
+      - "Registry configuration"
+      - "Multi-arch build needs"
+
+  - skill: testing
+    receives:
+      - "Test commands to run"
+      - "Coverage requirements"
+      - "E2E test setup"
+
+provides_context_to:
+  - skill: kubernetes
+    provides:
+      - "Image tags from builds"
+      - "Deployment triggers"
+      - "GitOps workflow integration"
+
+  - skill: aws-services
+    provides:
+      - "Deployment automation"
+      - "ECR push workflows"
+      - "Lambda deployment"
+
+  - skill: devops
+    provides:
+      - "Pipeline templates"
+      - "Infrastructure deployment triggers"
+      - "Environment promotion"
+
+escalation_paths:
+  - situation: "Complex multi-environment deployment"
+    escalate_to: devops
+    context: "Environment management, GitOps"
+
+  - situation: "Infrastructure provisioning in pipeline"
+    escalate_to: aws-services
+    context: "Terraform/CDK in CI/CD"
+
+  - situation: "Kubernetes-specific deployment"
+    escalate_to: kubernetes
+    context: "Helm, ArgoCD integration"
+
+workflow_integration:
+  typical_sequence:
+    1:
+      step: "Code pushed"
+      skills: [cicd-pipelines]
+      output: "Workflow triggered"
+
+    2:
+      step: "Lint and typecheck"
+      skills: [cicd-pipelines]
+      output: "Code quality verified"
+
+    3:
+      step: "Run tests"
+      skills: [cicd-pipelines, testing]
+      output: "Test results, coverage"
+
+    4:
+      step: "Build artifacts"
+      skills: [cicd-pipelines, docker]
+      output: "Container images, bundles"
+
+    5:
+      step: "Deploy to staging"
+      skills: [cicd-pipelines, kubernetes]
+      output: "Staging deployment"
+
+    6:
+      step: "Run E2E tests"
+      skills: [cicd-pipelines, testing]
+      output: "E2E verification"
+
+    7:
+      step: "Deploy to production"
+      skills: [cicd-pipelines, kubernetes]
+      output: "Production deployment"
+
+  decision_points:
+    - question: "GitHub Actions or GitLab CI?"
+      guidance: |
+        GitHub Actions when:
+        - Code is on GitHub
+        - Need extensive marketplace
+        - Want reusable workflows across repos
+
+        GitLab CI when:
+        - Code is on GitLab
+        - Need built-in container registry
+        - Want pipeline-as-code with includes
+        - Self-hosted runners needed
+
+    - question: "Trunk-based or GitFlow?"
+      guidance: |
+        Trunk-based (recommended):
+        - Single main branch
+        - Short-lived feature branches
+        - Continuous deployment
+        - Feature flags for incomplete work
+
+        GitFlow when:
+        - Multiple versions in production
+        - Strict release schedules
+        - Compliance requirements
+
+    - question: "Monorepo or polyrepo?"
+      guidance: |
+        Monorepo CI patterns:
+        - Use path filters to run only affected jobs
+        - Cache sharing across packages
+        - Affected-only testing
+
+        Polyrepo CI patterns:
+        - Simpler per-repo workflows
+        - Independent deployments
+        - Version coordination needed
+
+collaboration_patterns:
+  with_docker:
+    when: "Building and pushing container images"
+    approach: |
+      Docker Build in GitHub Actions:
+
+      jobs:
+        build:
+          runs-on: ubuntu-latest
+          permissions:
+            packages: write
+
+          steps:
+            - uses: actions/checkout@v4
+
+            - uses: docker/setup-buildx-action@v3
+
+            - uses: docker/login-action@v3
+              with:
+                registry: ghcr.io
+                username: ${{ github.actor }}
+                password: ${{ secrets.GITHUB_TOKEN }}
+
+            - uses: docker/build-push-action@v5
+              with:
+                push: true
+                tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
+                cache-from: type=gha
+                cache-to: type=gha,mode=max
+
+  with_kubernetes:
+    when: "Deploying to Kubernetes clusters"
+    approach: |
+      Kubernetes Deployment Workflow:
+
+      jobs:
+        deploy:
+          runs-on: ubuntu-latest
+          environment: production
+
+          steps:
+            - uses: actions/checkout@v4
+
+            # Option 1: Direct kubectl
+            - uses: azure/k8s-set-context@v3
+              with:
+                kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+            - run: |
+                kubectl set image deployment/my-app \
+                  my-app=ghcr.io/${{ github.repository }}:${{ github.sha }}
+                kubectl rollout status deployment/my-app
+
+
+            # Option 2: GitOps (update manifest repo)
+            - uses: actions/checkout@v4
+              with:
+                repository: org/k8s-manifests
+                token: ${{ secrets.MANIFEST_TOKEN }}
+                path: manifests
+
+            - run: |
+                cd manifests
+                kustomize edit set image myapp=ghcr.io/...:${{ github.sha }}
+                git commit -am "Deploy ${{ github.sha }}"
+                git push
+            # ArgoCD picks up the change
+
+  with_testing:
+    when: "Running test suites in CI"
+    approach: |
+      Test Strategy in CI:
+
+      jobs:
+        unit-tests:
+          runs-on: ubuntu-latest
+          steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                cache: 'npm'
+            - run: npm ci
+            - run: npm test -- --coverage
+            - uses: codecov/codecov-action@v4
+
+        integration-tests:
+          runs-on: ubuntu-latest
+          services:
+            postgres:
+              image: postgres:16
+              env:
+                POSTGRES_PASSWORD: test
+              options: >-
+                --health-cmd pg_isready
+                --health-interval 10s
+          steps:
+            - run: npm run test:integration
+
+        e2e-tests:
+          runs-on: ubuntu-latest
+          steps:
+            - uses: cypress-io/github-action@v6
+              with:
+                start: npm start
+                wait-on: http://localhost:3000
+
+  with_monorepo:
+    when: "CI for monorepo with multiple packages"
+    approach: |
+      Monorepo CI Patterns:
+
+      # Detect affected packages
+      jobs:
+        changes:
+          runs-on: ubuntu-latest
+          outputs:
+            packages: ${{ steps.filter.outputs.changes }}
+          steps:
+            - uses: actions/checkout@v4
+            - uses: dorny/paths-filter@v3
+              id: filter
+              with:
+                filters: |
+                  api:
+                    - 'packages/api/**'
+                  web:
+                    - 'packages/web/**'
+                  shared:
+                    - 'packages/shared/**'
+
+        test:
+          needs: changes
+          if: needs.changes.outputs.packages != '[]'
+          strategy:
+            matrix:
+              package: ${{ fromJson(needs.changes.outputs.packages) }}
+          steps:
+            - run: npm test -w packages/${{ matrix.package }}
+
+
+      # Or use Nx/Turborepo affected
+      jobs:
+        build:
+          steps:
+            - run: npx turbo run build --filter=...[origin/main]
+            - run: npx nx affected --target=test --base=origin/main
+
+platform_integration:
+  github_actions:
+    setup: |
+      # Recommended GitHub Actions setup
+
+      # 1. Enable branch protection
+      # - Require status checks
+      # - Require PR reviews
+      # - No force push to main
+
+      # 2. Configure environments
+      # Settings > Environments > production
+      # - Add protection rules
+      # - Add required reviewers
+      # - Add environment secrets
+
+      # 3. Set repository secrets
+      # Settings > Secrets and variables > Actions
+      # - DOCKER_PASSWORD
+      # - KUBE_CONFIG
+      # - etc.
+
+      # 4. Configure OIDC for cloud providers
+      # No long-lived secrets needed
+    considerations:
+      - "Use ubuntu-22.04 for stability"
+      - "Enable branch protection rules"
+      - "Use environment protection for deploys"
+
+  gitlab_ci:
+    setup: |
+      # GitLab CI setup
+
+      # 1. Enable CI/CD in Settings > CI/CD
+
+      # 2. Configure runners
+      # - Use shared runners or
+      # - Register project-specific runners
+
+      # 3. Set variables
+      # Settings > CI/CD > Variables
+      # - Protected variables for prod
+      # - Masked for secrets
+
+      # 4. Configure environments
+      # Deployments > Environments
+      # - Protected environments
+      # - Approval rules
+    considerations:
+      - "Use GitLab Container Registry"
+      - "Configure protected branches"
+      - "Use merge trains for main"
+
+ecosystem:
+  primary_tools:
+    - "GitHub Actions"
+    - "GitLab CI"
+    - "CircleCI"
+    - "Jenkins"
+
+  utilities:
+    - name: act
+      use_when: "Test GitHub Actions locally"
+    - name: actionlint
+      use_when: "Lint GitHub Actions workflows"
+    - name: gitlab-ci-lint
+      use_when: "Validate .gitlab-ci.yml"
+    - name: nektos/act
+      use_when: "Run Actions locally with Docker"
+
+  alternatives:
+    - name: CircleCI
+      use_when: "Complex workflows, config as code"
+      avoid_when: "Budget constraints, simple needs"
+
+    - name: Jenkins
+      use_when: "Self-hosted, maximum flexibility"
+      avoid_when: "Don't want to maintain Jenkins"
+
+    - name: Buildkite
+      use_when: "Hybrid cloud/on-prem runners"
+      avoid_when: "Simple cloud-only needs"
+
+  deprecated:
+    - "Travis CI (mostly)"
+    - "set-output command (use GITHUB_OUTPUT)"
+    - "set-env command (use GITHUB_ENV)"
+    - "actions/cache@v2 (use v4)"
