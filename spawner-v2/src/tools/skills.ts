@@ -552,10 +552,12 @@ function handleList(
     }
   }
 
-  // Sort by layer then name
+  // Sort by layer then name (handle undefined names)
   results.sort((a, b) => {
-    if (a.layer !== b.layer) return a.layer - b.layer;
-    return a.name.localeCompare(b.name);
+    if (a.layer !== b.layer) return (a.layer || 99) - (b.layer || 99);
+    const nameA = a.name || a.id || '';
+    const nameB = b.name || b.id || '';
+    return nameA.localeCompare(nameB);
   });
 
   // Build layer summary
@@ -1256,8 +1258,8 @@ function handleLocalList(
     });
   }
 
-  // Sort by name
-  results.sort((a, b) => a.name.localeCompare(b.name));
+  // Sort by name (handle undefined)
+  results.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
   const lines: string[] = [
     '# Local Skills Directory',
