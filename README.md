@@ -75,6 +75,40 @@ Claude: [Detects your skill level, asks 2-3 questions, recommends stack]
 
 ---
 
+## What's Next?
+
+### Common Workflows
+
+**Building a SaaS:**
+```
+1. Load the backend + auth-specialist + stripe-integration skills
+2. Ask Claude to scaffold your app
+3. Use spawner_validate before each commit
+```
+
+**Debugging Production Issues:**
+```
+1. Load the debugging-master skill
+2. Describe the issue to Claude
+3. Use spawner_unstick if you've been stuck 30+ minutes
+```
+
+**Adding a New Feature:**
+```
+1. Load the relevant skill (e.g., realtime-engineer for WebSockets)
+2. Ask Claude - it now knows the gotchas for that domain
+3. Use spawner_watch_out to see sharp edges for your stack
+```
+
+### Pro Tips
+
+- **Start sessions with `spawner_orchestrate`** - it auto-detects your project context
+- **Load skills before asking questions** - Claude becomes a specialist, not a generalist
+- **Use `spawner_remember`** - save decisions so Claude remembers next session
+- **Check `spawner_validate` before commits** - catches security issues and anti-patterns
+
+---
+
 ## How It Works
 
 ### Loading a Skill
@@ -167,6 +201,47 @@ We organize by **domain expertise**, not file type:
 ```
 
 This mirrors how **real teams work** - you don't ask a frontend dev about database indexing.
+
+---
+
+## Troubleshooting
+
+### Skills not loading?
+
+```bash
+# Check if skills are installed
+ls ~/.spawner/skills
+
+# Reinstall if missing
+npx vibeship-spawner-skills install
+```
+
+### MCP not connecting?
+
+**Claude Code:**
+```bash
+# Check if spawner is configured
+claude mcp list
+
+# Re-add if missing
+claude mcp add --transport http spawner https://mcp.vibeship.co/mcp
+```
+
+**Claude Desktop:**
+1. Verify config in `claude_desktop_config.json`
+2. Restart Claude Desktop completely
+3. Check that `npx` is in your PATH
+
+### Tools not appearing?
+
+- Type `/mcp` in Claude Code to check MCP status
+- Ensure you're in a project directory (not home folder)
+- Try: `claude mcp remove spawner` then re-add
+
+### Still stuck?
+
+- Check the [Tutorial](docs/TUTORIAL.md) for detailed setup
+- Open an issue on [GitHub](https://github.com/vibeforge1111/vibeship-spawner/issues)
 
 ---
 
@@ -347,82 +422,6 @@ These are upgraded versions of popular skills with deeper context awareness and 
 | Startup | 3 | YC playbook, founder mode |
 | Design | 4 | UI, UX, branding |
 | Product | 4 | A/B testing, analytics, PM |
-
----
-
-## Creating Skills
-
-Want to add a skill? We have a pipeline that creates world-class skills:
-
-```
-spawner_skill_research → spawner_skill_new → spawner_skill_score
-```
-
-Skills must score **80+** on our 100-point rubric to ship.
-
-See [SKILL_CREATION_GUIDE.md](docs/SKILL_CREATION_GUIDE.md) for details.
-
----
-
-## Project Structure
-
-```
-vibeship-spawner/
-├── spawner-v2/              # MCP Server (Cloudflare Worker)
-│   ├── src/                 # TypeScript source
-│   └── skills/              # 273 skills (synced)
-├── docs/                    # Documentation
-│   ├── ARCHITECTURE.md      # How it works
-│   ├── SKILL_CREATION_GUIDE.md
-│   └── SKILL_SYNC.md        # Keeping repos aligned
-├── scripts/                 # Automation
-│   ├── sync-skills.js       # Sync skills between repos
-│   └── generate-skills-json.js
-└── web/                     # Website (SvelteKit)
-```
-
-**Skills repo:** [vibeship-spawner-skills](https://github.com/vibeforge1111/vibeship-spawner-skills)
-
----
-
-## Tech Stack
-
-| Component | Technology |
-|-----------|------------|
-| Runtime | Cloudflare Workers |
-| Database | Cloudflare D1 (SQLite) |
-| Cache | Cloudflare KV |
-| Skills | Local YAML files (zero API cost) |
-| Protocol | MCP (Model Context Protocol) |
-| Language | TypeScript + Zod |
-
----
-
-## Development
-
-```bash
-# Clone and install
-git clone https://github.com/vibeforge1111/vibeship-spawner
-cd vibeship-spawner/spawner-v2
-npm install
-
-# Run locally
-wrangler dev
-
-# Deploy
-wrangler deploy
-```
-
----
-
-## Documentation
-
-| Doc | Purpose |
-|-----|---------|
-| [Tutorial](docs/TUTORIAL.md) | Getting started |
-| [Architecture](docs/ARCHITECTURE.md) | How it works |
-| [Skill Creation](docs/SKILL_CREATION_GUIDE.md) | Building skills |
-| [Skill Sync](docs/SKILL_SYNC.md) | Keeping repos aligned |
 
 ---
 
