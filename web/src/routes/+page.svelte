@@ -285,6 +285,8 @@
 
   const copyTexts: Record<string, string> = {
     'claude-code-cmd': 'claude mcp add spawner -- npx -y mcp-remote https://mcp.vibeship.co',
+    'full-install': 'npx github:vibeforge1111/vibeship-spawner-skills install --mcp',
+    'skills-only': 'npx github:vibeforge1111/vibeship-spawner-skills install',
     config: `{
   "mcpServers": {
     "spawner": {
@@ -293,8 +295,8 @@
     }
   }
 }`,
-    'skills-clone-unix': 'git clone https://github.com/vibeforge1111/vibeship-spawner-skills ~/.spawner/skills',
-    'skills-clone-windows': 'git clone https://github.com/vibeforge1111/vibeship-spawner-skills %USERPROFILE%\\.spawner\\skills',
+    'skills-clone-unix': 'npx github:vibeforge1111/vibeship-spawner-skills install --mcp',
+    'skills-clone-windows': 'npx github:vibeforge1111/vibeship-spawner-skills install --mcp',
     'new-project': 'I want to build [your idea]. Use spawner_plan to help me get started.',
     'existing-project': 'Analyze this codebase with spawner_analyze and load the right skills.',
     'gotchas': 'Use spawner_watch_out to check for sharp edges before I implement [feature].',
@@ -1087,10 +1089,10 @@ export async function GET(req: Request) {
           <div class="qs-note">
             <span class="qs-note-icon">💡</span>
             <div class="qs-note-content">
-              <p><strong>Skills setup:</strong> Spawner will automatically prompt you to clone local skills on first use. If it doesn't, you can run manually:</p>
+              <p><strong>One-command full setup:</strong> Install skills + configure MCP automatically:</p>
               <div class="qs-code-block small">
-                <pre>git clone https://github.com/vibeforge1111/vibeship-spawner-skills ~/.spawner/skills</pre>
-                <button class="copy-btn small" onclick={() => copyToClipboard('skills-clone-unix')}>Copy</button>
+                <pre>npx github:vibeforge1111/vibeship-spawner-skills install --mcp</pre>
+                <button class="copy-btn small" onclick={() => copyToClipboard('full-install')}>Copy</button>
               </div>
             </div>
           </div>
@@ -1133,10 +1135,10 @@ export async function GET(req: Request) {
           <div class="qs-note">
             <span class="qs-note-icon">💡</span>
             <div class="qs-note-content">
-              <p><strong>Skills setup:</strong> Spawner will automatically prompt you to clone local skills on first use. If it doesn't, you can run manually:</p>
+              <p><strong>One-command full setup:</strong> Install skills + configure MCP automatically:</p>
               <div class="qs-code-block small">
-                <pre>git clone https://github.com/vibeforge1111/vibeship-spawner-skills ~/.spawner/skills</pre>
-                <button class="copy-btn small" onclick={() => copyToClipboard('skills-clone-unix')}>Copy</button>
+                <pre>npx github:vibeforge1111/vibeship-spawner-skills install --mcp</pre>
+                <button class="copy-btn small" onclick={() => copyToClipboard('full-install')}>Copy</button>
               </div>
             </div>
           </div>

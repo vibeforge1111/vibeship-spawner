@@ -3,6 +3,13 @@
 </script>
 
 <footer class="footer">
+  <div class="footer-install">
+    <code class="install-cmd">npx github:vibeforge1111/vibeship-spawner-skills install --mcp</code>
+    <button class="copy-install" onclick="navigator.clipboard.writeText('npx github:vibeforge1111/vibeship-spawner-skills install --mcp')">
+      Copy
+    </button>
+  </div>
+
   <div class="footer-content">
     <div class="footer-brand">
       <a href="/" class="footer-logo-link">
@@ -28,7 +35,7 @@
 
       <div class="footer-column">
         <h4 class="footer-heading">Resources</h4>
-        <a href="https://github.com/vibeforge1111/vibeship-spawner" target="_blank" rel="noopener">
+        <a href="https://github.com/vibeforge1111/vibeship-spawner-skills" target="_blank" rel="noopener">
           <Icon name="github" size={12} />
           <span>GitHub</span>
         </a>
@@ -53,7 +60,47 @@
   .footer {
     border-top: 1px solid var(--border);
     background: var(--bg-secondary);
-    padding: var(--space-8) var(--space-8) var(--space-4);
+    padding: 0 var(--space-8) var(--space-4);
+  }
+
+  .footer-install {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-4);
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border);
+    margin: 0 calc(-1 * var(--space-8));
+    margin-bottom: var(--space-6);
+  }
+
+  .install-cmd {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--green-dim);
+    background: var(--bg-primary);
+    padding: var(--space-2) var(--space-4);
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+
+  .copy-install {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    padding: var(--space-2) var(--space-3);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .copy-install:hover {
+    background: var(--green-dim);
+    color: var(--bg-primary);
+    border-color: var(--green-dim);
   }
 
   .footer-content {
