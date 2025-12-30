@@ -33,7 +33,15 @@ Most AI coding tools give you a generalist. Spawner gives you a **team of specia
 
 ### 1. Add Spawner to Claude
 
-Add to your Claude Desktop MCP configuration:
+**Claude Code (CLI):**
+
+```bash
+claude mcp add --transport http spawner https://mcp.vibeship.co/mcp
+```
+
+**Claude Desktop:**
+
+Add to your MCP configuration (`claude_desktop_config.json`):
 
 ```json
 {
