@@ -120,7 +120,8 @@
   />
 
   <main class="skills-content">
-    <!-- Overview Section -->
+    <!-- Overview Section - Only show when no category is selected -->
+    {#if !activeCategory}
     <section id="section-overview" class="content-section">
       <div class="overview-hero">
         <h1>A Team of World-Class Experts</h1>
@@ -336,6 +337,7 @@
         </div>
       </div>
     </section>
+    {/if}
 
     <!-- Browse Skills Section -->
     <section id="section-browse" class="content-section">
