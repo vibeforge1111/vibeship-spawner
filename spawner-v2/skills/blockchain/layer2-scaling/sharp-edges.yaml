@@ -1,0 +1,338 @@
+id: layer2-scaling
+skill: Layer 2 Scaling
+version: "1.0"
+
+sharp_edges:
+  - id: sequencer-downtime
+    severity: CRITICAL
+    title: Sequencer Downtime Causes Complete Outage
+    description: Single sequencer going down stops all transactions
+    symptoms:
+      - Transactions not being included
+      - dApp appears frozen
+      - Users panic about stuck funds
+    detection_pattern: "sendTransaction|write.*contract"
+    solution: |
+      // 1. Use Chainlink sequencer uptime feed
+      AggregatorV2V3Interface sequencerFeed = AggregatorV2V3Interface(
+          // Arbitrum: 0xFdB631F5EE196F0ed6FAa767959853A9F217697D
+          // Optimism: 0x371EAD81c9102C9BF4874A9075FFFf170F2Ee389
+          SEQUENCER_FEED
+      );
+
+      function isSequencerUp() public view returns (bool) {
+          (, int256 answer, , , ) = sequencerFeed.latestRoundData();
+          return answer == 0;
+      }
+
+      // 2. Implement graceful degradation
+      // 3. Show users clear status messages
+      // 4. Document forced inclusion path
+    references:
+      - https://docs.chain.link/data-feeds/l2-sequencer-feeds
+
+  - id: l1-data-cost-spike
+    severity: CRITICAL
+    title: L1 Gas Spike Makes L2 Transactions Expensive
+    description: L2 costs tied to L1 gas prices, which are volatile
+    symptoms:
+      - Sudden 10-100x cost increase
+      - Transactions failing due to insufficient gas
+      - User complaints about fees
+    detection_pattern: "getL1Fee|l1BaseFee|estimateGas"
+    solution: |
+      // Dynamic fee handling
+      async function safeTransaction(tx) {
+          // Get current L1 fee
+          const l1Fee = await oracle.getL1Fee(tx.data);
+          const l2Fee = tx.gasLimit * await provider.getGasPrice();
+
+          // Check against max acceptable
+          const totalFee = l1Fee.add(l2Fee);
+          if (totalFee.gt(maxAcceptableFee)) {
+              // Option 1: Wait for lower fees
+              // Option 2: Use fee estimator with buffer
+              // Option 3: Alert user to high fees
+              throw new Error(`Fee too high: ${formatEther(totalFee)}`);
+          }
+
+          // Add 20% buffer for L1 volatility
+          tx.gasPrice = tx.gasPrice.mul(120).div(100);
+          return sendTransaction(tx);
+      }
+    references:
+      - https://community.optimism.io/docs/developers/build/transaction-fees/
+
+  - id: seven-day-withdrawal
+    severity: HIGH
+    title: 7-Day Withdrawal Delay on Optimistic Rollups
+    description: Funds locked for 7 days when withdrawing to L1
+    symptoms:
+      - Users expecting instant withdrawals
+      - Liquidity issues
+      - Support tickets about "stuck" funds
+    detection_pattern: "withdraw|bridge.*l1|finalize"
+    solution: |
+      // Educate users upfront
+      function initiateWithdrawal(uint256 amount) external {
+          // Show warning in UI
+          emit WithdrawalInitiated(
+              msg.sender,
+              amount,
+              block.timestamp + 7 days // Estimated finalization
+          );
+
+          // Alternative: Use fast bridge (Across, Hop)
+          // Trade-off: Fee vs speed
+      }
+
+      // Fast bridge integration
+      async function fastWithdraw(amount) {
+          // Across/Hop take 2-10 minutes
+          // Fee: 0.1-0.3%
+          const quote = await acrossProtocol.getQuote(amount);
+          return acrossProtocol.deposit(amount, quote);
+      }
+    references:
+      - https://docs.across.to/
+
+  - id: zk-state-diff-costs
+    severity: HIGH
+    title: zkSync State Diff Costs Differ from EVM
+    description: zkSync charges for state changes, not calldata
+    symptoms:
+      - Gas estimates wildly different from actual
+      - Contract deployments much more expensive
+      - Storage-heavy operations cost more than expected
+    detection_pattern: "zksync|zkSync|era"
+    solution: |
+      // zkSync gas = L2 execution + L1 pubdata
+
+      // Pubdata cost factors:
+      // 1. Storage slot changes (not reads)
+      // 2. Contract bytecode
+      // 3. Event logs
+
+      // Optimization strategies:
+      // 1. Batch storage writes
+      // 2. Use smaller data types
+      // 3. Minimize events
+
+      // Test on zkSync specifically
+      const zkSyncProvider = new Provider("https://mainnet.era.zksync.io");
+      const gasEstimate = await zkSyncProvider.estimateGas(tx);
+      // This includes pubdata costs
+    references:
+      - https://docs.zksync.io/build/developer-reference/fee-model
+
+  - id: block-time-differences
+    severity: HIGH
+    title: Block Times Vary Significantly Across L2s
+    description: L2 block times range from 250ms to 2 seconds
+    symptoms:
+      - Timing-based logic fails
+      - Rate limiting doesn't work as expected
+      - Time-locked operations behave unexpectedly
+    detection_pattern: "block\\.timestamp|block\\.number"
+    solution: |
+      // Block times by L2:
+      // Arbitrum: ~250ms
+      // Optimism: 2 seconds
+      // Base: 2 seconds
+      // zkSync: Variable
+
+      // Don't assume consistent block times
+      // Use timestamps, not block numbers
+
+      // Bad
+      require(block.number > lastBlock + 100, "Too soon");
+
+      // Good
+      require(block.timestamp > lastTimestamp + 1 hours, "Too soon");
+
+      // For cross-L2 apps, use oracle timestamps
+    references:
+      - https://docs.arbitrum.io/build-decentralized-apps/arbitrum-vs-ethereum
+
+  - id: address-derivation-zksync
+    severity: HIGH
+    title: CREATE2 Addresses Differ on zkSync
+    description: zkSync uses different address derivation than EVM
+    symptoms:
+      - Contracts deploy to unexpected addresses
+      - Cross-chain address matching fails
+      - Factory patterns break
+    detection_pattern: "create2|CREATE2|deploy.*address"
+    solution: |
+      // zkSync uses different hash for CREATE2
+      // address = keccak256(
+      //   0xff ++ deployer ++ salt ++ keccak256(bytecode_hash ++ constructor_args)
+      // )
+
+      // Use zkSync SDK for address calculation
+      import { utils } from "zksync-web3";
+
+      const address = utils.create2Address(
+          deployerAddress,
+          bytecodeHash,
+          salt,
+          constructorArgs
+      );
+
+      // For cross-chain deployments, deploy separately
+      // and register addresses in a registry
+    references:
+      - https://docs.zksync.io/build/developer-reference/ethereum-differences/evm-instructions
+
+  - id: reorg-risk
+    severity: MEDIUM
+    title: Soft Confirmations Can Reorg
+    description: Sequencer confirmations aren't final until L1 inclusion
+    symptoms:
+      - Confirmed transactions disappear
+      - State reverts unexpectedly
+      - Double-spend in edge cases
+    detection_pattern: "await.*wait|confirmation|finality"
+    solution: |
+      // Finality levels:
+      // 1. Sequencer confirm: ~2s (CAN REORG)
+      // 2. L1 batch submission: ~5-15 min (safer)
+      // 3. L1 finality: ~15 min (very safe)
+      // 4. Challenge complete: 7 days (final)
+
+      // For high-value operations
+      async function waitForSafeConfirmation(txHash) {
+          const receipt = await provider.waitForTransaction(txHash);
+
+          // Wait for L1 batch inclusion
+          const l1BatchNumber = await getL1BatchNumber(receipt.blockNumber);
+          await waitForL1Finality(l1BatchNumber);
+
+          return receipt;
+      }
+    references:
+      - https://docs.optimism.io/builders/app-developers/transactions/statuses
+
+  - id: precompile-differences
+    severity: MEDIUM
+    title: Precompiles May Differ on L2s
+    description: Some precompiles missing or behave differently
+    symptoms:
+      - Cryptographic operations fail
+      - Gas costs different than expected
+      - Contract reverts on specific L2
+    detection_pattern: "ecrecover|sha256|ripemd|modexp"
+    solution: |
+      // Check precompile support per L2:
+      // - ecrecover: Supported everywhere
+      // - sha256: Supported everywhere
+      // - ripemd160: May not be supported
+      // - modexp: May have different gas costs
+      // - bn128: Varies by L2
+
+      // For ZK rollups, some precompiles need ZK circuits
+      // which may not be implemented
+
+      // Test all cryptographic operations on target L2
+      function testPrecompiles() public view {
+          // Test each precompile you use
+          bytes32 hash = sha256("test");
+          require(hash != bytes32(0), "sha256 failed");
+      }
+    references:
+      - https://docs.zksync.io/build/developer-reference/ethereum-differences/precompiles
+
+  - id: l1-block-info
+    severity: MEDIUM
+    title: L1 Block Info Access Patterns
+    description: Accessing L1 block data requires special handling on L2
+    symptoms:
+      - L1 blockhash unavailable
+      - L1 timestamp stale
+      - Cross-layer timing issues
+    detection_pattern: "L1Block|l1BlockNumber|blockhash"
+    solution: |
+      // Optimism L1 Block predeploy
+      import {L1Block} from "@eth-optimism/contracts/L2/L1Block.sol";
+
+      contract L1Aware {
+          L1Block constant l1Block = L1Block(
+              0x4200000000000000000000000000000000000015
+          );
+
+          function getL1Info() public view returns (
+              uint64 number,
+              uint64 timestamp,
+              uint256 basefee,
+              bytes32 hash
+          ) {
+              return (
+                  l1Block.number(),
+                  l1Block.timestamp(),
+                  l1Block.basefee(),
+                  l1Block.hash()
+              );
+          }
+      }
+
+      // Note: L1 info may be delayed by seconds/minutes
+    references:
+      - https://docs.optimism.io/builders/chain-operators/architecture
+
+  - id: gas-token-differences
+    severity: MEDIUM
+    title: Some L2s Use Custom Gas Tokens
+    description: Not all L2s use ETH for gas
+    symptoms:
+      - Transaction fee calculation wrong
+      - Wallet shows incorrect balance
+      - Bridge calculations off
+    detection_pattern: "gasPrice|tx\\.gasprice|msg\\.value"
+    solution: |
+      // L2 gas tokens:
+      // Optimism/Arbitrum/Base: ETH
+      // zkSync Era: ETH
+      // Mantle: MNT
+      // Metis: METIS
+
+      // For non-ETH gas L2s:
+      // 1. Users need gas token, not just ETH
+      // 2. Fee estimation uses gas token price
+      // 3. msg.value is still in ETH
+
+      // Check chain and adapt
+      function getGasToken() public view returns (address) {
+          if (block.chainid == 5000) return MANTLE_TOKEN;
+          if (block.chainid == 1088) return METIS_TOKEN;
+          return address(0); // ETH
+      }
+    references:
+      - https://docs.mantle.xyz/network/introduction/overview
+
+  - id: contract-size-limits
+    severity: MEDIUM
+    title: Different Contract Size Limits on L2s
+    description: L2s may have different or additional size constraints
+    symptoms:
+      - Deployment fails on specific L2
+      - Works on testnet but not mainnet
+      - Bytecode too large errors
+    detection_pattern: "deploy|bytecode|contract.*size"
+    solution: |
+      // Size limits:
+      // Ethereum: 24KB max
+      // Arbitrum: 24KB but different initcode limits
+      // zkSync: Different due to circuit constraints
+
+      // Solutions:
+      // 1. Use proxy patterns (smaller deployment)
+      // 2. Split into multiple contracts
+      // 3. Use libraries
+
+      // Check size during build
+      forge build --sizes
+
+      // Diamond pattern for complex contracts
+      // Deploy logic in facets, under 24KB each
+    references:
+      - https://docs.arbitrum.io/build-decentralized-apps/solidity-support

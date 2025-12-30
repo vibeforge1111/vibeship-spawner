@@ -1,0 +1,530 @@
+id: sentiment-analysis-trading
+skill: Sentiment Analysis for Trading
+version: "1.0"
+
+sharp_edges:
+  - id: sentiment-lag
+    severity: CRITICAL
+    title: Sentiment Lags Price (You're Trading Yesterday's News)
+    description: By the time sentiment appears, price has already moved
+    symptoms:
+      - Buy signal at local tops
+      - Sell signal at local bottoms
+      - Sentiment matches price direction
+    detection_pattern: "sentiment.*signal|sentiment.*indicator"
+    solution: |
+      Sentiment Lag Reality:
+
+      Causality Chain:
+      1. Information event occurs
+      2. Fast traders react (milliseconds)
+      3. Price moves
+      4. More traders notice
+      5. News articles written
+      6. Social media reacts
+      7. Sentiment indicators update
+      8. You see the signal
+      9. Price has moved 80%+ of the way
+
+      Testing for Lag:
+      ```python
+      import pandas as pd
+      import numpy as np
+      from scipy import stats
+
+      def test_sentiment_lead_lag(
+          sentiment: pd.Series,
+          returns: pd.Series,
+          max_lag: int = 10
+      ) -> dict:
+          """
+          Test if sentiment leads or lags returns.
+          """
+          results = []
+
+          for lag in range(-max_lag, max_lag + 1):
+              if lag < 0:
+                  # Negative lag = sentiment leads
+                  corr = stats.pearsonr(
+                      sentiment.iloc[:lag],
+                      returns.iloc[-lag:]
+                  )[0]
+              elif lag > 0:
+                  # Positive lag = sentiment lags (BAD)
+                  corr = stats.pearsonr(
+                      sentiment.iloc[lag:],
+                      returns.iloc[:-lag]
+                  )[0]
+              else:
+                  corr = stats.pearsonr(sentiment, returns)[0]
+
+              results.append({'lag': lag, 'correlation': corr})
+
+          df = pd.DataFrame(results)
+          max_corr_lag = df.loc[df['correlation'].abs().idxmax(), 'lag']
+
+          return {
+              'correlations_by_lag': df,
+              'peak_correlation_lag': max_corr_lag,
+              'is_lagging': max_corr_lag > 0,
+              'interpretation': (
+                  'USELESS: Sentiment lags price' if max_corr_lag > 0 else
+                  'USEFUL: Sentiment leads price' if max_corr_lag < 0 else
+                  'CONCURRENT: No lead/lag'
+              )
+          }
+      ```
+
+      If Your Sentiment Lags:
+      - Don't trade on it directly
+      - Use as contrarian indicator at extremes
+      - Combine with faster signals
+      - Look for sentiment CHANGES, not levels
+    references:
+      - Sentiment analysis and market timing research
+
+  - id: sentiment-data-gamed
+    severity: CRITICAL
+    title: Your Sentiment Data Is Being Manipulated
+    description: Bad actors actively game sentiment sources for profit
+    symptoms:
+      - Sudden sentiment spikes with no real news
+      - Coordinated campaigns detected
+      - Pump and dump patterns
+    detection_pattern: "twitter|reddit|social|discord"
+    solution: |
+      How Sentiment Gets Gamed:
+
+      1. Bot Networks
+         - Thousands of fake accounts
+         - Coordinate to post about asset
+         - Create fake "consensus"
+         - Cost: $50-500 to run a campaign
+
+      2. Paid Promoters
+         - Real accounts, but paid to shill
+         - Don't disclose sponsorship
+         - Mix real content with promotion
+
+      3. Pump Groups
+         - Private Discord/Telegram groups
+         - Coordinate buys, then dump
+         - Create social buzz during pump
+
+      4. Sentiment Provider Gaming
+         - If traders use sentiment provider X
+         - Manipulate X's data sources
+         - Create fake signals
+
+      Detection Methods:
+      ```python
+      def detect_coordination(
+          posts: list,
+          time_window_minutes: int = 30
+      ) -> dict:
+          """Detect coordinated posting campaigns."""
+          # Time clustering
+          timestamps = [p['timestamp'] for p in posts]
+          gaps = [(timestamps[i+1] - timestamps[i]).total_seconds()
+                  for i in range(len(timestamps)-1)]
+
+          avg_gap = np.mean(gaps)
+          min_gap = np.min(gaps)
+
+          # Account analysis
+          accounts = [p['account'] for p in posts]
+          unique_accounts = len(set(accounts))
+          repeat_posters = len(accounts) - unique_accounts
+
+          # Content similarity
+          texts = [p['text'].lower() for p in posts]
+          unique_phrases = len(set(texts))
+
+          # Red flags
+          is_coordinated = (
+              min_gap < 5 or  # Posts within 5 seconds
+              unique_accounts < len(accounts) * 0.5 or  # Many repeats
+              unique_phrases < len(texts) * 0.3  # Same content
+          )
+
+          return {
+              'is_coordinated': is_coordinated,
+              'unique_account_ratio': unique_accounts / len(accounts),
+              'content_diversity': unique_phrases / len(texts),
+              'min_post_gap_seconds': min_gap,
+              'red_flags': [
+                  'rapid_posting' if min_gap < 5 else None,
+                  'repeat_accounts' if repeat_posters > 5 else None,
+                  'similar_content' if unique_phrases < 10 else None
+              ]
+          }
+      ```
+
+      Protection:
+      - Filter for account age > 30 days
+      - Require engagement history
+      - Detect sudden volume spikes
+      - Cross-reference multiple platforms
+    references:
+      - Social media manipulation research
+
+  - id: on-chain-data-misinterpreted
+    severity: HIGH
+    title: On-Chain Data Doesn't Mean What You Think
+    description: Blockchain data is transparent but easily misinterpreted
+    symptoms:
+      - "Whale accumulation" trades fail
+      - Exchange flows don't predict price
+      - On-chain signals are consistently wrong
+    detection_pattern: "on.*chain|whale|exchange.*flow|wallet"
+    solution: |
+      On-Chain Interpretation Errors:
+
+      1. Wallet Fragmentation
+         - Whales use dozens of wallets
+         - "Whale buy" might be one of 50 wallets
+         - True position unknown
+
+      2. Exchange Cold Wallet Confusion
+         - Exchange moves to cold storage = "outflow"
+         - Not user withdrawals
+         - Bullish interpretation wrong
+
+      3. OTC Trades
+         - Large trades happen off-chain
+         - On-chain settlement later
+         - Timing mismatch with price
+
+      4. Smart Contract Interactions
+         - DeFi deposits ≠ Buying
+         - LP provision is neutral
+         - Staking is lock-up, not sentiment
+
+      Reality Check:
+      ```python
+      def validate_onchain_signal(
+          signal_type: str,
+          historical_accuracy: pd.DataFrame
+      ) -> dict:
+          """Check if on-chain signal has predictive value."""
+          # Calculate hit rate
+          correct = (historical_accuracy['signal_direction'] ==
+                     historical_accuracy['actual_direction']).mean()
+
+          # Calculate average return following signal
+          avg_return = historical_accuracy['subsequent_return'].mean()
+
+          # Is it better than random?
+          is_useful = (
+              correct > 0.52 and  # Better than coin flip
+              avg_return > 0.001   # Positive expected value
+          )
+
+          return {
+              'signal_type': signal_type,
+              'historical_accuracy': correct,
+              'avg_return': avg_return,
+              'is_useful': is_useful,
+              'recommendation': (
+                  'usable' if is_useful else
+                  'ignore - not better than random'
+              )
+          }
+      ```
+
+      Reliable vs Unreliable:
+      | Signal | Reliability | Why |
+      |--------|-------------|-----|
+      | Aggregate exchange flow | Moderate | Harder to fake |
+      | Single whale wallet | Low | Multi-wallet obfuscation |
+      | Stablecoin supply | Moderate | Less gameable |
+      | Active addresses | Low | Easy to spoof |
+    references:
+      - On-chain analytics research
+
+  - id: news-already-priced
+    severity: HIGH
+    title: News Is Priced In Before You Read It
+    description: By the time you see news, algos have traded it
+    symptoms:
+      - Buy the news, price drops
+      - Sell the news, price rises
+      - Surprise announcements don't move price
+    detection_pattern: "news|headline|announcement|report"
+    solution: |
+      News Pricing Speed:
+
+      Timeline of News Event:
+      - T+0ms: Event occurs
+      - T+10ms: Direct feeds receive data
+      - T+50ms: Algo traders execute
+      - T+500ms: Bloomberg/Reuters update
+      - T+2000ms: Aggregators receive
+      - T+5000ms: Your phone notification
+      - T+10000ms: You read it
+      - T+15000ms: You decide to trade
+      - T+20000ms: Your order executes
+
+      By T+20 seconds, you're trading against people
+      who traded at T+50ms. 99% of the move is done.
+
+      What Actually Works:
+      ```python
+      def news_trading_strategy(news_type: str) -> dict:
+          """Determine viable strategy for news type."""
+          strategies = {
+              'scheduled_announcement': {
+                  # Earnings, FOMC, etc.
+                  'strategy': 'trade_before_or_not_at_all',
+                  'why': 'Price moves in first second',
+                  'alternative': 'Trade implied volatility (options)'
+              },
+              'breaking_unscheduled': {
+                  'strategy': 'only_if_automated',
+                  'why': 'Milliseconds matter',
+                  'alternative': 'Look for second-order effects'
+              },
+              'developing_story': {
+                  # Multi-day events (geopolitical, legal)
+                  'strategy': 'position_for_resolution',
+                  'why': 'Information unfolds over time',
+                  'alternative': 'Trade thesis, not headlines'
+              },
+              'thematic': {
+                  # Industry trends, macro themes
+                  'strategy': 'position_over_weeks',
+                  'why': 'Slow information incorporation',
+                  'alternative': 'Build thesis from many data points'
+              }
+          }
+
+          return strategies.get(news_type, {
+              'strategy': 'skip',
+              'why': 'Unknown news type',
+              'alternative': 'Do nothing'
+          })
+      ```
+
+      If You Must Trade News:
+      - Trade the expected vs actual (earnings surprise)
+      - Trade second-order effects (supplier implications)
+      - Position before announcement (risky)
+      - Fade the initial overreaction (contrarian)
+    references:
+      - Market efficiency and news incorporation research
+
+  - id: sentiment-extreme-persistence
+    severity: HIGH
+    title: Extreme Sentiment Can Persist for Months
+    description: Markets can stay irrational longer than you can stay solvent
+    symptoms:
+      - "Fear is extreme" but market keeps falling
+      - "Greed is extreme" but market keeps rising
+      - Contrarian signals lose money
+    detection_pattern: "extreme|overbought|oversold|fear|greed"
+    solution: |
+      Extreme Sentiment Persistence:
+
+      Historical Examples:
+      - 1999-2000: Greed extreme for 18 months
+      - 2008: Fear extreme for 6 months
+      - 2020 COVID: Fear extreme for 3 weeks only
+      - 2021 Crypto: Greed extreme for 8 months
+      - 2022 Crypto: Fear extreme for 10 months
+
+      "Extreme fear" is a buy signal...eventually.
+      But "eventually" can destroy your account.
+
+      Better Approach:
+      ```python
+      def sentiment_extreme_strategy(
+          sentiment_score: float,
+          duration_at_extreme_days: int,
+          price_action: str  # 'trending', 'consolidating', 'reversing'
+      ) -> dict:
+          """
+          Strategy for sentiment extremes that accounts for persistence.
+          """
+          is_extreme_fear = sentiment_score < 20
+          is_extreme_greed = sentiment_score > 80
+
+          # Phase analysis
+          if duration_at_extreme_days < 7:
+              phase = 'early_extreme'
+              action = 'wait'
+              reason = 'Extremes often persist - too early'
+
+          elif duration_at_extreme_days < 30:
+              phase = 'established_extreme'
+              if price_action == 'reversing':
+                  action = 'scale_in'
+                  reason = 'Price confirming reversal'
+              else:
+                  action = 'wait'
+                  reason = 'No price confirmation yet'
+
+          else:  # > 30 days
+              phase = 'extended_extreme'
+              action = 'contrarian_scale_in'
+              reason = 'Duration suggests exhaustion'
+
+          return {
+              'phase': phase,
+              'action': action,
+              'reason': reason,
+              'required_confirmation': 'price_structure_break',
+              'max_position': 0.25 if phase == 'early_extreme' else 0.5
+          }
+      ```
+
+      Rules for Extremes:
+      1. Never full size at first extreme
+      2. Require price confirmation
+      3. Scale in, don't go all in
+      4. Have defined invalidation
+      5. Expect to be early
+    references:
+      - Behavioral finance and market timing
+
+  - id: alternative-data-garbage
+    severity: MEDIUM
+    title: 95% of Alternative Data Has Zero Alpha
+    description: Most alt data is expensive garbage that looks good in backtests
+    symptoms:
+      - Expensive data subscription
+      - "Works" in backtest, fails live
+      - High correlation with price (lagging indicator)
+    detection_pattern: "alternative.*data|satellite|credit.*card|web.*traffic"
+    solution: |
+      Alternative Data Reality:
+
+      Why Most Alt Data Fails:
+      1. Survivorship bias in data sets
+      2. Look-ahead bias in vendor backtests
+      3. Data decay (everyone has it now)
+      4. High correlation with price (lagging)
+      5. Overfit vendor models
+
+      Due Diligence Checklist:
+      ```python
+      def evaluate_alt_data(
+          data_name: str,
+          cost_per_month: float,
+          claimed_ic: float,
+          years_available: int,
+          uniqueness_score: float  # 0-1, how many others have it
+      ) -> dict:
+          """Evaluate if alternative data is worth the cost."""
+          # IC decay assumption
+          # More users = less alpha
+          adjusted_ic = claimed_ic * (1 - uniqueness_score * 0.5)
+
+          # Backtest IC is always optimistic
+          realistic_ic = adjusted_ic * 0.5
+
+          # Minimum IC for profitability
+          # Need ~0.02 IC to be useful after costs
+          is_potentially_useful = realistic_ic > 0.02
+
+          # Cost-benefit
+          # Need $X in alpha to justify $Y in data cost
+          min_aum_for_breakeven = cost_per_month * 12 / (realistic_ic * 0.1)
+
+          return {
+              'claimed_ic': claimed_ic,
+              'realistic_ic': realistic_ic,
+              'cost_per_month': cost_per_month,
+              'is_potentially_useful': is_potentially_useful,
+              'min_aum_for_breakeven': min_aum_for_breakeven,
+              'recommendation': (
+                  'worth_investigating' if is_potentially_useful and
+                  years_available >= 5 else
+                  'likely_garbage'
+              )
+          }
+      ```
+
+      Red Flags in Alt Data:
+      - Vendor won't share raw data (only signals)
+      - Backtest starts at exact low/high
+      - "Proprietary methodology" (can't validate)
+      - Only works on specific assets
+      - Less than 3 years history
+    references:
+      - Alternative data and alpha decay research
+
+  - id: sentiment-correlation-crisis
+    severity: MEDIUM
+    title: All Sentiment Signals Correlate in Crisis
+    description: In crisis, everything says "fear" and nothing helps you time the bottom
+    symptoms:
+      - All signals say sell at the bottom
+      - Sentiment composite maxes out
+      - No divergence to trade
+    detection_pattern: "crisis|crash|fear|extreme"
+    solution: |
+      Crisis Sentiment Behavior:
+
+      In Normal Markets:
+      - Social sentiment: +0.2
+      - Options flow: -0.1
+      - Exchange flows: +0.3
+      - Funding rates: +0.1
+      - Different signals, some useful
+
+      In Crisis (March 2020, for example):
+      - Social sentiment: -0.9
+      - Options flow: -0.8
+      - Exchange flows: -0.9
+      - Funding rates: -0.7
+      - ALL signals say the same thing
+
+      When everyone says "sell," who's left to sell?
+
+      Crisis Strategy:
+      ```python
+      def crisis_sentiment_strategy(
+          sentiment_composite: float,
+          sentiment_component_std: float,
+          vix_level: float,
+          days_in_crisis: int
+      ) -> dict:
+          """Strategy when all sentiment signals align negatively."""
+          # Low component std = all signals agree = crisis mode
+          is_crisis = (
+              sentiment_composite < 15 and
+              sentiment_component_std < 10 and
+              vix_level > 40
+          )
+
+          if not is_crisis:
+              return {'mode': 'normal', 'strategy': 'use_signals'}
+
+          # Crisis mode - signals less useful
+          if days_in_crisis < 5:
+              return {
+                  'mode': 'crisis_early',
+                  'strategy': 'wait',
+                  'reason': 'Capitulation may not be complete'
+              }
+          elif days_in_crisis < 20:
+              return {
+                  'mode': 'crisis_middle',
+                  'strategy': 'scale_in_slowly',
+                  'reason': 'Sentiment maxed, watch for divergence'
+              }
+          else:
+              return {
+                  'mode': 'crisis_extended',
+                  'strategy': 'contrarian_accumulate',
+                  'reason': 'Extended fear often near bottom'
+              }
+      ```
+
+      In Crisis, Look For:
+      - Sentiment staying extreme but price stabilizing
+      - One component diverging (e.g., smart money buying)
+      - VIX starting to decline
+      - Funding rates normalizing first
+    references:
+      - Crisis behavior and capitulation patterns

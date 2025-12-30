@@ -1,0 +1,393 @@
+# Prediction Markets Skill
+# Expert guidance for decentralized prediction markets and resolution oracles
+
+version: 1.0.0
+skill_id: prediction-markets
+name: Prediction Markets Engineer
+category: blockchain
+description: |
+  Comprehensive expertise in decentralized prediction markets, including
+  Polymarket-style platforms, UMA Optimistic Oracle integration, Conditional
+  Tokens Framework (CTF), market making, resolution mechanisms, and
+  regulatory considerations.
+
+triggers:
+  - prediction market
+  - Polymarket
+  - betting market
+  - outcome tokens
+  - resolution oracle
+  - UMA oracle
+  - conditional tokens
+  - binary market
+  - outcome prediction
+  - information market
+
+expertise_areas:
+  - Conditional Tokens Framework (CTF)
+  - UMA Optimistic Oracle
+  - Chainlink Functions
+  - Market making for prediction markets
+  - Resolution mechanism design
+  - LMSR (Logarithmic Market Scoring Rule)
+  - CPMM for prediction markets
+  - Dispute resolution systems
+
+patterns:
+  - id: conditional-tokens
+    name: Conditional Tokens Framework
+    description: |
+      Gnosis CTF for creating outcome tokens that represent positions
+      in prediction markets
+    when_to_use:
+      - Building prediction market platform
+      - Creating event-based tokens
+      - Composable prediction markets
+    implementation: |
+      // SPDX-License-Identifier: MIT
+      pragma solidity ^0.8.19;
+
+      import "@gnosis.pm/conditional-tokens-contracts/contracts/ConditionalTokens.sol";
+
+      contract PredictionMarket {
+          ConditionalTokens public ctf;
+          IERC20 public collateral;
+
+          struct Market {
+              bytes32 conditionId;
+              bytes32 questionId;
+              address oracle;
+              uint256 outcomeCount;
+              uint256 resolutionTime;
+              bool resolved;
+          }
+
+          mapping(bytes32 => Market) public markets;
+
+          constructor(address _ctf, address _collateral) {
+              ctf = ConditionalTokens(_ctf);
+              collateral = IERC20(_collateral);
+          }
+
+          function createMarket(
+              bytes32 questionId,
+              address oracle,
+              uint256 outcomeCount,
+              uint256 resolutionTime
+          ) external returns (bytes32 marketId) {
+              // Prepare condition in CTF
+              ctf.prepareCondition(oracle, questionId, outcomeCount);
+              bytes32 conditionId = ctf.getConditionId(oracle, questionId, outcomeCount);
+
+              marketId = keccak256(abi.encode(conditionId, block.timestamp));
+              markets[marketId] = Market({
+                  conditionId: conditionId,
+                  questionId: questionId,
+                  oracle: oracle,
+                  outcomeCount: outcomeCount,
+                  resolutionTime: resolutionTime,
+                  resolved: false
+              });
+
+              return marketId;
+          }
+
+          function buyOutcome(
+              bytes32 marketId,
+              uint256 outcomeIndex,
+              uint256 amount
+          ) external {
+              Market storage market = markets[marketId];
+              require(!market.resolved, "Market resolved");
+
+              // Transfer collateral
+              collateral.transferFrom(msg.sender, address(this), amount);
+              collateral.approve(address(ctf), amount);
+
+              // Create index set for desired outcome
+              uint256 indexSet = 1 << outcomeIndex;
+              uint256[] memory partition = new uint256[](1);
+              partition[0] = indexSet;
+
+              // Split position to get outcome tokens
+              bytes32 parentCollectionId = bytes32(0);
+              ctf.splitPosition(
+                  collateral,
+                  parentCollectionId,
+                  market.conditionId,
+                  partition,
+                  amount
+              );
+
+              // Transfer outcome tokens to user
+              bytes32 collectionId = ctf.getCollectionId(
+                  parentCollectionId,
+                  market.conditionId,
+                  indexSet
+              );
+              uint256 positionId = ctf.getPositionId(collateral, collectionId);
+              // User now holds outcome tokens
+          }
+      }
+
+      CTF Position Structure:
+      ┌─────────────────────────────────────────────────────────┐
+      │ Market: "Will ETH reach $5000 by Dec 2025?"             │
+      ├─────────────────────────────────────────────────────────┤
+      │ Condition ID: 0x123...                                  │
+      │ Outcomes: [YES, NO]                                     │
+      ├─────────────────────────────────────────────────────────┤
+      │ YES Token: ERC1155 position, pays $1 if YES             │
+      │ NO Token: ERC1155 position, pays $1 if NO               │
+      │                                                         │
+      │ $1 collateral = 1 YES token + 1 NO token                │
+      │ After resolution, winning token redeemable for $1       │
+      └─────────────────────────────────────────────────────────┘
+    security_notes:
+      - Oracle security is critical
+      - Consider dispute period before resolution
+      - Handle edge cases (market cancellation)
+
+  - id: uma-optimistic-oracle
+    name: UMA Optimistic Oracle Integration
+    description: |
+      Dispute-based oracle for real-world event resolution with
+      economic guarantees
+    when_to_use:
+      - Resolving prediction markets
+      - Any real-world data on-chain
+      - When decentralized resolution needed
+    implementation: |
+      // SPDX-License-Identifier: MIT
+      pragma solidity ^0.8.19;
+
+      import "@uma/core/contracts/optimistic-oracle-v3/interfaces/OptimisticOracleV3Interface.sol";
+
+      contract UMAMarketResolver {
+          OptimisticOracleV3Interface public oracle;
+          IERC20 public bondToken;
+          uint256 public constant BOND_AMOUNT = 5000e18; // 5000 USDC
+          uint64 public constant LIVENESS = 7200; // 2 hours
+
+          struct Resolution {
+              bytes32 assertionId;
+              bytes32 marketId;
+              bool outcome;
+              bool resolved;
+          }
+
+          mapping(bytes32 => Resolution) public resolutions;
+
+          function proposeResolution(
+              bytes32 marketId,
+              bool outcome,
+              string calldata explanation
+          ) external returns (bytes32 assertionId) {
+              // Build claim
+              bytes memory claim = abi.encodePacked(
+                  "Market ", marketId,
+                  " resolved to ", outcome ? "YES" : "NO",
+                  ". ", explanation
+              );
+
+              // Approve bond
+              bondToken.transferFrom(msg.sender, address(this), BOND_AMOUNT);
+              bondToken.approve(address(oracle), BOND_AMOUNT);
+
+              // Submit assertion
+              assertionId = oracle.assertTruth(
+                  claim,
+                  msg.sender,      // asserter
+                  address(this),   // callback recipient
+                  address(0),      // escalation manager (none)
+                  LIVENESS,
+                  bondToken,
+                  BOND_AMOUNT,
+                  bytes32(0),      // identifier
+                  bytes32(0)       // domain
+              );
+
+              resolutions[assertionId] = Resolution({
+                  assertionId: assertionId,
+                  marketId: marketId,
+                  outcome: outcome,
+                  resolved: false
+              });
+
+              return assertionId;
+          }
+
+          // UMA callback when assertion settles
+          function assertionResolvedCallback(
+              bytes32 assertionId,
+              bool assertedTruthfully
+          ) external {
+              require(msg.sender == address(oracle), "Only oracle");
+
+              Resolution storage res = resolutions[assertionId];
+              if (assertedTruthfully) {
+                  // Resolution accepted - finalize market
+                  res.resolved = true;
+                  _resolveMarket(res.marketId, res.outcome);
+              } else {
+                  // Disputed and overturned - proposer loses bond
+                  delete resolutions[assertionId];
+              }
+          }
+      }
+
+      UMA Resolution Flow:
+      1. Proposer asserts outcome with bond
+      2. 2-hour dispute window
+      3. If disputed:
+         - Goes to UMA DVM (decentralized voting)
+         - UMA token holders vote on truth
+         - Wrong party loses bond
+      4. If undisputed: assertion accepted
+    security_notes:
+      - Bond amount must deter false proposals
+      - Liveness period for dispute opportunity
+      - Handle callback failures gracefully
+
+  - id: amm-prediction
+    name: CPMM for Prediction Markets
+    description: |
+      Constant Product Market Maker adapted for binary outcome
+      token trading
+    when_to_use:
+      - Providing liquidity to prediction markets
+      - Automated market making
+      - Price discovery for outcomes
+    implementation: |
+      // SPDX-License-Identifier: MIT
+      pragma solidity ^0.8.19;
+
+      contract PredictionAMM {
+          IERC1155 public outcomeTokens;
+          uint256 public yesTokenId;
+          uint256 public noTokenId;
+
+          uint256 public yesReserve;
+          uint256 public noReserve;
+          uint256 public constant FEE_BPS = 20; // 0.2%
+
+          function addLiquidity(uint256 amount) external {
+              // Add equal amounts of both outcomes
+              outcomeTokens.safeTransferFrom(msg.sender, address(this), yesTokenId, amount, "");
+              outcomeTokens.safeTransferFrom(msg.sender, address(this), noTokenId, amount, "");
+
+              yesReserve += amount;
+              noReserve += amount;
+
+              // Mint LP tokens
+              _mintLP(msg.sender, amount);
+          }
+
+          function buyYes(uint256 noIn) external returns (uint256 yesOut) {
+              // Constant product: (yesReserve - yesOut) * (noReserve + noIn) = k
+              uint256 noInWithFee = noIn * (10000 - FEE_BPS) / 10000;
+              yesOut = (yesReserve * noInWithFee) / (noReserve + noInWithFee);
+
+              outcomeTokens.safeTransferFrom(msg.sender, address(this), noTokenId, noIn, "");
+              outcomeTokens.safeTransfer(msg.sender, yesTokenId, yesOut);
+
+              yesReserve -= yesOut;
+              noReserve += noIn;
+          }
+
+          function getYesPrice() public view returns (uint256) {
+              // Price of YES token in terms of NO token
+              // price = noReserve / (yesReserve + noReserve)
+              return (noReserve * 1e18) / (yesReserve + noReserve);
+          }
+
+          function getImpliedProbability() public view returns (uint256) {
+              // YES price = implied probability of YES outcome
+              return getYesPrice();
+          }
+      }
+
+      Price Interpretation:
+      ┌─────────────────────────────────────────────────────────┐
+      │ YES Price = $0.65                                       │
+      │ → Market implies 65% probability of YES outcome         │
+      │                                                         │
+      │ If you think YES probability > 65%, buy YES             │
+      │ If you think YES probability < 65%, buy NO (sell YES)   │
+      └─────────────────────────────────────────────────────────┘
+    security_notes:
+      - Consider impermanent loss for LPs
+      - Handle resolution and payout
+      - Prevent manipulation near resolution
+
+anti_patterns:
+  - id: centralized-oracle
+    name: Single entity resolves markets
+    severity: critical
+    description: |
+      One address has sole authority to resolve markets.
+      They can resolve incorrectly for profit.
+    detection: |
+      - Single EOA as oracle
+      - No dispute mechanism
+      - No multi-sig or DAO
+    consequence: |
+      Market operator can steal all losing bets by
+      resolving markets incorrectly
+
+  - id: no-dispute-period
+    name: Instant resolution without dispute
+    severity: high
+    description: |
+      Markets resolve immediately without opportunity
+      to challenge incorrect resolution
+    detection: |
+      - resolve() callable anytime
+      - No liveness/challenge period
+    consequence: |
+      Incorrect resolutions become final, losing
+      traders have no recourse
+
+  - id: outcome-token-imbalance
+    name: Outcome tokens don't sum to collateral
+    severity: critical
+    description: |
+      Creating outcome tokens that don't properly back
+      1:1 with collateral creates insolvency
+    detection: |
+      - Minting tokens without locking collateral
+      - Unbalanced split positions
+    consequence: |
+      Winning traders cannot redeem full value
+
+commands:
+  create_market:
+    description: Create a new prediction market
+    steps:
+      - Define clear, unambiguous question
+      - Specify resolution criteria
+      - Set resolution date
+      - Choose oracle mechanism
+      - Deploy contracts
+      - Seed initial liquidity
+      - Document resolution process
+
+  integrate_uma:
+    description: Integrate UMA Optimistic Oracle
+    steps:
+      - Review UMA documentation
+      - Set appropriate bond amount
+      - Configure liveness period
+      - Implement callback handlers
+      - Test dispute scenarios
+      - Deploy and verify
+
+  analyze_market:
+    description: Analyze prediction market for trading
+    steps:
+      - Check current implied probability
+      - Compare to personal estimate
+      - Assess liquidity and slippage
+      - Review oracle and resolution
+      - Calculate expected value
+      - Size position appropriately

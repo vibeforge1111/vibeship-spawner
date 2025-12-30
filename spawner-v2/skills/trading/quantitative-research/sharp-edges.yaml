@@ -1,0 +1,717 @@
+id: quantitative-research
+skill: Quantitative Research
+version: "1.0"
+
+sharp_edges:
+  - id: look-ahead-bias-hidden
+    severity: CRITICAL
+    title: Look-Ahead Bias Is Almost Always Present
+    description: If your backtest looks too good, you're probably using future data
+    symptoms:
+      - Sharpe ratio above 3
+      - Perfect entry/exit timing
+      - Backtest crushes reality
+    detection_pattern: "backtest.*sharpe.*[3-9]|perfect.*timing|too.*good"
+    solution: |
+      Common Sources of Look-Ahead Bias:
+
+      1. Index Membership
+         - Testing "S&P 500 stocks" but using TODAY's membership
+         - Stocks were added BECAUSE they performed well
+         - Fix: Use point-in-time constituents
+
+      2. Earnings Dates
+         - Using reported earnings date, not announcement date
+         - Fix: Add 1-day lag minimum to all fundamental data
+
+      3. Adjusted Prices
+         - Some splits/dividends adjusted using future info
+         - Fix: Use unadjusted prices + adjust yourself
+
+      4. Data Alignment
+         - Daily close vs intraday signal generation
+         - Fix: If signal uses close, trade next open
+
+      5. ETF Creation
+         - Testing ETF since "inception" but it tracks older index
+         - Fix: Use underlying index data
+
+      Audit Checklist:
+      ```python
+      def audit_for_lookahead(backtest_code: str):
+          """Red flags to search for."""
+          red_flags = [
+              'shift(-',      # Shifting forward = future data
+              '.iloc[-1]',    # Last row might be future
+              'future',       # Obvious
+              '.max()',       # Global max might use future
+              '.min()',       # Global min might use future
+              'full_period',  # Normalizing on full period
+          ]
+
+          warnings = []
+          for flag in red_flags:
+              if flag in backtest_code:
+                  warnings.append(f"POTENTIAL LOOK-AHEAD: {flag}")
+
+          return warnings
+      ```
+    references:
+      - "Backtesting" by Lopez de Prado
+
+  - id: overfitting-certainty
+    severity: CRITICAL
+    title: You Are Definitely Overfit (Accept It)
+    description: Every optimization overfit to some degree - the question is how much
+    symptoms:
+      - Strategy works perfectly in sample
+      - Adding parameters improves results
+      - Complex strategy beats simple
+    detection_pattern: "optimize|parameter|improve.*backtest"
+    solution: |
+      Overfitting Is Inevitable - Minimize It:
+
+      The Haircut Rule:
+      - In-sample Sharpe 2.0 → Expect 1.0 live
+      - In-sample Sharpe 3.0 → Expect 1.0-1.5 live
+      - In-sample Sharpe 5.0+ → Expect 0.5 or negative live
+
+      Degrees of Freedom Test:
+      ```python
+      def degrees_of_freedom_test(
+          strategy_params: int,
+          backtest_years: float,
+          trade_frequency: str
+      ) -> dict:
+          """
+          Rule of thumb: Need 20 observations per parameter.
+          """
+          trades_per_year = {
+              'daily': 252,
+              'weekly': 52,
+              'monthly': 12,
+              'quarterly': 4
+          }
+
+          total_trades = backtest_years * trades_per_year.get(trade_frequency, 52)
+          observations_per_param = total_trades / strategy_params
+
+          return {
+              'parameters': strategy_params,
+              'total_trades': total_trades,
+              'obs_per_param': observations_per_param,
+              'likely_overfit': observations_per_param < 20,
+              'recommendation': (
+                  "Reduce parameters" if observations_per_param < 20
+                  else "Adequate data"
+              )
+          }
+
+      # Example: 5 parameters, 3 years, daily trading
+      # = 756 trades / 5 params = 151 per param
+      # This is OK
+
+      # Example: 20 parameters, 3 years, monthly trading
+      # = 36 trades / 20 params = 1.8 per param
+      # SEVERELY OVERFIT
+      ```
+
+      The Simplicity Test:
+      - Can you explain the strategy in one sentence?
+      - Would it have made sense in 1990?
+      - Does it exploit human behavior?
+
+      If not → probably overfit to data artifact.
+    references:
+      - "The Probability of Backtest Overfitting" - Bailey & Lopez de Prado
+
+  - id: multiple-testing-trap
+    severity: CRITICAL
+    title: You've Already Run 100 Tests (You Just Don't Know It)
+    description: Every informal check is a hypothesis test - adjust accordingly
+    symptoms:
+      - "I only tested 3 strategies"
+      - "This is my first parameter set"
+      - Ignoring rejected hypotheses
+    detection_pattern: "test.*strat|try.*approach|param.*search"
+    solution: |
+      Hidden Multiple Testing:
+
+      Things That Count As Tests:
+      - Looking at a chart → Test
+      - Checking correlation → Test
+      - "What if I tried..." → Test
+      - Rejected strategies → Tests
+      - Parameter grid search → N tests
+
+      If you test 100 things at 5% significance:
+      - Expected false positives: 5
+      - Your "best" strategy might be pure noise
+
+      Corrections:
+      ```python
+      import numpy as np
+      from scipy import stats
+
+      def bonferroni_correction(p_values: list, alpha: float = 0.05) -> dict:
+          """
+          Simple but conservative correction.
+          """
+          n_tests = len(p_values)
+          adjusted_alpha = alpha / n_tests
+
+          significant = [p < adjusted_alpha for p in p_values]
+
+          return {
+              'original_alpha': alpha,
+              'adjusted_alpha': adjusted_alpha,
+              'n_tests': n_tests,
+              'significant': significant,
+              'n_significant': sum(significant)
+          }
+
+      def benjamini_hochberg(p_values: list, alpha: float = 0.05) -> dict:
+          """
+          Less conservative FDR control.
+          """
+          n = len(p_values)
+          sorted_pvals = sorted(enumerate(p_values), key=lambda x: x[1])
+
+          significant = [False] * n
+
+          for i, (original_idx, p) in enumerate(sorted_pvals):
+              threshold = (i + 1) / n * alpha
+              if p <= threshold:
+                  significant[original_idx] = True
+              else:
+                  break  # Stop at first failure
+
+          return {
+              'alpha': alpha,
+              'significant': significant,
+              'n_significant': sum(significant)
+          }
+
+      # Example: 50 strategy variations tested
+      # Best p-value: 0.01
+      #
+      # Unadjusted: "Significant at 5%!"
+      # Bonferroni: 0.01 > 0.05/50 = 0.001, NOT significant
+      # Reality: You got lucky
+      ```
+
+      Best Practice:
+      - Track ALL hypotheses tested
+      - Pre-register primary hypothesis
+      - Apply correction before claiming significance
+    references:
+      - "False Strategy Discovery" - Harvey et al.
+
+  - id: regime-blindness
+    severity: HIGH
+    title: Your Backtest Period Is One Regime
+    description: Strategies that work in bull markets fail in bear markets and vice versa
+    symptoms:
+      - Great 2010-2020 backtest (bull market)
+      - Momentum works, then doesn't
+      - "This time is different"
+    detection_pattern: "2010.*2020|last.*5.*year|recent.*history"
+    solution: |
+      Regime Dependency Reality:
+
+      Strategy Performance by Regime:
+
+      | Strategy | Bull | Bear | Chop |
+      |----------|------|------|------|
+      | Momentum | +++  | --   | --   |
+      | Mean Rev | +    | +    | +++  |
+      | Carry    | +++  | ---  | +    |
+      | Quality  | +    | +    | +    |
+      | Vol Sell | +++  | ---  | +    |
+
+      If your backtest is mostly bull market:
+      - Momentum will look great
+      - Vol selling will look great
+      - Quality will look boring
+
+      This tells you nothing about reality.
+
+      Minimum Regime Coverage:
+      ```python
+      def check_regime_coverage(returns: pd.Series) -> dict:
+          """
+          Ensure backtest covers multiple regimes.
+          """
+          required_periods = {
+              '2008_crisis': ('2007-10', '2009-03'),  # -50% drawdown
+              '2011_eurozone': ('2011-07', '2011-10'),  # -20%
+              '2015_china': ('2015-08', '2015-09'),     # Flash crash
+              '2018_volmageddon': ('2018-01', '2018-02'),
+              '2020_covid': ('2020-02', '2020-03'),     # -35%
+              '2022_bear': ('2022-01', '2022-10'),      # -25%
+          }
+
+          coverage = {}
+          for period_name, (start, end) in required_periods.items():
+              try:
+                  period_returns = returns[start:end]
+                  coverage[period_name] = len(period_returns) > 0
+              except:
+                  coverage[period_name] = False
+
+          return {
+              'periods_covered': coverage,
+              'coverage_pct': sum(coverage.values()) / len(coverage),
+              'is_adequate': sum(coverage.values()) >= 4  # Need most periods
+          }
+      ```
+    references:
+      - Market regime research literature
+
+  - id: survivorship-hidden
+    severity: HIGH
+    title: Your Universe Has Survivorship Bias (All Of Them Do)
+    description: You're only testing on stocks that didn't go bankrupt
+    symptoms:
+      - Using current index members historically
+      - Free data from Yahoo/Google Finance
+      - Higher returns than market average
+    detection_pattern: "yfinance|yahoo|current.*member|sp500.*list"
+    solution: |
+      Survivorship Bias Sources:
+
+      1. Index Membership
+         - S&P 500 today ≠ S&P 500 in 2008
+         - Removed companies often dropped AFTER poor performance
+         - Adds 1-2% annual return artificially
+
+      2. Data Vendors
+         - Free: Usually survivors only
+         - Cheap: Mixed quality
+         - Expensive: Usually complete
+
+      3. Crypto
+         - Only testing top 100 coins
+         - Ignoring the thousands that went to zero
+         - Massive survivorship bias
+
+      Quantifying the Bias:
+      ```python
+      def estimate_survivorship_bias(
+          strategy_return: float,  # Annual return from biased test
+          universe_turnover: float = 0.05  # 5% annual delisting
+      ) -> dict:
+          """
+          Rough estimate of survivorship bias impact.
+          """
+          # Academic research shows 1-2% for US equities
+          # Higher for small caps, crypto
+
+          estimated_bias = {
+              'large_cap_us': 0.01,
+              'small_cap_us': 0.02,
+              'international': 0.015,
+              'crypto': 0.05,  # Many coins die
+              'high_turnover': universe_turnover * 0.3
+          }
+
+          # Apply haircut
+          bias = sum(estimated_bias.values()) / len(estimated_bias)
+          adjusted_return = strategy_return - bias
+
+          return {
+              'reported_return': strategy_return,
+              'estimated_bias': bias,
+              'adjusted_return': adjusted_return,
+              'return_reduction_pct': bias / strategy_return * 100
+          }
+      ```
+
+      Solutions:
+      - Use point-in-time databases (CRSP, FactSet, etc.)
+      - Include delisted returns (usually -100%)
+      - For crypto: manually track dead coins
+    references:
+      - "Survivorship Bias in Performance Studies" - Brown et al.
+
+  - id: capacity-ignored
+    severity: HIGH
+    title: Your Strategy Has $1M Capacity, Not $1B
+    description: Market impact kills strategies at scale
+    symptoms:
+      - Trade large % of daily volume
+      - Small cap focus
+      - High turnover
+    detection_pattern: "scale|capacity|aum|volume"
+    solution: |
+      Capacity Estimation:
+
+      Rule of Thumb:
+      ```python
+      def estimate_capacity(
+          avg_position_adv_pct: float,  # Position as % of daily volume
+          turnover_annual: float,        # Annual turnover
+          target_sharpe: float = 1.0,    # Minimum acceptable Sharpe
+          base_sharpe: float = 2.0       # Sharpe at small size
+      ) -> dict:
+          """
+          Estimate strategy capacity before returns degrade.
+          """
+          # Market impact model: Impact = k * sqrt(participation)
+          # Each doubling of size reduces Sharpe by ~15%
+
+          # Maximum participation before significant impact
+          max_participation = 0.01  # 1% of ADV is safe
+
+          if avg_position_adv_pct > max_participation:
+              size_penalty = (avg_position_adv_pct / max_participation) ** 0.5
+          else:
+              size_penalty = 1.0
+
+          # Turnover amplifies impact
+          impact_from_turnover = turnover_annual * avg_position_adv_pct * 0.001
+
+          expected_sharpe = base_sharpe / size_penalty - impact_from_turnover
+
+          # Solve for max size
+          # This is approximate - real capacity requires simulation
+
+          return {
+              'current_sharpe_estimate': expected_sharpe,
+              'is_viable': expected_sharpe > target_sharpe,
+              'size_penalty': size_penalty,
+              'recommendation': (
+                  "Reduce position sizes" if expected_sharpe < target_sharpe
+                  else "Capacity appears adequate"
+              )
+          }
+      ```
+
+      Capacity By Strategy Type:
+
+      | Strategy | Typical Capacity | Why |
+      |----------|------------------|-----|
+      | SPY Momentum | $1B+ | Liquid |
+      | Small Cap Value | $50-100M | Illiquid |
+      | Crypto Arb | $1-10M | Very illiquid |
+      | HFT | $10-50M | Speed matters |
+      | Stat Arb Pairs | $50-200M | Moderate |
+    references:
+      - Market microstructure literature
+
+  - id: transaction-cost-fantasy
+    severity: HIGH
+    title: Your Backtest Assumes Free Trading (It's Not)
+    description: Transaction costs are often 50%+ of alpha
+    symptoms:
+      - "I included 0.1% slippage"
+      - Ignoring market impact
+      - High turnover strategies
+    detection_pattern: "slippage|transaction|commission|cost"
+    solution: |
+      Real Transaction Cost Components:
+
+      ```python
+      def realistic_transaction_cost(
+          trade_value: float,
+          asset_type: str,
+          avg_daily_volume_usd: float,
+          holding_period_days: float
+      ) -> dict:
+          """
+          Realistic all-in cost estimation.
+          """
+          # Commission (easy part)
+          commissions = {
+              'us_equity': 0.0001,  # $1 per $10k
+              'crypto_cex': 0.001,   # 10 bps
+              'crypto_dex': 0.003,   # 30 bps (with gas)
+              'futures': 0.00001     # Negligible
+          }
+
+          # Spread (market orders)
+          spreads = {
+              'us_equity': 0.0003,
+              'crypto_cex': 0.001,
+              'crypto_dex': 0.005,  # Variable
+              'futures': 0.0001
+          }
+
+          # Market impact (the big one)
+          participation = trade_value / avg_daily_volume_usd
+
+          # Almgren-Chriss model (simplified)
+          volatility = 0.02  # Assume 2% daily vol
+          impact = volatility * (participation ** 0.5)
+
+          # Scale by holding period (shorter = more impact matters)
+          impact_scaled = impact * (20 / max(holding_period_days, 1)) ** 0.5
+
+          commission = trade_value * commissions.get(asset_type, 0.001)
+          spread = trade_value * spreads.get(asset_type, 0.001)
+          market_impact = trade_value * impact_scaled
+
+          total = commission + spread + market_impact
+
+          return {
+              'commission': commission,
+              'spread': spread,
+              'market_impact': market_impact,
+              'total': total,
+              'total_bps': total / trade_value * 10000,
+              'impact_pct_of_total': market_impact / total * 100
+          }
+      ```
+
+      Reality Check Table:
+
+      | Asset | Your Assumption | Reality |
+      |-------|-----------------|---------|
+      | SPY | 1 bp | 3-5 bps |
+      | Small Cap | 5 bps | 30-50 bps |
+      | Crypto | 10 bps | 50-100 bps |
+      | Illiquid Crypto | 10 bps | 200-500 bps |
+
+      Annual Cost Impact (20x turnover):
+      - At 5 bps: 2% annual drag
+      - At 50 bps: 20% annual drag
+      - At 100 bps: 40% annual drag
+
+      Your 2.0 Sharpe strategy with 20x turnover in crypto?
+      Probably negative after costs.
+    references:
+      - "Optimal Execution" - Almgren & Chriss
+
+  - id: data-quality-ignored
+    severity: MEDIUM
+    title: Your Data Is Wrong (It Always Is)
+    description: Bad data creates phantom alpha
+    symptoms:
+      - Spikes to impossible prices
+      - "Alpha" from data errors
+      - Backtests don't replicate
+    detection_pattern: "data.*error|spike|outlier|impossible"
+    solution: |
+      Data Quality Checks:
+
+      ```python
+      import pandas as pd
+      import numpy as np
+
+      def audit_price_data(prices: pd.DataFrame) -> dict:
+          """
+          Check for common data errors.
+          """
+          issues = []
+
+          # 1. Impossible returns (>50% in one day)
+          returns = prices.pct_change()
+          extreme = returns.abs() > 0.5
+          if extreme.any().any():
+              issues.append({
+                  'type': 'extreme_returns',
+                  'count': extreme.sum().sum(),
+                  'severity': 'HIGH'
+              })
+
+          # 2. Zero prices
+          zeros = (prices == 0).any()
+          if zeros.any():
+              issues.append({
+                  'type': 'zero_prices',
+                  'columns': list(zeros[zeros].index),
+                  'severity': 'HIGH'
+              })
+
+          # 3. Duplicate timestamps
+          if prices.index.duplicated().any():
+              issues.append({
+                  'type': 'duplicate_timestamps',
+                  'count': prices.index.duplicated().sum(),
+                  'severity': 'MEDIUM'
+              })
+
+          # 4. Gaps (missing dates)
+          expected_dates = pd.date_range(
+              prices.index.min(), prices.index.max(), freq='B'
+          )
+          missing = len(expected_dates) - len(prices)
+          if missing > len(expected_dates) * 0.1:  # >10% missing
+              issues.append({
+                  'type': 'excessive_gaps',
+                  'missing_pct': missing / len(expected_dates),
+                  'severity': 'MEDIUM'
+              })
+
+          # 5. Stale prices (no change for days)
+          unchanged = (returns == 0).rolling(5).sum() >= 5
+          if unchanged.any().any():
+              issues.append({
+                  'type': 'stale_prices',
+                  'count': unchanged.sum().sum(),
+                  'severity': 'LOW'
+              })
+
+          return {
+              'issues': issues,
+              'total_issues': len(issues),
+              'is_clean': len(issues) == 0
+          }
+      ```
+
+      Common Phantom Alpha Sources:
+      - Dividend not adjusted → fake momentum
+      - Split not adjusted → impossible returns
+      - Delisting price wrong → survivorship alpha
+      - Quote vs trade prices → spread capture artifact
+    references:
+      - Financial data quality research
+
+  - id: curve-fitting-excuses
+    severity: MEDIUM
+    title: Every Additional Parameter Is Curve Fitting
+    description: Complexity is the enemy of robustness
+    symptoms:
+      - "I need this parameter for edge cases"
+      - Strategy has 10+ parameters
+      - Parameters are suspiciously round
+    detection_pattern: "parameter|tune|adjust|optimize"
+    solution: |
+      Parameter Discipline:
+
+      The Rule of 5:
+      - 0-2 parameters: Probably robust
+      - 3-5 parameters: Acceptable with caution
+      - 6-10 parameters: Likely overfit
+      - 10+ parameters: Definitely overfit
+
+      Each Parameter Must Pass:
+      1. Economic rationale (why this number?)
+      2. Sensitivity test (results stable ±20%?)
+      3. Cross-asset test (works on different assets?)
+      4. Out-of-sample validation
+
+      Parameter Sensitivity Test:
+      ```python
+      def parameter_sensitivity(
+          strategy_func: callable,
+          base_params: dict,
+          data: pd.DataFrame,
+          sensitivity_range: float = 0.2
+      ) -> dict:
+          """
+          Test how sensitive results are to parameter changes.
+          """
+          base_result = strategy_func(data, **base_params)
+          base_sharpe = calculate_sharpe(base_result)
+
+          sensitivity = {}
+
+          for param, value in base_params.items():
+              if not isinstance(value, (int, float)):
+                  continue
+
+              # Test +20% and -20%
+              results = []
+              for mult in [1 - sensitivity_range, 1 + sensitivity_range]:
+                  test_params = base_params.copy()
+                  test_params[param] = value * mult
+
+                  result = strategy_func(data, **test_params)
+                  sharpe = calculate_sharpe(result)
+                  results.append(sharpe)
+
+              sensitivity[param] = {
+                  'base_sharpe': base_sharpe,
+                  'low_sharpe': results[0],
+                  'high_sharpe': results[1],
+                  'range': max(results) - min(results),
+                  'is_stable': (max(results) - min(results)) / base_sharpe < 0.2
+              }
+
+          return {
+              'parameter_sensitivity': sensitivity,
+              'unstable_params': [p for p, v in sensitivity.items() if not v['is_stable']],
+              'overall_stability': all(v['is_stable'] for v in sensitivity.values())
+          }
+      ```
+
+      If parameters are round numbers (10, 20, 50):
+      - They're arbitrary
+      - Test 11, 19, 53 - similar results?
+      - If not, you're overfit
+    references:
+      - "Strategy Parameter Optimization" literature
+
+  - id: ml-false-hope
+    severity: MEDIUM
+    title: Machine Learning Is Not Magic Alpha
+    description: ML usually just learns to overfit more efficiently
+    symptoms:
+      - Neural network for prediction
+      - "AI trading strategy"
+      - Training accuracy 90%+
+    detection_pattern: "neural|machine.*learning|deep.*learning|ai.*trad"
+    solution: |
+      ML in Finance Reality:
+
+      Why ML Usually Fails:
+      1. Low signal-to-noise ratio (~0.01 IC)
+      2. Non-stationarity (regimes change)
+      3. Data is limited (not millions of samples)
+      4. Features are highly correlated
+      5. Easy to overfit with many parameters
+
+      If You Must Use ML:
+      ```python
+      def ml_sanity_checks(model, train_data, test_data):
+          """
+          Minimum checks before believing ML results.
+          """
+          checks = {}
+
+          # 1. Train/test performance gap
+          train_score = model.score(train_data)
+          test_score = model.score(test_data)
+          checks['overfit_ratio'] = train_score / max(test_score, 0.01)
+          checks['is_overfit'] = checks['overfit_ratio'] > 2
+
+          # 2. Feature importance
+          # If top features are random-looking, model is noise
+          importances = model.feature_importances_
+          checks['top_feature_importance'] = max(importances)
+          checks['concentrated'] = max(importances) > 0.3
+
+          # 3. Time consistency
+          # Split test set into halves - both should work
+          mid = len(test_data) // 2
+          first_half = model.score(test_data[:mid])
+          second_half = model.score(test_data[mid:])
+          checks['time_stable'] = abs(first_half - second_half) < 0.1
+
+          # 4. Random baseline
+          # Beat a random model by significant margin?
+          random_score = 0.5  # Random = 50%
+          checks['beats_random'] = test_score > random_score + 0.05
+
+          return {
+              'checks': checks,
+              'red_flags': [k for k, v in checks.items()
+                           if v in [True, False] and v == True]
+          }
+      ```
+
+      What Works in ML for Finance:
+      - Simple models (linear, tree-based)
+      - Regularization (L1/L2, dropout)
+      - Ensemble methods
+      - Feature selection before training
+      - Walk-forward validation
+
+      What Doesn't Work:
+      - Deep learning on price data
+      - Complex architectures
+      - End-to-end learning
+      - Training on 3 years of daily data
+    references:
+      - "Machine Learning for Asset Managers" - Lopez de Prado

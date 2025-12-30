@@ -1,0 +1,457 @@
+# DAO Governance Skill
+# Expert guidance for on-chain governance, voting, and treasury management
+
+version: 1.0.0
+skill_id: dao-governance
+name: DAO Governance Engineer
+category: blockchain
+description: |
+  Comprehensive expertise in decentralized autonomous organization
+  governance systems, including Snapshot off-chain voting, OpenZeppelin
+  Governor on-chain execution, treasury multi-sigs, proposal lifecycles,
+  delegation, and governance attack prevention.
+
+triggers:
+  - DAO governance
+  - on-chain voting
+  - Snapshot
+  - Governor contract
+  - governance proposal
+  - treasury management
+  - multi-sig
+  - token voting
+  - delegation
+  - quorum
+  - timelock
+  - governance attack
+
+expertise_areas:
+  - OpenZeppelin Governor contracts
+  - Snapshot off-chain voting
+  - Tally governance dashboard
+  - Timelock controllers
+  - Gnosis Safe multi-sig
+  - Token delegation patterns
+  - Proposal lifecycle management
+  - Governance attack prevention
+  - Quadratic voting
+  - Vote escrow (veToken) models
+
+patterns:
+  - id: openzeppelin-governor
+    name: OpenZeppelin Governor Implementation
+    description: |
+      Standard on-chain governance using OpenZeppelin's modular
+      Governor contract system
+    when_to_use:
+      - Full on-chain execution required
+      - High-stakes protocol decisions
+      - Binding treasury transactions
+    implementation: |
+      // SPDX-License-Identifier: MIT
+      pragma solidity ^0.8.19;
+
+      import "@openzeppelin/contracts/governance/Governor.sol";
+      import "@openzeppelin/contracts/governance/extensions/GovernorSettings.sol";
+      import "@openzeppelin/contracts/governance/extensions/GovernorCountingSimple.sol";
+      import "@openzeppelin/contracts/governance/extensions/GovernorVotes.sol";
+      import "@openzeppelin/contracts/governance/extensions/GovernorVotesQuorumFraction.sol";
+      import "@openzeppelin/contracts/governance/extensions/GovernorTimelockControl.sol";
+
+      contract ProtocolGovernor is
+          Governor,
+          GovernorSettings,
+          GovernorCountingSimple,
+          GovernorVotes,
+          GovernorVotesQuorumFraction,
+          GovernorTimelockControl
+      {
+          constructor(
+              IVotes _token,
+              TimelockController _timelock
+          )
+              Governor("Protocol Governor")
+              GovernorSettings(
+                  7200,      // votingDelay: ~1 day in blocks
+                  50400,     // votingPeriod: ~1 week in blocks
+                  100000e18  // proposalThreshold: 100k tokens to propose
+              )
+              GovernorVotes(_token)
+              GovernorVotesQuorumFraction(4) // 4% quorum
+              GovernorTimelockControl(_timelock)
+          {}
+
+          // Required overrides for multiple inheritance
+          function votingDelay() public view override(Governor, GovernorSettings)
+              returns (uint256)
+          {
+              return super.votingDelay();
+          }
+
+          function votingPeriod() public view override(Governor, GovernorSettings)
+              returns (uint256)
+          {
+              return super.votingPeriod();
+          }
+
+          function quorum(uint256 blockNumber)
+              public view override(Governor, GovernorVotesQuorumFraction)
+              returns (uint256)
+          {
+              return super.quorum(blockNumber);
+          }
+
+          function state(uint256 proposalId)
+              public view override(Governor, GovernorTimelockControl)
+              returns (ProposalState)
+          {
+              return super.state(proposalId);
+          }
+
+          function proposalThreshold()
+              public view override(Governor, GovernorSettings)
+              returns (uint256)
+          {
+              return super.proposalThreshold();
+          }
+
+          function _queueOperations(
+              uint256 proposalId,
+              address[] memory targets,
+              uint256[] memory values,
+              bytes[] memory calldatas,
+              bytes32 descriptionHash
+          ) internal override(Governor, GovernorTimelockControl) returns (uint48) {
+              return super._queueOperations(proposalId, targets, values, calldatas, descriptionHash);
+          }
+
+          function _executeOperations(
+              uint256 proposalId,
+              address[] memory targets,
+              uint256[] memory values,
+              bytes[] memory calldatas,
+              bytes32 descriptionHash
+          ) internal override(Governor, GovernorTimelockControl) {
+              super._executeOperations(proposalId, targets, values, calldatas, descriptionHash);
+          }
+
+          function _cancel(
+              address[] memory targets,
+              uint256[] memory values,
+              bytes[] memory calldatas,
+              bytes32 descriptionHash
+          ) internal override(Governor, GovernorTimelockControl) returns (uint256) {
+              return super._cancel(targets, values, calldatas, descriptionHash);
+          }
+
+          function _executor()
+              internal view override(Governor, GovernorTimelockControl)
+              returns (address)
+          {
+              return super._executor();
+          }
+      }
+    security_notes:
+      - Use Timelock for all executions
+      - Set reasonable proposal thresholds
+      - Monitor for flash loan attacks
+
+  - id: snapshot-governance
+    name: Snapshot Off-Chain Voting
+    description: |
+      Gas-free off-chain voting using Snapshot with optional
+      on-chain execution via SafeSnap
+    when_to_use:
+      - High voting participation needed
+      - Gas costs are a barrier
+      - Signaling votes before on-chain
+    implementation: |
+      Snapshot Space Configuration (space.json):
+      {
+        "name": "Protocol DAO",
+        "network": "1",
+        "symbol": "PROTO",
+        "strategies": [
+          {
+            "name": "erc20-balance-of",
+            "params": {
+              "address": "0x...",
+              "decimals": 18
+            }
+          },
+          {
+            "name": "delegation",
+            "params": {
+              "strategies": [
+                {
+                  "name": "erc20-balance-of",
+                  "params": { "address": "0x..." }
+                }
+              ]
+            }
+          }
+        ],
+        "members": [],
+        "admins": ["0xAdmin1", "0xAdmin2"],
+        "filters": {
+          "minScore": 100,
+          "onlyMembers": false
+        },
+        "validation": {
+          "name": "basic",
+          "params": {
+            "minScore": 100
+          }
+        },
+        "voting": {
+          "delay": 86400,
+          "period": 604800,
+          "type": "single-choice",
+          "quorum": 1000000
+        },
+        "plugins": {
+          "safeSnap": {
+            "safes": {
+              "1": { "address": "0xGnosisSafe..." }
+            }
+          }
+        }
+      }
+
+      Proposal Lifecycle:
+      1. Draft proposal in forum
+      2. Community discussion (3-7 days)
+      3. Create Snapshot vote
+      4. Voting period (5-7 days)
+      5. If passed + SafeSnap: queue transactions
+      6. Execute via Gnosis Safe
+    security_notes:
+      - Snapshot votes are NOT binding by default
+      - Use SafeSnap for on-chain execution
+      - Verify voting strategy prevents manipulation
+
+  - id: vetoken-governance
+    name: Vote-Escrowed Token (veToken) Model
+    description: |
+      Curve-style voting power based on lock duration,
+      aligning long-term incentives with governance
+    when_to_use:
+      - Rewarding long-term holders
+      - Reducing mercenary capital influence
+      - Complex token utility (gauges, bribes)
+    implementation: |
+      // SPDX-License-Identifier: MIT
+      pragma solidity ^0.8.19;
+
+      import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+      import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
+      contract VotingEscrow {
+          using SafeERC20 for IERC20;
+
+          struct LockedBalance {
+              uint256 amount;
+              uint256 end;
+          }
+
+          IERC20 public immutable token;
+          uint256 public constant MAXTIME = 4 * 365 days;
+          uint256 public constant WEEK = 7 days;
+
+          mapping(address => LockedBalance) public locked;
+          uint256 public totalLocked;
+
+          event Deposit(address indexed user, uint256 amount, uint256 lockTime);
+          event Withdraw(address indexed user, uint256 amount);
+
+          constructor(address _token) {
+              token = IERC20(_token);
+          }
+
+          function createLock(uint256 amount, uint256 unlockTime) external {
+              require(amount > 0, "Amount must be > 0");
+              require(locked[msg.sender].amount == 0, "Existing lock");
+
+              uint256 roundedUnlock = (unlockTime / WEEK) * WEEK;
+              require(roundedUnlock > block.timestamp, "Must be future");
+              require(roundedUnlock <= block.timestamp + MAXTIME, "Max 4 years");
+
+              token.safeTransferFrom(msg.sender, address(this), amount);
+
+              locked[msg.sender] = LockedBalance({
+                  amount: amount,
+                  end: roundedUnlock
+              });
+              totalLocked += amount;
+
+              emit Deposit(msg.sender, amount, roundedUnlock);
+          }
+
+          function withdraw() external {
+              LockedBalance memory lock = locked[msg.sender];
+              require(lock.amount > 0, "No lock");
+              require(block.timestamp >= lock.end, "Lock not expired");
+
+              uint256 amount = lock.amount;
+              delete locked[msg.sender];
+              totalLocked -= amount;
+
+              token.safeTransfer(msg.sender, amount);
+              emit Withdraw(msg.sender, amount);
+          }
+
+          function votingPower(address user) public view returns (uint256) {
+              LockedBalance memory lock = locked[user];
+              if (lock.end <= block.timestamp) return 0;
+
+              // Linear decay: power = amount * (timeLeft / maxTime)
+              uint256 timeLeft = lock.end - block.timestamp;
+              return (lock.amount * timeLeft) / MAXTIME;
+          }
+
+          function totalVotingPower() external view returns (uint256) {
+              // Simplified - production needs checkpoint system
+              return totalLocked / 2; // Rough average
+          }
+      }
+
+      veToken Benefits:
+      - Longer lock = more voting power
+      - Power decays as unlock approaches
+      - Discourages short-term speculation
+      - Enables gauge voting and bribes
+    security_notes:
+      - Implement checkpoint system for accurate totals
+      - Consider early unlock penalty option
+      - Watch for lock manipulation before votes
+
+  - id: timelock-controller
+    name: Timelock for Governance Execution
+    description: |
+      Mandatory delay between proposal passage and execution,
+      allowing community to exit if they disagree
+    when_to_use:
+      - All on-chain governance execution
+      - Protocol parameter changes
+      - Treasury disbursements
+    implementation: |
+      // SPDX-License-Identifier: MIT
+      pragma solidity ^0.8.19;
+
+      import "@openzeppelin/contracts/governance/TimelockController.sol";
+
+      // Deployment
+      address[] memory proposers = new address[](1);
+      proposers[0] = address(governor);
+
+      address[] memory executors = new address[](1);
+      executors[0] = address(0); // Anyone can execute after delay
+
+      TimelockController timelock = new TimelockController(
+          2 days,    // minDelay
+          proposers,
+          executors,
+          address(0) // No admin (renounced)
+      );
+
+      Timelock Parameters:
+      ┌──────────────────┬────────────────────────────────────┐
+      │ Parameter        │ Recommendation                     │
+      ├──────────────────┼────────────────────────────────────┤
+      │ minDelay         │ 2-7 days for major protocols       │
+      │ Proposers        │ Only Governor contract             │
+      │ Executors        │ Anyone (after delay) or Governor   │
+      │ Admin            │ Renounced (address(0))             │
+      └──────────────────┴────────────────────────────────────┘
+
+      Emergency Exceptions:
+      - Separate Guardian role for critical security
+      - Guardian can pause, NOT execute arbitrary code
+      - Guardian is multi-sig with security council
+    security_notes:
+      - Never give admin role to EOA
+      - Timelock should own all protocol contracts
+      - Emergency guardian separate from governance
+
+anti_patterns:
+  - id: flash-loan-voting
+    name: Voting vulnerable to flash loans
+    severity: critical
+    description: |
+      Voting power based on current balance allows flash loan
+      attackers to borrow massive amounts, vote, then repay
+    detection: |
+      - balanceOf() used directly for voting
+      - No snapshot mechanism
+      - Voting power computed at vote time
+    consequence: |
+      Attacker can pass any proposal with borrowed tokens,
+      completely subverting governance
+
+  - id: no-timelock
+    name: Direct execution without timelock
+    severity: critical
+    description: |
+      Proposals execute immediately after passing, giving no
+      time for community to respond to malicious proposals
+    detection: |
+      - Governor without TimelockController
+      - execute() calls directly to protocol
+    consequence: |
+      Malicious proposal drains treasury before community reacts
+
+  - id: low-quorum
+    name: Quorum too low for security
+    severity: high
+    description: |
+      Quorum below 2-4% allows small groups to pass proposals
+      when participation is low
+    detection: |
+      - Quorum < 2% of supply
+      - No dynamic quorum adjustment
+    consequence: |
+      Important decisions made by tiny minority
+
+  - id: no-proposal-threshold
+    name: Anyone can create proposals
+    severity: medium
+    description: |
+      No minimum token holding to propose leads to spam
+      and governance fatigue
+    detection: |
+      - proposalThreshold() returns 0
+      - No proposal creation restrictions
+    consequence: |
+      Governance flooded with low-quality proposals,
+      voter fatigue, reduced participation
+
+commands:
+  setup_governance:
+    description: Set up complete DAO governance stack
+    steps:
+      - Deploy governance token with ERC20Votes
+      - Deploy TimelockController
+      - Deploy Governor with extensions
+      - Transfer protocol ownership to Timelock
+      - Set up Snapshot space
+      - Configure Tally dashboard
+      - Document governance process
+
+  analyze_proposal:
+    description: Analyze governance proposal for risks
+    steps:
+      - Decode all transaction calldata
+      - Identify affected contracts and functions
+      - Check for unlimited approvals
+      - Verify parameter changes are reasonable
+      - Assess treasury impact
+      - Review proposer history
+
+  delegate_votes:
+    description: Guide on delegation best practices
+    steps:
+      - Identify active delegates with track record
+      - Check delegate voting history on Tally
+      - Review delegate statements
+      - Execute delegation transaction
+      - Verify delegation on block explorer

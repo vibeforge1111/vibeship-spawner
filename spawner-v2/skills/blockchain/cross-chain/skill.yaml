@@ -1,0 +1,236 @@
+# Cross-Chain Skill
+# Expert guidance for bridges, LayerZero, and omnichain applications
+
+version: 1.0.0
+skill_id: cross-chain
+name: Cross-Chain Engineer
+category: blockchain
+description: |
+  Comprehensive expertise in cross-chain infrastructure, including
+  LayerZero, Wormhole, Axelar, and custom bridge implementations.
+  Covers omnichain token standards, message passing, bridge security,
+  and cross-chain application architecture.
+
+triggers:
+  - cross-chain
+  - bridge
+  - LayerZero
+  - Wormhole
+  - Axelar
+  - omnichain
+  - multi-chain
+  - chain abstraction
+  - cross-chain messaging
+  - token bridge
+
+expertise_areas:
+  - LayerZero v2 integration
+  - Wormhole message passing
+  - Axelar GMP
+  - Bridge security patterns
+  - OFT (Omnichain Fungible Token)
+  - Cross-chain governance
+  - Chain-agnostic architecture
+  - Bridge exploit prevention
+
+patterns:
+  - id: layerzero-oft
+    name: LayerZero OFT Implementation
+    description: |
+      Omnichain Fungible Token using LayerZero for seamless
+      cross-chain token transfers
+    when_to_use:
+      - Native multi-chain token deployment
+      - Unified token supply across chains
+      - No wrapped token complexity
+    implementation: |
+      // SPDX-License-Identifier: MIT
+      pragma solidity ^0.8.19;
+
+      import "@layerzerolabs/lz-evm-oapp-v2/contracts/oft/OFT.sol";
+
+      contract MyToken is OFT {
+          constructor(
+              string memory _name,
+              string memory _symbol,
+              address _lzEndpoint,
+              address _delegate
+          ) OFT(_name, _symbol, _lzEndpoint, _delegate) {
+              // Mint initial supply on home chain
+              _mint(msg.sender, 1_000_000_000 * 1e18);
+          }
+
+          // Override for custom logic
+          function _debit(
+              uint256 _amountLD,
+              uint256 _minAmountLD,
+              uint32 _dstEid
+          ) internal override returns (uint256 amountSentLD, uint256 amountReceivedLD) {
+              // Custom debit logic if needed
+              return super._debit(_amountLD, _minAmountLD, _dstEid);
+          }
+      }
+
+      Deployment Flow:
+      1. Deploy OFT on each chain
+      2. Set trusted peers (setPeer)
+      3. Configure DVN (Decentralized Verifier Network)
+      4. Test cross-chain transfer
+
+      // Set peer addresses
+      function configurePeers() external onlyOwner {
+          // Ethereum <-> Arbitrum
+          setPeer(30101, bytes32(uint256(uint160(ethereumOFT))));
+          setPeer(30110, bytes32(uint256(uint160(arbitrumOFT))));
+      }
+
+      // Send tokens cross-chain
+      function bridgeTokens(uint32 dstEid, uint256 amount) external payable {
+          bytes memory options = OptionsBuilder.newOptions()
+              .addExecutorLzReceiveOption(200000, 0);
+
+          SendParam memory sendParam = SendParam({
+              dstEid: dstEid,
+              to: bytes32(uint256(uint160(msg.sender))),
+              amountLD: amount,
+              minAmountLD: amount * 995 / 1000, // 0.5% slippage
+              extraOptions: options,
+              composeMsg: "",
+              oftCmd: ""
+          });
+
+          MessagingFee memory fee = quoteSend(sendParam, false);
+          send{value: fee.nativeFee}(sendParam, fee, msg.sender);
+      }
+    security_notes:
+      - Verify peer addresses on all chains
+      - Configure appropriate gas limits
+      - Use DVN for security
+
+  - id: lock-mint-bridge
+    name: Lock and Mint Bridge Pattern
+    description: |
+      Traditional bridge pattern: lock tokens on source chain,
+      mint wrapped tokens on destination
+    when_to_use:
+      - Bridging existing tokens
+      - When token contract can't be modified
+      - Canonical wrapped tokens
+    implementation: |
+      // Source Chain: Lock tokens
+      contract TokenLocker {
+          IERC20 public token;
+          mapping(uint256 => bool) public processedNonces;
+          uint256 public nonce;
+
+          event TokensLocked(
+              address indexed sender,
+              uint256 amount,
+              uint256 destinationChain,
+              uint256 nonce
+          );
+
+          function lock(uint256 amount, uint256 destinationChain) external {
+              token.safeTransferFrom(msg.sender, address(this), amount);
+              emit TokensLocked(msg.sender, amount, destinationChain, nonce++);
+          }
+
+          function unlock(
+              address recipient,
+              uint256 amount,
+              uint256 bridgeNonce,
+              bytes calldata proof
+          ) external onlyRelayer {
+              require(!processedNonces[bridgeNonce], "Already processed");
+              require(_verifyProof(proof), "Invalid proof");
+
+              processedNonces[bridgeNonce] = true;
+              token.safeTransfer(recipient, amount);
+          }
+      }
+
+      // Destination Chain: Mint wrapped tokens
+      contract WrappedToken is ERC20, Ownable {
+          address public bridge;
+
+          function mint(address to, uint256 amount) external {
+              require(msg.sender == bridge, "Only bridge");
+              _mint(to, amount);
+          }
+
+          function burn(address from, uint256 amount) external {
+              require(msg.sender == bridge, "Only bridge");
+              _burn(from, amount);
+          }
+      }
+
+      Security Requirements:
+      - Multi-sig or decentralized relayer set
+      - Merkle proof or signature verification
+      - Rate limiting on unlocks
+      - Pause functionality
+      - Monitoring and alerts
+    security_notes:
+      - Bridge contracts are high-value targets
+      - Use battle-tested implementations
+      - Multiple independent verifiers required
+
+anti_patterns:
+  - id: single-relayer
+    name: Single relayer bridge
+    severity: critical
+    description: |
+      One entity controls all cross-chain message verification.
+      If compromised, can steal all bridged assets.
+    detection: |
+      - Single EOA as relayer
+      - No multi-sig
+      - No decentralized verification
+    consequence: |
+      $2.8B lost in bridge exploits historically
+
+  - id: no-finality-wait
+    name: Accepting messages before finality
+    severity: critical
+    description: |
+      Processing cross-chain messages before source chain
+      finality allows reorg attacks
+    detection: |
+      - Immediate message processing
+      - No block confirmation requirement
+    consequence: |
+      Transaction on source reverted, but destination processed
+
+  - id: unlimited-minting
+    name: Wrapped token minting without verification
+    severity: critical
+    description: |
+      Wrapped token mint function doesn't verify corresponding
+      lock on source chain
+    detection: |
+      - mint() callable by bridge address
+      - No proof verification
+    consequence: |
+      Bridge can mint unlimited wrapped tokens
+
+commands:
+  deploy_oft:
+    description: Deploy LayerZero OFT on multiple chains
+    steps:
+      - Deploy OFT on source chain
+      - Deploy OFT adapter or new OFT on destination chains
+      - Configure peer addresses bidirectionally
+      - Set up DVN configuration
+      - Test with small amounts first
+      - Verify all contracts on explorers
+
+  audit_bridge:
+    description: Security review of bridge implementation
+    steps:
+      - Check message verification mechanism
+      - Verify finality requirements
+      - Review access controls
+      - Assess pause and emergency functions
+      - Check for reentrancy vulnerabilities
+      - Verify rate limiting
+      - Review upgrade mechanisms

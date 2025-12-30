@@ -1,0 +1,352 @@
+# Token Launch Skill
+# Expert guidance for IDOs, vesting schedules, tokenomics, and fair launch mechanics
+
+version: 1.0.0
+skill_id: token-launch
+name: Token Launch Engineer
+category: blockchain
+description: |
+  Comprehensive expertise in launching tokens through IDOs, implementing secure
+  vesting contracts, designing sustainable tokenomics, and ensuring fair launch
+  mechanics. Covers launchpad integrations, cliff/unlock schedules, anti-bot
+  protection, and regulatory considerations.
+
+triggers:
+  - token launch
+  - IDO
+  - initial dex offering
+  - tokenomics
+  - vesting schedule
+  - cliff period
+  - token allocation
+  - fair launch
+  - launchpad
+  - token sale
+  - presale
+  - private sale
+  - public sale
+  - token unlock
+  - TGE
+  - token generation event
+
+expertise_areas:
+  - Token economics design
+  - Vesting contract implementation
+  - Launchpad integrations (Seedify, DAO Maker, Polkastarter)
+  - Fair launch mechanisms
+  - Anti-bot and anti-whale protection
+  - Multi-chain token deployment
+  - Liquidity bootstrapping pools (LBP)
+  - Token distribution strategies
+
+patterns:
+  - id: standard-vesting-contract
+    name: Linear Vesting with Cliff
+    description: |
+      Industry-standard vesting pattern with initial cliff period followed
+      by linear token release
+    when_to_use:
+      - Team token allocations (4-year vesting, 1-year cliff)
+      - Investor allocations (2-3 year vesting, 6-12 month cliff)
+      - Advisor tokens (2-year vesting, 6-month cliff)
+    implementation: |
+      // SPDX-License-Identifier: MIT
+      pragma solidity ^0.8.19;
+
+      import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+      import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+      import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+      import "@openzeppelin/contracts/access/Ownable.sol";
+
+      contract TokenVesting is ReentrancyGuard, Ownable {
+          using SafeERC20 for IERC20;
+
+          struct VestingSchedule {
+              uint256 totalAmount;
+              uint256 released;
+              uint256 startTime;
+              uint256 cliffDuration;
+              uint256 vestingDuration;
+              bool revocable;
+              bool revoked;
+          }
+
+          IERC20 public immutable token;
+          mapping(address => VestingSchedule) public vestingSchedules;
+
+          event TokensReleased(address indexed beneficiary, uint256 amount);
+          event VestingRevoked(address indexed beneficiary, uint256 returnedAmount);
+
+          constructor(address _token) Ownable(msg.sender) {
+              require(_token != address(0), "Invalid token address");
+              token = IERC20(_token);
+          }
+
+          function createVestingSchedule(
+              address beneficiary,
+              uint256 totalAmount,
+              uint256 startTime,
+              uint256 cliffDuration,
+              uint256 vestingDuration,
+              bool revocable
+          ) external onlyOwner {
+              require(vestingSchedules[beneficiary].totalAmount == 0, "Schedule exists");
+              require(totalAmount > 0, "Amount must be > 0");
+              require(vestingDuration > cliffDuration, "Vesting must exceed cliff");
+
+              token.safeTransferFrom(msg.sender, address(this), totalAmount);
+
+              vestingSchedules[beneficiary] = VestingSchedule({
+                  totalAmount: totalAmount,
+                  released: 0,
+                  startTime: startTime,
+                  cliffDuration: cliffDuration,
+                  vestingDuration: vestingDuration,
+                  revocable: revocable,
+                  revoked: false
+              });
+          }
+
+          function release() external nonReentrant {
+              VestingSchedule storage schedule = vestingSchedules[msg.sender];
+              require(schedule.totalAmount > 0, "No vesting schedule");
+              require(!schedule.revoked, "Vesting revoked");
+
+              uint256 releasable = _computeReleasableAmount(schedule);
+              require(releasable > 0, "No tokens to release");
+
+              schedule.released += releasable;
+              token.safeTransfer(msg.sender, releasable);
+
+              emit TokensReleased(msg.sender, releasable);
+          }
+
+          function _computeReleasableAmount(VestingSchedule memory schedule)
+              internal view returns (uint256)
+          {
+              if (block.timestamp < schedule.startTime + schedule.cliffDuration) {
+                  return 0;
+              }
+
+              uint256 elapsed = block.timestamp - schedule.startTime;
+              if (elapsed >= schedule.vestingDuration) {
+                  return schedule.totalAmount - schedule.released;
+              }
+
+              uint256 vested = (schedule.totalAmount * elapsed) / schedule.vestingDuration;
+              return vested - schedule.released;
+          }
+      }
+    security_notes:
+      - Use SafeERC20 for all token transfers
+      - Implement ReentrancyGuard on release functions
+      - Validate all time parameters
+      - Consider emergency pause functionality
+
+  - id: fair-launch-anti-bot
+    name: Fair Launch with Anti-Bot Protection
+    description: |
+      Launch mechanism that prevents bot frontrunning and ensures fair
+      distribution to real participants
+    when_to_use:
+      - Public token sales
+      - DEX liquidity provision
+      - Community-focused launches
+    implementation: |
+      // SPDX-License-Identifier: MIT
+      pragma solidity ^0.8.19;
+
+      contract FairLaunch {
+          uint256 public constant MAX_TX_AMOUNT = 1 ether; // Per-tx limit
+          uint256 public constant COOLDOWN_BLOCKS = 3;
+          uint256 public launchBlock;
+          bool public tradingEnabled;
+
+          mapping(address => uint256) public lastBuyBlock;
+          mapping(address => bool) public isWhitelisted;
+          mapping(address => bool) public isBlacklisted;
+
+          modifier antiBot(address from, address to, uint256 amount) {
+              if (!isWhitelisted[from] && !isWhitelisted[to]) {
+                  require(!isBlacklisted[from] && !isBlacklisted[to], "Blacklisted");
+
+                  // Block 0-2: Only whitelisted (prevents sandwich attacks at launch)
+                  if (block.number <= launchBlock + 2) {
+                      revert("Trading not yet enabled");
+                  }
+
+                  // Block 3-10: Per-transaction limits
+                  if (block.number <= launchBlock + 10) {
+                      require(amount <= MAX_TX_AMOUNT, "Exceeds max tx");
+                  }
+
+                  // Cooldown between buys (prevents rapid accumulation)
+                  require(
+                      block.number >= lastBuyBlock[to] + COOLDOWN_BLOCKS,
+                      "Cooldown active"
+                  );
+                  lastBuyBlock[to] = block.number;
+              }
+              _;
+          }
+
+          function enableTrading() external onlyOwner {
+              require(!tradingEnabled, "Already enabled");
+              tradingEnabled = true;
+              launchBlock = block.number;
+          }
+      }
+    security_notes:
+      - Deploy and add liquidity in same transaction to prevent sniping
+      - Consider using private mempool (Flashbots) for launch tx
+      - Set reasonable per-wallet limits during initial period
+
+  - id: tokenomics-allocation
+    name: Sustainable Tokenomics Template
+    description: |
+      Battle-tested token allocation framework based on successful launches
+    when_to_use:
+      - Designing new token economics
+      - Reviewing existing allocations
+      - Planning token distribution
+    implementation: |
+      Recommended Token Allocation (1B total supply):
+
+      ┌─────────────────────────┬─────────┬────────────────────────────────┐
+      │ Category                │ %       │ Vesting                        │
+      ├─────────────────────────┼─────────┼────────────────────────────────┤
+      │ Community/Ecosystem     │ 35-45%  │ Ongoing distribution           │
+      │ Treasury/DAO            │ 20-25%  │ Governance controlled          │
+      │ Team                    │ 15-20%  │ 4yr vest, 1yr cliff            │
+      │ Investors (Seed+Private)│ 12-18%  │ 2-3yr vest, 6-12mo cliff       │
+      │ Public Sale             │ 5-10%   │ 0-25% TGE, rest 6-12mo vest    │
+      │ Advisors                │ 2-5%    │ 2yr vest, 6mo cliff            │
+      │ Liquidity               │ 5-10%   │ Locked in DEX                  │
+      └─────────────────────────┴─────────┴────────────────────────────────┘
+
+      TGE Unlock Best Practices:
+      - Public sale: 10-25% at TGE (higher for smaller allocations)
+      - Private investors: 0-10% at TGE
+      - Team: 0% at TGE (never unlock team tokens at launch)
+      - Ecosystem: Release as needed for growth
+
+      Red Flags to Avoid:
+      ❌ Team allocation > 25%
+      ❌ No cliff for investors/team
+      ❌ > 50% TGE unlock for any group
+      ❌ Concentrated whale wallets > 5% each
+      ❌ Unlocks creating > 10% supply increase at once
+    security_notes:
+      - Ensure all allocations are verifiable on-chain
+      - Use multi-sig for team/treasury wallets
+      - Consider token lockup transparency dashboards
+
+  - id: liquidity-bootstrapping
+    name: Liquidity Bootstrapping Pool (LBP)
+    description: |
+      Fair price discovery mechanism using Balancer-style weighted pools
+      that shift weights over time
+    when_to_use:
+      - Projects wanting fair price discovery
+      - Avoiding large initial dumps
+      - When seeking wide token distribution
+    implementation: |
+      LBP Configuration (Balancer V2):
+
+      // Initial weights: 96% PROJECT / 4% USDC
+      // Final weights: 50% PROJECT / 50% USDC
+      // Duration: 24-72 hours
+
+      Key Parameters:
+      - Start weight: 90-96% project token
+      - End weight: 50% project token
+      - Duration: 24-72 hours (longer = more gradual)
+      - Swap fee: 0.5-2%
+
+      Price Dynamics:
+      - Price starts HIGH (discourages immediate dumps)
+      - Price decreases as weights shift
+      - Buyers wait for acceptable entry
+      - Natural price discovery occurs
+
+      Anti-Gaming Measures:
+      - No withdrawals during LBP
+      - Swap fee accumulates to project
+      - Random end time (not publicized)
+      - Rate limiting on swaps
+    security_notes:
+      - Lock all project tokens for LBP duration
+      - Use Balancer's official LBP factory
+      - Consider pausing capability for emergencies
+
+anti_patterns:
+  - id: unlock-cliff-too-short
+    name: Insufficient Vesting Cliff
+    severity: high
+    description: |
+      Team or investor tokens with cliffs under 6 months create immediate
+      sell pressure and signal lack of commitment
+    detection: |
+      Watch for:
+      - Team cliff < 12 months
+      - Investor cliff < 6 months
+      - "TGE unlock" > 20% for non-public rounds
+    consequence: |
+      Early unlocks lead to price dumps, community distrust, and
+      potential securities law violations
+
+  - id: whale-concentration
+    name: Excessive Wallet Concentration
+    severity: high
+    description: |
+      Single wallets holding > 5% of supply create manipulation risk
+      and governance centralization
+    detection: |
+      Check token distribution:
+      - Any non-contract wallet > 5% supply
+      - Top 10 wallets > 50% combined
+      - Hidden multi-wallet concentration
+    consequence: |
+      Price manipulation, governance attacks, rug pull risk
+
+  - id: no-liquidity-lock
+    name: Unlocked DEX Liquidity
+    severity: critical
+    description: |
+      DEX liquidity not locked can be pulled, rugging all holders
+    detection: |
+      Verify on lock services:
+      - Unicrypt, Team Finance, PinkSale locks
+      - Minimum 6-12 month lock period
+      - Multi-sig for early unlock
+    consequence: |
+      Complete loss of trading liquidity, price collapse to zero
+
+commands:
+  audit_tokenomics:
+    description: Review token allocation and vesting for red flags
+    steps:
+      - Verify total supply and distribution percentages
+      - Check all vesting schedules for appropriate cliffs
+      - Analyze wallet concentration
+      - Review liquidity lock status
+      - Assess unlock schedule impact on circulating supply
+
+  prepare_launch:
+    description: Pre-launch checklist for token deployment
+    steps:
+      - Complete smart contract audit
+      - Verify vesting contracts on testnet
+      - Confirm launchpad integration requirements
+      - Set up token tracking (Etherscan, CoinGecko, CMC)
+      - Prepare liquidity and lock mechanism
+      - Test anti-bot measures on testnet
+      - Document all contract addresses and multi-sigs
+
+  calculate_fdv:
+    description: Calculate and validate fully diluted valuation
+    steps:
+      - FDV = Total Supply × Token Price
+      - Compare to similar projects at launch
+      - Assess if valuation is sustainable
+      - Factor in all vesting unlocks over time

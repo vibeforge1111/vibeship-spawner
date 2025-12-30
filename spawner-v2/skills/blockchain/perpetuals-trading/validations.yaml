@@ -1,0 +1,173 @@
+# Validations - Perpetuals Trading
+# Automated checks for perpetual futures protocol issues
+
+version: 1.0.0
+skill_id: perpetuals-trading
+
+validations:
+  # Oracle Security
+  - id: single-oracle
+    name: Single oracle dependency
+    severity: error
+    type: regex
+    pattern:
+      - 'oracle\.getPrice(?!.*secondary|.*deviation)'
+    message: "Perpetuals should use multiple oracles with deviation checks"
+    fix_action: "Implement secondary oracle and validate deviation"
+    applies_to:
+      - "*.sol"
+
+  - id: no-oracle-freshness
+    name: No oracle freshness check
+    severity: error
+    type: regex
+    pattern:
+      - 'latestRoundData(?!.*timestamp|.*updatedAt)'
+    message: "Oracle prices should be validated for freshness"
+    fix_action: "Check updatedAt timestamp and reject stale prices"
+    applies_to:
+      - "*.sol"
+
+  # Position Management
+  - id: no-max-leverage
+    name: No maximum leverage limit
+    severity: error
+    type: regex
+    pattern:
+      - 'function\s+openPosition(?!.*maxLeverage|.*MAX_LEVERAGE)'
+    message: "Positions must have maximum leverage limits"
+    fix_action: "Implement MAX_LEVERAGE check before opening position"
+    applies_to:
+      - "*.sol"
+
+  - id: no-position-cap
+    name: No individual position size cap
+    severity: warning
+    type: regex
+    pattern:
+      - 'function\s+openPosition(?!.*maxPosition|.*positionCap)'
+    message: "Large positions create outsized risk"
+    fix_action: "Cap individual position size as percentage of pool"
+    applies_to:
+      - "*.sol"
+
+  - id: no-oi-limit
+    name: No open interest limit
+    severity: error
+    type: regex
+    pattern:
+      - 'openInterest\s*\+='
+    message: "Open interest should be capped relative to liquidity"
+    fix_action: "Check totalOI <= maxOI before increasing"
+    applies_to:
+      - "*.sol"
+
+  # Liquidation
+  - id: instant-liquidation
+    name: No partial liquidation mechanism
+    severity: warning
+    type: regex
+    pattern:
+      - 'function\s+liquidate(?!.*partial|.*gradual)'
+    message: "Large positions should be partially liquidated"
+    fix_action: "Implement partial liquidation for positions above threshold"
+    applies_to:
+      - "*.sol"
+
+  - id: no-liquidation-incentive
+    name: Missing liquidator reward
+    severity: warning
+    type: regex
+    pattern:
+      - 'function\s+liquidate(?!.*reward|.*fee.*liquidator)'
+    message: "Liquidators need incentive to participate"
+    fix_action: "Add liquidation reward from position collateral"
+    applies_to:
+      - "*.sol"
+
+  # Risk Management
+  - id: no-insurance-fund
+    name: No insurance fund for bad debt
+    severity: error
+    type: regex
+    pattern:
+      - 'contract.*Perp(?!.*insurance|.*insuranceFund)'
+    message: "Perpetual protocols need insurance fund for bad debt"
+    fix_action: "Implement insurance fund funded by trading fees"
+    applies_to:
+      - "*.sol"
+
+  - id: no-circuit-breaker
+    name: No circuit breaker for extreme moves
+    severity: warning
+    type: regex
+    pattern:
+      - 'markPrice(?!.*circuitBreaker|.*pause)'
+    message: "Consider circuit breaker for extreme price movements"
+    fix_action: "Pause trading if price moves >10% in short period"
+    applies_to:
+      - "*.sol"
+
+  # Funding Rate
+  - id: uncapped-funding
+    name: Uncapped funding rate
+    severity: warning
+    type: regex
+    pattern:
+      - 'fundingRate(?!.*MAX_FUNDING|.*cap)'
+    message: "Funding rates should be capped to prevent manipulation"
+    fix_action: "Cap funding rate to reasonable maximum (e.g., 0.1% per hour)"
+    applies_to:
+      - "*.sol"
+
+code_smells:
+  - id: instant-price-update
+    name: Instantaneous price execution
+    description: "Using oracle price at exact moment enables manipulation"
+    pattern: null
+    suggestion: "Use TWAP or delayed price for large positions"
+
+  - id: no-slippage-protection
+    name: Missing slippage protection
+    description: "Large orders should have price limits"
+    pattern: 'openPosition(?!.*minPrice|.*maxPrice)'
+    suggestion: "Add acceptable price parameter to prevent front-running"
+
+best_practices:
+  protocol_design:
+    recommendation: |
+      Perpetual Protocol Checklist:
+
+      [ ] Multi-oracle with deviation checks
+      [ ] Oracle freshness validation
+      [ ] Maximum leverage per market
+      [ ] Position size limits
+      [ ] Open interest caps
+      [ ] Insurance fund
+      [ ] Partial liquidation
+      [ ] Liquidator incentives
+      [ ] Funding rate caps
+      [ ] Circuit breakers
+      [ ] ADL before socialization
+
+  risk_parameters:
+    recommendation: |
+      Recommended Risk Parameters:
+
+      BTC/ETH Markets:
+      - Max leverage: 50-100x
+      - Maintenance margin: 0.5%
+      - Position cap: 5% of pool
+      - OI cap: 50% of pool per side
+
+      Altcoins:
+      - Max leverage: 20-50x
+      - Maintenance margin: 2-5%
+      - Position cap: 2% of pool
+      - OI cap: 30% of pool per side
+
+      Memecoins:
+      - Max leverage: 5-20x
+      - Maintenance margin: 5-10%
+      - Position cap: 1% of pool
+      - OI cap: 20% of pool per side

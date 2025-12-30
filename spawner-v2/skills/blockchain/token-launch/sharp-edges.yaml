@@ -1,0 +1,386 @@
+# Sharp Edges - Token Launch
+# The gotchas that trip up token launch engineers
+
+version: 1.0.0
+skill_id: token-launch
+
+sharp_edges:
+  - id: vesting-timestamp-manipulation
+    summary: Block timestamp can be manipulated by miners
+    severity: medium
+    situation: |
+      You use block.timestamp for vesting calculations. Miners can
+      manipulate timestamps within ~15 second range, potentially
+      allowing early claims.
+    why: |
+      Ethereum allows miners to set block timestamps within a window.
+      For long vesting periods this is negligible, but for short cliffs
+      or frequent claims, it can be exploited.
+    solution: |
+      # USE BLOCK NUMBERS FOR PRECISION
+
+      // WRONG: Timestamp-based (manipulable)
+      function claimable() public view returns (uint256) {
+          uint256 elapsed = block.timestamp - startTime;
+          return (totalAmount * elapsed) / vestingDuration;
+      }
+
+      // RIGHT: Block-based for critical timing
+      uint256 public startBlock;
+      uint256 public constant BLOCKS_PER_DAY = 7200; // ~12s blocks
+
+      function claimable() public view returns (uint256) {
+          uint256 elapsedBlocks = block.number - startBlock;
+          uint256 vestingBlocks = vestingDays * BLOCKS_PER_DAY;
+          return (totalAmount * elapsedBlocks) / vestingBlocks;
+      }
+
+      // For most vesting, timestamp is fine - block numbers
+      // are overkill for 1-year cliffs. Use judgment.
+    symptoms:
+      - Users claim slightly before expected
+      - Edge cases in vesting math
+      - Inconsistent claim amounts
+    detection_pattern: 'block\.timestamp.*vesting|cliff'
+
+  - id: erc20-approval-race
+    summary: Token approval race condition in vesting deposits
+    severity: high
+    situation: |
+      Your vesting contract requires users to approve, then deposit.
+      Between approval and deposit, tokens can be front-run.
+    why: |
+      The standard approve-then-transfer pattern has a known race
+      condition. Attacker can front-run the second transaction.
+    solution: |
+      # USE PERMIT OR INCREASE ALLOWANCE
+
+      // WRONG: Standard approve pattern
+      token.approve(vestingContract, amount);
+      vestingContract.deposit(amount);
+
+      // RIGHT: Use permit (ERC-2612)
+      function depositWithPermit(
+          uint256 amount,
+          uint256 deadline,
+          uint8 v, bytes32 r, bytes32 s
+      ) external {
+          IERC20Permit(address(token)).permit(
+              msg.sender, address(this), amount, deadline, v, r, s
+          );
+          _deposit(msg.sender, amount);
+      }
+
+      // Alternative: Use increaseAllowance
+      token.increaseAllowance(vestingContract, amount);
+    symptoms:
+      - Failed deposits after approval
+      - Missing token transfers
+      - Users reporting stolen tokens
+    detection_pattern: 'approve.*transferFrom'
+
+  - id: cliff-off-by-one
+    summary: Off-by-one error at cliff boundary
+    severity: medium
+    situation: |
+      Your vesting math allows claims exactly at cliff end, but you
+      use > instead of >= (or vice versa), causing 1-block errors.
+    why: |
+      Boundary conditions in vesting are common bugs. Users should
+      be able to claim at cliff end, not cliff end + 1.
+    solution: |
+      # GET BOUNDARY CONDITIONS RIGHT
+
+      // WRONG: Off-by-one (misses exact cliff moment)
+      function isCliffPassed() public view returns (bool) {
+          return block.timestamp > startTime + cliffDuration;
+      }
+
+      // RIGHT: Include exact boundary
+      function isCliffPassed() public view returns (bool) {
+          return block.timestamp >= startTime + cliffDuration;
+      }
+
+      // Write explicit tests for boundaries
+      function test_cliffBoundary() public {
+          vm.warp(startTime + cliffDuration - 1);
+          assertEq(vesting.claimable(user), 0);
+
+          vm.warp(startTime + cliffDuration);
+          assertGt(vesting.claimable(user), 0); // Should be claimable
+      }
+    symptoms:
+      - Users can't claim at expected time
+      - Claims work "a second later"
+      - Test failures at exact boundaries
+    detection_pattern: 'block\.timestamp\s*>\s*\w+.*cliff'
+
+  - id: tge-unlock-precision-loss
+    summary: TGE unlock calculation loses precision
+    severity: high
+    situation: |
+      You calculate TGE unlock as percentage of total. Using integer
+      division, you lose tokens or allow overclaiming.
+    why: |
+      Solidity integer division truncates. 25% of 1000 tokens = 250,
+      but 25% of 999 = 249 (loses 0.75 tokens worth of value).
+    solution: |
+      # USE PROPER PRECISION MATH
+
+      // WRONG: Precision loss
+      uint256 public constant TGE_PERCENT = 25;
+      uint256 tgeUnlock = totalAmount * TGE_PERCENT / 100;
+
+      // RIGHT: Higher precision constants
+      uint256 public constant TGE_BPS = 2500; // 25% in basis points
+      uint256 public constant BPS_DENOMINATOR = 10000;
+
+      uint256 tgeUnlock = (totalAmount * TGE_BPS) / BPS_DENOMINATOR;
+
+      // Store remaining for vesting to avoid accumulation errors
+      uint256 vestingAmount = totalAmount - tgeUnlock;
+
+      // BEST: Pre-compute exact amounts, not percentages
+      struct Allocation {
+          uint256 tgeAmount;      // Exact TGE tokens
+          uint256 vestingAmount;  // Exact vesting tokens
+          // Sum should equal totalAmount
+      }
+    symptoms:
+      - Total claimed != total allocated
+      - Dust amounts left in contract
+      - Last claimer gets slightly more/less
+    detection_pattern: '\*\s*\d+\s*/\s*100(?!\d)'
+
+  - id: launchpad-integration-reentrancy
+    summary: Launchpad callback reentrancy vulnerability
+    severity: critical
+    situation: |
+      Your token sale contract has a callback to the launchpad.
+      The callback can be exploited to re-enter before state updates.
+    why: |
+      Launchpads often require callbacks for integration. If you
+      update user balances after the callback, an attacker can
+      re-enter and claim multiple times.
+    solution: |
+      # CHECKS-EFFECTS-INTERACTIONS PATTERN
+
+      // WRONG: State update after external call
+      function claim() external {
+          uint256 amount = pendingClaims[msg.sender];
+          token.safeTransfer(msg.sender, amount);  // External call
+          pendingClaims[msg.sender] = 0;  // State update AFTER
+          launchpad.notifyClaim(msg.sender, amount);  // Another external
+      }
+
+      // RIGHT: Update state first
+      function claim() external nonReentrant {
+          uint256 amount = pendingClaims[msg.sender];
+          require(amount > 0, "Nothing to claim");
+
+          // Effects BEFORE interactions
+          pendingClaims[msg.sender] = 0;
+
+          // Then external calls
+          token.safeTransfer(msg.sender, amount);
+          launchpad.notifyClaim(msg.sender, amount);
+      }
+    symptoms:
+      - Users claim more than allocated
+      - Contract drains unexpectedly
+      - Transaction traces show recursive calls
+    detection_pattern: 'safeTransfer.*=\s*0|transfer.*pending\w+\s*='
+
+  - id: multi-round-allocation-conflict
+    summary: Private and public round allocations conflict
+    severity: high
+    situation: |
+      Same wallet participates in private and public rounds. Your
+      contract tracks only one allocation per address, overwriting
+      the first.
+    why: |
+      Many early investors also participate in public sales. Naive
+      mapping(address => uint256) overwrites their private allocation.
+    solution: |
+      # SEPARATE ALLOCATIONS PER ROUND
+
+      // WRONG: Single allocation mapping
+      mapping(address => uint256) public allocations;
+
+      function allocatePrivate(address user, uint256 amount) external {
+          allocations[user] = amount;  // Overwrites!
+      }
+
+      // RIGHT: Per-round allocations
+      enum Round { Seed, Private, Public }
+
+      mapping(address => mapping(Round => uint256)) public allocations;
+
+      function allocate(address user, Round round, uint256 amount) external {
+          allocations[user][round] = amount;
+      }
+
+      function totalAllocation(address user) public view returns (uint256) {
+          return allocations[user][Round.Seed]
+               + allocations[user][Round.Private]
+               + allocations[user][Round.Public];
+      }
+    symptoms:
+      - Investors report missing allocations
+      - Total distributed != expected
+      - Allocation proofs don't match contract
+    detection_pattern: null
+
+  - id: decimal-mismatch
+    summary: Token decimal mismatch causes wrong amounts
+    severity: critical
+    situation: |
+      You assume 18 decimals for all tokens. A 6-decimal stablecoin
+      (USDC) causes calculations to be off by 10^12.
+    why: |
+      ERC20 has no standard decimals. USDC/USDT are 6 decimals,
+      WBTC is 8 decimals. Hardcoding 18 decimals causes major errors.
+    solution: |
+      # ALWAYS QUERY DECIMALS
+
+      // WRONG: Hardcoded decimals
+      uint256 public constant DECIMALS = 18;
+      uint256 price = amount * tokenPrice / (10 ** DECIMALS);
+
+      // RIGHT: Query from token contract
+      function _getDecimals(address token) internal view returns (uint8) {
+          return IERC20Metadata(token).decimals();
+      }
+
+      function calculateTokens(uint256 paymentAmount) public view returns (uint256) {
+          uint8 paymentDecimals = _getDecimals(paymentToken);
+          uint8 saleDecimals = _getDecimals(saleToken);
+
+          // Normalize to 18 decimals for calculation
+          uint256 normalizedPayment = paymentAmount * 10**(18 - paymentDecimals);
+          uint256 tokensNormalized = normalizedPayment * tokensPerUnit / 1e18;
+
+          // Convert back to sale token decimals
+          return tokensNormalized / 10**(18 - saleDecimals);
+      }
+    symptoms:
+      - Users receive 10^12x more/fewer tokens
+      - Sale ends immediately or never fills
+      - Price displays incorrectly
+    detection_pattern: '10\s*\*\*\s*18|1e18.*decimals'
+
+  - id: unchecked-whitelist-removal
+    summary: Whitelist removal during active vesting
+    severity: medium
+    situation: |
+      Admin removes user from whitelist mid-vesting. User loses
+      access to unvested tokens they legitimately own.
+    why: |
+      Whitelists should only control initial eligibility, not
+      ongoing vesting rights. Once allocated, tokens belong to user.
+    solution: |
+      # SEPARATE ELIGIBILITY FROM VESTING
+
+      // WRONG: Whitelist gates claiming
+      function claim() external {
+          require(isWhitelisted[msg.sender], "Not whitelisted");
+          _claim(msg.sender);
+      }
+
+      // RIGHT: Whitelist only for initial allocation
+      function allocate(address user, uint256 amount) external onlyOwner {
+          require(isWhitelisted[user], "Not whitelisted");
+          vestingSchedules[user] = VestingSchedule(...);
+          // Whitelist no longer relevant after allocation
+      }
+
+      function claim() external {
+          require(vestingSchedules[msg.sender].totalAmount > 0, "No allocation");
+          _claim(msg.sender);
+      }
+    symptoms:
+      - Users locked out of earned tokens
+      - Support tickets about missing claims
+      - Legal disputes over vested amounts
+    detection_pattern: 'whitelist.*claim|claim.*whitelist'
+
+  - id: launch-time-timezone
+    summary: Launch time timezone confusion
+    severity: low
+    situation: |
+      You announce launch at "12:00 PM" without timezone. Half your
+      community misses the launch, others arrive 12 hours early.
+    why: |
+      Crypto is global. UTC is the only timezone that works for
+      everyone. Local times cause confusion and missed opportunities.
+    solution: |
+      # ALWAYS USE UTC
+
+      // In announcements
+      ❌ "Launch: December 15, 12:00 PM"
+      ✅ "Launch: December 15, 12:00 UTC"
+      ✅ "Launch: December 15, 12:00 UTC (convert to local time)"
+
+      // In contracts, store unix timestamp
+      uint256 public launchTime = 1702641600; // Fixed point in time
+
+      // Provide timezone conversion tool in UI
+      function formatLaunchTime() external view returns (string memory) {
+          // Frontend should handle timezone conversion
+          return "See contract for UTC timestamp";
+      }
+
+      // Frontend
+      const launchDate = new Date(launchTime * 1000);
+      const localTime = launchDate.toLocaleString();
+      const utcTime = launchDate.toUTCString();
+    symptoms:
+      - Community confusion about times
+      - Some users miss launch entirely
+      - Support overload pre-launch
+    detection_pattern: null
+
+  - id: gas-spike-launch
+    summary: Gas price spikes during launch block liquidity
+    severity: high
+    situation: |
+      Your launch coincides with high network activity. Gas prices
+      10x, and small buyers get priced out or fail transactions.
+    why: |
+      Popular launches create gas wars. Bots pay extreme gas to
+      get priority. Regular users can't compete and waste gas on
+      failed transactions.
+    solution: |
+      # DESIGN FOR GAS SPIKES
+
+      // Prevent gas wars with max gas price
+      uint256 public maxGasPrice = 100 gwei;
+
+      modifier reasonableGas() {
+          require(tx.gasprice <= maxGasPrice, "Gas price too high");
+          _;
+      }
+
+      function buy() external payable reasonableGas {
+          // Regular users have a chance
+      }
+
+      // Better: Use commit-reveal or queue system
+      mapping(address => bytes32) public commitments;
+      mapping(address => uint256) public revealWindow;
+
+      function commit(bytes32 hash) external {
+          commitments[msg.sender] = hash;
+          revealWindow[msg.sender] = block.number + 10;
+      }
+
+      function reveal(uint256 amount, bytes32 salt) external {
+          require(block.number >= revealWindow[msg.sender], "Too early");
+          require(keccak256(abi.encode(amount, salt)) == commitments[msg.sender]);
+          _processBuy(msg.sender, amount);
+      }
+    symptoms:
+      - Failed transactions during launch
+      - Only bots get allocations
+      - Gas costs exceed purchase value
+    detection_pattern: null

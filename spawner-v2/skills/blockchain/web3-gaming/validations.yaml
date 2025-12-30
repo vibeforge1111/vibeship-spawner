@@ -1,0 +1,188 @@
+# Validations - Web3 Gaming
+# Automated checks for blockchain game issues
+
+version: 1.0.0
+skill_id: web3-gaming
+
+validations:
+  # Economic Security
+  - id: no-emission-cap
+    name: Missing token emission cap
+    severity: error
+    type: regex
+    pattern:
+      - 'function\s+mint.*\{(?!.*cap|.*limit|.*max)'
+    message: "Token minting should have emission caps to prevent inflation"
+    fix_action: "Add dailyEmissionCap and enforce in mint function"
+    applies_to:
+      - "*.sol"
+
+  - id: no-cooldown
+    name: Missing cooldown on reward claims
+    severity: warning
+    type: regex
+    pattern:
+      - 'function\s+(claim|harvest|collect).*\{(?!.*cooldown|.*lastClaim)'
+    message: "Reward claims should have cooldown to prevent rapid farming"
+    fix_action: "Add mapping for lastClaimTime and enforce minimum interval"
+    applies_to:
+      - "*.sol"
+
+  - id: client-trusted-amount
+    name: Trusting client-provided reward amounts
+    severity: error
+    type: regex
+    pattern:
+      - 'function\s+claim.*uint256\s+amount.*\{(?!.*signature|.*verify)'
+    message: "Reward amounts should be server-signed, not client-provided"
+    fix_action: "Implement server-side signing of reward claims"
+    applies_to:
+      - "*.sol"
+
+  # NFT Security
+  - id: centralized-metadata
+    name: Centralized metadata URL
+    severity: warning
+    type: regex
+    pattern:
+      - 'tokenURI.*"https://|baseURI.*"http://'
+    message: "NFT metadata should use IPFS or on-chain storage"
+    fix_action: "Use ipfs:// or arweave:// for metadata permanence"
+    applies_to:
+      - "*.sol"
+
+  - id: missing-item-burn
+    name: No burn mechanism for items
+    severity: info
+    type: regex
+    pattern:
+      - 'ERC1155(?!.*burn)'
+    message: "Game items should have burn mechanism for economic sinks"
+    fix_action: "Implement burn function for item consumption"
+    applies_to:
+      - "*.sol"
+
+  # Access Control
+  - id: unprotected-game-functions
+    name: Game functions without role protection
+    severity: error
+    type: regex
+    pattern:
+      - 'function\s+(mint|reward|upgrade).*public(?!.*onlyRole|.*onlyGame)'
+    message: "Game state-changing functions need access control"
+    fix_action: "Add onlyRole(GAME_ROLE) or similar modifier"
+    applies_to:
+      - "*.sol"
+
+  - id: missing-pause
+    name: No pause functionality
+    severity: warning
+    type: regex
+    pattern:
+      - 'contract\s+\w+(?!.*Pausable)'
+    message: "Game contracts should have pause for emergencies"
+    fix_action: "Inherit from Pausable and add whenNotPaused modifier"
+    applies_to:
+      - "*.sol"
+
+  # Signature Security
+  - id: missing-expiry
+    name: Signature without expiry
+    severity: error
+    type: regex
+    pattern:
+      - 'keccak256.*signature(?!.*expiry|.*deadline)'
+    message: "Signed messages should include expiry timestamp"
+    fix_action: "Add expiry to hash and verify block.timestamp < expiry"
+    applies_to:
+      - "*.sol"
+
+  - id: missing-chain-id
+    name: Signature without chain ID
+    severity: warning
+    type: regex
+    pattern:
+      - 'keccak256.*abi\.encode(?!.*chainid)'
+    message: "Include chain ID in signature to prevent cross-chain replay"
+    fix_action: "Add block.chainid to the signed hash"
+    applies_to:
+      - "*.sol"
+
+  - id: missing-nonce
+    name: Signature without nonce
+    severity: error
+    type: regex
+    pattern:
+      - 'verify.*signature(?!.*nonce)'
+    message: "Signatures should use nonces to prevent replay"
+    fix_action: "Track per-user nonces and include in signed hash"
+    applies_to:
+      - "*.sol"
+
+  # Game Logic
+  - id: no-rate-limit
+    name: No rate limiting on actions
+    severity: warning
+    type: regex
+    pattern:
+      - 'function\s+play|function\s+battle(?!.*rateLimit|.*lastAction)'
+    message: "Game actions should be rate-limited to prevent automation"
+    fix_action: "Add per-action cooldowns and daily limits"
+    applies_to:
+      - "*.sol"
+
+code_smells:
+  - id: god-admin
+    name: Single admin controls everything
+    description: "One address can mint, pause, upgrade, and drain funds"
+    pattern: 'onlyOwner.*mint|onlyOwner.*withdraw'
+    suggestion: "Split roles: MINTER_ROLE, PAUSER_ROLE, UPGRADER_ROLE"
+
+  - id: magic-numbers-economy
+    name: Hardcoded economic values
+    description: "Reward amounts and caps hardcoded instead of configurable"
+    pattern: 'reward\s*=\s*\d+\s*ether'
+    suggestion: "Use governance-adjustable parameters for economy tuning"
+
+  - id: no-events-rewards
+    name: Reward distribution without events
+    description: "Difficult to track rewards off-chain for analytics"
+    pattern: null
+    suggestion: "Emit events for all token mints, burns, and transfers"
+
+best_practices:
+  game_economy:
+    recommendation: |
+      Game Economy Checklist:
+
+      [ ] Daily/weekly emission caps enforced on-chain
+      [ ] Multiple token sinks (crafting, fees, repairs)
+      [ ] Diminishing returns for extended play
+      [ ] Governance can adjust parameters
+      [ ] Real-time monitoring of earn/burn ratio
+      [ ] Emergency shutdown capability
+      [ ] Clear economic documentation
+
+  anti_cheat:
+    recommendation: |
+      Anti-Cheat Checklist:
+
+      [ ] Server-side game state validation
+      [ ] Signed reward claims with nonce + expiry
+      [ ] Rate limiting on all reward functions
+      [ ] Behavioral analysis for bot detection
+      [ ] Phone/KYC verification for high-value
+      [ ] Cooldowns between reward claims
+      [ ] Daily earning caps per wallet
+
+  nft_design:
+    recommendation: |
+      NFT Design Checklist:
+
+      [ ] Metadata on IPFS or on-chain
+      [ ] Clear attribute documentation
+      [ ] Reasonable gas for minting
+      [ ] ERC-2981 royalty support
+      [ ] Cross-marketplace compatibility
+      [ ] Burn mechanism for sinks
+      [ ] Upgrade path documented

@@ -1,0 +1,150 @@
+# Validations - Prediction Markets
+# Automated checks for prediction market issues
+
+version: 1.0.0
+skill_id: prediction-markets
+
+validations:
+  # Oracle Security
+  - id: single-oracle-resolver
+    name: Single address can resolve market
+    severity: error
+    type: regex
+    pattern:
+      - 'function\s+resolve.*onlyOwner|resolve.*onlyOracle(?!.*dispute)'
+    message: "Markets should have dispute mechanism, not single resolver"
+    fix_action: "Implement UMA or multi-sig resolution with dispute period"
+    applies_to:
+      - "*.sol"
+
+  - id: no-dispute-period
+    name: No dispute period for resolution
+    severity: error
+    type: regex
+    pattern:
+      - 'function\s+resolve(?!.*liveness|.*dispute|.*challenge)'
+    message: "Resolution should have dispute/challenge period"
+    fix_action: "Add liveness period where disputes can be raised"
+    applies_to:
+      - "*.sol"
+
+  # Token Economics
+  - id: unbalanced-tokens
+    name: Outcome tokens not properly backed
+    severity: error
+    type: regex
+    pattern:
+      - '_mint.*outcomeToken(?!.*collateral)'
+    message: "Outcome tokens must be backed 1:1 by collateral"
+    fix_action: "Lock collateral equal to minted outcome tokens"
+    applies_to:
+      - "*.sol"
+
+  - id: missing-redemption
+    name: No redemption function for winning tokens
+    severity: error
+    type: regex
+    pattern:
+      - 'contract.*Prediction(?!.*redeem|.*claim)'
+    message: "Winners must be able to redeem tokens for collateral"
+    fix_action: "Implement redeem() for winning outcome tokens"
+    applies_to:
+      - "*.sol"
+
+  # Trading Protection
+  - id: no-trading-cutoff
+    name: Trading continues until resolution
+    severity: warning
+    type: regex
+    pattern:
+      - 'function\s+(buy|trade|swap)(?!.*cutoff|.*deadline)'
+    message: "Consider trading cutoff before resolution to prevent front-running"
+    fix_action: "Add tradingCutoff before resolution time"
+    applies_to:
+      - "*.sol"
+
+  - id: no-slippage-protection
+    name: No slippage protection for trades
+    severity: warning
+    type: regex
+    pattern:
+      - 'function\s+buy(?!.*minOut|.*slippage)'
+    message: "Traders should be protected from excessive slippage"
+    fix_action: "Add minAmountOut parameter for slippage protection"
+    applies_to:
+      - "*.sol"
+
+  # Resolution
+  - id: no-resolution-proof
+    name: Resolution without proof
+    severity: warning
+    type: regex
+    pattern:
+      - 'function\s+resolve.*bool\s+outcome(?!.*proof|.*data)'
+    message: "Resolution should include verifiable proof"
+    fix_action: "Require proof/data parameter for verification"
+    applies_to:
+      - "*.sol"
+
+  - id: no-invalid-outcome
+    name: No INVALID resolution option
+    severity: info
+    type: regex
+    pattern:
+      - 'function\s+resolve.*bool\s+outcome'
+    message: "Consider INVALID outcome for ambiguous/cancelled markets"
+    fix_action: "Add third outcome option for market invalidation"
+    applies_to:
+      - "*.sol"
+
+code_smells:
+  - id: magic-resolution-time
+    name: Hardcoded resolution time
+    description: "Resolution time should be configurable per market"
+    pattern: 'resolutionTime\s*=\s*\d+'
+    suggestion: "Pass resolution time as market creation parameter"
+
+  - id: no-emergency-resolution
+    name: No emergency resolution path
+    description: "Markets may need emergency resolution in edge cases"
+    pattern: null
+    suggestion: "Implement DAO-controlled emergency resolution"
+
+best_practices:
+  market_creation:
+    recommendation: |
+      Market Creation Checklist:
+
+      [ ] Clear, unambiguous question
+      [ ] Specific resolution source documented
+      [ ] Exact resolution time (not window)
+      [ ] Edge cases documented
+      [ ] Backup resolution source
+      [ ] INVALID outcome option
+      [ ] Trading cutoff before resolution
+      [ ] Dispute/challenge period
+      [ ] Resolution proof requirement
+
+  oracle_setup:
+    recommendation: |
+      Resolution Oracle Options:
+
+      1. UMA Optimistic Oracle
+         - Decentralized dispute resolution
+         - Bond required, slashed if wrong
+         - Good for complex real-world events
+
+      2. Chainlink Automation
+         - Trustless timing triggers
+         - Combine with data feeds
+         - Good for quantitative outcomes
+
+      3. Multi-sig DAO
+         - Community-controlled resolution
+         - For high-stakes markets
+         - Slower but more secure
+
+      4. Reality.eth
+         - Crowdsourced truth
+         - Bond escalation mechanism
+         - Good for frequent markets

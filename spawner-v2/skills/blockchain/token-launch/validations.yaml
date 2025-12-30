@@ -1,0 +1,217 @@
+# Validations - Token Launch
+# Automated checks for token launch contract issues
+
+version: 1.0.0
+skill_id: token-launch
+
+validations:
+  # Security
+  - id: no-reentrancy-guard
+    name: Missing ReentrancyGuard on claim functions
+    severity: error
+    type: regex
+    pattern:
+      - 'function\s+(claim|withdraw|release).*\{(?!.*nonReentrant)'
+    message: "Claim functions should use ReentrancyGuard"
+    fix_action: "Add nonReentrant modifier to all claim/withdraw functions"
+    applies_to:
+      - "*.sol"
+
+  - id: hardcoded-decimals
+    name: Hardcoded 18 decimals assumption
+    severity: warning
+    type: regex
+    pattern:
+      - '10\s*\*\*\s*18|1e18'
+      - 'decimals\s*=\s*18'
+    message: "Token decimals should not be hardcoded - query from contract"
+    fix_action: "Use IERC20Metadata(token).decimals() instead"
+    applies_to:
+      - "*.sol"
+
+  - id: unsafe-transfer
+    name: Using transfer instead of safeTransfer
+    severity: error
+    type: regex
+    pattern:
+      - '\.transfer\s*\('
+      - '\.transferFrom\s*\('
+    message: "Use SafeERC20 safeTransfer/safeTransferFrom for compatibility"
+    fix_action: "Import SafeERC20 and use safeTransfer"
+    applies_to:
+      - "*.sol"
+
+  - id: no-zero-address-check
+    name: Missing zero address validation
+    severity: warning
+    type: regex
+    pattern:
+      - 'address\s+\w+\s*\).*\{(?!.*require.*!=\s*address\(0\))'
+    message: "Address parameters should be validated for zero address"
+    fix_action: "Add require(_addr != address(0), 'Zero address')"
+    applies_to:
+      - "*.sol"
+
+  # Vesting Logic
+  - id: no-cliff-check
+    name: Missing cliff period in vesting
+    severity: warning
+    type: regex
+    pattern:
+      - 'vestingSchedule(?!.*cliff)'
+      - 'struct\s+Vesting.*\{(?!.*cliff)'
+    message: "Vesting should include cliff period"
+    fix_action: "Add cliffDuration to vesting schedule"
+    applies_to:
+      - "*.sol"
+
+  - id: timestamp-manipulation-risk
+    name: Short timeframes using block.timestamp
+    severity: info
+    type: regex
+    pattern:
+      - 'block\.timestamp.*<\s*\d{1,6}[^0-9]'
+    message: "Short durations with timestamp may be manipulable"
+    fix_action: "Consider using block numbers for short critical periods"
+    applies_to:
+      - "*.sol"
+
+  # Token Distribution
+  - id: no-allocation-cap
+    name: Missing maximum allocation cap
+    severity: warning
+    type: regex
+    pattern:
+      - 'function\s+allocate(?!.*maxAllocation|.*<=.*cap)'
+    message: "Token allocations should have maximum caps"
+    fix_action: "Add per-user and total allocation limits"
+    applies_to:
+      - "*.sol"
+
+  - id: no-total-supply-check
+    name: Allocations may exceed total supply
+    severity: error
+    type: regex
+    pattern:
+      - 'totalAllocated\s*\+='
+    message: "Ensure allocations cannot exceed token total supply"
+    fix_action: "Add require(totalAllocated + amount <= maxSupply)"
+    applies_to:
+      - "*.sol"
+
+  # Access Control
+  - id: missing-owner-check
+    name: Administrative function without access control
+    severity: error
+    type: regex
+    pattern:
+      - 'function\s+(allocate|setVesting|revoke|pause).*public(?!.*onlyOwner|.*onlyRole)'
+    message: "Administrative functions need access control"
+    fix_action: "Add onlyOwner or onlyRole modifier"
+    applies_to:
+      - "*.sol"
+
+  - id: no-multisig
+    name: Single owner without multi-sig
+    severity: warning
+    type: regex
+    pattern:
+      - 'Ownable\s*\('
+    message: "Consider using multi-sig for owner functions"
+    fix_action: "Deploy owner as Gnosis Safe or similar multi-sig"
+    applies_to:
+      - "*.sol"
+
+  # Anti-Bot
+  - id: no-launch-protection
+    name: No anti-bot protection at launch
+    severity: warning
+    type: regex
+    pattern:
+      - 'function\s+enableTrading(?!.*launchBlock|.*cooldown)'
+    message: "Consider adding anti-bot protection for launch"
+    fix_action: "Add cooldown blocks and max transaction limits"
+    applies_to:
+      - "*.sol"
+
+  - id: no-max-wallet
+    name: No maximum wallet limit
+    severity: info
+    type: regex
+    pattern:
+      - 'function\s+_transfer(?!.*maxWallet|.*maxBalance)'
+    message: "Consider max wallet limits to prevent whale accumulation"
+    fix_action: "Add maxWalletAmount check in transfer"
+    applies_to:
+      - "*.sol"
+
+code_smells:
+  - id: magic-numbers
+    name: Magic numbers in vesting calculations
+    description: "Unexplained numbers in code reduce readability"
+    pattern: '\*\s*\d{3,}|\d{3,}\s*\*'
+    suggestion: "Extract to named constants (e.g., SECONDS_PER_DAY, BPS_DENOMINATOR)"
+
+  - id: complex-unlock-formula
+    name: Overly complex unlock calculation
+    description: "Complex formulas are harder to audit and more prone to bugs"
+    pattern: null
+    suggestion: "Simplify vesting to cliff + linear, or use Sablier/Llamapay"
+
+  - id: no-events
+    name: State changes without events
+    description: "Missing events make off-chain tracking difficult"
+    pattern: '=\s*[^;]+;(?!.*emit)'
+    suggestion: "Emit events for all significant state changes"
+
+  - id: string-errors
+    name: Using string error messages
+    description: "String errors cost more gas than custom errors"
+    pattern: 'require\s*\([^,]+,\s*"'
+    suggestion: "Use custom errors for gas efficiency"
+
+best_practices:
+  vesting_contract:
+    recommendation: |
+      Production Vesting Contract Checklist:
+
+      [ ] ReentrancyGuard on all external functions
+      [ ] SafeERC20 for token transfers
+      [ ] Zero address validation on all addresses
+      [ ] Cliff and vesting duration validation
+      [ ] Event emission for all state changes
+      [ ] Pause functionality for emergencies
+      [ ] Multi-sig owner
+      [ ] View function for pending claims
+      [ ] Batch operations for gas efficiency
+      [ ] Comprehensive test coverage (>95%)
+
+  launch_security:
+    recommendation: |
+      Token Launch Security Checklist:
+
+      [ ] Smart contract audit completed
+      [ ] Vesting contracts tested on testnet
+      [ ] Liquidity locked for minimum 6 months
+      [ ] Anti-bot measures in place
+      [ ] Max transaction limits set
+      [ ] Cooldown between transactions
+      [ ] Launchpad integration tested
+      [ ] Emergency pause available
+      [ ] Multi-sig controls all admin functions
+      [ ] Token contract verified on explorer
+
+  tokenomics_review:
+    recommendation: |
+      Tokenomics Red Flag Checklist:
+
+      [ ] Team allocation <= 20%
+      [ ] Team cliff >= 12 months
+      [ ] Investor cliff >= 6 months
+      [ ] No single unlock > 10% of supply
+      [ ] Treasury under multi-sig/DAO control
+      [ ] Liquidity allocation >= 5%
+      [ ] Public sale has TGE unlock <= 25%
+      [ ] All allocations verifiable on-chain
+      [ ] Unlock schedule published and immutable
+      [ ] No hidden wallets or allocations

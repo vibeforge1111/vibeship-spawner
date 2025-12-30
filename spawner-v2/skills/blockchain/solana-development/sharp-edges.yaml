@@ -1,0 +1,297 @@
+id: solana-development
+skill: Solana Development
+version: "1.0"
+
+sharp_edges:
+  - id: account-ownership-bypass
+    severity: CRITICAL
+    title: Account Ownership Not Verified
+    description: Program accepts accounts without verifying it owns them
+    symptoms:
+      - Attackers can pass fake accounts with manipulated data
+      - Unauthorized state modifications
+      - Fund drainage through spoofed accounts
+    detection_pattern: "Account<'info,.*>.*without.*constraint"
+    solution: |
+      // Always use Anchor's typed accounts or verify manually
+      #[account(
+          constraint = account.owner == expected_owner @ ErrorCode::InvalidOwner
+      )]
+      pub my_account: Account<'info, MyData>,
+
+      // Or manual check
+      require!(
+          ctx.accounts.data.owner == &crate::ID,
+          ErrorCode::InvalidAccountOwner
+      );
+    references:
+      - https://www.soldev.app/course/account-data-matching
+
+  - id: pda-seed-collision
+    severity: CRITICAL
+    title: PDA Seed Collision Vulnerability
+    description: PDA seeds don't include enough unique identifiers
+    symptoms:
+      - Multiple users sharing same PDA
+      - Account overwrites
+      - Unpredictable program behavior
+    detection_pattern: "seeds.*=.*\\[b\"[^\"]+\"\\].*without.*user"
+    solution: |
+      // Bad: Only static seed
+      seeds = [b"vault"]
+
+      // Good: Include user-specific data
+      seeds = [b"vault", user.key().as_ref()]
+
+      // Better: Include nonce for multiple accounts per user
+      seeds = [b"vault", user.key().as_ref(), &nonce.to_le_bytes()]
+    references:
+      - https://www.anchor-lang.com/docs/pdas
+
+  - id: missing-signer-check
+    severity: CRITICAL
+    title: Missing Signer Verification
+    description: Instruction doesn't verify required signers
+    symptoms:
+      - Anyone can call privileged functions
+      - Unauthorized fund transfers
+      - Admin functions exposed
+    detection_pattern: "pub.*authority.*AccountInfo.*without.*Signer"
+    solution: |
+      // Use Signer type for required signers
+      #[account(mut)]
+      pub authority: Signer<'info>,
+
+      // For PDA authority, verify seeds
+      #[account(
+          seeds = [b"authority"],
+          bump,
+      )]
+      pub pda_authority: Account<'info, AuthorityAccount>,
+    references:
+      - https://www.soldev.app/course/signer-auth
+
+  - id: arithmetic-overflow
+    severity: HIGH
+    title: Unchecked Arithmetic Operations
+    description: Using +, -, *, / without overflow protection
+    symptoms:
+      - Integer overflow causing zero balances
+      - Underflow creating massive values
+      - Incorrect fee calculations
+    detection_pattern: "\\+|\\-|\\*|/(?!/).*u64|u128"
+    solution: |
+      // Use checked math
+      let result = a.checked_add(b).ok_or(ErrorCode::MathOverflow)?;
+      let result = a.checked_sub(b).ok_or(ErrorCode::MathUnderflow)?;
+      let result = a.checked_mul(b).ok_or(ErrorCode::MathOverflow)?;
+      let result = a.checked_div(b).ok_or(ErrorCode::DivisionByZero)?;
+
+      // Or use saturating for non-critical paths
+      let capped = a.saturating_add(b);
+    references:
+      - https://doc.rust-lang.org/std/primitive.u64.html#method.checked_add
+
+  - id: rent-exemption-failure
+    severity: HIGH
+    title: Account Not Rent Exempt
+    description: Creating accounts without sufficient lamports for rent exemption
+    symptoms:
+      - Accounts being garbage collected
+      - Lost user funds
+      - State disappearing after ~2 years
+    detection_pattern: "init.*space.*without.*rent"
+    solution: |
+      // Anchor handles this with init, but verify space calculation
+      #[account(
+          init,
+          payer = user,
+          space = 8 + MyAccount::INIT_SPACE, // 8 byte discriminator + data
+      )]
+      pub my_account: Account<'info, MyAccount>,
+
+      // Manual: Calculate rent
+      let rent = Rent::get()?;
+      let lamports = rent.minimum_balance(account_size);
+    references:
+      - https://docs.solana.com/developing/programming-model/accounts#rent
+
+  - id: transaction-size-limit
+    severity: HIGH
+    title: Transaction Size Limit Exceeded
+    description: Transaction exceeds 1232 byte limit
+    symptoms:
+      - Transactions failing silently
+      - "Transaction too large" errors
+      - Batch operations failing
+    detection_pattern: "multiple.*accounts.*single.*transaction"
+    solution: |
+      // Break into multiple transactions
+      // Use lookup tables for repeated accounts
+      const lookupTable = await connection.getAddressLookupTable(tableAddress);
+
+      const message = new TransactionMessage({
+          payerKey: payer.publicKey,
+          recentBlockhash,
+          instructions,
+      }).compileToV0Message([lookupTable.value]);
+
+      // Or use Jito bundles for atomic multi-tx
+    references:
+      - https://docs.solana.com/developing/versioned-transactions
+
+  - id: compute-unit-exhaustion
+    severity: HIGH
+    title: Compute Unit Budget Exceeded
+    description: Program exceeds default 200k compute units
+    symptoms:
+      - Transaction failures with "exceeded CUs"
+      - Complex operations failing
+      - Loops causing issues
+    detection_pattern: "for.*in.*iter|while.*loop"
+    solution: |
+      // Request more compute units
+      const modifyComputeUnits = ComputeBudgetProgram.setComputeUnitLimit({
+          units: 400000
+      });
+
+      // Set priority fee
+      const addPriorityFee = ComputeBudgetProgram.setComputeUnitPrice({
+          microLamports: 1000
+      });
+
+      // Add to transaction
+      transaction.add(modifyComputeUnits, addPriorityFee, ...instructions);
+    references:
+      - https://docs.solana.com/developing/programming-model/runtime#compute-budget
+
+  - id: account-resurrection
+    severity: HIGH
+    title: Account Resurrection Attack
+    description: Closed accounts can be resurrected with old data
+    symptoms:
+      - Closed accounts reappearing
+      - Old state being restored
+      - Double-spend possibilities
+    detection_pattern: "close.*=.*without.*zero"
+    solution: |
+      // Zero data before closing
+      pub fn close_account(ctx: Context<CloseAccount>) -> Result<()> {
+          let account = &ctx.accounts.my_account;
+          let dest = &ctx.accounts.destination;
+
+          // Zero the data
+          let mut data = account.try_borrow_mut_data()?;
+          data.fill(0);
+
+          // Transfer lamports and close
+          **dest.lamports.borrow_mut() = dest.lamports()
+              .checked_add(account.lamports())
+              .unwrap();
+          **account.lamports.borrow_mut() = 0;
+
+          Ok(())
+      }
+    references:
+      - https://www.soldev.app/course/closing-accounts
+
+  - id: missing-freeze-authority
+    severity: MEDIUM
+    title: Token Mint Without Freeze Authority
+    description: Creating tokens without ability to freeze malicious accounts
+    symptoms:
+      - Cannot freeze attacker accounts
+      - No recourse for stolen tokens
+      - Compliance issues
+    detection_pattern: "initialize_mint.*freeze_authority.*None"
+    solution: |
+      // Include freeze authority for compliance
+      token::initialize_mint(
+          CpiContext::new(
+              ctx.accounts.token_program.to_account_info(),
+              InitializeMint {
+                  mint: ctx.accounts.mint.to_account_info(),
+                  rent: ctx.accounts.rent.to_account_info(),
+              },
+          ),
+          decimals,
+          &ctx.accounts.authority.key(),
+          Some(&ctx.accounts.freeze_authority.key()), // Don't use None
+      )?;
+    references:
+      - https://spl.solana.com/token#freezing-accounts
+
+  - id: oracle-price-manipulation
+    severity: MEDIUM
+    title: Single Oracle Price Dependency
+    description: Relying on single price oracle without validation
+    symptoms:
+      - Flash loan price manipulation
+      - Stale price exploitation
+      - Oracle failure causing issues
+    detection_pattern: "price.*oracle.*single|get_price.*without.*staleness"
+    solution: |
+      // Use multiple oracles and validate
+      let pyth_price = get_pyth_price(&ctx.accounts.pyth_oracle)?;
+      let switchboard_price = get_switchboard_price(&ctx.accounts.switchboard)?;
+
+      // Check staleness
+      require!(
+          pyth_price.publish_time > Clock::get()?.unix_timestamp - MAX_STALENESS,
+          ErrorCode::StalePrice
+      );
+
+      // Check deviation
+      let deviation = calculate_deviation(pyth_price.price, switchboard_price);
+      require!(deviation < MAX_DEVIATION, ErrorCode::PriceDeviation);
+    references:
+      - https://docs.pyth.network/price-feeds/best-practices
+
+  - id: missing-program-id-check
+    severity: MEDIUM
+    title: CPI to Unverified Program
+    description: Cross-program invocation without verifying target program ID
+    symptoms:
+      - Calls to malicious programs
+      - Fund theft via fake programs
+      - State corruption
+    detection_pattern: "CpiContext::new.*without.*program.*check"
+    solution: |
+      // Verify program ID before CPI
+      #[account(
+          constraint = token_program.key() == token::ID @ ErrorCode::InvalidProgram
+      )]
+      pub token_program: Program<'info, Token>,
+
+      // Or manual check
+      require!(
+          ctx.accounts.external_program.key() == expected_program::ID,
+          ErrorCode::InvalidProgramId
+      );
+    references:
+      - https://www.soldev.app/course/arbitrary-cpi
+
+  - id: lamport-drain
+    severity: MEDIUM
+    title: Unprotected Lamport Withdrawal
+    description: SOL can be drained from program accounts
+    symptoms:
+      - Program accounts emptied
+      - Rent collection failing
+      - Accounts becoming non-rent-exempt
+    detection_pattern: "lamports.*borrow_mut.*sub|transfer.*sol"
+    solution: |
+      // Always check minimum balance
+      let rent = Rent::get()?;
+      let min_balance = rent.minimum_balance(account.data_len());
+
+      require!(
+          account.lamports() - withdraw_amount >= min_balance,
+          ErrorCode::InsufficientBalance
+      );
+
+      // Or mark accounts as rent-exempt in constraints
+      #[account(
+          mut,
+          constraint = vault.lamports() >= Rent::get()?.minimum_balance(vault.data_len())
+      )]

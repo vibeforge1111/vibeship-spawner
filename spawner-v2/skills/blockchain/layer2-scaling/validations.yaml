@@ -1,0 +1,142 @@
+id: layer2-scaling
+skill: Layer 2 Scaling
+version: "1.0"
+
+validations:
+  - id: check-l1-gas-handling
+    name: L1 Gas Cost Handling
+    description: Verify L1 data costs are considered
+    pattern: "getL1Fee|l1BaseFee|GasPriceOracle"
+    file_glob: "**/*.sol"
+    match: absent_in_context
+    context_pattern: "estimateGas|gasPrice|fee"
+    message: "Consider L1 data costs in gas estimation for L2"
+    severity: warning
+    autofix: false
+
+  - id: check-sequencer-awareness
+    name: Sequencer Uptime Handling
+    description: Critical operations should check sequencer status
+    pattern: "sequencerFeed|isSequencerUp"
+    file_glob: "**/*.sol"
+    match: absent_in_context
+    context_pattern: "oracle|price|liquidat"
+    message: "Consider sequencer uptime checks for price-sensitive operations"
+    severity: warning
+    autofix: false
+
+  - id: check-finality-handling
+    name: Finality Awareness
+    description: High-value operations should wait for appropriate finality
+    pattern: "waitForTransaction|confirmations?:\\s*[12]\\s*[,}]"
+    file_glob: "**/*.ts"
+    match: present
+    message: "1-2 confirmations may not be sufficient for L2 finality"
+    severity: info
+    autofix: false
+
+  - id: check-bridge-authentication
+    name: Bridge Message Authentication
+    description: Verify bridge receivers authenticate messages
+    pattern: "xDomainMessageSender|sourceSender"
+    file_glob: "**/*.sol"
+    match: absent_in_context
+    context_pattern: "receive.*Message|cross.*domain"
+    message: "Bridge receivers must authenticate message source"
+    severity: error
+    autofix: false
+
+  - id: check-hardcoded-addresses
+    name: L2-Specific Addresses
+    description: Check for hardcoded L2-specific addresses
+    pattern: "0x4200000000000000000000000000000"
+    file_glob: "**/*.sol"
+    match: present
+    message: "Verify L2 predeploy addresses are correct for target chain"
+    severity: info
+    autofix: false
+
+  - id: check-calldata-size
+    name: Calldata Optimization
+    description: Large calldata increases L2 costs significantly
+    pattern: "bytes\\s+memory|string\\s+memory"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "external|public"
+    message: "Consider calldata instead of memory for external functions on L2"
+    severity: info
+    autofix: false
+
+  - id: check-block-timestamp
+    name: Block Timing Assumptions
+    description: Block times vary across L2s
+    pattern: "block\\.number.*\\+|block\\.number.*-"
+    file_glob: "**/*.sol"
+    match: present
+    message: "Use block.timestamp instead of block.number for timing on L2"
+    severity: warning
+    autofix: false
+
+  - id: check-create2-usage
+    name: CREATE2 L2 Compatibility
+    description: CREATE2 addresses differ on some L2s
+    pattern: "create2|CREATE2"
+    file_glob: "**/*.sol"
+    match: present
+    message: "CREATE2 address derivation differs on zkSync - test on target L2"
+    severity: info
+    autofix: false
+
+  - id: check-withdrawal-handling
+    name: Withdrawal Period Handling
+    description: Verify withdrawal delay is handled
+    pattern: "withdraw.*L1|bridge.*out"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "7.*day|delay|finalize"
+    message: "Document 7-day withdrawal delay for optimistic rollups"
+    severity: info
+    autofix: false
+
+  - id: check-multi-chain-config
+    name: Multi-Chain Configuration
+    description: Chain-specific configurations should be parameterized
+    pattern: "chainId.*==|block\\.chainid.*=="
+    file_glob: "**/*.sol"
+    match: present
+    message: "Consider using configuration contracts for multi-chain deployments"
+    severity: info
+    autofix: false
+
+pre_commit:
+  - id: l2-compile
+    name: Compile for L2
+    command: "forge build"
+    description: Verify contracts compile
+
+  - id: l2-test
+    name: L2 Test Suite
+    command: "forge test"
+    description: Run tests with L2 fork
+
+  - id: contract-size
+    name: Contract Size Check
+    command: "forge build --sizes | grep -E '^\\|.*\\|.*\\|' | awk -F'|' '{if ($3 > 24000) print $2 \" exceeds 24KB\"}'"
+    description: Check contracts under 24KB limit
+
+ci_checks:
+  - id: l2-fork-tests
+    name: L2 Fork Tests
+    command: "forge test --fork-url $L2_RPC_URL"
+    description: Test against L2 fork
+    required: true
+
+  - id: multi-l2-tests
+    name: Multi-L2 Compatibility
+    command: "./scripts/test-all-l2s.sh"
+    description: Test across multiple L2 networks
+
+  - id: gas-report
+    name: L2 Gas Report
+    command: "forge test --gas-report"
+    description: Generate gas usage report for L2 optimization

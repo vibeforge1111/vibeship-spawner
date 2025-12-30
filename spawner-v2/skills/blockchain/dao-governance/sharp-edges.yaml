@@ -1,0 +1,350 @@
+# Sharp Edges - DAO Governance
+# The gotchas that trip up governance engineers
+
+version: 1.0.0
+skill_id: dao-governance
+
+sharp_edges:
+  - id: flash-loan-governance-attack
+    summary: Flash loans can borrow voting power for single block
+    severity: critical
+    situation: |
+      Your governance uses current token balance for voting power.
+      An attacker flash loans millions of tokens, votes, and repays
+      in the same transaction, passing any proposal.
+    why: |
+      Flash loans provide unlimited capital for single transactions.
+      If voting power is balance-based without snapshots, attacker
+      can temporarily own majority voting power for free.
+    solution: |
+      # USE VOTE SNAPSHOTS
+
+      // WRONG: Current balance for voting
+      function getVotes(address account) public view returns (uint256) {
+          return token.balanceOf(account); // Flashloanable!
+      }
+
+      // RIGHT: OpenZeppelin ERC20Votes with checkpoints
+      import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
+
+      contract GovernanceToken is ERC20, ERC20Votes {
+          // Snapshots voting power at each block
+          // getPastVotes(account, blockNumber) returns historical power
+      }
+
+      // Governor uses snapshot at proposal creation
+      function _castVote(uint256 proposalId, address account, uint8 support)
+          internal override returns (uint256)
+      {
+          uint256 proposalSnapshot = proposalSnapshot(proposalId);
+          // Uses voting power from PAST block, not current
+          uint256 weight = getVotes(account, proposalSnapshot);
+          // ...
+      }
+
+      Additional Protections:
+      - Require tokens held for N blocks before voting
+      - Implement voting escrow (lock tokens during vote)
+      - Add vote cooldown after large transfers
+    symptoms:
+      - Proposal passed with suspicious single voter
+      - Large token movements same block as vote
+      - Voting power appeared and disappeared instantly
+    detection_pattern: 'balanceOf.*getVotes|voting.*balanceOf'
+
+  - id: proposal-griefing
+    summary: Attackers spam proposals to cause governance fatigue
+    severity: medium
+    situation: |
+      Anyone can create proposals with no cost. Malicious actors
+      flood governance with garbage proposals, exhausting voters.
+    why: |
+      Without proposal thresholds, creating proposals is free.
+      Spam proposals waste voter attention and reduce participation
+      on legitimate proposals.
+    solution: |
+      # REQUIRE STAKE TO PROPOSE
+
+      // Minimum tokens to create proposal
+      uint256 public constant PROPOSAL_THRESHOLD = 100_000 * 1e18;
+
+      function propose(...) public override returns (uint256) {
+          require(
+              getVotes(msg.sender, block.number - 1) >= PROPOSAL_THRESHOLD,
+              "Below proposal threshold"
+          );
+          return super.propose(...);
+      }
+
+      // Alternative: Proposal deposit (slashed if rejected)
+      mapping(uint256 => uint256) public proposalDeposits;
+      uint256 public constant PROPOSAL_DEPOSIT = 1000 * 1e18;
+
+      function proposeWithDeposit(...) external returns (uint256) {
+          token.safeTransferFrom(msg.sender, address(this), PROPOSAL_DEPOSIT);
+          uint256 proposalId = _propose(...);
+          proposalDeposits[proposalId] = PROPOSAL_DEPOSIT;
+          return proposalId;
+      }
+
+      function finalizeProposal(uint256 proposalId) external {
+          ProposalState state = state(proposalId);
+          if (state == ProposalState.Succeeded || state == ProposalState.Executed) {
+              // Return deposit
+              token.safeTransfer(proposer[proposalId], proposalDeposits[proposalId]);
+          } else if (state == ProposalState.Defeated) {
+              // Slash deposit to treasury
+              token.safeTransfer(treasury, proposalDeposits[proposalId]);
+          }
+      }
+    symptoms:
+      - Many low-quality proposals
+      - Declining voter participation
+      - Governance fatigue complaints
+    detection_pattern: 'proposalThreshold.*=.*0|propose.*public(?!.*threshold)'
+
+  - id: quorum-sniping
+    summary: Proposals pass with minimal votes during low activity
+    severity: high
+    situation: |
+      Your DAO has 4% quorum. During holidays or market downturn,
+      participation drops. A coordinated group passes controversial
+      proposal with 4.1% of tokens.
+    why: |
+      Fixed quorum doesn't adjust to participation levels.
+      Low-activity periods enable minority takeover.
+    solution: |
+      # DYNAMIC OR RELATIVE QUORUM
+
+      // Option 1: Quorum based on recent participation
+      uint256 public constant MIN_QUORUM_BPS = 400; // 4%
+      uint256 public participationMovingAverage;
+
+      function quorum(uint256 blockNumber) public view returns (uint256) {
+          // At least 4%, but scales with recent participation
+          uint256 baseQuorum = (token.totalSupply() * MIN_QUORUM_BPS) / 10000;
+          uint256 participationQuorum = participationMovingAverage / 2;
+          return baseQuorum > participationQuorum ? baseQuorum : participationQuorum;
+      }
+
+      // Option 2: Require super-majority for major changes
+      enum ProposalType { Standard, Constitutional }
+
+      mapping(uint256 => ProposalType) public proposalTypes;
+
+      function quorum(uint256 proposalId) public view returns (uint256) {
+          if (proposalTypes[proposalId] == ProposalType.Constitutional) {
+              return (token.totalSupply() * 1000) / 10000; // 10%
+          }
+          return (token.totalSupply() * 400) / 10000; // 4%
+      }
+
+      // Option 3: Against votes count toward quorum
+      // Prevents apathy from enabling passage
+      function _quorumReached(uint256 proposalId) internal view returns (bool) {
+          ProposalVote storage vote = _proposalVotes[proposalId];
+          // Include For + Against (not Abstain) in quorum calc
+          uint256 participation = vote.forVotes + vote.againstVotes;
+          return participation >= quorum(proposalSnapshot(proposalId));
+      }
+    symptoms:
+      - Proposals passing with <5% participation
+      - Complaints about "governance capture"
+      - Controversial decisions with low turnout
+    detection_pattern: 'quorum.*\d{1,3}[^0-9]|quorumNumerator.*<.*4'
+
+  - id: timelock-bypass
+    summary: Emergency functions bypass governance timelock
+    severity: critical
+    situation: |
+      Your protocol has emergency admin functions for security.
+      Those same functions allow bypassing governance to make
+      arbitrary changes.
+    why: |
+      Emergency powers are necessary for security, but overly
+      broad emergency functions become governance backdoors.
+    solution: |
+      # SCOPE EMERGENCY POWERS NARROWLY
+
+      // WRONG: Emergency admin can do anything
+      function emergencyAction(bytes calldata data) external onlyEmergency {
+          (bool success,) = protocolCore.call(data);
+          require(success);
+      }
+
+      // RIGHT: Emergency limited to specific actions
+      contract EmergencyModule {
+          function emergencyPause() external onlyGuardian {
+              protocol.pause();
+              emit EmergencyPause(msg.sender);
+          }
+
+          function emergencyUnpause() external onlyGuardian {
+              // Cannot unpause - only governance can
+              revert("Use governance to unpause");
+          }
+
+          function emergencyWithdraw(address token, uint256 amount) external {
+              revert("Not allowed - use governance");
+          }
+
+          // Guardian CANNOT:
+          // - Change protocol parameters
+          // - Upgrade contracts
+          // - Access treasury
+          // - Modify governance itself
+      }
+
+      // Sunset emergency powers
+      uint256 public immutable emergencyExpiry;
+
+      constructor() {
+          emergencyExpiry = block.timestamp + 365 days;
+      }
+
+      modifier onlyGuardian() {
+          require(msg.sender == guardian);
+          require(block.timestamp < emergencyExpiry, "Emergency powers expired");
+          _;
+      }
+    symptoms:
+      - Emergency functions with broad capabilities
+      - Single EOA can bypass governance
+      - No sunset on emergency powers
+    detection_pattern: 'emergency.*call|guardian.*arbitrary'
+
+  - id: delegation-confusion
+    summary: Self-delegation required but not documented
+    severity: low
+    situation: |
+      Users hold governance tokens but can't vote. They don't know
+      they need to delegate to themselves first.
+    why: |
+      ERC20Votes requires explicit delegation (including self)
+      before voting power activates. This is unintuitive for users.
+    solution: |
+      # AUTO-DELEGATE OR CLEAR UX
+
+      // Option 1: Auto-delegate on transfer
+      function _afterTokenTransfer(
+          address from,
+          address to,
+          uint256 amount
+      ) internal override {
+          super._afterTokenTransfer(from, to, amount);
+
+          // Auto self-delegate for new holders
+          if (delegates(to) == address(0) && to != address(0)) {
+              _delegate(to, to);
+          }
+      }
+
+      // Option 2: Mint with delegation
+      function mint(address to, uint256 amount) external onlyMinter {
+          _mint(to, amount);
+          if (delegates(to) == address(0)) {
+              _delegate(to, to);
+          }
+      }
+
+      // Frontend: Always show delegation status
+      const votingPower = await token.getVotes(address);
+      const balance = await token.balanceOf(address);
+      const delegate = await token.delegates(address);
+
+      if (votingPower === 0n && balance > 0n) {
+          if (delegate === ethers.ZeroAddress) {
+              showWarning("Delegate to yourself to activate voting power!");
+          }
+      }
+    symptoms:
+      - Users complain they can't vote
+      - Voting power shows zero despite balance
+      - Low governance participation
+    detection_pattern: null
+
+  - id: vote-buying
+    summary: Bribes and vote markets undermine governance
+    severity: high
+    situation: |
+      External platforms offer token bribes for voting specific ways.
+      Governance becomes "highest bidder wins" rather than
+      stakeholder consensus.
+    why: |
+      Token voting assumes voters are stakeholders who benefit from
+      good decisions. Bribes decouple voting from stakeholder interest,
+      allowing wealthy attackers to buy outcomes.
+    solution: |
+      # MITIGATE VOTE BUYING
+
+      // veToken model reduces vote buying
+      // - Must lock tokens, not just hold for vote
+      // - Longer lock = more power
+      // - Bribes must outweigh lock opportunity cost
+
+      // Vote commit-reveal (hides votes until reveal)
+      mapping(uint256 => mapping(address => bytes32)) public voteCommits;
+      mapping(uint256 => uint256) public revealDeadline;
+
+      function commitVote(uint256 proposalId, bytes32 commitment) external {
+          voteCommits[proposalId][msg.sender] = commitment;
+      }
+
+      function revealVote(
+          uint256 proposalId,
+          uint8 support,
+          bytes32 salt
+      ) external {
+          require(block.timestamp >= revealDeadline[proposalId]);
+          bytes32 commit = keccak256(abi.encode(proposalId, support, salt));
+          require(voteCommits[proposalId][msg.sender] == commit);
+          _castVote(proposalId, msg.sender, support);
+      }
+
+      // Conviction voting (time-weighted)
+      // - Votes gain power over time of commitment
+      // - Selling tokens resets conviction
+      // - Makes last-minute vote buying ineffective
+
+      // Quadratic voting (diminishing returns)
+      // - 1 token = 1 vote, 4 tokens = 2 votes, etc.
+      // - Makes buying majority expensive
+    symptoms:
+      - Bribe platforms targeting your DAO
+      - Suspicious voting patterns
+      - Votes correlate with external payments
+    detection_pattern: null
+
+  - id: proposal-front-running
+    summary: Attackers front-run profitable proposals
+    severity: medium
+    situation: |
+      A proposal to buy tokens or change incentives is public.
+      Attackers buy tokens before execution, profit from the change.
+    why: |
+      Proposals are public during voting. Timelock delay is known.
+      Sophisticated actors position ahead of profitable changes.
+    solution: |
+      # DESIGN PROPOSALS TO MINIMIZE MEV
+
+      // Use time-weighted average prices (TWAP)
+      function executeTokenPurchase(address token, uint256 usdAmount) external {
+          // WRONG: Market buy at current price
+          // router.swap(usdc, token, usdAmount);
+
+          // RIGHT: TWAP over period
+          uint256 twap = oracle.getTwap(token, 1 hours);
+          uint256 maxTokens = (usdAmount * 1e18) / twap;
+          uint256 minReceived = (maxTokens * 95) / 100; // 5% slippage max
+
+          router.swapWithMinOutput(usdc, token, usdAmount, minReceived);
+      }
+
+      // Batch operations to hide specifics
+      // Commit-reveal for sensitive proposals
+      // Use private mempools for execution
+    symptoms:
+      - Large trades before proposal execution
+      - MEV bots targeting governance transactions
+      - Poor execution prices on treasury ops
+    detection_pattern: null

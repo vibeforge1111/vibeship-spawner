@@ -1,0 +1,140 @@
+id: nft-systems
+skill: NFT Systems
+version: "1.0"
+
+validations:
+  - id: check-safemint-reentrancy
+    name: SafeMint Reentrancy Protection
+    description: Verify state updates before _safeMint calls
+    pattern: "_safeMint.*\\n.*minted\\[|_safeMint.*\\n.*claimed\\["
+    file_glob: "**/*.sol"
+    match: present
+    message: "Update state BEFORE _safeMint to prevent reentrancy"
+    severity: error
+    autofix: false
+
+  - id: check-batch-limit
+    name: Batch Mint Limit
+    description: Verify batch minting has a reasonable limit
+    pattern: "function.*mint.*quantity.*\\{(?!.*require.*quantity.*<=)"
+    file_glob: "**/*.sol"
+    match: present
+    message: "Add batch size limit: require(quantity <= MAX_BATCH)"
+    severity: warning
+    autofix: false
+
+  - id: check-token-exists
+    name: Token Existence Check in tokenURI
+    description: Verify tokenURI checks token exists
+    pattern: "function tokenURI.*\\{(?!.*_exists|.*_ownerOf|.*require)"
+    file_glob: "**/*.sol"
+    match: present
+    message: "Add token existence check in tokenURI function"
+    severity: warning
+    autofix: false
+
+  - id: check-royalty-interface
+    name: ERC-2981 Royalty Interface
+    description: NFT contracts should implement ERC-2981
+    pattern: "ERC721|ERC1155"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "ERC2981|royaltyInfo"
+    message: "Consider implementing ERC-2981 for royalty support"
+    severity: info
+    autofix: false
+
+  - id: check-ipfs-protocol
+    name: IPFS Protocol URL
+    description: Use ipfs:// protocol instead of gateway URLs
+    pattern: "https://.*(ipfs\\.io|pinata|cloudflare-ipfs)"
+    file_glob: "**/*.json"
+    match: present
+    message: "Use ipfs:// protocol URL instead of gateway URL"
+    severity: warning
+    autofix: false
+
+  - id: check-metadata-required-fields
+    name: Metadata Required Fields
+    description: Verify metadata has required fields
+    pattern: "\"name\".*\"image\""
+    file_glob: "**/metadata/**/*.json"
+    match: absent
+    message: "Metadata must include 'name' and 'image' fields"
+    severity: error
+    autofix: false
+
+  - id: check-attributes-format
+    name: Attributes Format
+    description: Verify attributes use correct OpenSea format
+    pattern: "\"attributes\".*\\[.*\"trait_type\".*\"value\""
+    file_glob: "**/metadata/**/*.json"
+    match: absent_in_context
+    context_pattern: "\"attributes\""
+    message: "Attributes must use {trait_type, value} format"
+    severity: warning
+    autofix: false
+
+  - id: check-supply-limit
+    name: Supply Limit Enforcement
+    description: Verify mint function checks max supply
+    pattern: "function.*mint.*\\{(?!.*MAX_SUPPLY|.*maxSupply|.*totalSupply)"
+    file_glob: "**/*.sol"
+    match: present
+    message: "Add supply limit check in mint function"
+    severity: error
+    autofix: false
+
+  - id: check-metadata-freeze
+    name: Metadata Freeze Capability
+    description: Contract should have ability to freeze metadata
+    pattern: "setBaseURI|setTokenURI"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "frozen|immutable|lock"
+    message: "Consider adding metadata freeze functionality"
+    severity: info
+    autofix: false
+
+  - id: check-withdraw-function
+    name: Secure Withdraw Function
+    description: Verify withdraw uses call instead of transfer
+    pattern: "\\.transfer\\(|payable.*\\.send\\("
+    file_glob: "**/*.sol"
+    match: present
+    message: "Use .call{value:}('') instead of .transfer() for withdrawals"
+    severity: warning
+    autofix: false
+
+pre_commit:
+  - id: metadata-validation
+    name: Validate Metadata Files
+    command: "node scripts/validate-metadata.js"
+    description: Verify all metadata files are valid JSON with required fields
+
+  - id: image-availability
+    name: Check Image Availability
+    command: "node scripts/check-images.js"
+    description: Verify all image URLs are accessible
+
+  - id: contract-compile
+    name: Compile Contracts
+    command: "forge build"
+    description: Verify contracts compile without errors
+
+ci_checks:
+  - id: metadata-pinning
+    name: IPFS Pinning Verification
+    command: "node scripts/verify-pins.js"
+    description: Verify all IPFS content is pinned
+    required: true
+
+  - id: royalty-test
+    name: Royalty Configuration Test
+    command: "forge test --match-test testRoyalty"
+    description: Verify royalty info returns correctly
+
+  - id: opensea-validation
+    name: OpenSea Metadata Validation
+    command: "node scripts/opensea-validate.js"
+    description: Validate metadata against OpenSea standards

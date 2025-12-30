@@ -1,0 +1,330 @@
+id: evm-deep-dive
+skill: EVM Deep Dive
+version: "1.0"
+
+sharp_edges:
+  - id: optimizer-reordering
+    severity: CRITICAL
+    title: Optimizer Reorders Storage Operations
+    description: Solidity optimizer may reorder SLOAD/SSTORE in unexpected ways
+    symptoms:
+      - State reads return stale values
+      - Reentrancy guards bypassed
+      - Cross-function state inconsistencies
+    detection_pattern: "optimizer.*enabled|runs.*[0-9]+"
+    solution: |
+      // Use memory barriers with assembly
+      function criticalOperation() external {
+          uint256 _state = state; // Cache
+          assembly {
+              // Memory barrier - prevents reordering
+              mstore(0x00, _state)
+          }
+          // Continue with operation
+      }
+
+      // Or disable optimizer for specific functions
+      // via assembly blocks that optimizer won't touch
+    references:
+      - https://github.com/ethereum/solidity/issues/12820
+
+  - id: storage-collision-proxy
+    severity: CRITICAL
+    title: Storage Collision in Proxy Patterns
+    description: Implementation and proxy storage slots overlap
+    symptoms:
+      - Admin variables overwritten by implementation
+      - Proxy becomes unusable after upgrade
+      - Funds locked in contract
+    detection_pattern: "delegatecall|proxy|implementation"
+    solution: |
+      // Use EIP-1967 storage slots
+      bytes32 constant IMPLEMENTATION_SLOT =
+          bytes32(uint256(keccak256("eip1967.proxy.implementation")) - 1);
+
+      bytes32 constant ADMIN_SLOT =
+          bytes32(uint256(keccak256("eip1967.proxy.admin")) - 1);
+
+      function _getImplementation() internal view returns (address impl) {
+          assembly {
+              impl := sload(IMPLEMENTATION_SLOT)
+          }
+      }
+    references:
+      - https://eips.ethereum.org/EIPS/eip-1967
+
+  - id: selfdestruct-deprecation
+    severity: CRITICAL
+    title: SELFDESTRUCT Behavior Changed
+    description: Post-Cancun, SELFDESTRUCT only sends ETH, doesn't delete code
+    symptoms:
+      - Contract still exists after selfdestruct
+      - Storage persists
+      - CREATE2 resurrection blocked
+    detection_pattern: "selfdestruct|SELFDESTRUCT"
+    solution: |
+      // Don't rely on selfdestruct for:
+      // - Contract removal
+      // - Storage clearing
+      // - CREATE2 redeployment
+
+      // Instead, use disable patterns
+      contract Disableable {
+          bool public disabled;
+
+          modifier notDisabled() {
+              require(!disabled, "Contract disabled");
+              _;
+          }
+
+          function disable() external onlyOwner {
+              disabled = true;
+              // Send remaining ETH
+              payable(owner).transfer(address(this).balance);
+          }
+      }
+    references:
+      - https://eips.ethereum.org/EIPS/eip-6780
+
+  - id: transient-storage-scope
+    severity: HIGH
+    title: Transient Storage Only Lasts One Transaction
+    description: TSTORE/TLOAD values cleared after transaction
+    symptoms:
+      - Values disappear between calls
+      - Cross-transaction state lost
+      - Confusion with regular storage
+    detection_pattern: "tstore|tload|transient"
+    solution: |
+      // Transient storage use cases:
+      // - Reentrancy guards (cheaper than storage)
+      // - Callback context
+      // - Single-tx caching
+
+      contract ReentrancyGuard {
+          bytes32 constant LOCKED_SLOT = keccak256("REENTRANCY_GUARD");
+
+          modifier nonReentrant() {
+              assembly {
+                  if tload(LOCKED_SLOT) { revert(0, 0) }
+                  tstore(LOCKED_SLOT, 1)
+              }
+              _;
+              assembly {
+                  tstore(LOCKED_SLOT, 0)
+              }
+          }
+      }
+    references:
+      - https://eips.ethereum.org/EIPS/eip-1153
+
+  - id: memory-expansion-cost
+    severity: HIGH
+    title: Memory Expansion Has Quadratic Cost
+    description: Memory cost grows quadratically with size
+    symptoms:
+      - Gas usage spikes unexpectedly
+      - Large array operations fail
+      - Out of gas on memory allocation
+    detection_pattern: "new.*\\[|memory.*length"
+    solution: |
+      // Memory cost = 3 * words + words^2 / 512
+      // At 724 words (23KB), quadratic term equals linear term
+
+      // Avoid large memory allocations
+      // Use calldata for input, return minimal data
+
+      // Process in chunks
+      function processLarge(bytes calldata data) external {
+          uint256 chunkSize = 1000;
+          for (uint256 i = 0; i < data.length; i += chunkSize) {
+              uint256 end = min(i + chunkSize, data.length);
+              _processChunk(data[i:end]);
+          }
+      }
+    references:
+      - https://www.evm.codes/about#memoryexpansion
+
+  - id: cold-warm-access
+    severity: HIGH
+    title: Cold vs Warm Storage Access Costs
+    description: First access to storage slot costs 2100 gas, subsequent 100 gas
+    symptoms:
+      - First transaction in block costs more
+      - Gas estimates don't match execution
+      - Inconsistent gas usage
+    detection_pattern: "sload|SLOAD|storage"
+    solution: |
+      // Cache storage in memory for multiple reads
+      function process() external {
+          // Cold read: 2100 gas
+          uint256 _value = storageValue;
+
+          // Use _value multiple times (free after first read)
+          uint256 a = _value * 2;
+          uint256 b = _value / 3;
+          uint256 c = _value + 1;
+
+          // Single warm write: 2900 gas (vs 20000 for cold)
+          storageValue = c;
+      }
+
+      // Access pattern matters for gas estimation
+    references:
+      - https://eips.ethereum.org/EIPS/eip-2929
+
+  - id: returndata-bomb
+    severity: HIGH
+    title: Returndata Can Be Used to Grief
+    description: External calls can return massive data causing OOG
+    symptoms:
+      - External calls fail unexpectedly
+      - Gas griefing attacks
+      - Memory expansion from returndata copy
+    detection_pattern: "call\\(|staticcall\\(|delegatecall\\("
+    solution: |
+      // Limit returndata copy
+      assembly {
+          let success := call(gas(), target, value, 0, 0, 0, 0)
+          // Don't copy all returndata
+          if success {
+              // Only copy what you need
+              returndatacopy(0, 0, min(returndatasize(), 64))
+          }
+      }
+
+      // Or use low-level call with explicit size
+      (bool success, bytes memory result) = target.call{gas: 100000}(data);
+      // result is bounded by gas provided
+    references:
+      - https://github.com/ethereum/solidity/issues/12306
+
+  - id: abi-decode-revert
+    severity: MEDIUM
+    title: ABI Decode Can Revert Unexpectedly
+    description: Malformed returndata causes decode to revert
+    symptoms:
+      - External calls revert on success
+      - Can't handle non-standard tokens
+      - Integration failures
+    detection_pattern: "abi.decode|returns.*\\("
+    solution: |
+      // Handle non-standard ERC20 (like USDT)
+      function safeTransfer(IERC20 token, address to, uint256 amount) internal {
+          (bool success, bytes memory data) = address(token).call(
+              abi.encodeWithSelector(token.transfer.selector, to, amount)
+          );
+          require(
+              success && (data.length == 0 || abi.decode(data, (bool))),
+              "Transfer failed"
+          );
+      }
+
+      // Check returndata length before decode
+      if (returndata.length >= 32) {
+          result = abi.decode(returndata, (uint256));
+      }
+    references:
+      - https://github.com/d-xo/weird-erc20
+
+  - id: immutable-deployment-cost
+    severity: MEDIUM
+    title: Immutables Increase Deployment Cost
+    description: Immutable values are embedded in bytecode
+    symptoms:
+      - Higher deployment gas than expected
+      - Bytecode size increase
+      - Factory patterns become expensive
+    detection_pattern: "immutable"
+    solution: |
+      // Trade-off: deployment cost vs runtime cost
+      // Immutable: +200 gas deploy, -3 gas per read
+
+      // For frequently deployed contracts (factories):
+      // Consider storage over immutable if:
+      // - Deployed many times
+      // - Read infrequently
+
+      // For singleton contracts:
+      // Immutable is almost always better
+
+      // Break-even: ~67 reads to justify immutable
+      // deploy_cost_increase / read_cost_savings = 200 / 3 ≈ 67
+    references:
+      - https://docs.soliditylang.org/en/latest/contracts.html#immutable
+
+  - id: custom-error-size
+    severity: MEDIUM
+    title: Custom Errors Aren't Always Smaller
+    description: Custom errors with data can exceed string error size
+    symptoms:
+      - Gas savings not realized
+      - Larger revert data than strings
+      - ABI encoding overhead
+    detection_pattern: "error.*\\(.*\\)|revert.*\\("
+    solution: |
+      // String error: 4 (selector) + 32 (offset) + 32 (length) + string
+      // Custom error: 4 (selector) + 32 per parameter
+
+      // Error with no params: Always better
+      error Unauthorized();
+
+      // Error with 1 param: Usually better
+      error InsufficientBalance(uint256 required);
+
+      // Error with many params: May be larger
+      // revert InsufficientBalance(a, b, c, d) = 132 bytes
+      // vs "Insufficient balance" = 68 + 20 = 88 bytes
+
+      // Best practice: Max 2 parameters in custom errors
+    references:
+      - https://soliditylang.org/blog/2021/04/21/custom-errors/
+
+  - id: sstore-gas-refund
+    severity: MEDIUM
+    title: SSTORE Refund Mechanics Changed
+    description: Gas refunds capped at 20% of total gas used
+    symptoms:
+      - Expected refunds not received
+      - Clearing storage costs more than expected
+      - Gas estimation off
+    detection_pattern: "delete|= 0|sstore.*0"
+    solution: |
+      // Refund only happens when changing non-zero to zero
+      // Max refund: 20% of gas used in transaction
+
+      // Setting to zero: 2900 gas, refund 4800
+      // Net cost: -1900 (gain) BUT capped at 20% of total
+
+      // If tx uses 50000 gas, max refund = 10000
+      // Multiple deletions may not all get refunded
+
+      // Don't design around refunds - they're unreliable
+    references:
+      - https://eips.ethereum.org/EIPS/eip-3529
+
+  - id: yul-stack-depth
+    severity: MEDIUM
+    title: Yul Stack Depth Limit
+    description: EVM has 16 accessible stack slots limit
+    symptoms:
+      - "Stack too deep" errors in assembly
+      - Cannot access all local variables
+      - Complex functions fail to compile
+    detection_pattern: "assembly|function.*\\{[^}]*\\{[^}]*\\}"
+    solution: |
+      // Use memory for intermediate values
+      assembly {
+          // Instead of many stack variables
+          let ptr := mload(0x40)
+          mstore(ptr, value1)
+          mstore(add(ptr, 0x20), value2)
+          // ... access via mload(add(ptr, offset))
+      }
+
+      // Break into helper functions
+      function helper(uint256 a, uint256 b) internal pure returns (uint256) {
+          // Separate stack frame
+      }
+    references:
+      - https://www.evm.codes/about#stack

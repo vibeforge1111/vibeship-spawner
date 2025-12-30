@@ -1,0 +1,204 @@
+# Validations - DAO Governance
+# Automated checks for governance contract issues
+
+version: 1.0.0
+skill_id: dao-governance
+
+validations:
+  # Security
+  - id: no-vote-snapshot
+    name: Voting without snapshot mechanism
+    severity: error
+    type: regex
+    pattern:
+      - 'getVotes.*balanceOf|votingPower.*balanceOf'
+    message: "Voting power should use snapshots, not current balance (flash loan risk)"
+    fix_action: "Use ERC20Votes and getPastVotes() for snapshot-based voting"
+    applies_to:
+      - "*.sol"
+
+  - id: no-timelock
+    name: Governor without TimelockController
+    severity: error
+    type: regex
+    pattern:
+      - 'is\s+Governor(?!.*TimelockControl)'
+    message: "Governor should use TimelockController for execution delay"
+    fix_action: "Inherit GovernorTimelockControl and deploy with timelock"
+    applies_to:
+      - "*.sol"
+
+  - id: low-timelock-delay
+    name: Timelock delay too short
+    severity: warning
+    type: regex
+    pattern:
+      - 'minDelay\s*[=:]\s*\d{1,4}[^0-9]'
+    message: "Timelock delay should be at least 1-2 days for major protocols"
+    fix_action: "Set minDelay to 172800 (2 days) or higher"
+    applies_to:
+      - "*.sol"
+
+  - id: zero-proposal-threshold
+    name: No proposal threshold
+    severity: warning
+    type: regex
+    pattern:
+      - 'proposalThreshold.*return\s*0'
+    message: "Anyone can create proposals - consider requiring token stake"
+    fix_action: "Set proposalThreshold to reasonable amount (e.g., 0.1-1% of supply)"
+    applies_to:
+      - "*.sol"
+
+  - id: low-quorum
+    name: Quorum below 2%
+    severity: warning
+    type: regex
+    pattern:
+      - 'quorumNumerator\s*[=:]\s*[01][^0-9]'
+    message: "Quorum below 2% allows minority to pass proposals"
+    fix_action: "Set quorum to at least 4% for security"
+    applies_to:
+      - "*.sol"
+
+  # Access Control
+  - id: admin-not-timelock
+    name: Protocol admin is not timelock
+    severity: error
+    type: regex
+    pattern:
+      - 'admin\s*=.*(?!timelock|Timelock)'
+    message: "Protocol contracts should be owned by timelock"
+    fix_action: "Transfer ownership to TimelockController address"
+    applies_to:
+      - "*.sol"
+
+  - id: guardian-too-powerful
+    name: Emergency guardian with excessive powers
+    severity: warning
+    type: regex
+    pattern:
+      - 'guardian.*upgrade|guardian.*transfer|emergency.*call\('
+    message: "Guardian should only have pause capability, not arbitrary execution"
+    fix_action: "Limit guardian to emergencyPause() only"
+    applies_to:
+      - "*.sol"
+
+  # Voting Logic
+  - id: voting-period-short
+    name: Voting period too short
+    severity: warning
+    type: regex
+    pattern:
+      - 'votingPeriod.*return\s*\d{1,4}[^0-9]'
+    message: "Voting period under 3 days may not allow adequate participation"
+    fix_action: "Set votingPeriod to at least 5-7 days (36000-50400 blocks)"
+    applies_to:
+      - "*.sol"
+
+  - id: no-voting-delay
+    name: No delay before voting starts
+    severity: info
+    type: regex
+    pattern:
+      - 'votingDelay.*return\s*0'
+    message: "Voting delay allows community to discuss before voting"
+    fix_action: "Set votingDelay to at least 1 day (7200 blocks)"
+    applies_to:
+      - "*.sol"
+
+  # Delegation
+  - id: no-self-delegate
+    name: No auto-delegation for new holders
+    severity: info
+    type: regex
+    pattern:
+      - '_afterTokenTransfer(?!.*delegate)'
+    message: "Consider auto-delegating to improve participation"
+    fix_action: "Add auto self-delegation in _afterTokenTransfer"
+    applies_to:
+      - "*.sol"
+
+code_smells:
+  - id: single-admin
+    name: Single EOA as admin
+    description: "One person controls governance - not decentralized"
+    pattern: 'admin\s*=\s*0x[a-fA-F0-9]{40}'
+    suggestion: "Use multi-sig (Gnosis Safe) for initial admin"
+
+  - id: no-cancel-mechanism
+    name: Cannot cancel malicious proposals
+    description: "No way to stop harmful proposal after queue"
+    pattern: null
+    suggestion: "Implement cancel() with appropriate access control"
+
+  - id: hardcoded-governance-params
+    name: Governance parameters not adjustable
+    description: "Cannot tune quorum, delay, threshold over time"
+    pattern: 'constant.*votingPeriod|constant.*quorum'
+    suggestion: "Use GovernorSettings for adjustable parameters via governance"
+
+best_practices:
+  governance_setup:
+    recommendation: |
+      DAO Governance Checklist:
+
+      [ ] ERC20Votes token with snapshot capability
+      [ ] TimelockController with 2-7 day delay
+      [ ] Governor with all required extensions
+      [ ] Proposal threshold (0.1-1% of supply)
+      [ ] Quorum (4-10% of supply)
+      [ ] Voting period (5-7 days)
+      [ ] Voting delay (1-2 days)
+      [ ] Multi-sig for initial admin/guardian
+      [ ] Emergency pause only (no arbitrary execution)
+      [ ] Snapshot space for off-chain signaling
+      [ ] Tally dashboard configured
+
+  proposal_process:
+    recommendation: |
+      Proposal Lifecycle:
+
+      1. Forum Discussion (3-7 days)
+         - Post proposal draft
+         - Gather community feedback
+         - Iterate on details
+
+      2. Temperature Check (optional)
+         - Snapshot poll
+         - Non-binding signal
+
+      3. On-Chain Proposal
+         - Create via Governor
+         - votingDelay countdown begins
+
+      4. Voting Period (5-7 days)
+         - For / Against / Abstain
+         - Delegation respected
+
+      5. Queue (if passed)
+         - Add to Timelock queue
+         - Begin execution delay
+
+      6. Execute (after delay)
+         - Anyone can execute
+         - Transactions run
+
+  security_council:
+    recommendation: |
+      Security Council Setup:
+
+      Role: Emergency response ONLY
+      Composition: 7-9 members, 4-5 threshold
+
+      Allowed Actions:
+      - Pause protocol
+      - Block malicious proposals
+
+      NOT Allowed:
+      - Upgrade contracts
+      - Access treasury
+      - Change governance
+      - Execute arbitrary calls
+
+      Sunset: Consider 12-18 month term limit

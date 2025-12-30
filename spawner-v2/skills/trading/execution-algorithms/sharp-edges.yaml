@@ -1,0 +1,630 @@
+id: execution-algorithms
+skill: Execution Algorithms
+version: "1.0"
+
+sharp_edges:
+  - id: slippage-underestimation
+    severity: CRITICAL
+    title: Your Slippage Estimate Is 3-5x Too Low
+    description: Backtest slippage assumptions rarely match reality
+    symptoms:
+      - "I assume 10bps slippage"
+      - Live performance worse than backtest
+      - Higher turnover = worse performance
+    detection_pattern: "slippage.*[0-9]bps|assume.*slip|commission"
+    solution: |
+      Slippage Reality Check:
+
+      Common Assumptions vs Reality:
+
+      | Asset | Backtest Assumption | Live Reality |
+      |-------|---------------------|--------------|
+      | SPY | 1-2 bps | 3-5 bps |
+      | Small Cap | 10 bps | 30-100 bps |
+      | Crypto (CEX) | 10 bps | 30-50 bps |
+      | Crypto (DEX) | 30 bps | 50-200 bps |
+
+      Why Reality Is Worse:
+      1. Market moves against you (information leakage)
+      2. Displayed quotes aren't available
+      3. Impact from your own trading
+      4. Timing differences (backtest uses close, live is intraday)
+      5. Partial fills at good prices, full fills at bad
+
+      Better Estimation:
+      ```python
+      def realistic_slippage_estimate(
+          order_size: float,
+          avg_daily_volume: float,
+          bid_ask_spread: float,
+          volatility: float
+      ) -> float:
+          """
+          More realistic slippage estimate.
+          """
+          participation = order_size / avg_daily_volume
+
+          # Components:
+          # 1. Half spread (crossing)
+          spread_cost = bid_ask_spread / 2
+
+          # 2. Market impact (square root model)
+          impact = 0.5 * volatility * (participation ** 0.5)
+
+          # 3. Timing/implementation delay
+          timing_cost = volatility * 0.1  # ~10% of daily vol
+
+          # 4. Adverse selection (informed counterparties)
+          adverse_selection = impact * 0.3
+
+          total = spread_cost + impact + timing_cost + adverse_selection
+
+          return total
+
+      # Example: $100k order on $10M ADV stock with 2% vol
+      slip = realistic_slippage_estimate(
+          order_size=100_000,
+          avg_daily_volume=10_000_000,
+          bid_ask_spread=0.0005,  # 5 bps
+          volatility=0.02
+      )
+      # slip ≈ 35 bps (not the 5 bps you assumed!)
+      ```
+    references:
+      - Market microstructure research
+
+  - id: hft-front-running
+    severity: CRITICAL
+    title: HFTs Are Trading Against Your Patterns
+    description: Predictable execution gets exploited by faster participants
+    symptoms:
+      - "Prices seem to run away from my orders"
+      - Fills worse than mid-market
+      - Market moves against you after you start trading
+    detection_pattern: "front.*run|hft|fast.*trader|pattern"
+    solution: |
+      How HFTs Detect and Exploit You:
+
+      Detection Methods:
+      1. Order flow pattern recognition
+         - Same time every day
+         - Same size each slice
+         - Same participation rate
+         - Regular refresh (icebergs)
+
+      2. Cross-venue correlation
+         - See your order on one venue
+         - Race to other venues
+         - Buy before you get there
+
+      3. Parent order detection
+         - Recognize child orders from same parent
+         - Predict your remaining quantity
+         - Trade ahead
+
+      Protection Strategies:
+      ```python
+      import random
+      import time
+
+      def randomized_execution(
+          base_quantity: int,
+          base_interval_seconds: float,
+          num_slices: int
+      ) -> list:
+          """
+          Add randomization to prevent pattern detection.
+          """
+          slices = []
+
+          for i in range(num_slices):
+              # Randomize quantity (±30%)
+              qty_mult = random.uniform(0.7, 1.3)
+              slice_qty = int(base_quantity / num_slices * qty_mult)
+
+              # Randomize timing (±40%)
+              time_mult = random.uniform(0.6, 1.4)
+              wait_time = base_interval_seconds * time_mult
+
+              # Randomize aggressiveness
+              order_type = random.choice(['limit', 'limit', 'market'])
+
+              # Sometimes skip (random gaps)
+              if random.random() < 0.1:  # 10% chance to skip
+                  continue
+
+              slices.append({
+                  'quantity': slice_qty,
+                  'wait_after': wait_time,
+                  'order_type': order_type
+              })
+
+          return slices
+      ```
+
+      Anti-Gaming Checklist:
+      - [ ] Randomize timing ±30%+
+      - [ ] Randomize size ±20%+
+      - [ ] Vary venues randomly
+      - [ ] Occasionally skip intervals
+      - [ ] Mix limit and market orders
+      - [ ] No consistent start time
+    references:
+      - High-frequency trading literature
+
+  - id: dark-pool-information-leakage
+    severity: HIGH
+    title: Dark Pools Are Not Actually Dark
+    description: Your dark pool orders leak information to the lit market
+    symptoms:
+      - "I sent to dark pool for privacy"
+      - Price moves before dark pool fill
+      - Poor execution quality in dark pools
+    detection_pattern: "dark.*pool|ats|hidden"
+    solution: |
+      Dark Pool Reality:
+
+      Information Leakage Mechanisms:
+      1. Ping activity
+         - HFTs send small orders to detect large interest
+         - Your dark pool order responds
+         - They now know you're there
+
+      2. Signal from dark pool routing
+         - Market sees order flow to dark pool
+         - Infers large order
+         - Trades ahead in lit market
+
+      3. Delayed reporting
+         - Dark pool fills reported after delay
+         - HFTs infer order flow patterns
+         - Adjust lit market activity
+
+      4. Broker internalization
+         - Broker sees your flow
+         - "Internalizes" (trades against you)
+         - May have information advantage
+
+      Dark Pool Usage Rules:
+      ```python
+      def should_use_dark_pool(
+          order_size: float,
+          avg_daily_volume: float,
+          urgency: str,
+          has_information: bool
+      ) -> dict:
+          """
+          Decide whether dark pool routing is beneficial.
+          """
+          participation = order_size / avg_daily_volume
+
+          recommendation = {
+              'use_dark': False,
+              'reason': '',
+              'allocation_pct': 0
+          }
+
+          # Good cases for dark pool
+          if participation > 0.05 and urgency == 'low' and not has_information:
+              recommendation['use_dark'] = True
+              recommendation['allocation_pct'] = 30
+              recommendation['reason'] = "Large patient uninformed order"
+
+          # Bad cases for dark pool
+          elif has_information:
+              recommendation['reason'] = "Information leakage risk"
+          elif urgency == 'high':
+              recommendation['reason'] = "Need faster fills"
+          elif participation < 0.01:
+              recommendation['reason'] = "Too small, lit market fine"
+
+          return recommendation
+      ```
+
+      If Using Dark Pools:
+      - Rotate across multiple pools
+      - Don't show full size
+      - Monitor for adverse selection
+      - Track fill quality vs lit
+    references:
+      - Dark pool regulation and research
+
+  - id: partial-fill-trap
+    severity: HIGH
+    title: Partial Fills Are Adverse Selection
+    description: When you get partial fills, you're being picked off
+    symptoms:
+      - "I got 20% filled at good price, 80% at bad price"
+      - Limit orders only fill when wrong
+      - Bid gets hit, price drops immediately
+    detection_pattern: "partial.*fill|limit.*order|fill.*rate"
+    solution: |
+      Adverse Selection Reality:
+
+      Why Partial Fills Are Bad:
+      - Good fills: When YOU are wrong
+      - Bad fills: When market knows something
+      - Partial = Someone smarter peeled off liquidity
+
+      Example:
+      ```
+      You post: Buy 1000 @ $99.95
+      Fill: 200 shares
+      Immediately: Price drops to $99.50
+      Reality: Someone with better info sold to you
+
+      Your 200 shares: -0.45% loss
+      Unfilled 800: Avoided loss? No, you still want them
+      True cost: Buy 800 @ $99.50 = worse average
+      ```
+
+      Measuring Adverse Selection:
+      ```python
+      def measure_adverse_selection(
+          fills: list,  # Each fill has price, quantity, time
+          prices_after: list,  # Market prices after each fill
+          horizon_seconds: int = 60
+      ) -> dict:
+          """
+          Measure how often price moves against you after fill.
+          """
+          adverse_moves = 0
+          favorable_moves = 0
+
+          for fill, price_after in zip(fills, prices_after):
+              if fill['side'] == 'buy':
+                  moved_against = price_after < fill['price']
+              else:
+                  moved_against = price_after > fill['price']
+
+              if moved_against:
+                  adverse_moves += 1
+              else:
+                  favorable_moves += 1
+
+          total = adverse_moves + favorable_moves
+          adverse_pct = adverse_moves / total if total > 0 else 0
+
+          return {
+              'adverse_selection_rate': adverse_pct,
+              'is_toxic': adverse_pct > 0.55,  # Random = 50%
+              'recommendation': (
+                  "Widen spreads or reduce queue priority"
+                  if adverse_pct > 0.55 else "Normal"
+              )
+          }
+      ```
+
+      Mitigation:
+      - Don't post at top of book (let others get picked off)
+      - Use "passive aggressive" hybrids
+      - Cancel and replace if suspicious
+      - Size small on limit orders
+    references:
+      - Market making and adverse selection literature
+
+  - id: exchange-rebate-trap
+    severity: HIGH
+    title: Chasing Rebates Costs More Than You Earn
+    description: Posting for rebates often results in worse overall execution
+    symptoms:
+      - "I always post for the rebate"
+      - Good queue position but bad fills
+      - High rebate income but worse total returns
+    detection_pattern: "rebate|maker|taker|fee"
+    solution: |
+      The Rebate Trap:
+
+      Typical Exchange Fees:
+      - Taker fee: -30 bps (you pay)
+      - Maker rebate: +20 bps (you receive)
+      - Spread: 60 bps
+
+      Naive math: "Post to get 20 bps rebate!"
+
+      Reality:
+      - You post, wait in queue
+      - Price moves against you 25 bps
+      - You get 20 bps rebate
+      - Net: -5 bps (worse than taking!)
+
+      When Rebates Make Sense:
+      ```python
+      def rebate_decision(
+          spread_bps: float,
+          maker_rebate_bps: float,
+          taker_fee_bps: float,
+          expected_wait_time_seconds: float,
+          volatility_per_second: float
+      ) -> dict:
+          """
+          Decide whether to make (post) or take (cross).
+          """
+          # Cost of taking
+          take_cost = spread_bps / 2 + taker_fee_bps
+
+          # Cost of making
+          make_rebate = maker_rebate_bps  # Negative cost
+          make_wait_cost = volatility_per_second * expected_wait_time_seconds * 10000  # bps
+          make_adverse = 5  # Adverse selection in bps (typical)
+
+          make_cost = -make_rebate + make_wait_cost + make_adverse
+
+          return {
+              'take_cost_bps': take_cost,
+              'make_cost_bps': make_cost,
+              'recommendation': 'make' if make_cost < take_cost else 'take',
+              'savings_bps': abs(take_cost - make_cost)
+          }
+
+      # Example: 10 bps spread, 20 bps rebate, 30 bps taker fee
+      # 60 second expected wait, 0.001 vol/sec
+      result = rebate_decision(
+          spread_bps=10,
+          maker_rebate_bps=20,
+          taker_fee_bps=30,
+          expected_wait_time_seconds=60,
+          volatility_per_second=0.0001
+      )
+      # take_cost: 5 + 30 = 35 bps
+      # make_cost: -20 + 6 + 5 = -9 bps
+      # Recommendation: make (if you can wait)
+      ```
+
+      Rule of Thumb:
+      - Urgent orders: Take, pay the fee
+      - Patient orders: Make, but monitor fill rate
+      - Always track true cost, not just rebate
+    references:
+      - Exchange fee structures
+
+  - id: volume-curve-stale
+    severity: MEDIUM
+    title: Your Volume Curve Is From Last Month
+    description: Historical volume patterns don't predict today's volume
+    symptoms:
+      - VWAP algo trades heavy in low volume
+      - Underperforms in unusual market conditions
+      - Volume spikes not captured
+    detection_pattern: "volume.*curve|vwap|historical.*volume"
+    solution: |
+      Volume Curve Problems:
+
+      Why Historical Curves Fail:
+      1. News changes intraday patterns
+      2. Special events (FOMC, earnings) shift volume
+      3. Market conditions vary
+      4. Your historical window may be wrong regime
+
+      Better Approaches:
+      ```python
+      import pandas as pd
+      import numpy as np
+
+      def adaptive_volume_curve(
+          historical_curve: pd.Series,  # Average by time of day
+          real_time_volume: pd.Series,  # Today's volume so far
+          decay_factor: float = 0.3
+      ) -> pd.Series:
+          """
+          Blend historical curve with real-time observations.
+          """
+          # Start with historical
+          adapted_curve = historical_curve.copy()
+
+          # Get current time
+          current_time = real_time_volume.index[-1].time()
+
+          # For times we've observed today, blend with actual
+          for t in real_time_volume.index:
+              time_key = t.time()
+              if time_key in adapted_curve.index:
+                  # Blend historical with observed
+                  historical = adapted_curve[time_key]
+                  observed = real_time_volume[t]
+
+                  # Weighted average (more weight to observed as day progresses)
+                  adapted_curve[time_key] = (
+                      decay_factor * historical +
+                      (1 - decay_factor) * observed
+                  )
+
+          # Renormalize
+          adapted_curve = adapted_curve / adapted_curve.sum()
+
+          return adapted_curve
+
+      def volume_aware_execution(
+          remaining_quantity: int,
+          current_volume: float,
+          expected_volume: float,
+          pov_target: float = 0.05
+      ) -> dict:
+          """
+          Adjust execution based on actual vs expected volume.
+          """
+          volume_ratio = current_volume / expected_volume
+
+          if volume_ratio > 1.3:
+              # Volume higher than expected - can be more aggressive
+              adjusted_pov = pov_target * 1.2
+              recommendation = "Volume high, increase pace"
+          elif volume_ratio < 0.7:
+              # Volume lower - be more patient
+              adjusted_pov = pov_target * 0.8
+              recommendation = "Volume low, reduce pace"
+          else:
+              adjusted_pov = pov_target
+              recommendation = "On track"
+
+          trade_quantity = int(current_volume * adjusted_pov)
+
+          return {
+              'trade_quantity': min(trade_quantity, remaining_quantity),
+              'adjusted_pov': adjusted_pov,
+              'recommendation': recommendation,
+              'volume_ratio': volume_ratio
+          }
+      ```
+    references:
+      - VWAP algorithm design
+
+  - id: limit-order-stale
+    severity: MEDIUM
+    title: Your Limit Order Is Stale (And Getting Picked Off)
+    description: Old limit orders become arbitrage opportunities
+    symptoms:
+      - Limit order sits, then suddenly fills
+      - Fill right before price moves against you
+      - "Always seems to fill at wrong time"
+    detection_pattern: "limit.*order|resting.*order|cancel"
+    solution: |
+      Stale Order Problem:
+
+      Scenario:
+      - You post buy limit at $100.00
+      - Sits for 5 minutes
+      - News comes out
+      - HFT sells to you at $100.00
+      - Price immediately drops to $99.50
+      - You lose 50 bps
+
+      Why It Happens:
+      - Your order is stale information
+      - Market has new information
+      - Fast traders arbitrage the difference
+
+      Solutions:
+      ```python
+      import time
+      from datetime import datetime
+
+      class StaleOrderMonitor:
+          def __init__(
+              self,
+              max_age_seconds: float = 30,
+              price_tolerance_pct: float = 0.001
+          ):
+              self.max_age = max_age_seconds
+              self.price_tolerance = price_tolerance_pct
+              self.order_time = None
+              self.order_price = None
+
+          def place_order(self, price: float):
+              self.order_time = time.time()
+              self.order_price = price
+
+          def should_cancel(self, current_price: float) -> dict:
+              """
+              Check if order should be cancelled.
+              """
+              if self.order_time is None:
+                  return {'cancel': False, 'reason': 'No order'}
+
+              age = time.time() - self.order_time
+              price_move = abs(current_price - self.order_price) / self.order_price
+
+              # Check age
+              if age > self.max_age:
+                  return {
+                      'cancel': True,
+                      'reason': f'Order stale ({age:.0f}s)',
+                      'action': 'Cancel and repost at new price'
+                  }
+
+              # Check price movement
+              if price_move > self.price_tolerance:
+                  return {
+                      'cancel': True,
+                      'reason': f'Price moved {price_move*100:.2f}%',
+                      'action': 'Cancel to avoid adverse selection'
+                  }
+
+              return {'cancel': False, 'reason': 'Order fresh'}
+
+      # Usage pattern:
+      # - Post limit order
+      # - Every second, check should_cancel()
+      # - If cancel, repost at new price
+      # - Never let orders sit more than 30s
+      ```
+
+      Stale Order Rules:
+      - Cancel unfilled limits after 30-60 seconds
+      - Monitor for price drift
+      - Use "good for seconds" order types if available
+      - Cancel immediately before known events
+    references:
+      - Order management best practices
+
+  - id: overfilled-position
+    severity: MEDIUM
+    title: You Got More Fills Than Expected
+    description: Multiple algo slices filling simultaneously creates overfill
+    symptoms:
+      - Position larger than intended
+      - Multiple child orders fill at once
+      - "I was only trying to buy 1000 shares"
+    detection_pattern: "overfill|fill.*more|position.*size"
+    solution: |
+      Overfill Scenario:
+
+      Problem:
+      - You want 1000 shares
+      - Send 5 slices of 200 to 5 venues
+      - Each venue has 300 available
+      - All fill: You now have 1500 shares (50% overfill!)
+
+      Prevention:
+      ```python
+      class OverfillPrevention:
+          def __init__(self, target_quantity: int):
+              self.target = target_quantity
+              self.sent = 0
+              self.filled = 0
+              self.pending = 0
+
+          def can_send(self, quantity: int) -> dict:
+              """
+              Check if we can send more orders.
+              """
+              max_outstanding = self.target - self.filled
+              current_outstanding = self.pending
+
+              # Conservative: Don't have more pending than needed
+              if current_outstanding >= max_outstanding:
+                  return {
+                      'can_send': False,
+                      'reason': 'Max pending reached',
+                      'max_allowed': 0
+                  }
+
+              allowed = min(quantity, max_outstanding - current_outstanding)
+
+              return {
+                  'can_send': True,
+                  'max_allowed': allowed,
+                  'pending': current_outstanding,
+                  'filled': self.filled
+              }
+
+          def order_sent(self, quantity: int):
+              self.sent += quantity
+              self.pending += quantity
+
+          def order_filled(self, quantity: int):
+              self.filled += quantity
+              self.pending -= quantity
+
+          def order_cancelled(self, quantity: int):
+              self.pending -= quantity
+      ```
+
+      Overfill Prevention Rules:
+      1. Track pending quantity across all venues
+      2. Never have pending > remaining
+      3. Use position sync (check actual position periodically)
+      4. Cancel excess orders when fills come in
+      5. Build in cancel latency buffer
+    references:
+      - Order management systems

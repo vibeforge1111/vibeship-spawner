@@ -1,0 +1,60 @@
+# Sharp Edges - Onchain Analytics
+version: 1.0.0
+skill_id: onchain-analytics
+
+sharp_edges:
+  - id: decimal-handling
+    summary: Token decimals vary and cause calculation errors
+    severity: high
+    situation: |
+      You divide raw token amounts by 1e18 assuming all tokens have
+      18 decimals. USDC (6 decimals) values are off by 10^12.
+    why: |
+      ERC20 tokens have varying decimals: USDC/USDT (6), WBTC (8),
+      most others (18). Using wrong decimals completely breaks analysis.
+    solution: |
+      -- Always join to get correct decimals
+      SELECT
+        t.token_bought_amount_raw / POWER(10, tk.decimals) as amount,
+        t.amount_usd
+      FROM dex.trades t
+      LEFT JOIN tokens.erc20 tk
+        ON t.token_bought_address = tk.contract_address
+        AND t.blockchain = tk.blockchain
+
+  - id: price-timing
+    summary: Price data timing mismatch with transactions
+    severity: medium
+    situation: |
+      You join transaction data with prices.usd. Transaction is at
+      10:31:45, nearest price is 10:30:00. For volatile tokens,
+      price may be 5% different.
+    why: |
+      Price oracles update periodically (usually every minute).
+      High volatility means significant gaps between actual and
+      recorded prices.
+    solution: |
+      -- Use closest price, not exact match
+      SELECT t.*, p.price
+      FROM transactions t
+      ASOF JOIN prices.usd p
+        ON t.token_address = p.contract_address
+        AND t.block_time >= p.minute
+      -- ASOF join gets most recent price before transaction
+
+  - id: internal-transactions
+    summary: Missing internal transactions in analysis
+    severity: high
+    situation: |
+      You track ETH transfers using ethereum.transactions. Contract
+      interactions that move ETH internally are invisible, missing
+      significant value flow.
+    why: |
+      Internal transactions (contract-to-contract ETH transfers)
+      aren't in the main transactions table. They require traces.
+    solution: |
+      -- Include internal transactions
+      SELECT * FROM ethereum.transactions WHERE value > 0
+      UNION ALL
+      SELECT * FROM ethereum.traces
+      WHERE type = 'call' AND value > 0

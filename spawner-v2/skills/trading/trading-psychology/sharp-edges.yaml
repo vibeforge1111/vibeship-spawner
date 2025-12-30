@@ -1,0 +1,522 @@
+id: trading-psychology
+skill: Trading Psychology
+version: "1.0"
+
+sharp_edges:
+  - id: you-are-the-problem
+    severity: CRITICAL
+    title: If You're Consistently Losing, YOU Are The Problem
+    description: Strategy rarely fails - discipline does
+    symptoms:
+      - Same mistakes repeated
+      - Edge exists but no profits
+      - Rules exist but not followed
+    detection_pattern: "losing|struggle|can't.*work|fail"
+    solution: |
+      The Hard Truth:
+
+      If your backtest works but you lose money:
+      - The strategy isn't broken
+      - The market isn't unfair
+      - YOU are breaking the strategy
+
+      Common Self-Sabotage:
+      1. Not taking valid signals (fear)
+      2. Taking invalid signals (FOMO)
+      3. Moving stops (loss aversion)
+      4. Taking partial profits early (greed/fear)
+      5. Sizing based on last trade (recency)
+
+      The Test:
+      ```python
+      def strategy_vs_trader_analysis(
+          strategy_signals: list,  # What strategy said to do
+          actual_trades: list       # What you actually did
+      ) -> dict:
+          """
+          Diagnose: Strategy problem or trader problem?
+          """
+          # Signals not taken
+          missed = [s for s in strategy_signals
+                    if not any(t['symbol'] == s['symbol'] and
+                              abs(t['entry_time'] - s['time']).seconds < 300
+                              for t in actual_trades)]
+
+          # Trades not in signals (unplanned trades)
+          unplanned = [t for t in actual_trades
+                       if not any(s['symbol'] == t['symbol'] and
+                                 abs(t['entry_time'] - s['time']).seconds < 300
+                                 for s in strategy_signals)]
+
+          # Exit analysis (did you follow exit rules?)
+          exit_violations = [t for t in actual_trades
+                            if not t['followed_exit_plan']]
+
+          # Calculate strategy return vs actual return
+          strategy_return = calculate_return(strategy_signals)
+          actual_return = calculate_return(actual_trades)
+
+          return {
+              'missed_signals': len(missed),
+              'unplanned_trades': len(unplanned),
+              'exit_violations': len(exit_violations),
+              'strategy_return': strategy_return,
+              'actual_return': actual_return,
+              'gap': strategy_return - actual_return,
+              'diagnosis': (
+                  'TRADER PROBLEM' if actual_return < strategy_return * 0.7
+                  else 'STRATEGY MAY NEED WORK'
+              )
+          }
+      ```
+
+      The Solution:
+      - Track EVERY deviation from plan
+      - Have accountability (partner, coach)
+      - Reduce size until discipline improves
+      - Consider paper trading until consistent
+    references:
+      - Trading psychology literature
+
+  - id: loss-triggers-spiral
+    severity: CRITICAL
+    title: One Loss Can Trigger A Losing Spiral
+    description: The first loss often leads to 5 more from revenge trading
+    symptoms:
+      - Losing days much worse than winning days
+      - "I was up, then everything went wrong"
+      - Multiple losses in short period after first loss
+    detection_pattern: "spiral|losing.*streak|revenge|one.*thing"
+    solution: |
+      Anatomy of a Losing Spiral:
+
+      1. First loss (normal, expected)
+      2. Frustration triggers larger position
+      3. Second loss (now emotional)
+      4. "I'll just get it back" - no break
+      5. Third loss (rules abandoned)
+      6. Full tilt - chase, size up, move stops
+      7. Day/week/month destroyed
+
+      Spiral Prevention Protocol:
+      ```python
+      @dataclass
+      class SpiralBreaker:
+          max_consecutive_losses: int = 2
+          cooldown_minutes: int = 30
+          daily_loss_limit_r: float = 3.0
+          mandatory_break_after_loss_r: float = 1.5
+
+          def check_after_trade(
+              self,
+              trade_result: float,  # R-multiple
+              consecutive_losses: int,
+              daily_pnl_r: float
+          ) -> dict:
+              actions = []
+
+              if trade_result < 0:
+                  actions.append("Log the loss in journal immediately")
+
+                  if abs(trade_result) >= self.mandatory_break_after_loss_r:
+                      actions.append(f"MANDATORY {self.cooldown_minutes}min break - large loss")
+
+                  if consecutive_losses >= self.max_consecutive_losses:
+                      actions.append("STOP: Max consecutive losses hit")
+
+              if daily_pnl_r <= -self.daily_loss_limit_r:
+                  actions.append("STOP: Daily loss limit reached. NO MORE TRADES TODAY.")
+
+              return {
+                  'can_continue': len([a for a in actions if 'STOP' in a]) == 0,
+                  'actions': actions,
+                  'next_size_multiplier': 0.5 if consecutive_losses >= 1 else 1.0
+              }
+      ```
+
+      Rules That Save Accounts:
+      1. After ANY loss: 15 minute break minimum
+      2. After 2 consecutive: Done for 2 hours or day
+      3. After daily limit: Done. Not "one more try."
+      4. Never increase size after a loss. Ever.
+    references:
+      - Tilt and loss recovery research
+
+  - id: winning-streak-danger
+    severity: HIGH
+    title: Winning Streaks Are As Dangerous As Losing Streaks
+    description: Overconfidence after wins leads to oversized losses
+    symptoms:
+      - Big winning week followed by bigger losing week
+      - "I can't lose" feeling
+      - Position sizes growing
+    detection_pattern: "winning.*streak|on.*fire|can't.*lose|hot.*hand"
+    solution: |
+      The Hot Hand Trap:
+
+      After winning streaks:
+      - Confidence increases (beyond justified)
+      - Size increases (breaking rules)
+      - Risk tolerance increases (ignoring warnings)
+      - One bad trade wipes multiple winners
+
+      Math:
+      - 5 winners at 1R = +5R
+      - 1 overconfident loser at 6R = -6R
+      - Net: -1R (after being "hot")
+
+      Protection:
+      ```python
+      def post_win_check(
+          consecutive_wins: int,
+          current_size: float,
+          normal_size: float
+      ) -> dict:
+          """Check for overconfidence after winning streak."""
+          warnings = []
+
+          # Check if size has crept up
+          if current_size > normal_size * 1.2:
+              warnings.append({
+                  'issue': 'Size creep detected',
+                  'current': current_size,
+                  'normal': normal_size,
+                  'action': 'Reduce to normal size'
+              })
+
+          # Check consecutive wins
+          if consecutive_wins >= 5:
+              warnings.append({
+                  'issue': 'Extended winning streak',
+                  'wins': consecutive_wins,
+                  'action': 'Extra caution - mean reversion likely'
+              })
+
+          # Overconfidence check
+          if consecutive_wins >= 3:
+              warnings.append({
+                  'issue': 'Overconfidence risk',
+                  'action': 'Review: Are you following rules or feeling invincible?'
+              })
+
+          return {
+              'warnings': warnings,
+              'recommended_size': normal_size,  # Always normal, never increased
+              'recommended_break': consecutive_wins >= 5
+          }
+      ```
+
+      Rules for Winning Streaks:
+      1. Never increase size because you're "hot"
+      2. Take a day off after 5 consecutive wins
+      3. Review: Am I following rules or getting lucky?
+      4. Remember: Edge is probability, not certainty
+    references:
+      - Overconfidence bias research
+
+  - id: perfectionism-paralysis
+    severity: HIGH
+    title: Waiting For Perfect Setup Means Missing All Setups
+    description: Over-analysis leads to paralysis
+    symptoms:
+      - Rarely pull trigger
+      - Always "almost" took the trade
+      - Too many confluence requirements
+    detection_pattern: "perfect|sure|wait.*for|confirm"
+    solution: |
+      Analysis Paralysis:
+
+      The perfect setup doesn't exist:
+      - When 5/5 indicators align, price already moved
+      - When you're 100% confident, you're probably wrong
+      - When you wait for "more confirmation," you miss the entry
+
+      The Reality:
+      - Good trades are uncomfortable
+      - 60% confidence is often enough
+      - Some uncertainty is healthy
+      - Speed matters for good entries
+
+      Breaking Paralysis:
+      ```python
+      def setup_readiness_check(
+          checklist_items: list,  # Your entry criteria
+          items_met: int,
+          total_items: int,
+          time_since_signal_seconds: int
+      ) -> dict:
+          """
+          Determine if you're overanalyzing.
+          """
+          pct_met = items_met / total_items
+
+          # Time decay
+          if time_since_signal_seconds > 300:  # 5 minutes
+              return {
+                  'action': 'PASS',
+                  'reason': 'Too slow - entry degraded',
+                  'lesson': 'Decide faster next time'
+              }
+
+          # Threshold check
+          if pct_met >= 0.8:  # 80% criteria met
+              return {
+                  'action': 'TAKE TRADE',
+                  'reason': f'{pct_met:.0%} criteria met - good enough',
+                  'missing': [c for c in checklist_items if not c['met']]
+              }
+          elif pct_met >= 0.6:
+              return {
+                  'action': 'CONSIDER REDUCED SIZE',
+                  'reason': f'{pct_met:.0%} criteria met',
+                  'size_reduction': 0.5
+              }
+          else:
+              return {
+                  'action': 'PASS',
+                  'reason': 'Not enough criteria met'
+              }
+      ```
+
+      Rules to Break Paralysis:
+      1. Set maximum analysis time (2 minutes)
+      2. 3-4 criteria max, not 10
+      3. If 3/4 hit, take the trade
+      4. Track missed trades to see if over-filtering
+    references:
+      - Decision making under uncertainty
+
+  - id: paper-trading-delusion
+    severity: MEDIUM
+    title: Paper Trading Success Doesn't Transfer To Real Trading
+    description: Psychology changes completely with real money
+    symptoms:
+      - Paper trading profitable, real trading losses
+      - Easy to follow rules in simulation
+      - Can't replicate paper performance
+    detection_pattern: "paper|simulation|demo|practice"
+    solution: |
+      Why Paper ≠ Real:
+
+      Paper Trading:
+      - No emotional attachment to numbers
+      - Easy to "let winners run"
+      - Easy to take stops
+      - No fear, no greed, no tilt
+
+      Real Trading:
+      - That's YOUR money disappearing
+      - Urge to take profit "just in case"
+      - Stops feel like failure
+      - Full spectrum of emotions
+
+      Bridge the Gap:
+      ```python
+      def paper_to_real_transition():
+          """Protocol for transitioning to real trading."""
+          phases = [
+              {
+                  'name': 'Paper Phase',
+                  'duration': '30+ trades profitable',
+                  'size': 0,
+                  'goal': 'Prove strategy works'
+              },
+              {
+                  'name': 'Micro Phase',
+                  'duration': '50+ trades',
+                  'size': 0.1,  # 10% of normal size
+                  'goal': 'Experience real P&L emotions'
+              },
+              {
+                  'name': 'Small Phase',
+                  'duration': '50+ trades profitable',
+                  'size': 0.25,  # 25% of normal size
+                  'goal': 'Build emotional tolerance'
+              },
+              {
+                  'name': 'Medium Phase',
+                  'duration': '50+ trades',
+                  'size': 0.5,  # 50% of normal size
+                  'goal': 'Verify psychology holds'
+              },
+              {
+                  'name': 'Full Size',
+                  'duration': 'Ongoing',
+                  'size': 1.0,
+                  'goal': 'Normal operation'
+              }
+          ]
+
+          return phases
+      ```
+
+      Each Phase Must Pass:
+      - Same win rate as paper/previous phase
+      - Rules followed >90% of the time
+      - No tilt episodes
+      - Emotional journal shows stability
+
+      If you fail a phase:
+      - Go back one level
+      - Increase time at that level
+      - Journal extensively
+      - Consider coaching
+    references:
+      - Learning transfer in trading
+
+  - id: social-media-comparison
+    severity: MEDIUM
+    title: Comparing To Social Media P&L Is Self-Destruction
+    description: Everyone posts wins, no one posts losses
+    symptoms:
+      - Feeling inadequate vs Twitter traders
+      - Questioning your strategy because others post bigger wins
+      - Chasing "guru" strategies
+    detection_pattern: "twitter|social|guru|following|screenshot"
+    solution: |
+      The Social Media Lie:
+
+      What You See:
+      - Screenshots of 500% gains
+      - "Called it!" tweets (after the fact)
+      - Lavish lifestyles
+      - Easy confidence
+
+      What You Don't See:
+      - The 20 losing trades before
+      - Blown accounts
+      - Survivorship bias (failed traders delete)
+      - Photoshopped/fake screenshots
+      - Paper trading screenshots
+
+      Reality:
+      - 90%+ of retail traders lose
+      - Most "gurus" make money from followers, not trading
+      - Big gains require big risks (often leading to blowup)
+      - Consistent 20%/year is world-class
+
+      Protection:
+      ```python
+      def social_media_hygiene():
+          """Rules for consuming trading social media."""
+          rules = [
+              "Don't follow anyone who only posts wins",
+              "Mute/block during trading hours",
+              "Never copy a trade from Twitter",
+              "If they're selling a course, they're not trading",
+              "Compare to YOUR plan, not others' P&L",
+              "Your edge is yours - stop looking for shortcuts",
+              "Unfollow anyone who makes you feel inadequate"
+          ]
+
+          return rules
+      ```
+
+      Remember:
+      - Your journey is yours
+      - Comparison steals joy AND profits
+      - Focus on process, not outcomes
+      - The best traders are often quiet
+    references:
+      - Social comparison and trading performance
+
+  - id: overnight-position-anxiety
+    severity: MEDIUM
+    title: Can't Sleep With Open Positions = Wrong Size
+    description: If positions keep you up, you're too big
+    symptoms:
+      - Checking phone at night
+      - Anxiety about overnight moves
+      - Sleep quality degraded
+    detection_pattern: "sleep|overnight|worry|anxious|can't.*stop"
+    solution: |
+      The Sleep Test:
+
+      The right position size lets you sleep soundly.
+      If you can't sleep, your size is wrong.
+
+      Maximum Overnight Risk:
+      ```python
+      def calculate_sleep_size(
+          account_value: float,
+          max_acceptable_overnight_loss_pct: float,
+          expected_overnight_move_pct: float,
+          stop_loss_pct: float
+      ) -> dict:
+          """
+          Calculate position size that lets you sleep.
+          """
+          # Maximum you're willing to lose overnight
+          max_loss_dollars = account_value * max_acceptable_overnight_loss_pct
+
+          # Assume stop might gap through
+          worst_case_gap = expected_overnight_move_pct * 2  # 2x expected for safety
+
+          # Position size where gap = acceptable loss
+          max_position_value = max_loss_dollars / worst_case_gap
+
+          return {
+              'max_position_value': max_position_value,
+              'as_pct_of_account': max_position_value / account_value,
+              'worst_case_loss': max_position_value * worst_case_gap,
+              'can_you_sleep': max_position_value * worst_case_gap <= max_loss_dollars
+          }
+
+      # Example: $100k account, max 2% overnight loss, 5% expected gap
+      # sleep_size($100k, 0.02, 0.05)
+      # → max position ~$20k (20% of account) for peaceful sleep
+      ```
+
+      Sleep Hygiene for Traders:
+      1. Set stops, trust them (accept gap risk)
+      2. Size so worst case = acceptable
+      3. No checking between 10pm and 6am
+      4. Phone outside bedroom
+      5. If can't sleep, reduce tomorrow
+    references:
+      - Trading and sleep research
+
+  - id: trading-addiction
+    severity: HIGH
+    title: Trading Can Become An Addiction
+    description: The dopamine of trading can be addictive like gambling
+    symptoms:
+      - Trading when you shouldn't
+      - Lying about trading activity
+      - Neglecting relationships, work, health
+      - Need to trade increasing over time
+    detection_pattern: "addict|can't.*stop|need.*trade|gambl"
+    solution: |
+      Trading Addiction Warning Signs:
+
+      Check yourself:
+      - [ ] Trading outside planned hours
+      - [ ] Hiding trading from family
+      - [ ] Chasing losses for extended periods
+      - [ ] Trading affecting sleep, relationships, work
+      - [ ] Feeling irritable when not trading
+      - [ ] Increasing frequency or size for same "thrill"
+      - [ ] Inability to take planned breaks
+
+      3+ checks = serious concern
+      5+ checks = get professional help
+
+      If You Recognize Yourself:
+      1. Be honest about the problem
+      2. Talk to someone (therapist, support group)
+      3. Consider stopping trading entirely
+      4. National Problem Gambling Helpline: 1-800-522-4700
+      5. Many traders have recovered - it's possible
+
+      Prevention:
+      - Set strict session times
+      - Track not just P&L but trade frequency
+      - Have non-trading hobbies
+      - Take regular breaks (1 week off quarterly)
+      - If trading for thrill, not profit, stop
+
+      This is not a joke or exaggeration.
+      Trading addiction has destroyed lives.
+      If you relate to this, please seek help.
+    references:
+      - Gambling addiction and trading literature

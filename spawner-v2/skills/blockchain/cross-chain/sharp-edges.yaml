@@ -1,0 +1,299 @@
+# Sharp Edges - Cross-Chain
+# The gotchas that trip up bridge developers
+
+version: 1.0.0
+skill_id: cross-chain
+
+sharp_edges:
+  - id: reorg-vulnerability
+    summary: Chain reorganization invalidates source transaction
+    severity: critical
+    situation: |
+      User locks tokens on source chain. Your bridge immediately
+      mints on destination. Source chain reorgs, lock tx disappears.
+      User now has tokens on both chains.
+    why: |
+      Blockchains have probabilistic finality. A transaction is not
+      truly final until sufficient confirmations. Acting before
+      finality creates double-spend risk.
+    solution: |
+      # WAIT FOR FINALITY
+
+      Finality Requirements by Chain:
+      ┌────────────────┬────────────────────────────────────────┐
+      │ Chain          │ Recommended Wait                       │
+      ├────────────────┼────────────────────────────────────────┤
+      │ Ethereum       │ 64 blocks (~13 min) for full finality  │
+      │ Arbitrum       │ After Ethereum finality + 1 hour       │
+      │ Optimism       │ 7 days for withdrawals (fraud proof)   │
+      │ Polygon        │ 256 blocks                             │
+      │ BNB Chain      │ 15 blocks                              │
+      │ Solana         │ 32 slots (~13 sec)                     │
+      └────────────────┴────────────────────────────────────────┘
+
+      contract Bridge {
+          mapping(uint256 => uint256) public requiredConfirmations;
+
+          function setConfirmations(uint256 chainId, uint256 blocks) external {
+              requiredConfirmations[chainId] = blocks;
+          }
+
+          function processMessage(
+              uint256 sourceChain,
+              uint256 sourceBlock,
+              bytes calldata message
+          ) external {
+              uint256 currentBlock = _getSourceBlock(sourceChain);
+              require(
+                  currentBlock >= sourceBlock + requiredConfirmations[sourceChain],
+                  "Insufficient confirmations"
+              );
+              // Process message
+          }
+      }
+    symptoms:
+      - Double minting after reorg
+      - Token supply mismatch between chains
+      - Bridge exploit reports
+    detection_pattern: null
+
+  - id: layerzero-peer-mismatch
+    summary: Peer addresses not set bidirectionally
+    severity: critical
+    situation: |
+      You deploy OFT on chains A and B. You set A's peer to B,
+      but forget to set B's peer to A. Transfers A→B work,
+      B→A fail silently.
+    why: |
+      LayerZero requires bidirectional peer configuration.
+      Messages are rejected if the sender isn't a recognized peer.
+    solution: |
+      # VERIFY BIDIRECTIONAL PEERS
+
+      // Deployment script (Foundry)
+      function deployAndConfigure() public {
+          // Deploy on all chains
+          address[] memory ofts = new address[](3);
+          uint32[] memory eids = [30101, 30110, 30106]; // ETH, ARB, AVAX
+
+          for (uint i = 0; i < 3; i++) {
+              vm.createSelectFork(rpcUrls[i]);
+              ofts[i] = address(new MyOFT(...));
+          }
+
+          // Set peers BIDIRECTIONALLY
+          for (uint i = 0; i < 3; i++) {
+              vm.createSelectFork(rpcUrls[i]);
+              for (uint j = 0; j < 3; j++) {
+                  if (i != j) {
+                      MyOFT(ofts[i]).setPeer(
+                          eids[j],
+                          bytes32(uint256(uint160(ofts[j])))
+                      );
+                  }
+              }
+          }
+
+          // VERIFY peers
+          for (uint i = 0; i < 3; i++) {
+              for (uint j = 0; j < 3; j++) {
+                  if (i != j) {
+                      bytes32 peer = MyOFT(ofts[i]).peers(eids[j]);
+                      require(
+                          peer == bytes32(uint256(uint160(ofts[j]))),
+                          "Peer mismatch!"
+                      );
+                  }
+              }
+          }
+      }
+    symptoms:
+      - One-way transfers work, reverse fails
+      - "Peer not set" errors
+      - Message rejection on receive
+    detection_pattern: 'setPeer(?!.*setPeer.*setPeer)'
+
+  - id: gas-estimation-cross-chain
+    summary: Insufficient gas for destination execution
+    severity: high
+    situation: |
+      You send cross-chain message with default gas. Destination
+      chain has higher gas costs or your logic is complex. Message
+      arrives but fails to execute.
+    why: |
+      Cross-chain messages include gas for destination execution.
+      If insufficient, the message arrives but reverts. Funds may
+      be stuck until retry.
+    solution: |
+      # ESTIMATE AND BUFFER GAS
+
+      // LayerZero v2 options
+      function sendWithProperGas(uint32 dstEid, bytes calldata payload)
+          external payable
+      {
+          // Estimate gas needed for destination logic
+          uint256 destGas = estimateDestinationGas(payload);
+
+          // Add 20% buffer for safety
+          destGas = destGas * 120 / 100;
+
+          bytes memory options = OptionsBuilder.newOptions()
+              .addExecutorLzReceiveOption(destGas, 0);
+
+          // Get quote with proper options
+          MessagingFee memory fee = _quote(dstEid, payload, options, false);
+
+          // Ensure enough fee paid
+          require(msg.value >= fee.nativeFee, "Insufficient fee");
+
+          _lzSend(dstEid, payload, options, fee, msg.sender);
+      }
+
+      // Test on testnets with realistic payloads
+      // Monitor failed messages on destination
+      // Implement retry mechanism
+    symptoms:
+      - Messages arrive but fail to execute
+      - "Out of gas" on destination chain
+      - Stuck funds requiring manual retry
+    detection_pattern: null
+
+  - id: address-format-cross-chain
+    summary: EVM address sent to non-EVM chain incorrectly formatted
+    severity: high
+    situation: |
+      You bridge to Solana using 20-byte EVM address. Solana expects
+      32-byte public key. Transaction fails or funds go to wrong address.
+    why: |
+      Different blockchains have different address formats.
+      EVM: 20 bytes, Solana: 32 bytes, Cosmos: bech32 encoded.
+      Using wrong format causes lost funds.
+    solution: |
+      # USE CHAIN-APPROPRIATE ADDRESS ENCODING
+
+      // Universal address format (LayerZero style)
+      function toBytes32(address addr) pure returns (bytes32) {
+          return bytes32(uint256(uint160(addr)));
+      }
+
+      function toAddress(bytes32 b) pure returns (address) {
+          return address(uint160(uint256(b)));
+      }
+
+      // For non-EVM chains
+      struct UniversalAddress {
+          uint256 chainType;  // 1=EVM, 2=Solana, 3=Cosmos
+          bytes32 addressBytes;
+      }
+
+      function encodeForSolana(bytes32 pubkey) pure returns (UniversalAddress) {
+          return UniversalAddress(2, pubkey);
+      }
+
+      function encodeForEVM(address addr) pure returns (UniversalAddress) {
+          return UniversalAddress(1, bytes32(uint256(uint160(addr))));
+      }
+
+      // Wormhole uses 32-byte addresses universally
+      // Pad EVM addresses with zeros
+    symptoms:
+      - Cross-chain transfers to wrong address
+      - Funds stuck or lost
+      - Deserialization errors
+    detection_pattern: null
+
+  - id: reentrancy-bridge-callback
+    summary: Reentrancy via cross-chain callback
+    severity: critical
+    situation: |
+      Your contract receives cross-chain message with callback.
+      Callback triggers another cross-chain message before state
+      update. Attacker exploits for double-spend.
+    why: |
+      Cross-chain callbacks are similar to reentrancy vectors.
+      Complex async flows create opportunities for state
+      manipulation between calls.
+    solution: |
+      # CHECKS-EFFECTS-INTERACTIONS FOR BRIDGES
+
+      contract BridgeReceiver is ReentrancyGuard {
+          mapping(bytes32 => bool) public processedMessages;
+
+          function onMessageReceived(
+              uint256 sourceChain,
+              bytes calldata message,
+              bytes32 messageId
+          ) external nonReentrant onlyBridge {
+              // CHECK
+              require(!processedMessages[messageId], "Already processed");
+
+              // EFFECT - Mark processed BEFORE any logic
+              processedMessages[messageId] = true;
+
+              // INTERACTION - Now safe to process
+              _handleMessage(message);
+          }
+
+          // Also use nonces for ordering
+          mapping(uint256 => uint256) public expectedNonce;
+
+          function processOrdered(
+              uint256 sourceChain,
+              uint256 nonce,
+              bytes calldata data
+          ) external {
+              require(nonce == expectedNonce[sourceChain], "Wrong nonce");
+              expectedNonce[sourceChain]++;
+              // Process...
+          }
+      }
+    symptoms:
+      - Message processed multiple times
+      - State inconsistency after bridge call
+      - Unexpected token minting
+    detection_pattern: 'onMessageReceived(?!.*nonReentrant|.*processed)'
+
+  - id: upgrade-mismatch
+    summary: Upgraded contract on one chain, not others
+    severity: high
+    situation: |
+      You upgrade your cross-chain contract on Ethereum but forget
+      Arbitrum. Messages between chains now have incompatible formats.
+    why: |
+      Cross-chain applications span multiple deployments. All must
+      stay synchronized. Upgrade on one chain without others breaks
+      interoperability.
+    solution: |
+      # SYNCHRONIZED UPGRADE PROCESS
+
+      Cross-Chain Upgrade Checklist:
+      1. Test new version on all testnets first
+      2. Prepare upgrade transactions for ALL chains
+      3. Execute upgrades in coordinated window
+      4. Verify compatibility between old/new during transition
+      5. Monitor for failed messages post-upgrade
+
+      // Version checking
+      contract CrossChainApp {
+          uint256 public constant VERSION = 2;
+
+          function _validateMessage(bytes calldata message) internal {
+              uint256 messageVersion = abi.decode(message[:32], (uint256));
+              require(
+                  messageVersion >= VERSION - 1 && messageVersion <= VERSION,
+                  "Version mismatch"
+              );
+          }
+      }
+
+      // Backwards-compatible message format
+      struct MessageV2 {
+          uint256 version;  // Always first
+          // V1 fields...
+          // V2 additions at end
+      }
+    symptoms:
+      - Messages fail after upgrade
+      - Decoding errors
+      - Different behavior on different chains
+    detection_pattern: null

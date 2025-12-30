@@ -1,0 +1,342 @@
+id: nft-systems
+skill: NFT Systems
+version: "1.0"
+
+sharp_edges:
+  - id: metadata-404
+    severity: CRITICAL
+    title: Metadata Returns 404 During Indexing
+    description: Marketplaces cache metadata - 404s during indexing permanently break display
+    symptoms:
+      - NFTs show as "content not available"
+      - Images don't load on marketplaces
+      - Collection delisted or flagged
+    detection_pattern: "tokenURI|baseURI|metadata"
+    solution: |
+      // 1. Upload ALL metadata before contract deployment
+      // 2. Verify every tokenURI returns valid JSON
+      // 3. Use IPFS directory uploads (CID stays same)
+
+      // Verification script:
+      async function verifyMetadata(baseURI, totalSupply) {
+          for (let i = 0; i < totalSupply; i++) {
+              const response = await fetch(`${baseURI}${i}.json`);
+              if (!response.ok) {
+                  throw new Error(`Token ${i} metadata not found`);
+              }
+              const metadata = await response.json();
+              // Verify required fields
+              if (!metadata.name || !metadata.image) {
+                  throw new Error(`Token ${i} missing required fields`);
+              }
+          }
+      }
+    references:
+      - https://docs.opensea.io/docs/metadata-standards
+
+  - id: ipfs-gateway-dependency
+    severity: CRITICAL
+    title: IPFS Gateway Single Point of Failure
+    description: Using specific IPFS gateway URL instead of ipfs:// protocol
+    symptoms:
+      - Images break when gateway goes down
+      - Pinata/Infura outages break collection
+      - Different gateways show different content
+    detection_pattern: "ipfs\\.io|gateway\\.pinata|cloudflare-ipfs"
+    solution: |
+      // Bad: Gateway-specific URL
+      "image": "https://gateway.pinata.cloud/ipfs/Qm..."
+
+      // Good: Protocol URL (marketplaces resolve)
+      "image": "ipfs://Qm..."
+
+      // Best: Multiple pinning services
+      // - Pin to Pinata
+      // - Pin to nft.storage
+      // - Pin to Filebase
+      // Use same CID, multiple providers for redundancy
+    references:
+      - https://docs.ipfs.tech/concepts/ipfs-gateway/
+
+  - id: reentrancy-mint
+    severity: CRITICAL
+    title: Reentrancy in Mint Function
+    description: _safeMint callback allows reentrant minting
+    symptoms:
+      - Users mint more than allowed
+      - Supply exceeded
+      - Max per wallet bypassed
+    detection_pattern: "_safeMint.*before.*state.*update"
+    solution: |
+      // Bad: State update after safeMint
+      function mint(uint256 quantity) external {
+          require(minted[msg.sender] + quantity <= maxPerWallet);
+          for (uint i = 0; i < quantity; i++) {
+              _safeMint(msg.sender, tokenIdCounter++);  // Callback here!
+          }
+          minted[msg.sender] += quantity;  // Too late!
+      }
+
+      // Good: Update state first
+      function mint(uint256 quantity) external {
+          require(minted[msg.sender] + quantity <= maxPerWallet);
+          minted[msg.sender] += quantity;  // Update first
+          for (uint i = 0; i < quantity; i++) {
+              _safeMint(msg.sender, tokenIdCounter++);
+          }
+      }
+
+      // Best: Use reentrancy guard
+      function mint(uint256 quantity) external nonReentrant {
+          // ...
+      }
+    references:
+      - https://blog.openzeppelin.com/reentrancy-after-istanbul/
+
+  - id: royalty-bypass
+    severity: HIGH
+    title: Royalties Easily Bypassed
+    description: ERC-2981 is not enforced, wrappers bypass royalties
+    symptoms:
+      - Royalties not paid on secondary sales
+      - Revenue drops after launch hype
+      - Wrapper contracts created
+    detection_pattern: "royaltyInfo|ERC2981"
+    solution: |
+      // Royalties are NOT enforceable on-chain
+      // Options:
+
+      // 1. Operator filter (blocks known bypasses)
+      import {DefaultOperatorFilterer} from "operator-filter-registry/DefaultOperatorFilterer.sol";
+
+      contract NFT is ERC721, DefaultOperatorFilterer {
+          function setApprovalForAll(address operator, bool approved)
+              public override onlyAllowedOperatorApproval(operator)
+          {
+              super.setApprovalForAll(operator, approved);
+          }
+      }
+
+      // 2. Accept reality: treat royalties as voluntary
+      // 3. Build utility that requires holding (staking, access)
+    references:
+      - https://github.com/ProjectOpenSea/operator-filter-registry
+
+  - id: reveal-frontrun
+    severity: HIGH
+    title: Reveal Can Be Front-Run
+    description: On-chain randomness or predictable reveal allows sniping
+    symptoms:
+      - Rares concentrated in few wallets
+      - Sniper bots profit
+      - Community loses trust
+    detection_pattern: "reveal|blockhash|block\\.timestamp"
+    solution: |
+      // Bad: Predictable randomness
+      function reveal() external {
+          offset = uint256(blockhash(block.number - 1)) % totalSupply;
+      }
+
+      // Good: Commit-reveal with future block
+      function commitReveal(bytes32 commitment) external onlyOwner {
+          require(revealBlock == 0, "Already committed");
+          _commitment = commitment;
+          revealBlock = block.number + 100;  // 100 blocks in future
+      }
+
+      function reveal(uint256 seed) external {
+          require(block.number > revealBlock, "Too early");
+          require(block.number < revealBlock + 256, "Blockhash expired");
+          require(keccak256(abi.encodePacked(seed)) == _commitment, "Bad seed");
+
+          offset = uint256(keccak256(abi.encodePacked(
+              seed, blockhash(revealBlock)
+          ))) % totalSupply;
+      }
+
+      // Best: Use Chainlink VRF
+    references:
+      - https://docs.chain.link/vrf
+
+  - id: batch-gas-failure
+    severity: HIGH
+    title: Large Batch Mints Fail
+    description: No limit on batch size causes out-of-gas failures
+    symptoms:
+      - Transactions fail after paying gas
+      - Users lose ETH on failed mints
+      - Frustrated community
+    detection_pattern: "mint.*quantity|for.*_safeMint"
+    solution: |
+      uint256 public constant MAX_BATCH = 20;
+
+      function mint(uint256 quantity) external payable {
+          require(quantity > 0 && quantity <= MAX_BATCH, "Invalid quantity");
+          require(totalSupply() + quantity <= MAX_SUPPLY, "Exceeds supply");
+
+          // Use ERC721A for gas-efficient batch mints
+          _mint(msg.sender, quantity);
+      }
+
+      // Gas estimates per batch size (ERC721 vs ERC721A):
+      // 1 token:  ~80k vs ~50k gas
+      // 5 tokens: ~400k vs ~55k gas
+      // 10 tokens: ~800k vs ~60k gas
+    references:
+      - https://www.erc721a.org/
+
+  - id: metadata-mutability
+    severity: MEDIUM
+    title: Metadata Can Be Changed After Sale
+    description: No mechanism to freeze metadata permanently
+    symptoms:
+      - Rug pull concerns
+      - Collectors don't trust collection
+      - Legal liability for changes
+    detection_pattern: "setBaseURI|setTokenURI"
+    solution: |
+      bool public metadataFrozen;
+
+      event MetadataFrozen(string finalBaseURI);
+      event BatchMetadataUpdate(uint256 fromTokenId, uint256 toTokenId);
+
+      function freezeMetadata() external onlyOwner {
+          require(!metadataFrozen, "Already frozen");
+          metadataFrozen = true;
+          emit MetadataFrozen(baseURI);
+          // EIP-4906 refresh signal
+          emit BatchMetadataUpdate(0, type(uint256).max);
+      }
+
+      function setBaseURI(string calldata _uri) external onlyOwner {
+          require(!metadataFrozen, "Metadata is frozen");
+          baseURI = _uri;
+      }
+    references:
+      - https://eips.ethereum.org/EIPS/eip-4906
+
+  - id: opensea-metadata-schema
+    severity: MEDIUM
+    title: Metadata Doesn't Match OpenSea Schema
+    description: Missing or incorrect metadata fields
+    symptoms:
+      - Traits don't display
+      - Rarity tools can't parse
+      - Collection looks broken
+    detection_pattern: "attributes|trait_type|value"
+    solution: |
+      // Required OpenSea metadata format:
+      {
+          "name": "Token #1",
+          "description": "Description here",
+          "image": "ipfs://...",
+          "attributes": [
+              {
+                  "trait_type": "Background",
+                  "value": "Blue"
+              },
+              {
+                  "trait_type": "Power Level",
+                  "value": 95,
+                  "display_type": "number"
+              },
+              {
+                  "trait_type": "Birthday",
+                  "value": 1609459200,
+                  "display_type": "date"
+              }
+          ],
+          "external_url": "https://yoursite.com/token/1",
+          "animation_url": "ipfs://..." // For video/audio
+      }
+    references:
+      - https://docs.opensea.io/docs/metadata-standards
+
+  - id: erc1155-supply-tracking
+    severity: MEDIUM
+    title: ERC-1155 Missing Total Supply
+    description: No way to query total supply per token ID
+    symptoms:
+      - Can't verify scarcity
+      - Marketplaces show "?" for supply
+      - Rarity calculation impossible
+    detection_pattern: "ERC1155(?!Supply)"
+    solution: |
+      // Use ERC1155Supply extension
+      import "@openzeppelin/contracts/token/ERC1155/extensions/ERC1155Supply.sol";
+
+      contract MyNFT is ERC1155Supply {
+          function mint(address to, uint256 id, uint256 amount) external {
+              _mint(to, id, amount, "");
+          }
+
+          // Now available:
+          // totalSupply(id) - tokens minted for this ID
+          // exists(id) - whether any tokens exist for ID
+      }
+    references:
+      - https://docs.openzeppelin.com/contracts/4.x/api/token/erc1155#ERC1155Supply
+
+  - id: solana-creator-verification
+    severity: MEDIUM
+    title: Unverified Creator on Solana
+    description: Creator not verified in Metaplex metadata
+    symptoms:
+      - Collection not indexed by Magic Eden
+      - Can't prove authenticity
+      - Royalties not enforced
+    detection_pattern: "metaplex|candy.*machine|creators"
+    solution: |
+      // In Metaplex metadata, creators must be verified
+      {
+          "creators": [
+              {
+                  "address": "YOUR_WALLET",
+                  "verified": true,  // Must be true!
+                  "share": 100
+              }
+          ]
+      }
+
+      // Verify using Metaplex SDK:
+      const { nft } = await metaplex.nfts().create({
+          // ...
+          creators: [
+              {
+                  address: metaplex.identity().publicKey,
+                  share: 100,
+                  // Automatically verified when using identity
+              }
+          ]
+      });
+    references:
+      - https://docs.metaplex.com/programs/token-metadata/accounts
+
+  - id: allowlist-timing-attack
+    severity: MEDIUM
+    title: Allowlist Merkle Root Changed Mid-Mint
+    description: Root can be changed while users are minting
+    symptoms:
+      - Valid proofs suddenly invalid
+      - User transactions fail
+      - Community outrage
+    detection_pattern: "merkleRoot|setMerkleRoot"
+    solution: |
+      // Lock merkle root during mint window
+      uint256 public mintStartTime;
+      uint256 public mintEndTime;
+      bool public merkleRootLocked;
+
+      function setMerkleRoot(bytes32 _root) external onlyOwner {
+          require(
+              block.timestamp < mintStartTime || !merkleRootLocked,
+              "Root locked during mint"
+          );
+          merkleRoot = _root;
+      }
+
+      function lockMerkleRoot() external onlyOwner {
+          merkleRootLocked = true;
+      }
+    references:
+      - https://www.rareskills.io/post/merkle-tree-solidity
