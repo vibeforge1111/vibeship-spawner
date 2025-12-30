@@ -2,59 +2,43 @@
 
 > Read this first when working on the Spawner MCP server
 
-## Documentation
+## Documentation (Single Source of Truth)
 
 | Doc | Purpose |
 |-----|---------|
-| `docs/V2/PRD.md` | Product requirements - what and why |
-| `docs/V2/ARCHITECTURE.md` | Technical architecture - how it works |
-| `docs/V2/SKILL_CREATION_GUIDE.md` | Skill creation guide - building skills |
-| `docs/V2/ROADMAP.md` | Build plan - week by week tasks |
+| `docs/PRD.md` | Product requirements - what and why |
+| `docs/ARCHITECTURE.md` | Technical architecture - how it works |
+| `docs/SKILL_CREATION_GUIDE.md` | How to create world-class skills |
+| `docs/SKILL_SPEC_V2.md` | Technical skill YAML format |
+| `docs/SKILL_SYNC.md` | Keeping skill repos in sync |
+| `docs/SECURITY.md` | Security guidelines |
+| `docs/ROADMAP.md` | Build plan and priorities |
 | `docs/TUTORIAL.md` | Getting started guide |
-| `docs/SKILL_SYNC.md` | **Skill sync architecture - keeping repos aligned** |
+
+**Skills Documentation** (in spawner-skills repo):
+| Doc | Purpose |
+|-----|---------|
+| `GETTING_STARTED.md` | User onboarding |
+| `SKILLS_DIRECTORY.md` | Complete skill catalog |
+| `SKILLS_ROADMAP.md` | Planned future skills |
 
 ## What Is Spawner?
 
-Spawner is an MCP server that transforms Claude into a specialized product-building system. It adds capabilities Claude doesn't have by default:
+Spawner is an MCP server that transforms Claude into a specialized product-building system:
 
-1. **Project Memory** - Remembers your project across sessions (decisions, issues, progress)
-2. **Guardrails** - Actually catches code issues (security, patterns, production readiness)
-3. **Sharp Edges** - Knows gotchas Claude doesn't know (versioned, situation-matched)
-4. **Escape Hatches** - Detects when you're stuck and offers alternatives
-5. **Skill System** - 273 specialist skills across 24 categories in YAML format
-6. **Skill Level Detection** - Adapts guidance to user experience level
+1. **Project Memory** - Remembers your project across sessions
+2. **Guardrails** - Catches code issues (security, patterns, production readiness)
+3. **Sharp Edges** - Knows gotchas Claude doesn't know
+4. **Skill System** - 273 specialist skills in YAML format
+5. **Skill Level Detection** - Adapts guidance to user experience
 
-## Local Skills (Zero-Cost)
+## Skills
 
-**Skills are now loaded locally, not from MCP.** This is free, fast, and works offline.
+**Install:** `npx vibeship-spawner-skills install`
+**Update:** `npx vibeship-spawner-skills update`
+**Full guide:** https://github.com/vibeforge1111/vibeship-spawner-skills
 
-### First-Time Setup
-
-**Quick install (recommended):**
-```bash
-npx vibeship-spawner-skills install
-```
-
-**Alternative (manual clone):**
-```bash
-# Windows
-git clone https://github.com/vibeforge1111/vibeship-spawner-skills %USERPROFILE%\.spawner\skills
-
-# macOS/Linux
-git clone https://github.com/vibeforge1111/vibeship-spawner-skills ~/.spawner/skills
-```
-
-### Loading Skills
-
-Read skill YAML files directly from local disk:
-
-```
-# Example: Load backend skill
-Read: ~/.spawner/skills/development/backend/skill.yaml
-Read: ~/.spawner/skills/development/backend/sharp-edges.yaml
-```
-
-### Skill Categories
+### Quick Reference
 
 | Need | Path |
 |------|------|
@@ -66,295 +50,119 @@ Read: ~/.spawner/skills/development/backend/sharp-edges.yaml
 | Testing | `development/test-architect` |
 | DevOps | `development/devops`, `development/infra-architect` |
 
-### Updating Skills
+### Skill Format
 
-```bash
-npx vibeship-spawner-skills update
-# or: cd ~/.spawner/skills && git pull
-```
-
-See full instructions: https://github.com/vibeforge1111/vibeship-spawner-skills
-
----
+Each skill has 4 YAML files:
+- `skill.yaml` - Identity, patterns, anti-patterns
+- `sharp-edges.yaml` - Gotchas with detection patterns
+- `validations.yaml` - Automated code checks
+- `collaboration.yaml` - Prerequisites, delegation triggers
 
 ## Tech Stack
 
 - **Runtime:** Cloudflare Workers
 - **Database:** Cloudflare D1 (SQLite)
-- **Cache:** Cloudflare KV (project memory, validations)
+- **Cache:** Cloudflare KV
 - **Protocol:** MCP (Model Context Protocol)
-- **Language:** TypeScript
-- **Validation:** Zod
+- **Language:** TypeScript + Zod
 
 ## Project Structure
 
 ```
 vibeship-spawner/
-├── spawner-v2/              # MCP Server (Cloudflare Worker) - ACTIVE CODE
+├── spawner-v2/              # MCP Server (Cloudflare Worker)
 │   ├── src/
 │   │   ├── index.ts         # Main worker, MCP routing
-│   │   ├── types.ts         # Type definitions
-│   │   ├── tools/           # MCP tool implementations (18 tools)
-│   │   ├── validation/      # Code checking (regex + AST)
-│   │   ├── skills/          # Skill loading and matching
-│   │   ├── telemetry/       # Event tracking
-│   │   └── db/              # D1 database operations
-│   ├── skills/              # 273 Skills (YAML format)
+│   │   ├── tools/           # MCP tool implementations
+│   │   ├── validation/      # Code checking
+│   │   └── skills/          # Skill loading
+│   ├── skills/              # 273 Skills (synced from spawner-skills)
 │   └── migrations/          # D1 schema
-├── benchmarks/              # Skill benchmark system
-├── catalogs/                # Agent and MCP catalogs
-├── docs/
-│   ├── V2/                  # Active documentation
-│   └── ARCHIVED/            # Historical docs (reference only)
-├── mcp-registry.json        # MCP tool/template registry
-└── web/                     # Web UI (SvelteKit)
+├── docs/                    # All documentation (flat structure)
+│   ├── ARCHITECTURE.md
+│   ├── PRD.md
+│   ├── SKILL_CREATION_GUIDE.md
+│   ├── SKILL_SPEC_V2.md
+│   ├── SKILL_SYNC.md
+│   ├── SECURITY.md
+│   ├── ROADMAP.md
+│   ├── TUTORIAL.md
+│   └── ARCHIVED/            # Historical docs only
+├── scripts/
+│   ├── sync-skills.js       # Keep spawner-v2/skills in sync
+│   └── generate-skills-json.js  # Update website
+├── web/                     # Website (SvelteKit)
+└── catalogs/                # Agent and MCP catalogs
 ```
 
-## Key Concepts
-
-### Skill System
-
-**Primary: Local Skills** - Loaded from `~/.spawner/skills/` (see Local Skills section above)
-- 273 skills across 24 categories
-- Free, fast, works offline
-- Clone once, read locally forever
-
-**V2 Skills (YAML format):**
-- Each skill has 4 required files:
-  - `skill.yaml` - Identity, patterns, anti-patterns, handoffs
-  - `sharp-edges.yaml` - Gotchas with detection patterns
-  - `validations.yaml` - Automated code checks
-  - `collaboration.yaml` - Prerequisites, delegation triggers
-- Categories: development (57), marketing (33), strategy (15), integrations (14), ai-ml (12), ai (12), agents (10), mind (10), data (8), hardware (6), frameworks (6), finance (6), enterprise (6), biotech (6), space (5), simulation (5), legal (5), communications (5), climate (5), science (4), product (4), integration (4), design (4), startup (3)
-
-**Internal (KV)** - Used by MCP server for validations and sharp edge queries only
-
-### Squads
-
-Pre-configured skill combinations for common tasks:
-- `auth-complete` - Full authentication implementation
-- `payments-complete` - Stripe/payments integration
-- `crud-feature` - Database CRUD operations
-
-Use: `spawner_skills({ action: "squad", squad: "auth-complete" })`
-
-### Skill Levels
-
-The system detects user experience level and adapts guidance:
-- **vibe-coder** - Non-technical, needs maximum guidance
-- **builder** - Some tech knowledge, learning
-- **developer** - Technical, familiar with patterns
-- **expert** - Senior developer, strong opinions
-
-Detection uses pattern matching on user phrases (e.g., "I don't know code", "let's use", "in my experience").
-
-### Project Templates
-
-Available templates with pre-configured stack, skills, and agents:
-
-| Template | Use Case | Stack |
-|----------|----------|-------|
-| `saas` | Subscription products | Next.js, Supabase, Stripe, Tailwind |
-| `marketplace` | Buy/sell platforms | Next.js, Supabase, Stripe, Algolia |
-| `ai-app` | LLM-powered apps | Next.js, Supabase, OpenAI |
-| `web3` | Blockchain apps | Next.js, wagmi, viem |
-| `tool` | CLIs and utilities | TypeScript, Node |
-
-### Sharp Edges
-
-Specific gotchas Claude doesn't know by default - the real moat.
-Each edge has: severity, situation, why, fix, detection pattern.
-
-### Guardrails
-
-Machine-runnable checks that catch issues:
-- **Security:** Hardcoded secrets, injection vulnerabilities
-- **Patterns:** Async client components, server imports in client
-- **Production:** Missing 'use server' directives, env validation
-
-### Stack Detection
-
-`spawner_analyze` detects technologies from:
-- File existence (next.config.js, wrangler.toml)
-- Package.json dependencies
-- Code patterns (imports, API usage)
-
-Detected categories: framework, database, auth, payments, styling, ai, web3, testing, api, deployment
-
-## MCP Tools (18 total)
+## MCP Tools
 
 | Tool | Purpose |
 |------|---------|
-| `spawner_orchestrate` | Main entry point - auto-detects context and routes |
-| `spawner_plan` | Plan and create projects (discover → recommend → create) |
-| `spawner_analyze` | Analyze existing codebase for stack/skill recommendations |
-| `spawner_load` | Load project context and skills for session |
-| `spawner_validate` | Run guardrail checks on code |
-| `spawner_remember` | Save decisions, issues, and session progress |
-| `spawner_watch_out` | Query gotchas for your current situation |
-| `spawner_unstick` | Get help when stuck on a problem |
-| `spawner_templates` | List available project templates |
-| `spawner_skills` | Search, list, get skills and squads |
-| `spawner_skill_brainstorm` | Optional pre-pipeline deep skill exploration |
-| `spawner_skill_research` | Research phase for skill creation |
-| `spawner_skill_new` | Create world-class skills with 4 YAML files |
-| `spawner_skill_score` | Score skill against 100-point quality rubric |
-| `spawner_skill_upgrade` | Enhance existing skills with more depth |
-| `spawner_setup` | Check configuration, get setup guides, verify requirements |
-| `spawner_emit` | Agent notification system for events |
+| `spawner_orchestrate` | Main entry point - auto-routes |
+| `spawner_plan` | Plan and create projects |
+| `spawner_analyze` | Analyze codebase for recommendations |
+| `spawner_validate` | Run guardrail checks |
+| `spawner_remember` | Save decisions and progress |
+| `spawner_watch_out` | Query gotchas |
+| `spawner_unstick` | Get help when stuck |
+| `spawner_skills` | Search and get skills |
+| `spawner_skill_new` | Create world-class skills |
+| `spawner_skill_score` | Score skill quality |
 
 **Skill Creation Pipeline:** `brainstorm?` → `research` → `new` → `score`
 
-**Production endpoint:** https://mcp.vibeship.co
-
-## Environment Variables
-
-```toml
-# wrangler.toml
-[vars]
-ENVIRONMENT = "development" | "production"
-
-[[d1_databases]]
-binding = "DB"
-
-[[kv_namespaces]]
-binding = "SKILLS"
-binding = "SHARP_EDGES"
-binding = "CACHE"
-```
-
-## Development Commands
+## Development
 
 ```bash
-# Start local dev (from spawner-v2/)
-cd spawner-v2
-npm install
-wrangler dev
+# Start local dev
+cd spawner-v2 && npm install && wrangler dev
 
 # Deploy
 wrangler deploy
 
-# Run D1 migrations
-wrangler d1 execute spawner-db --file=./migrations/001_initial.sql
+# Sync skills from spawner-skills repo
+node scripts/sync-skills.js sync
 
-# Upload skills to KV
-node scripts/upload-skills.js
+# Regenerate website skills
+node scripts/generate-skills-json.js
 ```
+
+## Keeping Skills in Sync
+
+**Source of truth:** `spawner-skills` repo (github.com/vibeforge1111/vibeship-spawner-skills)
+
+```bash
+# Check sync status
+node scripts/sync-skills.js check
+
+# Fix sync issues
+node scripts/sync-skills.js sync
+```
+
+See `docs/SKILL_SYNC.md` for full sync architecture.
 
 ## Code Style
 
 - TypeScript strict mode
-- Zod for input validation on all tools
-- Explicit error handling (try/catch on all async)
+- Zod for all input validation
+- Explicit try/catch on async
 - No console.log in production
-- Comments for non-obvious logic only
-
-## Testing With Claude Desktop
-
-1. Run `wrangler dev` in spawner-v2/
-2. Add to Claude Desktop config:
-```json
-{
-  "mcpServers": {
-    "spawner": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "http://localhost:8787/mcp"]
-    }
-  }
-}
-```
-3. Restart Claude Desktop
-4. Test tools in conversation
-
-## Common Tasks
-
-### Adding a New Skill
-
-**For local skills repo** (https://github.com/vibeforge1111/vibeship-spawner-skills):
-1. Choose category folder (development/, data/, ai/, design/, etc.)
-2. Create skill folder with kebab-case name
-3. Add required files: `skill.yaml`, `sharp-edges.yaml`, `validations.yaml`, `collaboration.yaml`
-4. Push to GitHub
-
-**For internal MCP** (spawner-v2/skills/):
-1. Same structure as above
-2. Run upload script: `node scripts/upload-skills.js`
-
-See `docs/V2/SKILL_CREATION_GUIDE.md` for full guide.
-
-### Adding a New Check
-
-1. Add check definition to relevant skill's `validations/checks.yaml`
-2. If new check type, implement in `src/validation/checks/`
-3. Register in validation runner
-4. Test with real code that should fail
-
-### Adding a New Sharp Edge
-
-1. Add to skill's `sharp-edges.yaml`
-2. Include: id, summary, severity, situation, why, solution, detection_pattern
-3. Run upload script to update KV
-
-## Debugging
-
-### MCP Tool Not Responding
-- Check wrangler logs: `wrangler tail`
-- Verify tool registered in `src/index.ts`
-- Check input validation (Zod schema)
-
-### D1 Query Failing
-- Test query directly: `wrangler d1 execute spawner-db --command="..."`
-- Check binding name in wrangler.toml
-- Verify migration ran
-
-### KV Not Loading
-- Check namespace binding
-- Verify upload script ran
-- Check key format matches loader
 
 ## Architecture Decisions
 
-### Why D1 for Projects?
-Relational data (projects → sessions → decisions) fits SQL.
-D1 is cheap, fast, and co-located with Workers.
-
-### Why Local Skills?
-Skills are now loaded locally from `~/.spawner/skills/` via git clone.
-- Zero API cost (no MCP calls for skill content)
-- Works offline after initial clone
-- Fast reads from local filesystem
-- KV is still used internally for validations and sharp edge queries
-
-### Why Not Full AST for All Checks?
-ts-morph is powerful but slow.
-Regex catches 80% of issues with 10% of complexity.
-Use AST only when regex can't express the check.
-
-### Why Cloudflare?
-- Edge runtime (fast cold starts for MCP)
-- D1 + KV in one platform
-- Generous free tier
-- Workers AI available if needed later
-
-## What Not To Do
-
-- Don't add checks that Claude already catches consistently
-- Don't create skills for things Claude knows well by default
-- Don't store actual user code (privacy, storage costs)
-- Don't add complexity without proven user need
-- Don't skip telemetry (it's how we learn)
+| Decision | Reason |
+|----------|--------|
+| D1 for projects | Relational data fits SQL, cheap, fast |
+| Local skills | Zero API cost, works offline |
+| Regex before AST | 80% of checks with 10% complexity |
+| Cloudflare | Edge runtime, integrated D1+KV |
 
 ## The Differentiation Test
 
-Before adding any feature, ask:
+Before adding any feature:
 > "Would Claude alone do this? If yes, cut it. If no, ship it."
 
-## Questions?
+---
 
-If something isn't clear, check the docs first:
-1. `docs/V2/PRD.md` for "what" and "why"
-2. `docs/V2/ARCHITECTURE.md` for "how"
-3. `docs/V2/SKILL_CREATION_GUIDE.md` for skills specifically
-4. `docs/V2/ROADMAP.md` for priorities
-
-If still unclear, that's a docs gap - fix it when you figure it out.
+**Questions?** Check docs first: `docs/PRD.md` (what), `docs/ARCHITECTURE.md` (how), `docs/SKILL_CREATION_GUIDE.md` (skills).
