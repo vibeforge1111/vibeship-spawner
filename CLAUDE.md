@@ -11,6 +11,7 @@
 | `docs/V2/SKILL_CREATION_GUIDE.md` | Skill creation guide - building skills |
 | `docs/V2/ROADMAP.md` | Build plan - week by week tasks |
 | `docs/TUTORIAL.md` | Getting started guide |
+| `docs/SKILL_SYNC.md` | **Skill sync architecture - keeping repos aligned** |
 
 ## What Is Spawner?
 
