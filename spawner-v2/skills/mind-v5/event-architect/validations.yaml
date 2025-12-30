@@ -1,0 +1,155 @@
+# Event Architect Validations
+# Automated checks for event sourcing patterns
+
+validations:
+  - id: event-missing-correlation-id
+    name: Event Without Correlation ID
+    severity: error
+    type: regex
+    pattern:
+      - '@dataclass.*Event[\\s\\S]*?(?!correlation_id)'
+      - 'class.*Event.*:[\\s\\S]{0,500}(?!correlation_id)[\\s\\S]*?def to_'
+    message: "Event class missing correlation_id field. Required for distributed tracing."
+    fix_action: "Add correlation_id: UUID and causation_id: UUID fields to event class"
+    applies_to:
+      - "*.py"
+      - "**/events/*.py"
+      - "**/domain/*.py"
+
+  - id: event-missing-version
+    name: Event Without Version Number
+    severity: error
+    type: regex
+    pattern:
+      - '@dataclass.*Event[\\s\\S]{0,300}(?!event_version|version)'
+    message: "Event class missing version number. Required for schema evolution."
+    fix_action: "Add event_version: int = 1 field to event class"
+    applies_to:
+      - "*.py"
+      - "**/events/*.py"
+
+  - id: event-mutable-dataclass
+    name: Event Dataclass Not Frozen
+    severity: error
+    type: regex
+    pattern:
+      - '@dataclass(?!.*frozen=True).*Event'
+      - '@dataclass\\s*\\n\\s*class.*Event'
+    message: "Event dataclass should be frozen (immutable). Events are facts."
+    fix_action: "Change @dataclass to @dataclass(frozen=True)"
+    applies_to:
+      - "*.py"
+      - "**/events/*.py"
+
+  - id: projection-insert-not-idempotent
+    name: Projection INSERT Without ON CONFLICT
+    severity: error
+    type: regex
+    pattern:
+      - 'INSERT INTO(?!.*ON CONFLICT)'
+      - "execute.*INSERT(?!.*ON CONFLICT)"
+    message: "INSERT without ON CONFLICT is not idempotent. Projection replay will fail."
+    fix_action: "Add ON CONFLICT (id) DO UPDATE or DO NOTHING for idempotent upserts"
+    applies_to:
+      - "**/projections/*.py"
+      - "**/handlers/*.py"
+
+  - id: nats-missing-durable
+    name: NATS Subscription Without Durable Name
+    severity: error
+    type: regex
+    pattern:
+      - 'subscribe\\([^)]*(?!durable)[^)]*\\)'
+      - '\\.subscribe\\(.*\\)(?!.*durable)'
+    message: "NATS subscription without durable name. Position lost on restart."
+    fix_action: "Add durable='consumer-name' parameter to subscription"
+    applies_to:
+      - "*.py"
+      - "**/consumers/*.py"
+
+  - id: nats-ack-none
+    name: NATS AckNone for Important Events
+    severity: warning
+    type: regex
+    pattern:
+      - 'AckPolicy\\.NONE'
+      - 'ack_policy.*none'
+    message: "AckNone means no delivery guarantee. Use AckExplicit for important events."
+    fix_action: "Change to AckPolicy.EXPLICIT for events that matter"
+    applies_to:
+      - "*.py"
+      - "**/consumers/*.py"
+
+  - id: event-datetime-without-timezone
+    name: Event Timestamp Without Timezone
+    severity: warning
+    type: regex
+    pattern:
+      - 'datetime\\.now\\(\\)'
+      - 'datetime\\.utcnow\\(\\)'
+    message: "Use datetime.now(timezone.utc) for timezone-aware timestamps."
+    fix_action: "Replace with datetime.now(timezone.utc) or use occurred_at from event"
+    applies_to:
+      - "*.py"
+      - "**/events/*.py"
+
+  - id: event-handler-external-call
+    name: External API Call in Event Handler
+    severity: warning
+    type: regex
+    pattern:
+      - 'async def handle.*event[\\s\\S]*?await.*(?:httpx|aiohttp|requests)\\.(?:get|post)'
+      - 'def handle.*event[\\s\\S]*?requests\\.(?:get|post)'
+    message: "External API calls in handlers break replay determinism. Use saga pattern."
+    fix_action: "Move external calls to separate saga/workflow or include data in event"
+    applies_to:
+      - "**/handlers/*.py"
+      - "**/projections/*.py"
+
+  - id: event-random-in-handler
+    name: Non-Deterministic Operation in Handler
+    severity: warning
+    type: regex
+    pattern:
+      - 'def handle[\\s\\S]*?random\\.'
+      - 'def handle[\\s\\S]*?uuid4\\(\\)'
+    message: "Random values in handlers break replay. Put randomness in event payload."
+    fix_action: "Generate UUIDs/random values when creating event, not when handling"
+    applies_to:
+      - "**/handlers/*.py"
+      - "**/projections/*.py"
+
+  - id: event-large-payload
+    name: Large Object in Event Payload
+    severity: warning
+    type: regex
+    pattern:
+      - 'embedding:\\s*List\\[float\\](?!.*Optional)'
+      - 'content:\\s*str(?!.*hash)'
+    message: "Consider storing large data (embeddings, content) by reference, not in event."
+    fix_action: "Store content_hash or embedding_ref instead of full data"
+    applies_to:
+      - "**/events/*.py"
+
+  - id: projection-missing-checkpoint
+    name: Projection Without Position Checkpoint
+    severity: warning
+    type: regex
+    pattern:
+      - 'class.*Projection[\\s\\S]*?async def handle[\\s\\S]*?(?!position|checkpoint)'
+    message: "Projection should store checkpoint position for recovery."
+    fix_action: "Store event position atomically with projection updates"
+    applies_to:
+      - "**/projections/*.py"
+
+  - id: event-past-tense-name
+    name: Event Name Not Past Tense
+    severity: info
+    type: regex
+    pattern:
+      - 'class\\s+(?:Create|Update|Delete|Send|Process)\\w+Event'
+      - "event_type.*=.*'(?:Create|Update|Delete)'"
+    message: "Events should be past tense (MemoryCreated not CreateMemory). Events are facts."
+    fix_action: "Rename to past tense: Created, Updated, Deleted, Sent, Processed"
+    applies_to:
+      - "**/events/*.py"

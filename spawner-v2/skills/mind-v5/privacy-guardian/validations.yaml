@@ -1,0 +1,169 @@
+# Privacy Guardian Validations
+# Automated checks for privacy and security patterns
+
+validations:
+  - id: hardcoded-secret
+    name: Hardcoded Secret or API Key
+    severity: error
+    type: regex
+    pattern:
+      - 'API_KEY.*=.*["\'][a-zA-Z0-9]{20,}["\']'
+      - 'SECRET.*=.*["\'][a-zA-Z0-9]{20,}["\']'
+      - 'PASSWORD.*=.*["\'][^"\']+["\']'
+      - 'Fernet\\(b["\']'
+      - 'ENCRYPTION_KEY.*=.*["\']'
+    message: "Hardcoded secret detected. Use environment variables or secret manager."
+    fix_action: "Move secret to environment variable or secret management system"
+    applies_to:
+      - "**/*.py"
+      - "**/*.js"
+      - "**/*.ts"
+
+  - id: pii-in-log
+    name: PII Logged to Application Logs
+    severity: error
+    type: regex
+    pattern:
+      - 'log.*\\(.*email'
+      - 'log.*\\(.*password'
+      - 'log.*\\(.*ssn'
+      - 'log.*\\(.*phone'
+      - 'print\\(.*user\\.name'
+      - 'logger.*content'
+    message: "Potential PII in log statement. Sanitize before logging."
+    fix_action: "Remove PII from log or use anonymized identifiers"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-pii-check-before-embed
+    name: Embedding Without PII Check
+    severity: warning
+    type: regex
+    pattern:
+      - 'embed\\(.*content(?!.*sanitiz)'
+      - 'embed\\(.*text(?!.*pii|.*clean)'
+      - 'embedder.*memory\\.content'
+    message: "Embedding content without PII sanitization. PII may be reconstructable."
+    fix_action: "Sanitize PII before embedding text"
+    applies_to:
+      - "**/embedding/**/*.py"
+      - "**/memory/**/*.py"
+
+  - id: encryption-no-rotation
+    name: Encryption Without Key Rotation
+    severity: warning
+    type: regex
+    pattern:
+      - 'Fernet\\(.*os\\.environ'
+      - 'AES.*key.*=.*config'
+      - 'encryption_key.*=.*settings'
+    message: "Static encryption key without rotation mechanism."
+    fix_action: "Implement envelope encryption with key rotation"
+    applies_to:
+      - "**/crypto/**/*.py"
+      - "**/encryption/**/*.py"
+
+  - id: dp-no-budget-track
+    name: Differential Privacy Without Budget Tracking
+    severity: warning
+    type: regex
+    pattern:
+      - 'laplace.*epsilon(?!.*budget)'
+      - 'differential.*privacy(?!.*track|.*budget|.*account)'
+      - 'add.*noise.*epsilon'
+    message: "Differential privacy without budget tracking. Privacy degrades over queries."
+    fix_action: "Track and limit privacy budget per user"
+    applies_to:
+      - "**/privacy/**/*.py"
+      - "**/federation/**/*.py"
+
+  - id: audit-log-mutable
+    name: Audit Log Without Immutability
+    severity: warning
+    type: regex
+    pattern:
+      - 'INSERT INTO audit(?!.*hash)'
+      - 'audit.*log(?!.*append|.*immutable|.*chain)'
+    message: "Audit log without hash chain or immutability guarantee."
+    fix_action: "Implement hash chain and append-only constraints"
+    applies_to:
+      - "**/audit/**/*.py"
+      - "**/*audit*.py"
+
+  - id: access-no-audit
+    name: Data Access Without Audit Logging
+    severity: info
+    type: regex
+    pattern:
+      - 'get.*memory(?!.*audit)'
+      - 'fetch.*user.*data(?!.*log)'
+      - 'SELECT.*FROM.*memories(?!.*audit)'
+    message: "Data access without audit logging. Can't track who accessed what."
+    fix_action: "Add audit logging for all data access"
+    applies_to:
+      - "**/memory/**/*.py"
+      - "**/db/**/*.py"
+
+  - id: deletion-no-verify
+    name: Data Deletion Without Verification
+    severity: warning
+    type: regex
+    pattern:
+      - 'DELETE.*FROM(?!.*verify|.*confirm)'
+      - 'delete.*user.*data(?!.*all|.*complete)'
+    message: "Deletion without verification. Data may remain in backups/caches."
+    fix_action: "Verify deletion across all data stores"
+    applies_to:
+      - "**/db/**/*.py"
+      - "**/deletion/**/*.py"
+
+  - id: no-retention-policy
+    name: Data Storage Without Retention Policy
+    severity: info
+    type: regex
+    pattern:
+      - 'INSERT INTO.*memories(?!.*expires|.*retention)'
+      - 'store.*memory(?!.*ttl|.*retention)'
+    message: "Data stored without retention policy. May accumulate indefinitely."
+    fix_action: "Add retention policy with automated cleanup"
+    applies_to:
+      - "**/memory/**/*.py"
+      - "**/storage/**/*.py"
+
+  - id: federation-no-threshold
+    name: Federation Without Aggregation Threshold
+    severity: error
+    type: regex
+    pattern:
+      - 'federat.*pattern(?!.*threshold|.*min.*count)'
+      - 'share.*pattern(?!.*aggregat)'
+    message: "Federating patterns without aggregation threshold. Individual users identifiable."
+    fix_action: "Apply k-anonymity threshold before federation"
+    applies_to:
+      - "**/federation/**/*.py"
+
+  - id: unencrypted-sensitive-field
+    name: Sensitive Field Not Encrypted
+    severity: warning
+    type: regex
+    pattern:
+      - 'content.*=.*memory\\.content(?!.*encrypt)'
+      - 'INSERT.*content(?!.*encrypted)'
+    message: "Sensitive content stored without encryption."
+    fix_action: "Encrypt sensitive fields before storage"
+    applies_to:
+      - "**/memory/**/*.py"
+      - "**/db/**/*.py"
+
+  - id: session-no-expiry
+    name: Session Without Expiry
+    severity: info
+    type: regex
+    pattern:
+      - 'session(?!.*expire|.*ttl|.*timeout)'
+      - 'create.*session(?!.*lifetime)'
+    message: "Session created without expiry. Stale sessions are security risk."
+    fix_action: "Set session expiry and implement refresh logic"
+    applies_to:
+      - "**/auth/**/*.py"
+      - "**/session/**/*.py"

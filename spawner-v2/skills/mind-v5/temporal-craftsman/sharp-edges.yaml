@@ -1,0 +1,470 @@
+# Temporal Craftsman Sharp Edges
+# Battle scars from running Temporal in production
+
+sharp_edges:
+  - id: workflow-non-determinism
+    summary: Non-deterministic code in workflow causes replay failure
+    severity: critical
+    situation: |
+      Your workflow works perfectly in development. After running for a few
+      hours in production, it fails with "non-determinism detected" error.
+      Workflow is now stuck.
+    why: |
+      Temporal replays workflow history to rebuild state. If your workflow
+      code produces different results on replay (different random values,
+      different time, different order), Temporal detects the mismatch and
+      fails the workflow. Recovery is painful.
+    solution: |
+      # WRONG: Non-deterministic operations
+      @workflow.defn
+      class BadWorkflow:
+          @workflow.run
+          async def run(self):
+              # These will differ on replay!
+              id = uuid.uuid4()  # Different UUID each time
+              now = datetime.now()  # Different time each time
+              choice = random.choice([1, 2, 3])  # Different choice
+
+              if some_condition:  # Order of dict iteration, set, etc.
+                  ...
+
+      # RIGHT: Use Temporal's deterministic helpers
+      @workflow.defn
+      class GoodWorkflow:
+          @workflow.run
+          async def run(self):
+              # Deterministic alternatives
+              id = workflow.uuid4()  # Same UUID on replay
+              now = workflow.now()  # Workflow logical time
+              # For random: pass from activity or use workflow.random()
+
+              # If you need randomness, get it from activity
+              random_value = await workflow.execute_activity(
+                  get_random_value,
+                  start_to_close_timeout=timedelta(seconds=10),
+              )
+
+      # Common sources of non-determinism:
+      # - uuid4(), random, datetime.now()
+      # - dict iteration order (use OrderedDict or sorted)
+      # - set iteration
+      # - reading environment variables
+      # - Any external I/O
+    symptoms:
+      - "'Non-determinism detected' error"
+      - "Workflow fails after hours of running"
+      - "Workflow stuck in 'Running' state"
+      - "Works in dev, fails in prod"
+    detection_pattern: 'import uuid|uuid\\.uuid4\\(\\)|datetime\\.now\\(\\)|random\\.'
+    version_range: ">=1.0.0"
+
+  - id: workflow-history-overflow
+    summary: Long-running workflow exceeds history limit
+    severity: critical
+    situation: |
+      You have a workflow that runs for months (subscription, monitoring).
+      After a few months, it fails with "history size limit exceeded."
+      All state is lost.
+    why: |
+      Temporal stores every event in workflow history. Default limit is 50K
+      events. A workflow that loops and takes actions accumulates history
+      until it hits the limit. Then it fails permanently.
+    solution: |
+      # Use continue-as-new for long-running workflows
+      @workflow.defn
+      class LongRunningWorkflow:
+          @workflow.run
+          async def run(self, state: WorkflowState) -> WorkflowState:
+              iteration = 0
+              MAX_ITERATIONS = 1000  # Before continue-as-new
+
+              while True:
+                  # Do work
+                  await workflow.execute_activity(
+                      do_periodic_work,
+                      state,
+                      start_to_close_timeout=timedelta(minutes=5),
+                  )
+
+                  iteration += 1
+
+                  # Check if we should continue-as-new
+                  if iteration >= MAX_ITERATIONS:
+                      # Pass state to new workflow instance
+                      workflow.continue_as_new(state)
+                      # This line never executes
+
+                  # Wait before next iteration
+                  await workflow.sleep(timedelta(hours=1))
+
+      # Alternative: Use scheduled workflows instead
+      # Create a new workflow instance on schedule rather than looping
+
+      # Monitor history size
+      @workflow.defn
+      class MonitoredWorkflow:
+          @workflow.run
+          async def run(self, state: State):
+              info = workflow.info()
+              if info.get_current_history_length() > 40000:
+                  workflow.logger.warning("Approaching history limit")
+                  workflow.continue_as_new(state)
+    symptoms:
+      - "'History size limit exceeded' error"
+      - "Workflow running for months suddenly fails"
+      - "Can't query workflow state"
+      - "Replay times grow very long"
+    detection_pattern: 'while True:|while.*running'
+    version_range: ">=1.0.0"
+
+  - id: activity-timeout-too-short
+    summary: Default activity timeout kills ML/LLM operations
+    severity: high
+    situation: |
+      You call an activity that makes an LLM call. It works sometimes,
+      times out other times. The activity keeps retrying and eventually
+      you have multiple LLM calls running.
+    why: |
+      Default start_to_close_timeout is often too short for ML operations.
+      Activity times out, Temporal retries, but the original call may still
+      be running. You end up with duplicate work and wasted API costs.
+    solution: |
+      # Set appropriate timeouts for ML operations
+      @workflow.defn
+      class LLMWorkflow:
+          @workflow.run
+          async def run(self, prompt: str) -> str:
+              result = await workflow.execute_activity(
+                  call_llm,
+                  prompt,
+                  # LLM calls can take 30-120 seconds
+                  start_to_close_timeout=timedelta(minutes=5),
+                  # Heartbeat to prove activity is making progress
+                  heartbeat_timeout=timedelta(seconds=60),
+                  retry_policy=RetryPolicy(
+                      maximum_attempts=2,  # Don't retry too many times (cost!)
+                      # Don't retry on rate limits - use backoff instead
+                      non_retryable_error_types=["RateLimitError"],
+                  ),
+              )
+              return result
+
+      @activity.defn
+      async def call_llm(prompt: str) -> str:
+          # Heartbeat before long operation
+          activity.heartbeat("Starting LLM call")
+
+          response = await llm.complete(prompt)
+
+          activity.heartbeat("LLM call complete")
+          return response
+
+      # For very long operations, use schedule_to_close_timeout
+      await workflow.execute_activity(
+          long_operation,
+          schedule_to_close_timeout=timedelta(hours=1),  # Total allowed time
+          start_to_close_timeout=timedelta(minutes=30),  # Per attempt
+          heartbeat_timeout=timedelta(minutes=2),
+      )
+    symptoms:
+      - "Activity timeout errors"
+      - "LLM called multiple times for same request"
+      - "High API costs from duplicates"
+      - "Inconsistent activity completion"
+    detection_pattern: 'execute_activity.*(?!timeout)'
+    version_range: ">=1.0.0"
+
+  - id: missing-activity-heartbeat
+    summary: Long activity killed due to missing heartbeat
+    severity: high
+    situation: |
+      Your activity processes 10,000 items. It works for small batches.
+      Large batches fail after heartbeat_timeout, even though the activity
+      is making progress.
+    why: |
+      Heartbeat timeout is a liveness check. If the activity doesn't heartbeat,
+      Temporal assumes it's stuck and kills it. For long operations, you must
+      explicitly heartbeat to prove you're alive.
+    solution: |
+      @activity.defn
+      async def process_large_batch(items: List[Item]) -> int:
+          processed = 0
+
+          for i, item in enumerate(items):
+              # Heartbeat every N items or every M seconds
+              if i % 100 == 0:
+                  activity.heartbeat({
+                      "processed": processed,
+                      "total": len(items),
+                      "current_item": item.id,
+                  })
+
+              # Check for cancellation
+              if activity.is_cancelled():
+                  # Clean up and exit
+                  raise asyncio.CancelledError()
+
+              await process_item(item)
+              processed += 1
+
+          return processed
+
+      # For streaming operations, heartbeat on each chunk
+      @activity.defn
+      async def process_stream(stream_url: str) -> int:
+          count = 0
+          async with stream.open(stream_url) as s:
+              async for chunk in s:
+                  activity.heartbeat(f"Processed {count} chunks")
+                  await process_chunk(chunk)
+                  count += 1
+          return count
+
+      # Caller must set heartbeat_timeout
+      await workflow.execute_activity(
+          process_large_batch,
+          items,
+          start_to_close_timeout=timedelta(hours=2),
+          heartbeat_timeout=timedelta(minutes=1),  # Required!
+      )
+    symptoms:
+      - "Activity killed after heartbeat_timeout"
+      - "Large batches fail, small ones succeed"
+      - "Retry restarts from beginning"
+      - "'Activity heartbeat timeout' error"
+    detection_pattern: 'activity\\.defn.*for.*in.*:(?!.*heartbeat)'
+    version_range: ">=1.0.0"
+
+  - id: workflow-versioning-skipped
+    summary: Code change breaks running workflows
+    severity: high
+    situation: |
+      You deploy a fix to your workflow. All running workflows start
+      failing with non-determinism errors. You can't roll back because
+      new workflows started already.
+    why: |
+      Workflow code changes affect replay. Running workflows were started
+      with old code and have history based on old behavior. New code
+      produces different decisions on replay, causing non-determinism.
+    solution: |
+      # ALWAYS use patching for workflow logic changes
+      @workflow.defn
+      class VersionedWorkflow:
+          @workflow.run
+          async def run(self, input: Input) -> Output:
+              # Version 1: Original behavior
+              # Version 2: Added validation step
+
+              if workflow.patched("v2-add-validation"):
+                  # This only runs for workflows started after patch
+                  await workflow.execute_activity(
+                      validate_input,
+                      input,
+                      start_to_close_timeout=timedelta(minutes=5),
+                  )
+
+              # Original code path
+              result = await workflow.execute_activity(
+                  process_input,
+                  input,
+                  start_to_close_timeout=timedelta(minutes=30),
+              )
+
+              if workflow.patched("v2-add-notification"):
+                  await workflow.execute_activity(
+                      send_notification,
+                      result,
+                      start_to_close_timeout=timedelta(minutes=1),
+                  )
+
+              return result
+
+      # After all old workflows complete (check via queries):
+      # 1. Replace patched() with deprecate_patch()
+      # 2. Remove old code paths
+      # 3. Eventually remove deprecate_patch() calls
+
+      # Versioning rules:
+      # - New activities: use patched()
+      # - Changed activity args: use patched()
+      # - Changed retry policy: use patched()
+      # - Changed timeouts: use patched()
+      # - ANY logic change that affects decisions: use patched()
+    symptoms:
+      - "Non-determinism errors after deploy"
+      - "Can't roll back cleanly"
+      - "Some workflows work, others fail"
+      - "Errors mention 'history mismatch'"
+    detection_pattern: 'workflow\\.defn(?!.*patched|.*deprecated)'
+    version_range: ">=1.0.0"
+
+  - id: child-workflow-orphan
+    summary: Child workflows continue after parent cancelled
+    severity: medium
+    situation: |
+      You cancel a parent workflow. The child workflows keep running,
+      doing work that's no longer needed. Resources wasted, potential
+      inconsistency.
+    why: |
+      By default, child workflow cancellation is not automatic. Parent
+      cancellation doesn't propagate to children unless you configure it.
+      Children become orphans doing useless work.
+    solution: |
+      # Set cancellation policy when starting child workflows
+      @workflow.defn
+      class ParentWorkflow:
+          @workflow.run
+          async def run(self, input: Input):
+              # Child with proper cancellation
+              child_handle = await workflow.start_child_workflow(
+                  ChildWorkflow.run,
+                  input.child_input,
+                  id=f"child-{input.id}",
+                  # Cancel child when parent is cancelled
+                  parent_close_policy=workflow.ParentClosePolicy.REQUEST_CANCEL,
+                  # Or terminate immediately
+                  # parent_close_policy=workflow.ParentClosePolicy.TERMINATE,
+              )
+
+              result = await child_handle.result()
+              return result
+
+      # In child workflow, handle cancellation gracefully
+      @workflow.defn
+      class ChildWorkflow:
+          @workflow.run
+          async def run(self, input: ChildInput):
+              try:
+                  # Normal processing
+                  result = await workflow.execute_activity(...)
+                  return result
+              except asyncio.CancelledError:
+                  # Cleanup on cancellation
+                  await workflow.execute_activity(
+                      cleanup_partial_work,
+                      input.id,
+                      start_to_close_timeout=timedelta(minutes=5),
+                  )
+                  raise  # Re-raise to complete cancellation
+    symptoms:
+      - "Child workflows run after parent cancelled"
+      - "Orphaned workflows in UI"
+      - "Wasted compute/API costs"
+      - "Inconsistent state (parent cancelled, child completed)"
+    detection_pattern: 'start_child_workflow(?!.*parent_close_policy)'
+    version_range: ">=1.0.0"
+
+  - id: task-queue-single-worker
+    summary: All workflows on one worker creates bottleneck
+    severity: medium
+    situation: |
+      You run all workflows on the "default" task queue with one worker.
+      Throughput is limited. Long activities block short workflows.
+    why: |
+      Single worker processes tasks sequentially (within concurrency limits).
+      Long-running activities consume worker slots, blocking other work.
+      No isolation between workflow types.
+    solution: |
+      # Use dedicated task queues for different workflow types
+      QUEUES = {
+          "consolidation": "memory-consolidation",
+          "extraction": "memory-extraction",
+          "realtime": "realtime-processing",
+      }
+
+      # Start workers with appropriate concurrency
+      # consolidation-worker.py
+      worker = Worker(
+          client,
+          task_queue=QUEUES["consolidation"],
+          workflows=[MemoryConsolidationWorkflow],
+          activities=[consolidate_memories, promote_memories],
+          max_concurrent_activities=5,  # Limit for resource-heavy work
+      )
+
+      # realtime-worker.py
+      worker = Worker(
+          client,
+          task_queue=QUEUES["realtime"],
+          workflows=[RealtimeProcessingWorkflow],
+          activities=[process_message],
+          max_concurrent_activities=50,  # Higher for fast activities
+      )
+
+      # Scale workers independently
+      # K8s: Different deployments per task queue
+      # Docker: Different container counts per queue
+
+      # Start workflows on appropriate queue
+      await client.start_workflow(
+          MemoryConsolidationWorkflow.run,
+          input,
+          id=workflow_id,
+          task_queue=QUEUES["consolidation"],  # Dedicated queue
+      )
+    symptoms:
+      - "Throughput lower than expected"
+      - "Fast workflows blocked by slow ones"
+      - "Can't scale specific workloads"
+      - "All workers equally loaded despite different work"
+    detection_pattern: 'task_queue.*=.*["\']default["\']'
+    version_range: ">=1.0.0"
+
+  - id: signal-handler-blocking
+    summary: Signal handler does work instead of just updating state
+    severity: medium
+    situation: |
+      Your workflow accepts signals. In the signal handler, you make
+      activity calls or do complex logic. Signals start timing out
+      or behaving strangely.
+    why: |
+      Signal handlers should be fast and non-blocking. They run during
+      workflow replay. Complex logic or activity calls in handlers
+      cause unexpected behavior and performance issues.
+    solution: |
+      # WRONG: Doing work in signal handler
+      @workflow.defn
+      class BadWorkflow:
+          @workflow.signal
+          async def update_config(self, new_config: Config):
+              # DON'T do this - makes activity call in signal
+              await workflow.execute_activity(
+                  apply_config,
+                  new_config,
+                  start_to_close_timeout=timedelta(minutes=5),
+              )
+
+      # RIGHT: Signal updates state, main loop does work
+      @workflow.defn
+      class GoodWorkflow:
+          def __init__(self):
+              self.pending_config: Optional[Config] = None
+              self.should_update = False
+
+          @workflow.signal
+          def update_config(self, new_config: Config):
+              # Just update state - fast, non-blocking
+              self.pending_config = new_config
+              self.should_update = True
+
+          @workflow.run
+          async def run(self):
+              while True:
+                  # Main loop handles the work
+                  await workflow.wait_condition(lambda: self.should_update)
+
+                  if self.pending_config:
+                      await workflow.execute_activity(
+                          apply_config,
+                          self.pending_config,
+                          start_to_close_timeout=timedelta(minutes=5),
+                      )
+                      self.pending_config = None
+                      self.should_update = False
+    symptoms:
+      - "Signals slow or timing out"
+      - "Workflow replay is slow"
+      - "Non-determinism errors related to signals"
+      - "Signal handler logic runs multiple times"
+    detection_pattern: '@workflow\\.signal[\\s\\S]*?execute_activity'
+    version_range: ">=1.0.0"

@@ -1,0 +1,275 @@
+# Observability SRE Sharp Edges
+# Production gotchas for monitoring and alerting
+
+sharp_edges:
+  - id: cardinality-explosion
+    summary: High-cardinality labels exhaust Prometheus memory
+    severity: critical
+    situation: Adding user_id or request_id as metric labels
+    why: |
+      Each unique label combination creates a new time series.
+      user_id with 1M users = 1M time series per metric.
+      Prometheus stores in memory. You'll run out, crash, lose metrics.
+    solution: |
+      1. Never use unbounded values as labels:
+         # Bad
+         REQUEST_COUNT.labels(user_id=user_id).inc()
+
+         # Good - use buckets
+         REQUEST_COUNT.labels(user_tier="premium").inc()
+
+      2. Use exemplars for trace correlation instead:
+         REQUEST_LATENCY.observe(duration, {'trace_id': trace_id})
+
+      3. Monitor cardinality:
+         # PromQL to check
+         prometheus_tsdb_head_series
+
+      4. Set limits in Prometheus config:
+         storage:
+           tsdb:
+             max_block_duration: 2h
+         global:
+           evaluation_interval: 15s
+    symptoms:
+      - Prometheus OOM crashes
+      - "too many time series" errors
+      - Slow PromQL queries
+    detection_pattern: 'labels\(.*user_id|labels\(.*request_id|labels\(.*email'
+
+  - id: histogram-bucket-mismatch
+    summary: Histogram buckets don't match latency distribution
+    severity: medium
+    situation: Default histogram buckets for your latency profile
+    why: |
+      Default buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
+      But your API is typically 200-500ms. Most requests fall in one bucket.
+      p99 calculation is inaccurate. You can't see latency distribution.
+    solution: |
+      1. Define buckets based on expected latency:
+         # For API: 50ms-2s typical
+         REQUEST_LATENCY = Histogram(
+             'http_request_duration_seconds',
+             'Request latency',
+             buckets=[0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 2.0, 5.0]
+         )
+
+      2. Add buckets around SLO threshold:
+         # SLO: 95% under 500ms
+         buckets=[0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 1.0, 2.0]
+
+      3. For batch jobs with longer durations:
+         buckets=[1, 5, 10, 30, 60, 120, 300, 600]
+
+      4. Use native histograms if supported:
+         # Prometheus 2.40+ with sparse histograms
+    symptoms:
+      - All requests in same histogram bucket
+      - p99 calculation shows wrong value
+      - Can't see latency degradation
+    detection_pattern: 'buckets=|Histogram\(|histogram_quantile'
+
+  - id: alert-storm
+    summary: Single failure triggers hundreds of alerts
+    severity: high
+    situation: Database outage triggers alerts for every service
+    why: |
+      Database goes down. API can't connect. Every service alerts.
+      20 services × 5 alert types = 100 alerts. PagerDuty goes crazy.
+      Real signal lost in noise. On-call can't find root cause.
+    solution: |
+      1. Use alert inhibition:
+         # alertmanager.yml
+         inhibit_rules:
+           - source_match:
+               alertname: DatabaseDown
+             target_match:
+               severity: warning
+             equal: ['cluster']
+
+      2. Use alert grouping:
+         route:
+           group_by: ['alertname', 'cluster']
+           group_wait: 30s
+           group_interval: 5m
+
+      3. Alert on cause, not symptoms:
+         # One alert: DatabaseConnectionFailed
+         # Not: ServiceAError, ServiceBError, ServiceCError
+
+      4. Set up dependent service mapping:
+         # If database is down, suppress downstream alerts
+    symptoms:
+      - Hundreds of alerts during single incident
+      - On-call can't find root cause
+      - Alert fatigue from storms
+    detection_pattern: 'inhibit_rules|group_by|suppress'
+
+  - id: missing-trace-propagation
+    summary: Traces break at service boundaries
+    severity: medium
+    situation: Distributed tracing across services
+    why: |
+      Service A calls Service B, but doesn't propagate trace context.
+      Traces end at Service A. You see partial picture.
+      Can't follow request through system. Debugging cross-service issues impossible.
+    solution: |
+      1. Propagate context headers:
+         # Outgoing request
+         from opentelemetry.propagate import inject
+         headers = {}
+         inject(headers)
+         response = await client.post(url, headers=headers)
+
+      2. Extract on incoming:
+         from opentelemetry.propagate import extract
+         context = extract(request.headers)
+         with tracer.start_as_current_span("handle", context=context):
+             ...
+
+      3. Use instrumented HTTP clients:
+         # HTTPXClientInstrumentor auto-propagates
+         HTTPXClientInstrumentor.instrument()
+
+      4. Verify propagation:
+         # Check for traceparent header in requests
+         traceparent: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
+    symptoms:
+      - Traces end abruptly at service boundaries
+      - Can't see full request path
+      - "orphan" spans without parents
+    detection_pattern: 'traceparent|trace-id|W3C.*trace'
+
+  - id: sampling-misses-errors
+    summary: Tail sampling drops interesting traces
+    severity: medium
+    situation: High-traffic service with aggressive sampling
+    why: |
+      You sample 1% of traces to reduce storage. But errors are rare too.
+      1% of errors sampled = you miss 99% of error traces.
+      The traces you need for debugging aren't there.
+    solution: |
+      1. Sample 100% of errors:
+         # Tail sampling processor in collector
+         processors:
+           tail_sampling:
+             policies:
+               - name: errors
+                 type: status_code
+                 status_code: {status_codes: [ERROR]}
+               - name: slow
+                 type: latency
+                 latency: {threshold_ms: 1000}
+               - name: random
+                 type: probabilistic
+                 probabilistic: {sampling_percentage: 1}
+
+      2. Or sample at collection, not recording:
+         # Record all spans, sample at export
+         sampler = ParentBased(
+             root=TraceIdRatioBased(0.01),
+             remote_parent_sampled=AlwaysOn(),
+         )
+
+      3. Use debug flags for specific users:
+         if request.headers.get("X-Debug-Trace"):
+             span.set_attribute("sampling.priority", 2)  # Force sample
+    symptoms:
+      - Can't find trace for reported error
+      - Slow request traces missing
+      - "Error happened but no trace found"
+    detection_pattern: 'sampling|sample.*rate|TraceIdRatio'
+
+  - id: slo-window-too-short
+    summary: SLO window too short, constant violations on normal variance
+    severity: medium
+    situation: Defining SLO windows
+    why: |
+      5-minute SLO window. Normal traffic variance causes brief dips.
+      Alert fires every time traffic pattern changes (lunch, night).
+      Team ignores alerts. Real violations missed.
+    solution: |
+      1. Use rolling 30-day windows for SLOs:
+         # 99.9% over 30 days = 43.8 minutes error budget
+
+      2. Use burn rate for alerting, not raw SLO:
+         # Alert when consuming budget 10x faster than sustainable
+         expr: |
+           (
+             rate(errors[5m]) / rate(requests[5m])
+           ) > (10 * 0.001)  # 10x burn rate
+
+      3. Multi-window strategy:
+         # Fast burn (1h): 14x rate, exhausts in 2 days → page
+         # Slow burn (6h): 2x rate, exhausts in 2 weeks → ticket
+
+      4. Visualize budget remaining, not current state:
+         # "30% error budget remaining" is more actionable
+    symptoms:
+      - SLO alerts during normal operations
+      - Constant alert/resolve cycles
+      - Team ignores SLO alerts
+    detection_pattern: 'slo.*window|error.*budget|burn.*rate'
+
+  - id: log-volume-cost
+    summary: Logging everything costs thousands in storage
+    severity: medium
+    situation: Verbose logging in production
+    why: |
+      Debug logging everywhere. 1KB per request × 1M requests/day = 1GB/day.
+      30 days retention = 30GB. Cloud logging charges per GB ingested.
+      $50/month becomes $500/month with verbose logging.
+    solution: |
+      1. Use log levels appropriately:
+         # DEBUG: development only
+         # INFO: key events, not every function
+         # WARNING: recoverable issues
+         # ERROR: actual failures
+
+      2. Sample debug logs:
+         if random.random() < 0.01:  # 1% sample
+             logger.debug("detailed info", ...)
+
+      3. Set retention policies:
+         # DEBUG: 1 day
+         # INFO: 7 days
+         # ERROR: 30 days
+
+      4. Filter at collection, not storage:
+         # Vector/Fluentd: drop noisy logs before shipping
+    symptoms:
+      - Unexpectedly high logging costs
+      - Log storage filling up
+      - Slow log queries
+    detection_pattern: 'logger\.debug|log_level|retention'
+
+  - id: dashboard-not-actionable
+    summary: Dashboard shows data but doesn't guide action
+    severity: low
+    situation: Creating monitoring dashboards
+    why: |
+      Dashboard shows 50 metrics. CPU, memory, disk, requests, errors...
+      Incident happens. Which graph matters? What action to take?
+      Dashboard is for display, not diagnosis.
+    solution: |
+      1. Start with SLO dashboard:
+         # Single panel: Are SLOs met? Green/Red
+         # Error budget remaining: percentage
+
+      2. Link to action:
+         # If latency SLO violated → link to latency dashboard
+         # Latency dashboard → link to runbook
+
+      3. Add context to graphs:
+         # Annotations for deployments, incidents
+         # Thresholds showing SLO boundaries
+
+      4. Layer dashboards:
+         # L0: SLO status (always visible)
+         # L1: Service health (during investigation)
+         # L2: Deep dive (debugging)
+    symptoms:
+      - Nobody looks at dashboards during incidents
+      - "What does this graph mean?"
+      - Dashboards created and forgotten
+    detection_pattern: 'dashboard|panel|grafana'

@@ -55,4 +55,4 @@ For up-to-date documentation, see:
 - `/docs/V2/SKILL_CREATION_GUIDE.md` - How to build skills
 - `/docs/TUTORIAL.md` - Getting started guide
 
-**Note:** These archived files may reference outdated skill counts, tool lists, or architecture. The system now has **245 skills** and **18 MCP tools**.
+**Note:** These archived files may reference outdated skill counts, tool lists, or architecture. The system now has **273 skills** and **18 MCP tools**.

@@ -1,0 +1,163 @@
+# Infrastructure Architect Validations
+# Automated checks for infrastructure patterns
+
+validations:
+  - id: no-resource-limits
+    name: Container Without Resource Limits
+    severity: error
+    type: regex
+    pattern:
+      - 'containers:(?!.*limits)'
+      - 'image:.*(?!.*resources:)'
+    message: "Container defined without resource limits. Can starve node resources."
+    fix_action: "Add resources.limits.cpu and resources.limits.memory"
+    applies_to:
+      - "**/kubernetes/**/*.yaml"
+      - "**/k8s/**/*.yaml"
+      - "**/manifests/**/*.yaml"
+
+  - id: latest-tag
+    name: Using Latest Image Tag
+    severity: error
+    type: regex
+    pattern:
+      - 'image:.*:latest'
+      - 'image:[^:]+\s*$'
+    message: "Using :latest or untagged image. Not reproducible, can't rollback."
+    fix_action: "Use specific version tags or SHA digests"
+    applies_to:
+      - "**/kubernetes/**/*.yaml"
+      - "**/k8s/**/*.yaml"
+      - "**/*deployment*.yaml"
+
+  - id: no-health-probes
+    name: Pod Without Health Probes
+    severity: error
+    type: regex
+    pattern:
+      - 'containers:(?!.*livenessProbe)'
+      - 'containers:(?!.*readinessProbe)'
+    message: "Container without health probes. K8s can't detect failures."
+    fix_action: "Add livenessProbe and readinessProbe"
+    applies_to:
+      - "**/kubernetes/**/*.yaml"
+      - "**/k8s/**/*.yaml"
+      - "**/*deployment*.yaml"
+
+  - id: privileged-container
+    name: Privileged Container
+    severity: critical
+    type: regex
+    pattern:
+      - 'privileged:\s*true'
+      - 'allowPrivilegeEscalation:\s*true'
+    message: "Privileged container. Container escape = full node access."
+    fix_action: "Remove privileged: true, set allowPrivilegeEscalation: false"
+    applies_to:
+      - "**/kubernetes/**/*.yaml"
+      - "**/k8s/**/*.yaml"
+
+  - id: run-as-root
+    name: Container Running as Root
+    severity: warning
+    type: regex
+    pattern:
+      - 'runAsUser:\s*0'
+      - 'runAsNonRoot:\s*false'
+    message: "Container running as root user. Increases blast radius of compromise."
+    fix_action: "Set runAsNonRoot: true, runAsUser: 1000"
+    applies_to:
+      - "**/kubernetes/**/*.yaml"
+      - "**/k8s/**/*.yaml"
+
+  - id: no-network-policy
+    name: Namespace Without Network Policy
+    severity: warning
+    type: regex
+    pattern:
+      - 'kind:\s*Namespace(?!.*NetworkPolicy)'
+    message: "Namespace without default deny NetworkPolicy. All pods can talk to all pods."
+    fix_action: "Add default-deny NetworkPolicy for the namespace"
+    applies_to:
+      - "**/kubernetes/**/*.yaml"
+      - "**/k8s/**/*.yaml"
+
+  - id: hardcoded-secrets
+    name: Secrets Hardcoded in Manifests
+    severity: critical
+    type: regex
+    pattern:
+      - 'password:\s*["\'][^"\']+["\']'
+      - 'apiKey:\s*["\'][^"\']+["\']'
+      - 'secret:\s*["\'][^"\']+["\']'
+      - 'token:\s*["\'][A-Za-z0-9+/=]{20,}["\']'
+    message: "Hardcoded secret in manifest. Will be in Git history forever."
+    fix_action: "Use Kubernetes Secrets or external secrets manager"
+    applies_to:
+      - "**/kubernetes/**/*.yaml"
+      - "**/k8s/**/*.yaml"
+      - "**/terraform/**/*.tf"
+
+  - id: terraform-no-lock
+    name: Terraform Backend Without Locking
+    severity: error
+    type: regex
+    pattern:
+      - 'backend\s+"s3"(?!.*dynamodb_table)'
+      - 'backend\s+"gcs"(?!.*lock)'
+    message: "Terraform backend without state locking. Concurrent runs will corrupt state."
+    fix_action: "Add dynamodb_table for S3 or enable locking for GCS"
+    applies_to:
+      - "**/terraform/**/*.tf"
+      - "**/*.tf"
+
+  - id: terraform-no-version
+    name: Terraform Provider Without Version Constraint
+    severity: warning
+    type: regex
+    pattern:
+      - 'provider\s+"[^"]+"\s*\{(?!.*version)'
+      - 'source\s*=\s*"[^"]+/[^"]+"(?!.*version)'
+    message: "Provider without version constraint. Updates can break infrastructure."
+    fix_action: "Add version constraint: version = \"~> 4.0\""
+    applies_to:
+      - "**/terraform/**/*.tf"
+      - "**/*.tf"
+
+  - id: no-pdb
+    name: Deployment Without PodDisruptionBudget
+    severity: info
+    type: regex
+    pattern:
+      - 'kind:\s*Deployment(?!.*PodDisruptionBudget)'
+      - 'replicas:\s*[3-9](?!.*PodDisruptionBudget)'
+    message: "Deployment without PDB. Cluster operations can take down all pods at once."
+    fix_action: "Add PodDisruptionBudget with minAvailable or maxUnavailable"
+    applies_to:
+      - "**/kubernetes/**/*.yaml"
+      - "**/k8s/**/*.yaml"
+
+  - id: no-topology-spread
+    name: No Pod Topology Constraints
+    severity: info
+    type: regex
+    pattern:
+      - 'replicas:\s*[3-9](?!.*topologySpreadConstraints)'
+      - 'kind:\s*Deployment(?!.*podAntiAffinity)'
+    message: "Multiple replicas without spread constraints. May all land on same node."
+    fix_action: "Add topologySpreadConstraints or podAntiAffinity"
+    applies_to:
+      - "**/kubernetes/**/*.yaml"
+      - "**/k8s/**/*.yaml"
+
+  - id: service-without-selector
+    name: Service Without Pod Selector
+    severity: warning
+    type: regex
+    pattern:
+      - 'kind:\s*Service(?!.*selector:)'
+    message: "Service without selector. May be intentional (ExternalName) but usually a mistake."
+    fix_action: "Add selector matching pod labels, or confirm ExternalName is intended"
+    applies_to:
+      - "**/kubernetes/**/*.yaml"
+      - "**/k8s/**/*.yaml"

@@ -281,9 +281,9 @@ Everything else - build as needed based on product direction and market.
 
 | Status | Count |
 |--------|-------|
-| ✅ Built (skill.yaml exists) | **245** |
+| ✅ Built (skill.yaml exists) | **273** |
 | 🚧 In Progress | 0 |
-| **Total Skills** | **245** |
+| **Total Skills** | **273** |
 
 ### Actual Skills by Category
 
@@ -297,7 +297,7 @@ Everything else - build as needed based on product direction and market.
 | ai | 12 | LLM architect, fine-tuning, computer vision, NLP |
 | agents | 10 | Autonomous agents, browser automation, voice, workflows |
 | mind | 10 | Debugging, decision-making, refactoring, system design |
-| data | 8 | Postgres, Redis, vectors, graphs, temporal, schema |
+| data | 10 | Postgres, Redis, vectors, graphs, temporal, schema, pg-boss, graphile-worker |
 | hardware | 6 | Embedded, FPGA, robotics, sensors, motor control |
 | frameworks | 6 | Next.js, React, Svelte, Supabase, Tailwind, TypeScript |
 | finance | 6 | Algo trading, DeFi, derivatives, portfolio optimization |
@@ -310,10 +310,11 @@ Everything else - build as needed based on product direction and market.
 | climate | 5 | Carbon, energy systems, sustainability, modeling |
 | science | 4 | Experimental design, reproducibility, statistics |
 | product | 4 | A/B testing, analytics, PM, customer success |
-| integration | 4 | Auth, email, Stripe, Vercel deployment |
+| integration | 8 | Auth, email, Stripe, Vercel, BullMQ, Inngest, Trigger.dev, QStash |
 | design | 4 | UI, UX, branding, landing pages |
 | startup | 3 | YC playbook, founder mode, burn rate |
-| **Total** | **245** | |
+| mind-v5 | 22 | Enhanced v5 skills for memory-enabled AI (postgres, api, auth, etc.) |
+| **Total** | **273** | |
 
 ### Clone for Local Use
 

@@ -1,0 +1,155 @@
+# SDK Builder Validations
+# Automated checks for SDK code quality
+
+validations:
+  - id: no-timeout
+    name: HTTP Client Without Timeout
+    severity: error
+    type: regex
+    pattern:
+      - 'httpx\.Client\(\)'
+      - 'httpx\.AsyncClient\(\)'
+      - 'requests\.get\([^,]*\)$'
+      - 'requests\.post\([^,]*\)$'
+    message: "HTTP client without timeout. Requests can hang indefinitely."
+    fix_action: "Add timeout parameter: httpx.AsyncClient(timeout=30.0)"
+    applies_to:
+      - "**/*.py"
+
+  - id: credential-in-error
+    name: Credentials in Error Message
+    severity: critical
+    type: regex
+    pattern:
+      - 'raise.*api_key'
+      - 'raise.*secret'
+      - 'raise.*password'
+      - 'raise.*token.*='
+      - 'Error.*f.*api_key'
+    message: "Potential credential leak in error message. Never include secrets."
+    fix_action: "Remove credentials from error: raise AuthError('Invalid API key')"
+    applies_to:
+      - "**/*.py"
+
+  - id: dict-return-type
+    name: Dict Return Instead of Typed Object
+    severity: warning
+    type: regex
+    pattern:
+      - '-> dict:'
+      - '-> Dict\['
+      - '-> dict\[str, Any\]'
+    message: "Returning dict loses type safety. Use Pydantic model or dataclass."
+    fix_action: "Return typed object: -> Memory instead of -> dict"
+    applies_to:
+      - "**/client*.py"
+      - "**/sdk*.py"
+
+  - id: bare-exception-sdk
+    name: Bare Exception in SDK
+    severity: error
+    type: regex
+    pattern:
+      - 'except:'
+      - 'except Exception:'
+    message: "Bare exception hides errors from SDK users. Be specific."
+    fix_action: "Catch and convert to SDK-specific errors: except httpx.HTTPError as e:"
+    applies_to:
+      - "**/*.py"
+
+  - id: new-client-per-request
+    name: New HTTP Client Per Request
+    severity: warning
+    type: regex
+    pattern:
+      - 'async with httpx\.AsyncClient'
+      - 'with requests\.Session\(\)'
+    message: "Creating new client per request. Reuse client for connection pooling."
+    fix_action: "Create client once in __init__, reuse for all requests"
+    applies_to:
+      - "**/*.py"
+
+  - id: sync-in-async-sdk
+    name: Sync HTTP in Async SDK
+    severity: error
+    type: regex
+    pattern:
+      - 'async def.*\n.*requests\.'
+      - 'async def.*\n.*urllib'
+    message: "Using sync HTTP in async function. Use httpx or aiohttp."
+    fix_action: "Replace requests with httpx.AsyncClient"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-retry-logic
+    name: No Retry Logic
+    severity: info
+    type: regex
+    pattern:
+      - 'await.*\.get\('
+      - 'await.*\.post\('
+    message: "No retry logic visible. Consider adding for transient failures."
+    fix_action: "Add retry wrapper with exponential backoff for 5xx and 429"
+    applies_to:
+      - "**/client*.py"
+      - "**/http*.py"
+
+  - id: magic-string
+    name: Magic String Instead of Enum
+    severity: warning
+    type: regex
+    pattern:
+      - '"episodic"|"semantic"|"procedural"'
+      - '"pending"|"completed"|"failed"'
+    message: "Magic string should be enum or Literal for type safety."
+    fix_action: "Use enum: MemoryType.EPISODIC or Literal['episodic', 'semantic']"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-repr
+    name: Missing __repr__ on Client
+    severity: info
+    type: regex
+    pattern:
+      - 'class.*Client.*:(?!.*__repr__)'
+    message: "Client class without __repr__. Debug output may leak credentials."
+    fix_action: "Add __repr__ that masks sensitive fields"
+    applies_to:
+      - "**/client*.py"
+
+  - id: immediate-retry
+    name: Retry Without Backoff
+    severity: warning
+    type: regex
+    pattern:
+      - 'sleep\(0\)'
+      - 'sleep\(1\)'
+      - 'for.*retry.*:(?!.*sleep)'
+    message: "Retry without backoff can overwhelm servers."
+    fix_action: "Add exponential backoff: delay = initial * (2 ** attempt)"
+    applies_to:
+      - "**/*.py"
+
+  - id: credential-logging
+    name: Potential Credential Logging
+    severity: critical
+    type: regex
+    pattern:
+      - 'logger.*headers'
+      - 'print.*headers'
+      - 'log.*Authorization'
+    message: "Logging headers may expose credentials."
+    fix_action: "Never log headers containing Authorization or API keys"
+    applies_to:
+      - "**/*.py"
+
+  - id: missing-close
+    name: Client Without Close Method
+    severity: warning
+    type: regex
+    pattern:
+      - 'class.*Client.*:(?!.*close|.*__aexit__|.*__exit__)'
+    message: "HTTP client should have close() or context manager support."
+    fix_action: "Add async def close() and __aenter__/__aexit__ methods"
+    applies_to:
+      - "**/client*.py"

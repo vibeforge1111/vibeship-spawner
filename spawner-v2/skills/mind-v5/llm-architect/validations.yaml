@@ -1,0 +1,182 @@
+# LLM Architect Validations
+# Automated checks for LLM application patterns
+
+validations:
+  - id: llm-response-no-validation
+    name: LLM Response Used Without Validation
+    severity: error
+    type: regex
+    pattern:
+      - 'response\.content\[0\]\.text(?!.*try|except|validate|parse)'
+      - 'completion\.choices\[0\]\.message\.content(?!.*json\.loads|validate)'
+      - 'await.*complete\(.*\)(?!.*try|validate|schema)'
+    message: "LLM response used directly without validation. LLMs return unpredictable text."
+    fix_action: "Wrap in try/except, validate against schema, or use structured output"
+    applies_to:
+      - "*.py"
+      - "*.ts"
+      - "*.js"
+
+  - id: json-parse-llm-output
+    name: JSON Parse on Raw LLM Output
+    severity: error
+    type: regex
+    pattern:
+      - 'json\.loads\(.*response.*content'
+      - 'JSON\.parse\(.*response.*content'
+      - 'json\.loads\(.*completion'
+    message: "Parsing JSON directly from LLM output. LLMs often add markdown or malformed JSON."
+    fix_action: "Use tool use/function calling for structured output, or implement JSON repair"
+    applies_to:
+      - "*.py"
+      - "*.ts"
+      - "*.js"
+
+  - id: missing-token-count-check
+    name: No Token Count Before LLM Call
+    severity: warning
+    type: regex
+    pattern:
+      - 'messages\.create\((?!.*count_tokens|token.*limit|truncate)'
+      - 'chat\.completions\.create\((?!.*tiktoken|count|max_context)'
+    message: "LLM call without token count check. Input may silently truncate."
+    fix_action: "Count tokens before sending, ensure input fits in context window"
+    applies_to:
+      - "*.py"
+      - "*.ts"
+
+  - id: vector-search-no-threshold
+    name: Vector Search Without Relevance Threshold
+    severity: warning
+    type: regex
+    pattern:
+      - '\.search\(.*limit.*\)(?!.*threshold|score|filter)'
+      - 'similarity_search\(.*k=(?!.*score_threshold)'
+    message: "Vector search without relevance threshold. Low-quality results may cause hallucinations."
+    fix_action: "Add minimum score threshold to filter irrelevant results"
+    applies_to:
+      - "*.py"
+      - "*.ts"
+      - "*.js"
+
+  - id: missing-reranking-stage
+    name: RAG Without Reranking
+    severity: warning
+    type: regex
+    pattern:
+      - 'search\(.*\)[\s\S]{0,100}messages\.create(?!.*rerank|cross.?encoder)'
+      - 'retrieve.*\n.*llm(?!.*rerank)'
+    message: "RAG pipeline without reranking stage. First-stage retrieval has low precision."
+    fix_action: "Add cross-encoder reranking before passing results to LLM"
+    applies_to:
+      - "*.py"
+      - "**/rag/*.py"
+
+  - id: prompts-hardcoded-inline
+    name: Prompts Hardcoded Inline
+    severity: warning
+    type: regex
+    pattern:
+      - 'system.*=.*"You are(?!.*PROMPT|prompt|template)'
+      - "system.*=.*'You are(?!.*PROMPT|prompt|template)"
+      - 'messages\.create\([\s\S]*?content.*=.*"(?!{)[\w\s]{50,}'
+    message: "System prompt hardcoded inline. Prompts should be versioned like code."
+    fix_action: "Store prompts in separate files or constants, version control them"
+    applies_to:
+      - "*.py"
+      - "*.ts"
+
+  - id: agent-no-max-iterations
+    name: Agent Loop Without Iteration Limit
+    severity: error
+    type: regex
+    pattern:
+      - 'while True[\s\S]*?await.*(?:complete|tool|agent)'
+      - 'while.*not.*done[\s\S]*?await.*complete(?!.*max_iter|counter|limit)'
+    message: "Agent loop without max iterations. Can loop infinitely consuming tokens."
+    fix_action: "Add max_iterations counter and break condition"
+    applies_to:
+      - "*.py"
+      - "*.ts"
+      - "**/agents/*.py"
+
+  - id: no-rate-limit-handling
+    name: LLM Calls Without Rate Limit Handling
+    severity: warning
+    type: regex
+    pattern:
+      - 'await.*messages\.create(?![\s\S]{0,200}(?:retry|RateLimit|429|tenacity))'
+      - 'await.*completions\.create(?![\s\S]{0,200}(?:retry|RateLimit|429))'
+    message: "LLM API calls without rate limit handling. Production will fail under load."
+    fix_action: "Add retry with exponential backoff for rate limit errors"
+    applies_to:
+      - "*.py"
+      - "*.ts"
+
+  - id: streaming-json-parse
+    name: Parsing JSON from Streamed Response
+    severity: error
+    type: regex
+    pattern:
+      - 'stream.*=.*True[\s\S]{0,500}json\.loads'
+      - 'stream.*:.*true[\s\S]{0,500}JSON\.parse'
+    message: "Parsing JSON from streamed response. Chunks don't respect JSON boundaries."
+    fix_action: "Buffer complete response before parsing, or use streaming tool use"
+    applies_to:
+      - "*.py"
+      - "*.ts"
+      - "*.js"
+
+  - id: context-no-delimiter
+    name: Retrieved Content Without Delimiter
+    severity: warning
+    type: regex
+    pattern:
+      - 'documents.*\+.*query(?!.*<|>|\[|\]|delimiter|DOCUMENT)'
+      - 'context.*=.*docs.*\+.*question(?!.*tag|mark|separate)'
+    message: "Retrieved content mixed with query without clear delimiters. Risk of prompt injection."
+    fix_action: "Use XML tags or clear delimiters to separate untrusted content"
+    applies_to:
+      - "*.py"
+      - "*.ts"
+
+  - id: embedding-model-not-tracked
+    name: Embedding Without Model Tracking
+    severity: info
+    type: regex
+    pattern:
+      - 'embed\(.*\)[\s\S]{0,100}(?:insert|upsert|store)(?!.*model)'
+      - 'embeddings\.create[\s\S]{0,100}vector_store(?!.*model.*version)'
+    message: "Storing embeddings without tracking model version. Model changes break search."
+    fix_action: "Store embedding model name and version with each vector"
+    applies_to:
+      - "*.py"
+      - "*.ts"
+
+  - id: tool-schema-no-examples
+    name: Tool Definition Without Usage Examples
+    severity: info
+    type: regex
+    pattern:
+      - 'tools.*=.*\[.*"input_schema"(?![\s\S]{0,500}(?:example|Example|EXAMPLE))'
+      - '"name".*"description".*"input_schema"(?![\s\S]{0,300}example)'
+    message: "Tool definition without usage examples. LLM learns patterns from examples."
+    fix_action: "Add concrete examples in tool description showing proper usage"
+    applies_to:
+      - "*.py"
+      - "*.ts"
+      - "*.js"
+
+  - id: chunking-no-overlap
+    name: Text Chunking Without Overlap
+    severity: info
+    type: regex
+    pattern:
+      - 'chunk_size.*=.*\d+(?![\s\S]{0,100}overlap)'
+      - 'RecursiveCharacterTextSplitter\((?!.*chunk_overlap)'
+      - 'split.*chunk.*(?!.*overlap)'
+    message: "Chunking without overlap. Context at chunk boundaries is lost."
+    fix_action: "Add 10-20% chunk overlap to preserve context across boundaries"
+    applies_to:
+      - "*.py"
+      - "*.ts"

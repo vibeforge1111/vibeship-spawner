@@ -1,0 +1,299 @@
+# Python Craftsman Sharp Edges
+# Production gotchas for Python development
+
+sharp_edges:
+  - id: async-blocking-call
+    summary: Blocking call in async function freezes entire event loop
+    severity: critical
+    situation: Using sync library in async code
+    why: |
+      Called requests.get() in async function. Single request takes 2 seconds.
+      During those 2 seconds, ZERO other requests can be processed.
+      Event loop is frozen. 1000 concurrent users all waiting for one request.
+    solution: |
+      1. Use async libraries instead of sync:
+         # Bad
+         import requests
+         async def fetch():
+             return requests.get(url)  # BLOCKS!
+
+         # Good
+         import httpx
+         async def fetch():
+             async with httpx.AsyncClient() as client:
+                 return await client.get(url)
+
+      2. If you must use sync, run in executor:
+         import asyncio
+         async def fetch():
+             loop = asyncio.get_event_loop()
+             return await loop.run_in_executor(
+                 None, requests.get, url
+             )
+
+      3. Common blocking calls to avoid:
+         - requests (use httpx or aiohttp)
+         - time.sleep (use asyncio.sleep)
+         - open() for files (use aiofiles)
+         - psycopg2 (use asyncpg)
+    symptoms:
+      - "Why is async code slow?"
+      - High latency under load
+      - Event loop blocked warnings
+    detection_pattern: 'requests\.|time\.sleep|psycopg2|open\('
+
+  - id: pydantic-v1-vs-v2
+    summary: Pydantic V1 patterns fail silently in V2
+    severity: high
+    situation: Mixing Pydantic V1 and V2 patterns
+    why: |
+      V2 changed almost everything. class Config became model_config.
+      Validators changed syntax. Optional handling changed.
+      V1 code might run but behave differently. Silent bugs.
+    solution: |
+      1. Key V1 → V2 migrations:
+         # V1
+         class MyModel(BaseModel):
+             class Config:
+                 orm_mode = True
+
+         # V2
+         class MyModel(BaseModel):
+             model_config = ConfigDict(from_attributes=True)
+
+      2. Validators:
+         # V1
+         @validator("name")
+         def validate_name(cls, v):
+             return v
+
+         # V2
+         @field_validator("name")
+         @classmethod
+         def validate_name(cls, v: str) -> str:
+             return v
+
+      3. Optional fields:
+         # V1: Optional[str] defaults to None
+         # V2: Optional[str] requires explicit default
+         name: str | None = None  # Explicit!
+
+      4. Check Pydantic version in requirements:
+         pydantic>=2.0.0,<3.0.0
+    symptoms:
+      - ValidationError on previously working code
+      - Config options ignored
+      - Type coercion not happening
+    detection_pattern: 'class Config:|@validator|orm_mode'
+
+  - id: type-narrowing-failure
+    summary: mypy doesn't understand your type narrowing
+    severity: medium
+    situation: Complex conditionals that narrow types
+    why: |
+      You know value can't be None after the check. mypy doesn't.
+      Adding assert or typing tricks makes code verbose.
+      Ignoring with # type: ignore defeats the purpose.
+    solution: |
+      1. Use TypeGuard for custom narrowing:
+         from typing import TypeGuard
+
+         def is_valid_memory(obj: Any) -> TypeGuard[Memory]:
+             return (
+                 isinstance(obj, dict)
+                 and "id" in obj
+                 and "content" in obj
+             )
+
+         # mypy now knows x is Memory
+         if is_valid_memory(x):
+             process_memory(x)
+
+      2. Use assert for simple cases (but not in production):
+         value = get_optional_value()
+         assert value is not None  # mypy understands
+         use_value(value)
+
+      3. Use typing.cast as last resort:
+         from typing import cast
+         value = cast(str, maybe_string)  # You're promising mypy
+
+      4. Redesign to avoid optionals when possible:
+         # Instead of returning Optional
+         def get_user(id: str) -> User | None:
+
+         # Return Result type
+         def get_user(id: str) -> Result[User, NotFoundError]:
+    symptoms:
+      - "Incompatible types" on code that works
+      - Excessive type: ignore comments
+      - Type narrowing not working
+    detection_pattern: 'type:\s*ignore|cast\(|assert.*is not None'
+
+  - id: circular-import
+    summary: Circular imports cause ImportError at runtime
+    severity: high
+    situation: Module A imports B, B imports A
+    why: |
+      Python executes imports at import time. If A needs B to define
+      itself, but B needs A, you get ImportError or undefined names.
+      Works sometimes depending on import order. Fails in production.
+    solution: |
+      1. Use TYPE_CHECKING for type hints only:
+         from typing import TYPE_CHECKING
+
+         if TYPE_CHECKING:
+             from .memory import Memory  # Only for type checker
+
+         def process(memory: "Memory") -> None:  # String annotation
+             ...
+
+      2. Restructure with interface module:
+         # core/interfaces.py - no imports from other modules
+         class MemoryInterface(Protocol):
+             id: str
+             content: str
+
+         # core/memory.py
+         from .interfaces import MemoryInterface
+
+      3. Move shared code to separate module:
+         # A imports shared, B imports shared
+         # Neither imports each other
+
+      4. Delay imports to function level (last resort):
+         def process():
+             from .memory import Memory  # Import when needed
+    symptoms:
+      - ImportError on startup
+      - "cannot import name"
+      - Import works in REPL, fails in app
+    detection_pattern: 'from \. import|from \.\. import'
+
+  - id: async-generator-not-closed
+    summary: Async generator left open leaks resources
+    severity: medium
+    situation: Using async for without proper cleanup
+    why: |
+      Async generators hold resources until closed. If you break out
+      of the loop or exception occurs, generator isn't closed.
+      Connections, file handles left open. Memory leaks in long-running apps.
+    solution: |
+      1. Use aclosing context manager:
+         from contextlib import aclosing
+
+         async with aclosing(stream_data()) as stream:
+             async for item in stream:
+                 if done:
+                     break  # Generator properly closed
+
+      2. Always handle cleanup in generator:
+         async def stream_data():
+             conn = await connect()
+             try:
+                 async for row in conn.cursor():
+                     yield row
+             finally:
+                 await conn.close()  # Cleanup on any exit
+
+      3. For simple cases, collect to list:
+         items = [item async for item in stream_data()]
+         # Generator completes normally
+
+      4. Use aclose() explicitly:
+         gen = stream_data()
+         try:
+             async for item in gen:
+                 ...
+         finally:
+             await gen.aclose()
+    symptoms:
+      - Connection pool exhausted
+      - Memory slowly growing
+      - "Too many open files"
+    detection_pattern: 'async for.*break|async def.*yield'
+
+  - id: dependency-hell
+    summary: Dependencies conflict, install fails or breaks
+    severity: high
+    situation: Complex dependency tree with version conflicts
+    why: |
+      Package A needs X>=2.0. Package B needs X<2.0. Pip picks one,
+      something breaks at runtime. Or worse, picks wrong version silently.
+      Works on your machine with cached packages. Fails in fresh install.
+    solution: |
+      1. Use lock files religiously:
+         # With uv
+         uv lock
+         uv sync
+
+         # With poetry
+         poetry lock
+         poetry install
+
+      2. Minimize direct dependencies:
+         # Don't add package for one function
+         # Check if stdlib has what you need
+         # Prefer packages with few dependencies
+
+      3. Pin to exact versions in lock, ranges in pyproject:
+         # pyproject.toml - flexible for users
+         dependencies = ["httpx>=0.25.0,<1.0.0"]
+
+         # uv.lock - exact for CI
+         httpx==0.25.2
+
+      4. Use dependency groups:
+         [project.optional-dependencies]
+         dev = ["pytest", "mypy"]  # Dev only
+         docs = ["mkdocs"]  # Docs only
+
+      5. Check for conflicts before adding:
+         uv pip compile pyproject.toml --dry-run
+    symptoms:
+      - "Could not find a version that satisfies"
+      - Different behavior on different machines
+      - Fresh install fails, existing works
+    detection_pattern: 'requirements\.txt|pip install'
+
+  - id: mutable-default-argument
+    summary: Mutable default argument shared between calls
+    severity: medium
+    situation: Using [] or {} as default argument
+    why: |
+      Default arguments evaluated once at function definition.
+      Same list/dict object reused across all calls. Append to "default"
+      list, next call sees your changes. Classic Python gotcha.
+    solution: |
+      1. Use None and create inside function:
+         # Bad
+         def add_item(items: list = []):
+             items.append("new")
+             return items
+
+         # Good
+         def add_item(items: list | None = None):
+             if items is None:
+                 items = []
+             items.append("new")
+             return items
+
+      2. Use field default_factory in dataclasses:
+         from dataclasses import dataclass, field
+
+         @dataclass
+         class Memory:
+             tags: list[str] = field(default_factory=list)
+
+      3. Use Field(default_factory=...) in Pydantic:
+         class Memory(BaseModel):
+             metadata: dict[str, str] = Field(default_factory=dict)
+
+      4. Ruff catches this: Enable B006 rule
+         [tool.ruff.lint]
+         select = ["B"]  # Bugbear includes B006
+    symptoms:
+      - State "leaking" between function calls
+      - Tests passing individually, failing together
+      - "Default" values changing mysteriously
+    detection_pattern: 'def.*=\s*\[\]|def.*=\s*\{\}'

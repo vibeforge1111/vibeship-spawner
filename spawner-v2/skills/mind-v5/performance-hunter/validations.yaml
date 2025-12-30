@@ -1,0 +1,157 @@
+# Performance Hunter Validations
+# Automated checks for performance patterns
+
+validations:
+  - id: sync-in-async
+    name: Synchronous I/O in Async Function
+    severity: error
+    type: regex
+    pattern:
+      - 'async def.*:.*requests\\.get'
+      - 'async def.*:.*open\\(.*\\)\\.read'
+      - 'async def.*:.*time\\.sleep'
+      - 'async def[^:]+:[^$]*(?<!await )psycopg2\\.'
+    message: "Synchronous I/O in async function. Blocks event loop."
+    fix_action: "Use async version: aiohttp, aiofiles, asyncio.sleep"
+    applies_to:
+      - "**/*.py"
+
+  - id: n-plus-one-loop
+    name: Database Query in Loop
+    severity: error
+    type: regex
+    pattern:
+      - 'for.*in.*:.*await.*db\\.'
+      - 'for.*in.*:.*await.*fetch'
+      - 'for.*in.*:.*await.*execute'
+      - '\\[await.*db.*for.*in'
+    message: "Database query inside loop. Likely N+1 pattern."
+    fix_action: "Batch queries with WHERE IN or use DataLoader pattern"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-connection-pool
+    name: Creating Connections Without Pool
+    severity: warning
+    type: regex
+    pattern:
+      - 'asyncpg\\.connect\\('
+      - 'psycopg2\\.connect\\('
+      - 'redis\\.Redis\\((?!.*connection_pool)'
+    message: "Creating individual connections instead of using pool."
+    fix_action: "Use connection pool: asyncpg.create_pool(), ConnectionPool"
+    applies_to:
+      - "**/*.py"
+
+  - id: cache-no-ttl
+    name: Cache Without TTL
+    severity: warning
+    type: regex
+    pattern:
+      - 'cache\\.set\\([^)]*\\)(?!.*ttl|.*ex=|.*expire)'
+      - 'redis\\.set\\([^)]*\\)(?!.*ex=|.*px=)'
+    message: "Cache set without TTL. Data may become stale indefinitely."
+    fix_action: "Add TTL: cache.set(key, value, ttl=3600)"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-timeout
+    name: External Call Without Timeout
+    severity: warning
+    type: regex
+    pattern:
+      - 'aiohttp.*get\\([^)]*\\)(?!.*timeout)'
+      - 'httpx.*get\\([^)]*\\)(?!.*timeout)'
+      - 'requests\\.get\\([^)]*\\)(?!.*timeout)'
+    message: "External HTTP call without timeout. May hang indefinitely."
+    fix_action: "Add timeout: session.get(url, timeout=30)"
+    applies_to:
+      - "**/*.py"
+
+  - id: unbounded-memory
+    name: Unbounded Collection Growth
+    severity: warning
+    type: regex
+    pattern:
+      - 'results\\.append.*while True'
+      - 'cache\\[.*\\].*=(?!.*if len)'
+      - 'list\\.append.*for.*in.*yield'
+    message: "Collection may grow unbounded. Potential memory leak."
+    fix_action: "Add size limits or use generators for large data"
+    applies_to:
+      - "**/*.py"
+
+  - id: embed-no-cache
+    name: Embedding Without Caching
+    severity: info
+    type: regex
+    pattern:
+      - 'embed\\(.*\\)(?!.*cache)'
+      - 'embedder\\.embed(?!.*cached)'
+    message: "Embedding without cache check. Same content re-embedded."
+    fix_action: "Cache embeddings by content hash"
+    applies_to:
+      - "**/embedding/**/*.py"
+      - "**/retrieval/**/*.py"
+
+  - id: no-batch-processing
+    name: Sequential Processing Without Batching
+    severity: info
+    type: regex
+    pattern:
+      - 'for.*in.*:.*await.*embed'
+      - 'for.*in.*:.*await.*llm'
+      - 'for.*in.*:.*await.*api'
+    message: "Sequential API calls. Consider batching for efficiency."
+    fix_action: "Use asyncio.gather() or batch APIs"
+    applies_to:
+      - "**/*.py"
+
+  - id: query-no-limit
+    name: Database Query Without LIMIT
+    severity: info
+    type: regex
+    pattern:
+      - 'SELECT.*FROM(?!.*LIMIT|.*TOP|.*FETCH)'
+      - 'fetch\\([^)]*\\)(?!.*limit)'
+    message: "Query without LIMIT. May return unbounded results."
+    fix_action: "Add LIMIT or implement pagination"
+    applies_to:
+      - "**/*.py"
+
+  - id: log-in-hot-path
+    name: Expensive Logging in Hot Path
+    severity: info
+    type: regex
+    pattern:
+      - 'for.*:.*logger\\.debug'
+      - 'while.*:.*logger\\.info'
+      - 'logger.*json\\.dumps'
+    message: "Logging in tight loop. String formatting adds overhead."
+    fix_action: "Use lazy logging: logger.debug('%s', value)"
+    applies_to:
+      - "**/*.py"
+
+  - id: no-index-hint
+    name: Query On Unindexed Column
+    severity: info
+    type: regex
+    pattern:
+      - 'WHERE.*content.*='
+      - 'WHERE.*description.*LIKE'
+    message: "Query on potentially unindexed text column. May be slow."
+    fix_action: "Verify index exists or use full-text search"
+    applies_to:
+      - "**/*.py"
+
+  - id: json-in-loop
+    name: JSON Serialization in Loop
+    severity: info
+    type: regex
+    pattern:
+      - 'for.*:.*json\\.dumps'
+      - 'for.*:.*json\\.loads'
+    message: "JSON serialization in loop. Consider batch processing."
+    fix_action: "Serialize outside loop or use streaming JSON parser"
+    applies_to:
+      - "**/*.py"

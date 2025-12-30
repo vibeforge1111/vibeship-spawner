@@ -1,0 +1,172 @@
+# Observability SRE Validations
+# Automated checks for observability patterns
+
+validations:
+  - id: high-cardinality-label
+    name: High Cardinality Metric Label
+    severity: error
+    type: regex
+    pattern:
+      - 'labels\(.*user_id'
+      - 'labels\(.*request_id'
+      - 'labels\(.*email'
+      - 'labels\(.*session_id'
+      - '\.labels\(.*uuid'
+    message: "High-cardinality label will exhaust Prometheus memory."
+    fix_action: "Use exemplars or aggregate by tier/category instead"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.go"
+
+  - id: log-without-context
+    name: Log Statement Without Request Context
+    severity: warning
+    type: regex
+    pattern:
+      - 'logger\.(info|warning|error)\(["\'][^"\']+["\'](?!.*request_id)'
+      - 'console\.(log|error)\(["\'][^"\']+["\']\)'
+      - 'log\.(Info|Warn|Error)\(["\'][^"\']+["\'](?!.*traceId)'
+    message: "Log without request context. Can't correlate during debugging."
+    fix_action: "Include request_id or trace_id: logger.info('msg', request_id=req_id)"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.go"
+
+  - id: alert-no-runbook
+    name: Alert Without Runbook Link
+    severity: warning
+    type: regex
+    pattern:
+      - 'alert:(?!.*runbook)'
+      - 'alertname:(?!.*documentation)'
+    message: "Alert without runbook link. On-call won't know what to do."
+    fix_action: "Add runbook_url annotation to alert"
+    applies_to:
+      - "**/alerts/*.yaml"
+      - "**/prometheus/*.yaml"
+      - "**/*rules*.yaml"
+
+  - id: histogram-default-buckets
+    name: Histogram With Default Buckets
+    severity: info
+    type: regex
+    pattern:
+      - 'Histogram\([^)]+\)(?!.*buckets)'
+      - 'prometheus\.NewHistogram(?!.*Buckets)'
+    message: "Histogram using default buckets. May not match your latency profile."
+    fix_action: "Define custom buckets matching expected latency distribution"
+    applies_to:
+      - "**/*.py"
+      - "**/*.go"
+
+  - id: missing-error-label
+    name: Error Metric Without Error Type
+    severity: info
+    type: regex
+    pattern:
+      - 'error.*counter(?!.*type|.*code)'
+      - 'errors_total(?!.*error_type)'
+    message: "Error metric without error type label. Can't distinguish error types."
+    fix_action: "Add error_type or error_code label"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.go"
+
+  - id: no-trace-propagation
+    name: HTTP Call Without Trace Propagation
+    severity: warning
+    type: regex
+    pattern:
+      - 'requests\.get\((?!.*headers.*traceparent)'
+      - 'httpx\..*get\((?!.*headers)'
+      - 'fetch\((?!.*headers.*trace)'
+    message: "HTTP call may not propagate trace context."
+    fix_action: "Use instrumented HTTP client or inject trace headers"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+
+  - id: debug-log-production
+    name: Debug Logging in Production Code
+    severity: info
+    type: regex
+    pattern:
+      - 'logger\.debug\([^)]+\)(?!.*if.*DEBUG)'
+      - 'console\.debug\('
+      - 'log\.Debug\('
+    message: "Debug logging in production. May cause high log volume."
+    fix_action: "Guard with log level check or use sampling"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.go"
+
+  - id: metric-no-help
+    name: Metric Without Help Text
+    severity: info
+    type: regex
+    pattern:
+      - "Counter\\(['\"][^'\"]+['\"]\\s*,\\s*\\)"
+      - "Gauge\\(['\"][^'\"]+['\"]\\s*,\\s*\\)"
+      - "Histogram\\(['\"][^'\"]+['\"]\\s*,\\s*\\)"
+    message: "Metric without help text. Description helps with understanding."
+    fix_action: "Add description: Counter('name', 'description')"
+    applies_to:
+      - "**/*.py"
+
+  - id: slo-no-budget
+    name: SLO Without Error Budget Calculation
+    severity: warning
+    type: regex
+    pattern:
+      - 'slo.*target(?!.*budget)'
+      - 'availability.*99(?!.*error.*budget)'
+    message: "SLO defined without error budget tracking."
+    fix_action: "Add error budget calculation and alerting"
+    applies_to:
+      - "**/slo/*.yaml"
+      - "**/prometheus/*.yaml"
+
+  - id: alert-too-sensitive
+    name: Alert Without For Duration
+    severity: warning
+    type: regex
+    pattern:
+      - 'alert:(?!.*for:)'
+      - 'expr:.*[^}]$(?!.*for)'
+    message: "Alert without 'for' duration. May fire on brief spikes."
+    fix_action: "Add 'for: 5m' to require sustained condition"
+    applies_to:
+      - "**/alerts/*.yaml"
+      - "**/prometheus/*.yaml"
+
+  - id: catch-all-logging
+    name: Catching Exception Without Logging
+    severity: warning
+    type: regex
+    pattern:
+      - 'except:(?!.*log)'
+      - 'catch\s*\(.*\)\s*\{(?!.*log|.*console)'
+    message: "Exception caught without logging. Failures will be silent."
+    fix_action: "Log exception with error level and stack trace"
+    applies_to:
+      - "**/*.py"
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: latency-not-histogram
+    name: Latency Tracked as Gauge
+    severity: warning
+    type: regex
+    pattern:
+      - 'latency.*Gauge'
+      - 'duration.*Gauge'
+      - 'response_time.*Gauge'
+    message: "Latency tracked as Gauge loses distribution info."
+    fix_action: "Use Histogram for latency to enable percentile calculations"
+    applies_to:
+      - "**/*.py"
+      - "**/*.go"

@@ -1,0 +1,159 @@
+# Migration Specialist Validations
+# Automated checks for migration patterns
+
+validations:
+  - id: non-concurrent-index
+    name: Index Creation Without CONCURRENTLY
+    severity: error
+    type: regex
+    pattern:
+      - 'CREATE INDEX(?!\s+CONCURRENTLY)'
+      - 'CREATE UNIQUE INDEX(?!\s+CONCURRENTLY)'
+    message: "CREATE INDEX without CONCURRENTLY locks table writes."
+    fix_action: "Use CREATE INDEX CONCURRENTLY for online index creation"
+    applies_to:
+      - "**/*.sql"
+      - "**/migrations/**/*"
+
+  - id: direct-column-drop
+    name: Dropping Column Without Expand Phase
+    severity: error
+    type: regex
+    pattern:
+      - 'DROP COLUMN(?!.*--.*expand)'
+      - 'ALTER TABLE.*DROP.*COLUMN'
+    message: "Dropping column immediately may break running code."
+    fix_action: "Use expand-contract: stop using column in code first, then drop"
+    applies_to:
+      - "**/*.sql"
+      - "**/migrations/**/*"
+
+  - id: not-null-without-default
+    name: Adding NOT NULL Without Default Value
+    severity: warning
+    type: regex
+    pattern:
+      - 'ADD COLUMN.*NOT NULL(?!.*DEFAULT)'
+      - 'ALTER.*SET NOT NULL(?!.*DEFAULT)'
+    message: "Adding NOT NULL without default fails if rows exist."
+    fix_action: "Add default value or backfill before adding constraint"
+    applies_to:
+      - "**/*.sql"
+      - "**/migrations/**/*"
+
+  - id: alter-column-type
+    name: Changing Column Type Directly
+    severity: warning
+    type: regex
+    pattern:
+      - 'ALTER COLUMN.*TYPE'
+      - 'MODIFY COLUMN.*TO'
+    message: "Changing column type may lock table and lose data."
+    fix_action: "Use expand-contract: add new column, migrate, drop old"
+    applies_to:
+      - "**/*.sql"
+      - "**/migrations/**/*"
+
+  - id: no-rollback-migration
+    name: Migration Without Rollback
+    severity: warning
+    type: regex
+    pattern:
+      - 'def upgrade(?!.*def downgrade)'
+      - 'exports\.up(?!.*exports\.down)'
+    message: "Migration without rollback function."
+    fix_action: "Add downgrade/down function for rollback capability"
+    applies_to:
+      - "**/migrations/**/*.py"
+      - "**/migrations/**/*.js"
+
+  - id: unbounded-update
+    name: Update Without LIMIT or Batching
+    severity: warning
+    type: regex
+    pattern:
+      - 'UPDATE.*SET(?!.*LIMIT|.*WHERE.*IN.*SELECT.*LIMIT)'
+      - 'UPDATE.*WHERE(?!.*LIMIT)'
+    message: "Unbounded UPDATE may take too long on large tables."
+    fix_action: "Use batched updates with LIMIT or chunk by ID range"
+    applies_to:
+      - "**/*.sql"
+      - "**/migrations/**/*"
+
+  - id: fk-without-not-valid
+    name: Foreign Key Without NOT VALID
+    severity: warning
+    type: regex
+    pattern:
+      - 'ADD CONSTRAINT.*FOREIGN KEY(?!.*NOT VALID)'
+      - 'REFERENCES.*\)(?!.*NOT VALID)'
+    message: "Adding FK validates all rows, holding lock."
+    fix_action: "Add with NOT VALID, then VALIDATE CONSTRAINT separately"
+    applies_to:
+      - "**/*.sql"
+      - "**/migrations/**/*"
+
+  - id: cascade-delete
+    name: Cascade Delete on Large Table
+    severity: info
+    type: regex
+    pattern:
+      - 'ON DELETE CASCADE'
+      - 'ON UPDATE CASCADE'
+    message: "Cascade operations can affect many rows unexpectedly."
+    fix_action: "Consider soft deletes or application-level cascades for control"
+    applies_to:
+      - "**/*.sql"
+      - "**/migrations/**/*"
+
+  - id: truncate-in-migration
+    name: TRUNCATE in Migration
+    severity: error
+    type: regex
+    pattern:
+      - 'TRUNCATE TABLE'
+      - 'TRUNCATE.*CASCADE'
+    message: "TRUNCATE in migration loses data permanently."
+    fix_action: "Use DELETE with conditions, or ensure this is intended"
+    applies_to:
+      - "**/*.sql"
+      - "**/migrations/**/*"
+
+  - id: rename-table-direct
+    name: Renaming Table Directly
+    severity: warning
+    type: regex
+    pattern:
+      - 'ALTER TABLE.*RENAME TO'
+      - 'RENAME TABLE'
+    message: "Renaming table breaks running code referencing old name."
+    fix_action: "Use view as alias, or expand-contract pattern"
+    applies_to:
+      - "**/*.sql"
+      - "**/migrations/**/*"
+
+  - id: no-transaction-migration
+    name: Migration Without Transaction
+    severity: info
+    type: regex
+    pattern:
+      - 'BEGIN(?!.*COMMIT|.*ROLLBACK)'
+      - 'START TRANSACTION(?!.*COMMIT)'
+    message: "Migration may not be transactional. Partial failure possible."
+    fix_action: "Ensure migration runs in transaction or is idempotent"
+    applies_to:
+      - "**/*.sql"
+      - "**/migrations/**/*"
+
+  - id: hardcoded-table-size-assumption
+    name: Hardcoded Batch Size in Migration
+    severity: info
+    type: regex
+    pattern:
+      - 'LIMIT\s+\d{5,}'
+      - 'batch_size\s*=\s*\d{5,}'
+    message: "Large batch sizes may cause memory or timeout issues."
+    fix_action: "Test batch size on production-scale data"
+    applies_to:
+      - "**/*.sql"
+      - "**/migrations/**/*"

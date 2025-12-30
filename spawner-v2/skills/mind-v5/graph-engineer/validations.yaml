@@ -1,0 +1,160 @@
+# Graph Engineer Validations
+# Automated checks for knowledge graph patterns
+
+validations:
+  - id: cypher-no-index
+    name: Cypher Query Without Index Hint
+    severity: warning
+    type: regex
+    pattern:
+      - 'MATCH\\s*\\(\\w+\\)\\s*WHERE'
+      - 'MATCH\\s*\\(\\w+:\\w+\\)\\s*WHERE\\s*\\w+\\.\\w+\\s*='
+    message: "Query may not use index. Consider using indexed property in pattern match."
+    fix_action: "Move filter to pattern: MATCH (n:Label {prop: $val}) instead of WHERE"
+    applies_to:
+      - "*.py"
+      - "*.cypher"
+      - "**/graph/*.py"
+
+  - id: cypher-unbounded-traversal
+    name: Unbounded Path Traversal
+    severity: error
+    type: regex
+    pattern:
+      - '\\[:\\w+\\*\\]'
+      - '\\[r\\*\\]'
+      - '-\\[\\*\\]-'
+    message: "Unbounded path traversal (*) is exponential. Add depth limit like *1..5"
+    fix_action: "Change [*] to [*1..5] or appropriate bounded range"
+    applies_to:
+      - "*.py"
+      - "*.cypher"
+
+  - id: cypher-cartesian-product
+    name: Potential Cartesian Product in Query
+    severity: warning
+    type: regex
+    pattern:
+      - 'MATCH\\s*\\([^)]+\\)\\s*\\n\\s*MATCH\\s*\\([^)]+\\)(?!.*WITH)'
+    message: "Multiple MATCH without WITH may create Cartesian product. Use connected patterns."
+    fix_action: "Connect patterns or use WITH between MATCH clauses"
+    applies_to:
+      - "*.py"
+      - "*.cypher"
+
+  - id: graph-edge-no-temporal
+    name: Edge Creation Without Temporal Validity
+    severity: warning
+    type: regex
+    pattern:
+      - 'CREATE.*\\[r:.*\\{(?!.*valid_from)'
+      - 'MERGE.*\\[r:.*\\{(?!.*valid_from)'
+    message: "Edge created without valid_from. Add temporal validity for history tracking."
+    fix_action: "Add valid_from: datetime() and valid_until: null to edge properties"
+    applies_to:
+      - "*.py"
+      - "*.cypher"
+      - "**/graph/*.py"
+
+  - id: graph-query-not-parameterized
+    name: Cypher Query String Concatenation
+    severity: error
+    type: regex
+    pattern:
+      - 'f".*MATCH.*\\{.*\\}"'
+      - "f'.*MATCH.*\\{.*\\}'"
+      - '\\.format\\(.*MATCH'
+    message: "String formatting in Cypher query. Use parameters to enable plan caching."
+    fix_action: "Use query parameters: query($param) instead of f-string"
+    applies_to:
+      - "*.py"
+
+  - id: graph-node-delete
+    name: Direct Node Deletion
+    severity: warning
+    type: regex
+    pattern:
+      - 'DELETE\\s+\\w+\\s*$'
+      - 'DETACH DELETE'
+    message: "Deleting nodes loses history. Consider setting deleted_at timestamp instead."
+    fix_action: "Use soft delete: SET n.deleted_at = datetime() instead of DELETE"
+    applies_to:
+      - "*.py"
+      - "*.cypher"
+
+  - id: graph-merge-without-on-create
+    name: MERGE Without ON CREATE/ON MATCH
+    severity: info
+    type: regex
+    pattern:
+      - 'MERGE\\s*\\([^)]+\\)(?!.*ON\\s*(CREATE|MATCH))'
+    message: "MERGE without ON CREATE/ON MATCH. Consider specifying behavior for each case."
+    fix_action: "Add ON CREATE SET and ON MATCH SET clauses for clarity"
+    applies_to:
+      - "*.py"
+      - "*.cypher"
+
+  - id: graph-embedding-property
+    name: Large Embedding in Graph Property
+    severity: warning
+    type: regex
+    pattern:
+      - 'embedding:\\s*\\$'
+      - 'embedding:\\s*\\[.*\\]'
+      - '\\.embedding\\s*='
+    message: "Storing embeddings in graph properties is slow. Use external vector store."
+    fix_action: "Store embedding_id reference, keep vectors in Qdrant/pgvector"
+    applies_to:
+      - "*.py"
+      - "**/graph/*.py"
+
+  - id: graph-no-index-creation
+    name: Missing Index for Frequent Query Pattern
+    severity: info
+    type: regex
+    pattern:
+      - 'WHERE\\s+\\w+\\.user_id\\s*=(?!.*CREATE INDEX)'
+      - 'WHERE\\s+\\w+\\.\\w+_id\\s*=(?!.*CREATE INDEX)'
+    message: "Query filters on ID field. Ensure index exists for this property."
+    fix_action: "CREATE INDEX idx FOR (n:Label) ON (n.property)"
+    applies_to:
+      - "*.py"
+      - "*.cypher"
+
+  - id: graph-causal-no-cycle-check
+    name: Causal Edge Without Cycle Detection
+    severity: warning
+    type: regex
+    pattern:
+      - 'CREATE.*:CAUSES(?!.*cycle|.*acyclic)'
+      - 'MERGE.*:CAUSES(?!.*cycle|.*acyclic)'
+    message: "Creating causal edge without cycle check. Causal graphs must be DAGs."
+    fix_action: "Validate that adding edge doesn't create cycle before insertion"
+    applies_to:
+      - "*.py"
+      - "**/graph/*.py"
+
+  - id: graph-count-all-edges
+    name: Counting All Edges on Node
+    severity: warning
+    type: regex
+    pattern:
+      - 'MATCH.*-\\[r\\]-.*RETURN count\\(r\\)'
+      - 'SIZE\\(\\(.*\\)-\\[\\]-'
+    message: "Counting all edges on a node can be slow for god nodes. Consider caching count."
+    fix_action: "Store edge count as node property, update incrementally"
+    applies_to:
+      - "*.py"
+      - "*.cypher"
+
+  - id: graph-optional-match-unbounded
+    name: OPTIONAL MATCH Without Limit
+    severity: info
+    type: regex
+    pattern:
+      - 'OPTIONAL MATCH(?!.*LIMIT)'
+    message: "OPTIONAL MATCH without LIMIT can return many rows. Consider adding LIMIT."
+    fix_action: "Add LIMIT or use collect() with slice to bound results"
+    applies_to:
+      - "*.py"
+      - "*.cypher"

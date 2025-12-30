@@ -1,0 +1,185 @@
+# API Designer Validations
+# Automated checks for API design patterns
+
+validations:
+  - id: verb-in-url
+    name: Verb in URL Path
+    severity: warning
+    type: regex
+    pattern:
+      - '/create[A-Z]'
+      - '/get[A-Z]'
+      - '/update[A-Z]'
+      - '/delete[A-Z]'
+      - '/fetch[A-Z]'
+      - 'path.*=.*/(create|get|update|delete|fetch)'
+    message: "URL contains verb. REST uses HTTP methods as verbs."
+    fix_action: "Use POST /resources, GET /resources/{id}, etc."
+    applies_to:
+      - "**/*.ts"
+      - "**/*.py"
+      - "**/*.yaml"
+      - "**/*.json"
+
+  - id: inconsistent-id-format
+    name: Inconsistent ID Format
+    severity: info
+    type: regex
+    pattern:
+      - 'id:\s*number'
+      - 'id:\s*integer'
+      - '_id:\s*number'
+    message: "Using numeric IDs. Consider UUIDs or prefixed IDs for better security."
+    fix_action: "Use UUID or prefixed string IDs (e.g., 'mem_abc123')"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.py"
+      - "**/schema*.yaml"
+      - "**/openapi*.yaml"
+
+  - id: no-error-code
+    name: Error Response Without Code
+    severity: warning
+    type: regex
+    pattern:
+      - 'error.*message(?!.*code)'
+      - "throw new Error\\([\"'][^\"']+[\"']\\)"
+      - "raise.*Exception\\([\"'][^\"']+[\"']\\)"
+    message: "Error response without machine-readable code. Clients can't programmatically handle."
+    fix_action: "Add error code: {error: {code: 'NOT_FOUND', message: '...'}}"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.py"
+      - "**/*.js"
+
+  - id: unbounded-list
+    name: List Endpoint Without Pagination
+    severity: warning
+    type: regex
+    pattern:
+      - 'findMany\(\)(?!.*take)'
+      - 'find\(\{\}\)(?!.*limit)'
+      - 'SELECT.*FROM(?!.*LIMIT)'
+    message: "List query without limit. Response can grow unbounded."
+    fix_action: "Add pagination: findMany({take: 100}), add limit parameter"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.py"
+      - "**/*.sql"
+
+  - id: missing-rate-limit-headers
+    name: Rate Limiting Without Headers
+    severity: info
+    type: regex
+    pattern:
+      - 'status.*429(?!.*X-RateLimit)'
+      - 'Too Many Requests(?!.*Retry-After)'
+      - 'rate.*limit(?!.*header)'
+    message: "Rate limiting without standard headers. Clients can't implement backoff."
+    fix_action: "Return X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After headers"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.py"
+      - "**/*.js"
+
+  - id: datetime-no-timezone
+    name: Datetime Without Timezone
+    severity: warning
+    type: regex
+    pattern:
+      - 'datetime\.now\(\)(?!.*utc)'
+      - 'new Date\(\)\.toISOString\(\)(?!.*Z)'
+      - 'strftime\([^)]+\)(?!.*%z|%Z)'
+    message: "Datetime without explicit timezone. Causes interpretation issues."
+    fix_action: "Use UTC with timezone: datetime.now(timezone.utc), include 'Z' suffix"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.py"
+      - "**/*.js"
+
+  - id: no-request-id
+    name: Response Without Request ID
+    severity: info
+    type: regex
+    pattern:
+      - 'return.*json\((?!.*request_id|requestId)'
+      - 'Response\((?!.*x-request-id)'
+    message: "Response without request ID. Difficult to correlate logs with client issues."
+    fix_action: "Include request_id in response meta or X-Request-Id header"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.py"
+      - "**/*.js"
+
+  - id: graphql-no-depth-limit
+    name: GraphQL Without Depth Limit
+    severity: warning
+    type: regex
+    pattern:
+      - 'createSchema\((?!.*depthLimit)'
+      - 'ApolloServer\((?!.*validationRules)'
+      - 'graphql.*server(?!.*depth)'
+    message: "GraphQL without depth limit. Vulnerable to nested query attacks."
+    fix_action: "Add depth limit: depthLimit(5) in validation rules"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: expose-internal-error
+    name: Internal Error Details Exposed
+    severity: error
+    type: regex
+    pattern:
+      - 'catch.*return.*err\.message'
+      - 'catch.*response.*error.*stack'
+      - '500.*Internal.*Server.*Error.*\+.*err'
+    message: "Internal error details exposed to client. Security and privacy risk."
+    fix_action: "Return generic message, log details server-side"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.py"
+      - "**/*.js"
+
+  - id: no-content-type
+    name: Response Without Content-Type
+    severity: warning
+    type: regex
+    pattern:
+      - 'return.*json\((?!.*content.*type)'
+      - 'Response\((?!.*headers.*content-type)'
+    message: "Response without explicit Content-Type. Clients may misinterpret."
+    fix_action: "Set Content-Type: application/json or appropriate type"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.py"
+      - "**/*.js"
+
+  - id: breaking-enum-change
+    name: Removing or Renaming Enum Value
+    severity: error
+    type: regex
+    pattern:
+      - '// removed:.*enum'
+      - '# deprecated.*status'
+      - 'enum.*\{[^}]*//.*removed'
+    message: "Removing enum value is breaking change. Clients parsing old values will fail."
+    fix_action: "Keep old values, mark deprecated, add new values"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.py"
+      - "**/schema*.yaml"
+
+  - id: offset-pagination-large-table
+    name: Offset Pagination on Large Table
+    severity: info
+    type: regex
+    pattern:
+      - 'OFFSET\s+\$'
+      - 'offset:\s*number'
+      - '\.skip\(offset\)'
+    message: "Offset pagination inefficient for large tables. Consider cursor-based."
+    fix_action: "Use cursor-based pagination with keyset (WHERE id > :last_id)"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.py"
+      - "**/*.sql"
