@@ -29,8 +29,12 @@ Spawner is an MCP server that transforms Claude into a specialized product-build
 
 ### First-Time Setup
 
-If `~/.spawner/skills` doesn't exist, clone the skills repo:
+**Quick install (recommended):**
+```bash
+npx spawner-skills install
+```
 
+**Alternative (manual clone):**
 ```bash
 # Windows
 git clone https://github.com/vibeforge1111/vibeship-spawner-skills %USERPROFILE%\.spawner\skills
@@ -64,7 +68,8 @@ Read: ~/.spawner/skills/development/backend/sharp-edges.yaml
 ### Updating Skills
 
 ```bash
-cd ~/.spawner/skills && git pull
+npx spawner-skills update
+# or: cd ~/.spawner/skills && git pull
 ```
 
 See full instructions: https://github.com/vibeforge1111/vibeship-spawner-skills
@@ -99,11 +104,7 @@ vibeship-spawner/
 ├── catalogs/                # Agent and MCP catalogs
 ├── docs/
 │   ├── V2/                  # Active documentation
-│   └── archive/             # Historical docs
-├── archive/                 # Archived code
-│   ├── workers-v1/          # Original monolithic worker
-│   ├── v1-skills/           # V1 markdown skills
-│   └── v1-scripts/          # V1 skill finder script
+│   └── ARCHIVED/            # Historical docs (reference only)
 ├── mcp-registry.json        # MCP tool/template registry
 └── web/                     # Web UI (SvelteKit)
 ```

@@ -165,8 +165,8 @@ function inferCategoryFromSkillId(skillId: string): string {
  * Input schema for spawner_skills
  */
 export const skillsInputSchema = z.object({
-  action: z.enum(['search', 'list', 'get', 'squad', 'exists', 'get_files', 'health', 'sync', 'local']).optional().describe(
-    'Action: search (default), list, get, squad, exists, get_files, health, sync, local (get local paths for Claude to read)'
+  action: z.enum(['search', 'list', 'get', 'squad', 'pack', 'exists', 'get_files', 'health', 'sync', 'local']).optional().describe(
+    'Action: search (default), list, get, squad, pack (load skill pack from registry), exists, get_files, health, sync, local (get local paths for Claude to read)'
   ),
   query: z.string().optional().describe(
     'Search query - matches names, descriptions, tags, triggers'
@@ -182,6 +182,9 @@ export const skillsInputSchema = z.object({
   ),
   squad: z.string().optional().describe(
     'Squad name for squad action (e.g., "auth-complete", "payments-complete")'
+  ),
+  pack: z.string().optional().describe(
+    'Skill pack name for pack action (e.g., "essentials", "agents", "marketing-ai", "enterprise", "finance", "mind", "specialized")'
   ),
   source: z.enum(['all', 'v1', 'v2']).optional().describe(
     'Filter by source: all (default), v1 (markdown), v2 (yaml)'
@@ -205,8 +208,8 @@ export const skillsToolDefinition = {
     properties: {
       action: {
         type: 'string',
-        enum: ['search', 'list', 'get', 'squad', 'exists', 'get_files', 'health', 'sync', 'local'],
-        description: 'Action: search (default), list, get, squad, exists, get_files, health, sync, local (RECOMMENDED: get local paths for Claude to read with Read tool)',
+        enum: ['search', 'list', 'get', 'squad', 'pack', 'exists', 'get_files', 'health', 'sync', 'local'],
+        description: 'Action: search (default), list, get, squad, pack (load skill pack), exists, get_files, health, sync, local (RECOMMENDED: get local paths for Claude to read with Read tool)',
       },
       query: {
         type: 'string',
@@ -228,6 +231,10 @@ export const skillsToolDefinition = {
       squad: {
         type: 'string',
         description: 'Squad name (e.g., "auth-complete", "payments-complete", "crud-feature")',
+      },
+      pack: {
+        type: 'string',
+        description: 'Skill pack name from registry.yaml (e.g., "essentials", "agents", "marketing-ai", "enterprise", "finance", "mind", "specialized", "complete")',
       },
       source: {
         type: 'string',
@@ -339,6 +346,7 @@ export async function executeSkills(
     tag,
     layer,
     squad,
+    pack,
     source = 'all',
     context,
     previous_skill,
@@ -351,6 +359,8 @@ export async function executeSkills(
       action = 'get';
     } else if (squad) {
       action = 'squad';
+    } else if (pack) {
+      action = 'pack';
     } else {
       action = 'search';  // Default
     }
@@ -383,6 +393,12 @@ export async function executeSkills(
         throw new Error('squad is required for squad action');
       }
       return handleSquad(v1Registry, squad);
+
+    case 'pack':
+      if (!pack) {
+        return handlePackList(env);
+      }
+      return handlePack(env, pack, v2Skills);
 
     case 'exists':
       if (!name) {
@@ -690,6 +706,264 @@ function handleSquad(
       ...squad,
     },
     _instruction: buildSquadInstruction(squadName, squad),
+  };
+}
+
+/**
+ * Skill Pack definitions from registry.yaml
+ * These are curated collections of skills for specific use cases
+ */
+const SKILL_PACKS: Record<string, {
+  name: string;
+  description: string;
+  skills: string[];
+  auto_install?: boolean;
+}> = {
+  essentials: {
+    name: 'Spawner Essentials',
+    description: 'Core skills for building apps. Auto-installed on first use.',
+    auto_install: true,
+    skills: [
+      'development/backend', 'development/frontend', 'development/api-designer',
+      'development/auth-specialist', 'development/devops', 'development/security',
+      'development/code-reviewer', 'development/test-architect', 'development/docs-engineer',
+      'data/postgres-wizard', 'ai/llm-architect',
+      'frameworks/nextjs-app-router', 'frameworks/react-patterns', 'frameworks/supabase-backend',
+      'frameworks/tailwind-ui', 'frameworks/typescript-strict',
+      'design/ui-design', 'design/ux-design', 'product/product-management',
+    ],
+  },
+  data: {
+    name: 'Data & Databases',
+    description: 'Database, vector search, graphs, and data engineering.',
+    skills: [
+      'data/postgres-wizard', 'data/redis-specialist', 'data/vector-specialist',
+      'data/data-engineer', 'data/graph-engineer', 'data/temporal-craftsman',
+    ],
+  },
+  ai: {
+    name: 'AI & Machine Learning',
+    description: 'LLM architecture, ML systems, embeddings, causal inference.',
+    skills: [
+      'ai/llm-architect', 'ai/ml-memory', 'ai/causal-scientist',
+      'ai/art-consistency', 'development/ai-product',
+    ],
+  },
+  startup: {
+    name: 'Startup & Founder',
+    description: 'YC playbook, fundraising, founder skills.',
+    skills: [
+      'startup/yc-playbook', 'startup/founder-mode', 'startup/burn-rate-management',
+      'communications/investor-updates', 'strategy/competitive-analysis', 'strategy/market-research',
+    ],
+  },
+  marketing: {
+    name: 'Marketing & Growth',
+    description: 'Content, SEO, ads, growth strategies.',
+    skills: [
+      'marketing/marketing-fundamentals', 'marketing/content-strategy', 'marketing/seo',
+      'marketing/copywriting', 'marketing/blog-writing', 'marketing/ad-copywriting',
+      'marketing/viral-marketing', 'marketing/brand-storytelling',
+    ],
+  },
+  'marketing-ai': {
+    name: 'AI Marketing Suite',
+    description: 'AI-powered content creation, video, audio, and creative tools.',
+    skills: [
+      'marketing/ai-creative-director', 'marketing/ai-image-generation', 'marketing/ai-video-generation',
+      'marketing/ai-audio-production', 'marketing/ai-content-analytics', 'marketing/ai-brand-kit',
+      'marketing/ai-localization', 'marketing/digital-humans', 'marketing/voiceover',
+      'marketing/video-production', 'marketing/motion-graphics', 'marketing/prompt-engineering-creative',
+      'ai/art-consistency',
+    ],
+  },
+  agents: {
+    name: 'AI Agents',
+    description: 'Build autonomous agents, multi-agent systems, and automation.',
+    skills: [
+      'agents/autonomous-agents', 'agents/multi-agent-orchestration', 'agents/agent-memory-systems',
+      'agents/agent-tool-builder', 'agents/browser-automation', 'agents/computer-use-agents',
+      'agents/voice-agents', 'agents/workflow-automation', 'agents/zapier-make-patterns',
+      'agents/agent-evaluation',
+    ],
+  },
+  enterprise: {
+    name: 'Enterprise',
+    description: 'Compliance, governance, and enterprise architecture.',
+    skills: [
+      'enterprise/compliance-automation', 'enterprise/data-governance', 'enterprise/disaster-recovery',
+      'enterprise/enterprise-architecture', 'enterprise/integration-patterns', 'enterprise/multi-tenancy',
+      'legal/gdpr-privacy', 'legal/sox-compliance',
+    ],
+  },
+  finance: {
+    name: 'Finance & Fintech',
+    description: 'Algorithmic trading, DeFi, and financial modeling.',
+    skills: [
+      'finance/algorithmic-trading', 'finance/blockchain-defi', 'finance/derivatives-pricing',
+      'finance/fintech-integration', 'finance/portfolio-optimization', 'finance/risk-modeling',
+    ],
+  },
+  specialized: {
+    name: 'Specialized Domains',
+    description: 'Biotech, space, climate, hardware, and simulation.',
+    skills: [
+      'biotech/genomics-pipelines', 'biotech/drug-discovery-informatics',
+      'space/orbital-mechanics', 'space/mission-planning',
+      'climate/carbon-accounting', 'climate/sustainability-metrics',
+      'hardware/embedded-systems', 'hardware/ros2-robotics',
+      'simulation/monte-carlo', 'simulation/digital-twin',
+    ],
+  },
+  mind: {
+    name: 'Mind & Thinking',
+    description: 'Debugging, decision-making, and system design thinking.',
+    skills: [
+      'mind/debugging-master', 'mind/decision-maker', 'mind/system-designer',
+      'mind/refactoring-guide', 'mind/performance-thinker', 'mind/tech-debt-manager',
+      'mind/test-strategist', 'mind/code-quality', 'mind/incident-responder',
+      'mind/technical-writer',
+    ],
+  },
+  devops: {
+    name: 'DevOps & Infrastructure',
+    description: 'CI/CD, infrastructure, observability, chaos engineering.',
+    skills: [
+      'development/devops', 'development/infra-architect', 'development/observability-sre',
+      'development/chaos-engineer', 'development/performance-hunter',
+    ],
+  },
+  frameworks: {
+    name: 'Frameworks',
+    description: 'React, Next.js, Svelte, and more.',
+    skills: [
+      'frameworks/nextjs-app-router', 'frameworks/react-patterns', 'frameworks/supabase-backend',
+      'frameworks/sveltekit', 'frameworks/tailwind-ui', 'frameworks/typescript-strict',
+    ],
+  },
+  design: {
+    name: 'Design & Branding',
+    description: 'UI design, UX research, branding, landing pages.',
+    skills: [
+      'design/ui-design', 'design/ux-design', 'design/branding', 'design/landing-page-design',
+    ],
+  },
+};
+
+/**
+ * Handle pack action - load a curated skill pack
+ */
+async function handlePack(
+  env: Env,
+  packName: string,
+  v2Skills: V2Skill[]
+): Promise<SkillsOutput> {
+  const pack = SKILL_PACKS[packName];
+  if (!pack) {
+    const available = Object.keys(SKILL_PACKS);
+    throw new Error(`Pack "${packName}" not found. Available: ${available.join(', ')}`);
+  }
+
+  // Build local paths for all skills in the pack
+  const skillPaths: Array<{
+    id: string;
+    local_path: string;
+    files: { skill: string; sharp_edges: string; collaboration: string };
+  }> = [];
+
+  for (const skillPath of pack.skills) {
+    // skillPath is like "development/backend" - extract category and skill id
+    const parts = skillPath.split('/');
+    const skillId = parts[parts.length - 1];
+    const category = parts.slice(0, -1).join('/');
+    const localPath = `${LOCAL_SKILLS_PATH}/${skillPath}`;
+
+    skillPaths.push({
+      id: skillId,
+      local_path: localPath,
+      files: {
+        skill: `${localPath}/skill.yaml`,
+        sharp_edges: `${localPath}/sharp-edges.yaml`,
+        collaboration: `${localPath}/collaboration.yaml`,
+      },
+    });
+  }
+
+  // Build read commands for the first few skills
+  const readCommands = skillPaths.slice(0, 5).map(s => `Read: ${s.files.skill}`);
+
+  const lines: string[] = [
+    `# Skill Pack: ${pack.name}`,
+    '',
+    pack.description,
+    '',
+    `**Skills in this pack:** ${pack.skills.length}`,
+    pack.auto_install ? '**Auto-install:** Yes (essentials pack)' : '',
+    '',
+    '## Local Paths',
+    '',
+    'Use the Read tool with these paths to load skills:',
+    '',
+  ];
+
+  for (const skill of skillPaths.slice(0, 10)) {
+    lines.push(`- \`${skill.files.skill}\``);
+  }
+
+  if (skillPaths.length > 10) {
+    lines.push(`  ... and ${skillPaths.length - 10} more skills`);
+  }
+
+  lines.push('');
+  lines.push('## Quick Start');
+  lines.push('');
+  lines.push('```');
+  for (const cmd of readCommands) {
+    lines.push(cmd);
+  }
+  lines.push('```');
+  lines.push('');
+  lines.push('---');
+  lines.push('');
+  lines.push(`**Install skills locally:** \`git clone ${LOCAL_SKILLS_REPO} ~/.spawner/skills\``);
+
+  return {
+    local_hint: `Pack "${packName}" contains ${pack.skills.length} skills. Load with Read tool.`,
+    _instruction: lines.filter(Boolean).join('\n'),
+  };
+}
+
+/**
+ * Handle pack list action - show all available packs
+ */
+async function handlePackList(env: Env): Promise<SkillsOutput> {
+  const lines: string[] = [
+    '# Skill Packs',
+    '',
+    'Curated collections of skills for specific use cases.',
+    '',
+    '| Pack | Skills | Description |',
+    '|------|--------|-------------|',
+  ];
+
+  for (const [id, pack] of Object.entries(SKILL_PACKS)) {
+    const autoTag = pack.auto_install ? ' (auto)' : '';
+    lines.push(`| \`${id}\`${autoTag} | ${pack.skills.length} | ${pack.description} |`);
+  }
+
+  lines.push('');
+  lines.push('## Usage');
+  lines.push('');
+  lines.push('```');
+  lines.push('spawner_skills({ action: "pack", pack: "essentials" })');
+  lines.push('spawner_skills({ action: "pack", pack: "agents" })');
+  lines.push('spawner_skills({ action: "pack", pack: "marketing-ai" })');
+  lines.push('```');
+  lines.push('');
+  lines.push('Each pack returns local file paths for the Read tool.');
+
+  return {
+    _instruction: lines.join('\n'),
   };
 }
 
@@ -1375,18 +1649,24 @@ function buildNotFoundLocalInstruction(name: string, similar: string[]): string 
     lines.push('');
   }
 
-  lines.push('## Setup Local Skills');
+  lines.push('## Install Skills');
   lines.push('');
   lines.push('Skills should be installed locally at `~/.spawner/skills/`.');
   lines.push('');
-  lines.push('**First-time setup:**');
+  lines.push('**Quick install (recommended):**');
+  lines.push('```bash');
+  lines.push('npx spawner-skills install');
+  lines.push('```');
+  lines.push('');
+  lines.push('**Alternative (manual clone):**');
   lines.push('```bash');
   lines.push(`git clone ${LOCAL_SKILLS_REPO} ~/.spawner/skills`);
   lines.push('```');
   lines.push('');
   lines.push('**Update existing:**');
   lines.push('```bash');
-  lines.push('cd ~/.spawner/skills && git pull');
+  lines.push('npx spawner-skills update');
+  lines.push('# or: cd ~/.spawner/skills && git pull');
   lines.push('```');
   lines.push('');
   lines.push('After installation, try again with:');
