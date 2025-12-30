@@ -31,7 +31,7 @@ Spawner is an MCP server that transforms Claude into a specialized product-build
 
 **Quick install (recommended):**
 ```bash
-npx spawner-skills install
+npx vibeship-spawner-skills install
 ```
 
 **Alternative (manual clone):**
@@ -68,7 +68,7 @@ Read: ~/.spawner/skills/development/backend/sharp-edges.yaml
 ### Updating Skills
 
 ```bash
-npx spawner-skills update
+npx vibeship-spawner-skills update
 # or: cd ~/.spawner/skills && git pull
 ```
 

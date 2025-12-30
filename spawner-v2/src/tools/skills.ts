@@ -1656,7 +1656,7 @@ function buildNotFoundLocalInstruction(name: string, similar: string[]): string 
   lines.push('');
   lines.push('**Quick install (recommended):**');
   lines.push('```bash');
-  lines.push('npx spawner-skills install');
+  lines.push('npx vibeship-spawner-skills install');
   lines.push('```');
   lines.push('');
   lines.push('**Alternative (manual clone):**');
@@ -1666,7 +1666,7 @@ function buildNotFoundLocalInstruction(name: string, similar: string[]): string 
   lines.push('');
   lines.push('**Update existing:**');
   lines.push('```bash');
-  lines.push('npx spawner-skills update');
+  lines.push('npx vibeship-spawner-skills update');
   lines.push('# or: cd ~/.spawner/skills && git pull');
   lines.push('```');
   lines.push('');
