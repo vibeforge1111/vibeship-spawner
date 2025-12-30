@@ -421,7 +421,7 @@ wrangler deploy
 
 ## License
 
-MIT
+Apache 2.0
 
 ---
 
