@@ -20,7 +20,7 @@ Spawner is an MCP server that transforms Claude into a specialized product-build
 2. **Guardrails** - Actually catches code issues (security, patterns, production readiness)
 3. **Sharp Edges** - Knows gotchas Claude doesn't know (versioned, situation-matched)
 4. **Escape Hatches** - Detects when you're stuck and offers alternatives
-5. **Skill System** - 35+ specialist skills in YAML format
+5. **Skill System** - 245 specialist skills across 24 categories in YAML format
 6. **Skill Level Detection** - Adapts guidance to user experience level
 
 ## Local Skills (Zero-Cost)
@@ -88,12 +88,12 @@ vibeship-spawner/
 │   ├── src/
 │   │   ├── index.ts         # Main worker, MCP routing
 │   │   ├── types.ts         # Type definitions
-│   │   ├── tools/           # MCP tool implementations (14 tools)
+│   │   ├── tools/           # MCP tool implementations (18 tools)
 │   │   ├── validation/      # Code checking (regex + AST)
 │   │   ├── skills/          # Skill loading and matching
 │   │   ├── telemetry/       # Event tracking
 │   │   └── db/              # D1 database operations
-│   ├── skills/              # 35+ Skills (YAML format)
+│   ├── skills/              # 245 Skills (YAML format)
 │   └── migrations/          # D1 schema
 ├── benchmarks/              # Skill benchmark system
 ├── catalogs/                # Agent and MCP catalogs
@@ -113,7 +113,7 @@ vibeship-spawner/
 ### Skill System
 
 **Primary: Local Skills** - Loaded from `~/.spawner/skills/` (see Local Skills section above)
-- 136 skills across 11 categories
+- 245 skills across 24 categories
 - Free, fast, works offline
 - Clone once, read locally forever
 
@@ -123,7 +123,7 @@ vibeship-spawner/
   - `sharp-edges.yaml` - Gotchas with detection patterns
   - `validations.yaml` - Automated code checks
   - `collaboration.yaml` - Prerequisites, delegation triggers
-- Categories: development, data, ai, design, frameworks, marketing, startup, strategy, communications, integration, product
+- Categories: development (57), marketing (33), strategy (15), integrations (14), ai-ml (12), ai (12), agents (10), mind (10), data (8), hardware (6), frameworks (6), finance (6), enterprise (6), biotech (6), space (5), simulation (5), legal (5), communications (5), climate (5), science (4), product (4), integration (4), design (4), startup (3)
 
 **Internal (KV)** - Used by MCP server for validations and sharp edge queries only
 
@@ -179,10 +179,11 @@ Machine-runnable checks that catch issues:
 
 Detected categories: framework, database, auth, payments, styling, ai, web3, testing, api, deployment
 
-## MCP Tools (14 total)
+## MCP Tools (18 total)
 
 | Tool | Purpose |
 |------|---------|
+| `spawner_orchestrate` | Main entry point - auto-detects context and routes |
 | `spawner_plan` | Plan and create projects (discover → recommend → create) |
 | `spawner_analyze` | Analyze existing codebase for stack/skill recommendations |
 | `spawner_load` | Load project context and skills for session |
@@ -197,6 +198,8 @@ Detected categories: framework, database, auth, payments, styling, ai, web3, tes
 | `spawner_skill_new` | Create world-class skills with 4 YAML files |
 | `spawner_skill_score` | Score skill against 100-point quality rubric |
 | `spawner_skill_upgrade` | Enhance existing skills with more depth |
+| `spawner_setup` | Check configuration, get setup guides, verify requirements |
+| `spawner_emit` | Agent notification system for events |
 
 **Skill Creation Pipeline:** `brainstorm?` → `research` → `new` → `score`
 

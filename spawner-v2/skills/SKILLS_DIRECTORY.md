@@ -277,32 +277,49 @@ Everything else - build as needed based on product direction and market.
 
 ## Stats
 
+> **Note:** The conceptual layers above represent the vision. The actual skill inventory below shows what's built.
+
 | Status | Count |
 |--------|-------|
-| ✅ Built | 16 |
+| ✅ Built (skill.yaml exists) | **245** |
 | 🚧 In Progress | 0 |
-| 📋 Planned | 83 |
-| **Total** | **99** |
+| **Total Skills** | **245** |
 
-### By Layer
+### Actual Skills by Category
 
-| Layer | Built | Planned | Total |
-|-------|-------|---------|-------|
-| Paul Graham 📜 | 0 | 5 | 5 |
-| YC Hypergrowth 🚀 | 0 | 13 | 13 |
-| Strategic | 3 | 4 | 7 |
-| Design | 2 | 2 | 4 |
-| Tactical | 3 | 6 | 9 |
-| Operations | 0 | 4 | 4 |
-| Growth | 0 | 6 | 6 |
-| Core | 5 | 3 | 8 |
-| Integration | 2 | 8 | 10 |
-| Pattern | 3 | 6 | 9 |
-| Competitive Moat 🏰 | 0 | 5 | 5 |
-| Crisis & Edge Cases 🔥 | 0 | 5 | 5 |
-| AI-Native 🤖 | 0 | 6 | 6 |
-| Web3 ⛓️ | 0 | 5 | 5 |
-| **Total** | **16** | **83** | **99** |
+| Category | Count | Description |
+|----------|-------|-------------|
+| development | 57 | Backend, frontend, devops, security, testing, architecture |
+| marketing | 33 | AI video, copywriting, SEO, content, creative |
+| strategy | 15 | Product strategy, growth, founder skills, positioning |
+| integrations | 14 | AWS, GCP, Stripe, Discord, Slack, Twilio, etc. |
+| ai-ml | 12 | Code generation, image editing, safety, multimodal |
+| ai | 12 | LLM architect, fine-tuning, computer vision, NLP |
+| agents | 10 | Autonomous agents, browser automation, voice, workflows |
+| mind | 10 | Debugging, decision-making, refactoring, system design |
+| data | 8 | Postgres, Redis, vectors, graphs, temporal, schema |
+| hardware | 6 | Embedded, FPGA, robotics, sensors, motor control |
+| frameworks | 6 | Next.js, React, Svelte, Supabase, Tailwind, TypeScript |
+| finance | 6 | Algo trading, DeFi, derivatives, portfolio optimization |
+| enterprise | 6 | Compliance, governance, disaster recovery, architecture |
+| biotech | 6 | Genomics, drug discovery, lab automation, proteins |
+| space | 5 | Orbital mechanics, mission planning, ground stations |
+| simulation | 5 | Monte Carlo, digital twin, physics, agent-based |
+| legal | 5 | Contracts, GDPR, patents, export control, SOX |
+| communications | 5 | Dev comms, crisis, stakeholder, team, community |
+| climate | 5 | Carbon, energy systems, sustainability, modeling |
+| science | 4 | Experimental design, reproducibility, statistics |
+| product | 4 | A/B testing, analytics, PM, customer success |
+| integration | 4 | Auth, email, Stripe, Vercel deployment |
+| design | 4 | UI, UX, branding, landing pages |
+| startup | 3 | YC playbook, founder mode, burn rate |
+| **Total** | **245** | |
+
+### Clone for Local Use
+
+```bash
+git clone https://github.com/vibeforge1111/vibeship-spawner-skills ~/.spawner/skills
+```
 
 ---
 
@@ -322,4 +339,4 @@ When updating a skill:
 
 ---
 
-*Last updated: 2025-12-19*
+*Last updated: 2025-12-30*
