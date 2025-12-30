@@ -415,7 +415,6 @@ wrangler deploy
 | [Architecture](docs/ARCHITECTURE.md) | How it works |
 | [Skill Creation](docs/SKILL_CREATION_GUIDE.md) | Building skills |
 | [Skill Sync](docs/SKILL_SYNC.md) | Keeping repos aligned |
-| [Security](docs/SECURITY.md) | Security guidelines |
 
 ---
 

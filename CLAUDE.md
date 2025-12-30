@@ -11,7 +11,6 @@
 | `docs/SKILL_CREATION_GUIDE.md` | How to create world-class skills |
 | `docs/SKILL_SPEC_V2.md` | Technical skill YAML format |
 | `docs/SKILL_SYNC.md` | Keeping skill repos in sync |
-| `docs/SECURITY.md` | Security guidelines |
 | `docs/ROADMAP.md` | Build plan and priorities |
 | `docs/TUTORIAL.md` | Getting started guide |
 
