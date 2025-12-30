@@ -104,11 +104,33 @@ owns:                             # Concepts this skill is authoritative on
   - concept-one
   - concept-two
 
+does_not_own:                     # Explicit boundaries - delegate these
+  - concept-three → other-skill   # Format: concept → skill-id
+  - concept-four → another-skill  # Prevents scope creep
+
 pairs_with:                       # Skills that complement this one
   - related-skill-one
   - related-skill-two
 
 requires: []                      # Dependencies (usually empty)
+
+# Top-level principles (opinionated, earned through experience)
+principles:
+  - "First principle - specific, actionable"
+  - "Second principle - contrarian insight"
+  - "Third principle - hard-won lesson"
+
+# Stack information (for technical skills)
+stack:
+  frameworks:
+    - name: FrameworkOne
+      when: "Production use case"
+      note: "Version info, key features"
+    - name: FrameworkTwo
+      when: "Alternative use case"
+      note: "Trade-offs, considerations"
+
+expertise_level: world-class      # Optional: world-class, expert, intermediate
 
 tags:                             # Searchable keywords
   - tag1
@@ -143,11 +165,25 @@ anti_patterns:
     why: Why this causes problems
     instead: What to do instead
 
-# When to Involve Other Skills
+# When to Involve Other Skills (Basic)
 handoffs:
   - trigger: "keyword or phrase"
     to: other-skill-id
     context: Why this handoff makes sense
+
+# Bidirectional Handoffs (World-Class)
+handoffs:
+  receives_from:
+    - skill: upstream-skill
+      receives: "What data/context you get"
+    - skill: another-skill
+      receives: "What they provide to you"
+
+  hands_to:
+    - skill: downstream-skill
+      provides: "What you pass along"
+    - skill: specialist-skill
+      provides: "Context for the handoff"
 ```
 
 ### sharp-edges.yaml
@@ -244,10 +280,24 @@ validations:
 # PREREQUISITE SKILLS
 # Skills and knowledge this skill assumes or builds upon
 prerequisites:
-  skills:
-    - frontend          # Skill IDs this skill assumes access to
-    - typescript-strict
-  knowledge:
+  required: []            # Must-have skills (hard dependencies)
+
+  recommended:            # Nice-to-have skills with context
+    - skill: frontend
+      reason: "Component architecture fundamentals"
+      what_to_know:
+        - "Component lifecycle management"
+        - "State vs props patterns"
+        - "Event handling"
+
+    - skill: typescript-strict
+      reason: "Type-safe development"
+      what_to_know:
+        - "Generic types"
+        - "Type inference"
+        - "Strict null checks"
+
+  knowledge:              # Domain knowledge (not skills)
     - "Understanding of async/await patterns"
     - "Familiarity with component lifecycles"
     - "Basic understanding of state management concepts"
@@ -311,6 +361,50 @@ ecosystem:
   deprecated:
     - "Class components (prefer hooks)"
     - "componentWillMount lifecycle (removed in React 18)"
+
+# ESCALATION PATHS (World-Class)
+# When to escalate to specialists
+escalation_paths:
+  - situation: "Performance degradation"
+    escalate_to: performance-thinker
+    context: "Latency, memory, optimization"
+
+  - situation: "Security vulnerability"
+    escalate_to: security-specialist
+    context: "Audit, hardening, compliance"
+
+# PLATFORM INTEGRATION (for technical skills)
+# Setup code for major frameworks/platforms
+platform_integration:
+  framework_one:
+    setup: |
+      npm install framework-one
+
+      import { FrameworkOne } from 'framework-one'
+
+      const client = new FrameworkOne({
+        config: process.env.CONFIG
+      })
+    considerations:
+      - "Use environment variables for secrets"
+      - "Enable production mode in deployment"
+      - "Set up monitoring before launch"
+
+# COST OPTIMIZATION (for AI/cloud skills)
+cost_optimization:
+  model_selection:
+    - "Use cheaper models for simple tasks"
+    - "Reserve expensive models for complex reasoning"
+
+  resource_management:
+    - "Cache results aggressively"
+    - "Batch operations where possible"
+    - "Set hard budget limits"
+
+  monitoring:
+    - "Track cost per operation"
+    - "Alert on anomalies"
+    - "Review usage weekly"
 ```
 
 **Collaboration Pattern Types:**
@@ -729,47 +823,58 @@ Identify:
 
 ### Before Shipping a Skill
 
-**Identity:**
-- [ ] Sounds like a real expert, not a job description
-- [ ] Has 3-5 concrete principles
-- [ ] Principles are opinionated, not generic
+**skill.yaml - Identity & Core Content:**
+- [ ] Sounds like a real expert with battle scars, not a job description
+- [ ] Has 5-7 top-level `principles:` that are opinionated and specific
+- [ ] Clear `does_not_own:` boundaries with delegation arrows (→ skill-id)
+- [ ] `stack.frameworks:` with when/note for each (technical skills)
+- [ ] `expertise_level: world-class` if truly comprehensive
 
 **Sharp Edges (minimum 8-12):**
-- [ ] Each is a real gotcha, not theoretical risk
-- [ ] Has specific situation description
-- [ ] Explains real consequences
-- [ ] Provides working solution with code
-- [ ] Has detection pattern (where possible)
-- [ ] Symptoms are observable
+- [ ] Each is a real gotcha learned the hard way, not theoretical risk
+- [ ] Has specific situation description (when/how this happens)
+- [ ] Explains real consequences (money lost, outages, user churn)
+- [ ] Provides working solution with before/after code
+- [ ] Has `detection_pattern` regex (or explicit `null` for process issues)
+- [ ] Symptoms are observable (error messages, metrics, user complaints)
+- [ ] Severity matches the "3 AM test" criteria
 
 **Patterns (minimum 4-6):**
-- [ ] Each has memorable name
-- [ ] Code is copy-paste ready
-- [ ] Explains when to use
-- [ ] Shows transformation
+- [ ] Each has memorable, descriptive name
+- [ ] Code is copy-paste ready and tested
+- [ ] Explains `when:` to use (specific situations)
+- [ ] Shows transformation (before/after or complete example)
 
 **Anti-Patterns (minimum 4-6):**
-- [ ] Each explains non-obvious "why"
-- [ ] Shows what to do instead
-- [ ] Links to solving pattern
+- [ ] Each explains non-obvious "why" (real consequences)
+- [ ] Shows what to do `instead:` with code
+- [ ] Links to pattern that solves it (when applicable)
 
 **Validations (minimum 8-12):**
-- [ ] Regex tested against real code
-- [ ] No excessive false positives
-- [ ] Fix action is specific and actionable
-- [ ] File types correctly targeted
+- [ ] Regex tested against 10+ real code samples
+- [ ] No excessive false positives (< 10% false positive rate)
+- [ ] `fix_action` is specific and actionable
+- [ ] `applies_to` file types correctly targeted
+- [ ] `severity` matches actual impact (error/warning/info)
 
-**Handoffs:**
-- [ ] All edge cases have handoffs
-- [ ] Target skills exist
-- [ ] Context is clear
+**Handoffs (skill.yaml):**
+- [ ] `receives_from:` lists upstream skills and what they provide
+- [ ] `hands_to:` lists downstream skills and what you provide
+- [ ] All edge cases have clear handoff paths
+- [ ] Target skills actually exist in the system
 
 **Collaboration (collaboration.yaml):**
-- [ ] Prerequisites list foundational skills and knowledge
-- [ ] 5-10 complementary skills with relationships
-- [ ] 3-5 delegation triggers with context and expected output
+- [ ] `prerequisites.required:` lists hard dependencies
+- [ ] `prerequisites.recommended:` with reason and what_to_know for each
+- [ ] 3-5 `delegation_triggers:` with context and expected output
+- [ ] `receives_context_from:` lists what you get from other skills
+- [ ] `provides_context_to:` lists what you give to other skills
+- [ ] `escalation_paths:` for specialist handoffs
+- [ ] `workflow_integration:` with typical_sequence and decision_points
+- [ ] `platform_integration:` with setup code and considerations (technical skills)
+- [ ] `cost_optimization:` guidance (AI/cloud skills)
 - [ ] Cross-domain insights documented (2-3 minimum)
-- [ ] Ecosystem defined for technical skills (tools/alternatives/deprecated)
+- [ ] Ecosystem defined (tools/alternatives/deprecated)
 
 ---
 
@@ -992,12 +1097,23 @@ spawner_skill_new({ action: "validate", id: "frontend" })
 
 World-class skills have:
 
-1. **An expert identity** that sounds like a real person with battle scars (WHO YOU ARE, STRONG OPINIONS, CONTRARIAN INSIGHT, HISTORY, LIMITS, PREREQUISITES)
+1. **An expert identity** that sounds like a real person with battle scars
+   - Top-level `principles:` (5-7 opinionated beliefs)
+   - Clear `does_not_own:` boundaries with delegation arrows
+   - `stack.frameworks:` with when/note patterns
 2. **8-12 sharp edges** with detection patterns and real solutions
+   - Severity matches the "3 AM test"
+   - Observable symptoms, not theoretical risks
 3. **4-6 patterns** with copy-paste ready code
 4. **4-6 anti-patterns** with non-obvious "why"
 5. **8-12 validations** that catch real problems
-6. **Clear handoffs** to related skills
-7. **Collaboration model** with prerequisites, delegation triggers, and cross-domain insights
+6. **Bidirectional handoffs** (`receives_from` / `hands_to`)
+7. **Rich collaboration model:**
+   - `prerequisites.required/recommended` with what_to_know
+   - `delegation_triggers` with context and expected output
+   - `escalation_paths` for specialist handoffs
+   - `workflow_integration` with typical sequences
+   - `platform_integration` with setup code (technical)
+   - `cost_optimization` guidance (AI/cloud skills)
 
 The goal: **Claude should know what you know, catch what you'd catch, fix what you'd fix, and know when to delegate to specialists.**

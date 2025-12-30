@@ -876,7 +876,7 @@ export async function GET(req: Request) {
       <!-- Skills Directory -->
       <div class="skills-directory-preview">
         <div class="directory-header-preview">
-          <span class="directory-count">54 Skills</span>
+          <span class="directory-count">260+ Skills</span>
           <a href="/skills" class="directory-link">View All →</a>
         </div>
 
