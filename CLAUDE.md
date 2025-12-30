@@ -20,7 +20,7 @@ Spawner is an MCP server that transforms Claude into a specialized product-build
 2. **Guardrails** - Actually catches code issues (security, patterns, production readiness)
 3. **Sharp Edges** - Knows gotchas Claude doesn't know (versioned, situation-matched)
 4. **Escape Hatches** - Detects when you're stuck and offers alternatives
-5. **Skill System** - 270+ specialist skills across 24 categories in YAML format
+5. **Skill System** - 273 specialist skills across 24 categories in YAML format
 6. **Skill Level Detection** - Adapts guidance to user experience level
 
 ## Local Skills (Zero-Cost)
@@ -98,7 +98,7 @@ vibeship-spawner/
 │   │   ├── skills/          # Skill loading and matching
 │   │   ├── telemetry/       # Event tracking
 │   │   └── db/              # D1 database operations
-│   ├── skills/              # 270+ Skills (YAML format)
+│   ├── skills/              # 273 Skills (YAML format)
 │   └── migrations/          # D1 schema
 ├── benchmarks/              # Skill benchmark system
 ├── catalogs/                # Agent and MCP catalogs
@@ -114,7 +114,7 @@ vibeship-spawner/
 ### Skill System
 
 **Primary: Local Skills** - Loaded from `~/.spawner/skills/` (see Local Skills section above)
-- 270+ skills across 24 categories
+- 273 skills across 24 categories
 - Free, fast, works offline
 - Clone once, read locally forever
 
