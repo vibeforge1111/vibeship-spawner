@@ -59,6 +59,7 @@ interface V2Skill {
  * Unified skill result
  */
 interface UnifiedSkill {
+  id?: string;
   name: string;
   description: string;
   layer: number;
@@ -874,7 +875,7 @@ async function handlePack(
   for (const skillPath of pack.skills) {
     // skillPath is like "development/backend" - extract category and skill id
     const parts = skillPath.split('/');
-    const skillId = parts[parts.length - 1];
+    const skillId = parts[parts.length - 1] ?? skillPath;
     const category = parts.slice(0, -1).join('/');
     const localPath = `${LOCAL_SKILLS_PATH}/${skillPath}`;
 
