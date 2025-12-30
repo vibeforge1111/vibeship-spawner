@@ -173,7 +173,7 @@ Generated in each skill folder with:
 
 ### Global Learnings (`skill-generator-improvement-tips.md`)
 
-Updated in `docs/V2/` with patterns that work/don't work.
+Updated in `docs/` with patterns that work/don't work.
 
 ## Workflow
 

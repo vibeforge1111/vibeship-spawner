@@ -101,9 +101,9 @@ Claude: Here are 3 alternative approaches...
 
 ## Documentation
 
-- `docs/V2/PRD.md` - Product requirements
-- `docs/V2/ARCHITECTURE.md` - Technical architecture
-- `docs/V2/SKILL_SPEC.md` - Building skills
+- `docs/PRD.md` - Product requirements
+- `docs/ARCHITECTURE.md` - Technical architecture
+- `docs/SKILL_SPEC_V2.md` - Building skills
 
 ---
 

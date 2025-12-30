@@ -161,7 +161,7 @@
 
 ## Phase 5: Memory System 🟡 IN PROGRESS
 
-> See: `docs/V2/MEMORY_IMPLEMENTATION_PLAN.md` for full details
+> See: `docs/MEMORY_IMPLEMENTATION_PLAN.md` for full details
 
 ### 5.1 Enhanced Schema ⬜ NOT STARTED
 - [ ] Create `002_memories.sql` migration

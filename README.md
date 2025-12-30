@@ -1,27 +1,37 @@
 # VibeShip Spawner
 
-> "You vibe. It ships."
+> **"You vibe. It ships."**
 
-An MCP server that transforms Claude into a specialized product-building system with project memory, guardrails, sharp edges, and escape hatches.
+Transform Claude into a specialist that actually knows your stack's gotchas, remembers your project decisions, and catches issues before they become problems.
 
 ---
 
-## What It Does
+## Why Spawner?
 
-Spawner adds capabilities Claude doesn't have by default:
+**Claude is brilliant, but it doesn't know what it doesn't know.**
 
-1. **Project Memory** - Remembers your project across sessions (decisions, issues, progress)
-2. **Guardrails** - Actually catches code issues (not just suggests)
-3. **Sharp Edges** - Knows gotchas Claude doesn't know
-4. **Escape Hatches** - Detects when you're stuck and offers alternatives
-5. **Skill System** - 136 specialist skills loaded locally (zero cost)
-6. **Skill Level Detection** - Adapts guidance to your experience level
+| Problem | How Spawner Fixes It |
+|---------|---------------------|
+| Claude forgets your project between sessions | **Project Memory** - decisions, issues, and progress persist |
+| Claude suggests patterns that break in production | **Sharp Edges** - 2,000+ gotchas from real-world failures |
+| Claude misses security issues in code | **Guardrails** - automated checks catch vulnerabilities |
+| Claude gives generic advice | **273 Specialist Skills** - deep expertise in specific domains |
+| Claude doesn't know when to hand off | **Skill Collaboration** - knows when another skill should take over |
+
+### The Differentiation
+
+Most AI coding tools give you a generalist. Spawner gives you a **team of specialists** that:
+
+- Know the specific gotchas for Next.js 14, Supabase RLS, Stripe webhooks
+- Remember that you chose Drizzle over Prisma and why
+- Catch the `'use server'` directive you forgot
+- Hand off authentication work to the auth-specialist when needed
 
 ---
 
 ## Quick Start
 
-### 1. Configure Claude Desktop
+### 1. Add Spawner to Claude
 
 Add to your Claude Desktop MCP configuration:
 
@@ -38,262 +48,311 @@ Add to your Claude Desktop MCP configuration:
 
 Restart Claude Desktop.
 
-### 2. Install Local Skills (One-Time)
+### 2. Install Skills (One Command)
 
-Skills are loaded locally for zero API cost. Clone once, use forever:
-
-**Windows:**
 ```bash
-git clone https://github.com/vibeforge1111/vibeship-spawner-skills %USERPROFILE%\.spawner\skills
+npx vibeship-spawner-skills install
 ```
 
-**macOS/Linux:**
-```bash
-git clone https://github.com/vibeforge1111/vibeship-spawner-skills ~/.spawner/skills
-```
+This installs **273 specialist skills** to `~/.spawner/skills/`. Zero cost, works offline.
 
 ### 3. Start Building
 
-Open Claude and describe your idea:
-
 ```
-You: I want to build a marketplace for selling digital art
-```
+You: I want to build a marketplace for digital art
 
-Spawner automatically:
-1. Detects your skill level
-2. Asks clarifying questions (max 3)
-3. Recommends template, stack, and skills
-4. Creates your project when ready
+Claude: [Detects your skill level, asks 2-3 questions, recommends stack]
+        I recommend the marketplace template with Next.js, Supabase, and Stripe...
+```
 
 ---
 
-## MCP Tools
+## How It Works
 
-| Tool | Purpose |
+### Loading a Skill
+
+Tell Claude to read a skill when you need specialist knowledge:
+
+```
+You: Read ~/.spawner/skills/development/backend/skill.yaml
+
+Claude: [Now has deep backend expertise, patterns, anti-patterns, and gotchas]
+```
+
+### Quick Skill Commands
+
+| Need | Command |
 |------|---------|
-| `spawner_orchestrate` | **Call first.** Detects context, sets up skills, routes to resume/analyze/brainstorm |
-| `spawner_plan` | Plan and create projects (discover → recommend → create) |
-| `spawner_analyze` | Analyze existing codebase for stack/skill recommendations |
-| `spawner_load` | Load project context and skills for session |
-| `spawner_validate` | Run guardrail checks on code |
-| `spawner_remember` | Save decisions and session progress |
-| `spawner_watch_out` | Query gotchas for your current situation |
-| `spawner_unstick` | Get help when stuck on a problem |
-| `spawner_templates` | List available project templates |
-| `spawner_skills` | Search, list, get skills and squads |
-| `spawner_skill_brainstorm` | Optional deep exploration before skill creation |
-| `spawner_skill_research` | Research phase for skill creation |
-| `spawner_skill_new` | Create world-class skills with 4 YAML files |
-| `spawner_skill_score` | Score skill against 100-point quality rubric |
-| `spawner_skill_upgrade` | Enhance existing skills |
+| Backend API | `Read ~/.spawner/skills/development/backend/skill.yaml` |
+| Authentication | `Read ~/.spawner/skills/development/auth-specialist/skill.yaml` |
+| Database | `Read ~/.spawner/skills/data/postgres-wizard/skill.yaml` |
+| Frontend | `Read ~/.spawner/skills/development/frontend/skill.yaml` |
+| AI/LLM | `Read ~/.spawner/skills/ai/llm-architect/skill.yaml` |
 
-**Production endpoint:** https://mcp.vibeship.co
+### Using MCP Tools
 
----
-
-## Project Templates
-
-| Template | Use Case | Stack |
-|----------|----------|-------|
-| `saas` | Subscription products | Next.js, Supabase, Stripe |
-| `marketplace` | Buy/sell platforms | Next.js, Supabase, Stripe, Algolia |
-| `ai-app` | LLM-powered apps | Next.js, Supabase, OpenAI |
-| `web3` | Blockchain apps | Next.js, wagmi, viem |
-| `tool` | CLIs and utilities | TypeScript, Node |
+| Tool | When to Use |
+|------|-------------|
+| `spawner_orchestrate` | Start of any session - auto-detects context |
+| `spawner_analyze` | Analyze existing codebase |
+| `spawner_validate` | Check code for issues |
+| `spawner_watch_out` | Get gotchas for your current stack |
+| `spawner_unstick` | When you've been stuck for 30+ minutes |
+| `spawner_remember` | Save important decisions |
 
 ---
 
-## Skill System
+## Updating Skills
 
-### 136 Skills (Zero Cost)
+Skills are updated regularly with new gotchas and patterns.
 
-Skills are loaded locally from `~/.spawner/skills/`. No API calls, works offline.
-
-**Categories:**
-- **Development (31):** backend, frontend, api-designer, auth-specialist, devops, security, test-architect...
-- **Data (6):** postgres-wizard, redis-specialist, vector-specialist, graph-engineer...
-- **AI (3):** llm-architect, ml-memory, causal-scientist
-- **Design (4):** ui-design, ux-design, branding, landing-page-design
-- **Frameworks (6):** nextjs-app-router, react-patterns, svelte-kit, vue-composition...
-- **Marketing (33):** copywriting, content-strategy, seo, growth, social-media...
-- **Startup (3):** yc-partner, fundraising, pitch-deck
-- **Strategy (2):** product-strategy, competitive-analysis
-- **Product (4):** product-management, analytics, roadmapping...
-- **Communications:** investor-updates, pitching, writing
-- **Integration:** webhooks, api-integration, third-party-services
-
-```
-You: What skills are available for authentication?
-Claude: [Reads ~/.spawner/skills/development/auth-specialist/skill.yaml]
+```bash
+npx vibeship-spawner-skills update
 ```
 
-### Squads
-
-Pre-configured skill combinations for common tasks:
-
-```
-You: I need to add authentication to my app
-Claude: [Uses spawner_skills({ action: "squad", squad: "auth-complete" })]
-```
-
-Available squads:
-- `auth-complete` - Full authentication implementation
-- `payments-complete` - Stripe/payments integration
-- `crud-feature` - Database CRUD operations
-
-### Skill Level Detection
-
-Spawner detects your experience level and adapts guidance:
-- **vibe-coder** - Non-technical, needs maximum guidance
-- **builder** - Some tech knowledge, learning
-- **developer** - Technical, familiar with patterns
-- **expert** - Senior developer, strong opinions
-
----
-
-## Skill Creation
-
-Create world-class skills for Spawner with our automated pipeline.
-
-### Two Paths
-
-Choose your approach based on how deeply you want to explore:
-
-| Path | Flow | When to Use |
-|------|------|-------------|
-| **Quick** | `research` → `new` → `score` | You know exactly what skill you want |
-| **Deep** | `brainstorm` → `research` → `new` → `score` | You want to explore and add your personal touch |
-
-### Quick Path (Automated)
-
-Jump straight into creation when you have a clear vision:
-
-```
-You: I want to create a skill for React performance optimization
-
-Claude: [Uses spawner_skill_research to gather pain points, patterns, gotchas]
-Claude: [Uses spawner_skill_new to generate 4 YAML files]
-Claude: [Uses spawner_skill_score to validate against 100-point rubric]
-```
-
-### Deep Path (Brainstorm + Automated)
-
-Start with exploration when you want maximum depth:
-
-```
-You: Let's brainstorm a skill for database migrations
-
-Claude: [Uses spawner_skill_brainstorm]
-        - The Expert: Who inspires this skill?
-        - Boundaries: What does it own vs. hand off?
-        - Common Pitfalls: Walk through dangerous scenarios
-        - Collaboration: What skills does it work with?
-        - Personal Touch: Your unique insights
-
-Claude: [Uses spawner_skill_research with brainstorm insights]
-Claude: [Uses spawner_skill_new to generate skill files]
-Claude: [Uses spawner_skill_score - minimum 80 to ship]
-```
-
-### Skill Creation Tools
-
-| Tool | Purpose |
-|------|---------|
-| `spawner_skill_brainstorm` | Optional deep exploration before creation |
-| `spawner_skill_research` | Gather pain points, expert content, ecosystem mapping |
-| `spawner_skill_new` | Generate 4 YAML files (skill, sharp-edges, validations, collaboration) |
-| `spawner_skill_score` | Score against 100-point quality rubric (80 min to ship) |
-| `spawner_skill_upgrade` | Enhance existing skills with targeted improvements |
-
-### Skill Files
-
-Each skill requires 4 YAML files:
-
-```
-skills/
-└── your-skill/
-    ├── skill.yaml          # Identity, patterns, anti-patterns, handoffs
-    ├── sharp-edges.yaml    # 8-12 gotchas with detection patterns
-    ├── validations.yaml    # 8-12 automated code checks
-    └── collaboration.yaml  # Prerequisites, delegation triggers
+Or manually:
+```bash
+cd ~/.spawner/skills && git pull
 ```
 
 ---
 
-## Example Workflows
+## Why YAML Skills?
 
-### New Project
+### The Problem with Prompts
 
-```
-You: I want to build a SaaS for team task management
+Traditional prompt libraries are:
+- **Monolithic** - one giant prompt tries to do everything
+- **Stale** - no versioning, no updates
+- **Generic** - not tailored to specific technologies
 
-Claude: [Uses spawner_plan to understand your needs]
-Claude: Based on your idea, I recommend the SaaS template with...
-Claude: [Creates project with spawner_plan action="create"]
-```
+### Our Approach: Structured YAML
 
-### Existing Project
-
-```
-You: Analyze my codebase and suggest improvements
-
-Claude: [Uses spawner_analyze with your package.json and files]
-Claude: I detected Next.js + Supabase. Missing auth. Recommend adding...
-```
-
-### When Stuck
+Each skill has **4 focused files**:
 
 ```
-You: I've been trying to fix this auth redirect for hours
-
-Claude: [Uses spawner_unstick]
-Claude: Here are 3 alternative approaches...
+postgres-wizard/
+├── skill.yaml           # Identity, patterns, what it owns
+├── sharp-edges.yaml     # Specific gotchas (not generic advice)
+├── validations.yaml     # Machine-checkable rules
+└── collaboration.yaml   # When to hand off to other skills
 ```
 
-### Watch Out for Gotchas
+**Why this works:**
+- **Modular** - load only what you need
+- **Versionable** - track changes over time
+- **Specific** - each gotcha has detection patterns
+- **Collaborative** - skills know their boundaries
+
+### Why 25 Categories?
+
+We organize by **domain expertise**, not file type:
 
 ```
-You: What should I watch out for with Supabase RLS?
-
-Claude: [Uses spawner_watch_out]
-Claude: Found 3 sharp edges for your stack...
+~/.spawner/skills/
+├── development/     # 57 skills - the builders
+├── data/            # 10 skills - database specialists
+├── ai/              # 12 skills - ML/LLM experts
+├── marketing/       # 33 skills - growth & content
+├── strategy/        # 15 skills - business thinking
+└── ...              # 20 more categories
 ```
 
-### Get a Skill Squad
-
-```
-You: I need to implement payments with Stripe
-
-Claude: [Uses spawner_skills({ action: "squad", squad: "payments-complete" })]
-Claude: Loading payments squad: payments-flow (lead), stripe-webhooks, error-handling
-```
+This mirrors how **real teams work** - you don't ask a frontend dev about database indexing.
 
 ---
 
-## Stack Detection
+## Skills Directory
 
-`spawner_analyze` automatically detects technologies from your codebase:
-- **Framework:** Next.js, React, Vue, Svelte
-- **Database:** Supabase, Prisma, Drizzle, Firebase
-- **Auth:** NextAuth, Clerk, Supabase Auth
-- **Payments:** Stripe, LemonSqueezy
-- **Styling:** Tailwind, shadcn/ui
-- **AI:** OpenAI, Anthropic, Vercel AI
-- **Web3:** wagmi, viem, ethers
-- **Testing:** Jest, Vitest, Playwright
-- **Deployment:** Vercel, Cloudflare
+### Development (57 skills)
+Building software, from backend to deployment.
+
+| Skill | What It Knows |
+|-------|---------------|
+| `backend` | API design, server patterns, error handling |
+| `frontend` | React patterns, state management, performance |
+| `api-designer` | REST/GraphQL design, versioning, documentation |
+| `auth-specialist` | OAuth, JWT, session management, security |
+| `devops` | CI/CD, deployment, infrastructure |
+| `security` | OWASP, vulnerability prevention, hardening |
+| `test-architect` | Testing strategies, coverage, mocking |
+| `docker-specialist` | Containerization, compose, optimization |
+| `kubernetes-deployment` | K8s patterns, scaling, monitoring |
+| `mcp-developer` | Building MCP servers and tools |
+| `prompt-engineer` | LLM prompting, chain-of-thought, evaluation |
+| `rag-engineer` | Retrieval augmented generation, embeddings |
+| `realtime-engineer` | WebSockets, SSE, live updates |
+| `performance-hunter` | Profiling, optimization, bottlenecks |
+| `migration-specialist` | Database migrations, zero-downtime |
+| `...and 42 more` | |
+
+### Data (10 skills)
+Databases, caching, and data pipelines.
+
+| Skill | What It Knows |
+|-------|---------------|
+| `postgres-wizard` | Query optimization, indexing, RLS |
+| `redis-specialist` | Caching patterns, pub/sub, sessions |
+| `vector-specialist` | Embeddings, similarity search, pgvector |
+| `graph-engineer` | Neo4j, graph modeling, traversals |
+| `drizzle-orm` | Schema design, migrations, type safety |
+| `temporal-craftsman` | Workflow orchestration, durable execution |
+| `pg-boss` | Job queues, background processing |
+| `graphile-worker` | PostgreSQL job queues |
+| `data-engineer` | ETL, pipelines, data quality |
+| `database-schema-design` | Normalization, relationships, indexes |
+
+### AI & ML (24 skills)
+Machine learning, LLMs, and AI applications.
+
+| Skill | What It Knows |
+|-------|---------------|
+| `llm-architect` | Model selection, prompting, fine-tuning |
+| `llm-fine-tuning` | LoRA, PEFT, training data |
+| `ml-memory` | Vector stores, context management |
+| `computer-vision-deep` | CNNs, object detection, segmentation |
+| `nlp-advanced` | Transformers, NER, sentiment |
+| `distributed-training` | Multi-GPU, DeepSpeed, FSDP |
+| `model-optimization` | Quantization, pruning, ONNX |
+| `ai-safety-alignment` | RLHF, red-teaming, guardrails |
+| `multimodal-ai` | Vision-language models, CLIP |
+| `semantic-search` | Embeddings, reranking, hybrid search |
+| `...and 14 more` | |
+
+### Agents (10 skills)
+Autonomous systems and automation.
+
+| Skill | What It Knows |
+|-------|---------------|
+| `autonomous-agents` | Agent loops, tool use, planning |
+| `multi-agent-orchestration` | Agent coordination, handoffs |
+| `browser-automation` | Playwright, scraping, testing |
+| `computer-use-agents` | Screen interaction, GUI automation |
+| `voice-agents` | Speech-to-text, TTS, voice UX |
+| `workflow-automation` | n8n, Zapier, custom workflows |
+| `agent-memory-systems` | Long-term memory, retrieval |
+| `agent-tool-builder` | Tool design, function calling |
+| `agent-evaluation` | Benchmarking, evals, metrics |
+| `zapier-make-patterns` | No-code automation patterns |
+
+### Marketing (33 skills)
+Content, growth, and creative production.
+
+| Skill | What It Knows |
+|-------|---------------|
+| `copywriting` | Headlines, CTAs, conversion copy |
+| `seo` | Technical SEO, content optimization |
+| `content-strategy` | Editorial calendars, audience research |
+| `ai-video-generation` | Runway, Pika, video workflows |
+| `ai-image-generation` | Midjourney, DALL-E, Flux prompts |
+| `viral-marketing` | Hooks, distribution, shareability |
+| `brand-storytelling` | Narrative, voice, positioning |
+| `...and 26 more` | |
+
+### Integration (8 skills)
+Connecting services and APIs.
+
+| Skill | What It Knows |
+|-------|---------------|
+| `stripe-integration` | Payments, subscriptions, webhooks |
+| `email-systems` | Transactional, marketing, deliverability |
+| `bullmq-specialist` | Redis queues, job processing |
+| `inngest` | Event-driven functions, workflows |
+| `trigger-dev` | Background jobs, scheduling |
+| `upstash-qstash` | Serverless messaging, rate limiting |
+| `nextjs-supabase-auth` | Auth integration patterns |
+| `vercel-deployment` | Edge functions, ISR, analytics |
+
+### Integrations (14 skills)
+Platform-specific expertise.
+
+| Skill | What It Knows |
+|-------|---------------|
+| `aws-serverless` | Lambda, API Gateway, DynamoDB |
+| `gcp-cloud-run` | Cloud Run, Pub/Sub, Firestore |
+| `azure-functions` | Azure Functions, Cosmos DB |
+| `discord-bot-architect` | Discord.js, slash commands, bots |
+| `slack-bot-builder` | Slack API, Block Kit, workflows |
+| `twilio-communications` | SMS, voice, WhatsApp |
+| `shopify-apps` | Shopify API, Liquid, embedded apps |
+| `...and 7 more` | |
+
+### Frameworks (6 skills)
+Framework-specific patterns and gotchas.
+
+| Skill | What It Knows |
+|-------|---------------|
+| `nextjs-app-router` | App Router, RSC, Server Actions |
+| `react-patterns` | Hooks, state, performance |
+| `sveltekit` | SvelteKit routing, SSR, forms |
+| `supabase-backend` | Auth, RLS, Edge Functions |
+| `tailwind-ui` | Utility-first CSS, components |
+| `typescript-strict` | Type safety, generics, inference |
+
+### Finance (6 skills)
+Trading, DeFi, and fintech.
+
+| Skill | What It Knows |
+|-------|---------------|
+| `algorithmic-trading` | Backtesting, execution, risk |
+| `blockchain-defi` | Smart contracts, AMMs, yield |
+| `derivatives-pricing` | Options, Greeks, Monte Carlo |
+| `fintech-integration` | Plaid, payment rails, KYC |
+| `portfolio-optimization` | Mean-variance, factor models |
+| `risk-modeling` | VaR, stress testing, limits |
+
+### Mind (10 skills)
+Thinking frameworks and problem-solving.
+
+| Skill | What It Knows |
+|-------|---------------|
+| `debugging-master` | Root cause analysis, systematic debugging |
+| `system-designer` | Architecture, trade-offs, scaling |
+| `decision-maker` | Framework for technical decisions |
+| `refactoring-guide` | Safe refactoring patterns |
+| `tech-debt-manager` | Prioritization, payoff strategies |
+| `incident-responder` | On-call, postmortems, recovery |
+| `performance-thinker` | Optimization mindset |
+| `code-quality` | Maintainability, readability |
+| `test-strategist` | What to test, coverage strategy |
+| `technical-writer` | Documentation, ADRs, RFCs |
+
+### Mind-V5 (22 skills)
+Enhanced memory-enabled versions of core skills.
+
+These are upgraded versions of popular skills with deeper context awareness and memory integration.
+
+### Additional Categories
+
+| Category | Count | Focus |
+|----------|-------|-------|
+| Strategy | 15 | Product strategy, growth, positioning |
+| Enterprise | 6 | Compliance, governance, architecture |
+| Legal | 5 | GDPR, contracts, patents |
+| Space | 5 | Orbital mechanics, mission planning |
+| Biotech | 6 | Genomics, drug discovery, lab automation |
+| Hardware | 6 | Embedded, FPGA, robotics |
+| Climate | 5 | Carbon accounting, sustainability |
+| Simulation | 5 | Monte Carlo, digital twin, physics |
+| Science | 4 | Experimental design, statistics |
+| Communications | 5 | Developer relations, crisis comms |
+| Startup | 3 | YC playbook, founder mode |
+| Design | 4 | UI, UX, branding |
+| Product | 4 | A/B testing, analytics, PM |
 
 ---
 
-## Tech Stack
+## Creating Skills
 
-- **Runtime:** Cloudflare Workers
-- **Database:** Cloudflare D1 (SQLite)
-- **Cache:** Cloudflare KV (validations, sharp edges)
-- **Skills:** Local filesystem (`~/.spawner/skills/`) - zero API cost
-- **Protocol:** MCP (Model Context Protocol)
-- **Language:** TypeScript
+Want to add a skill? We have a pipeline that creates world-class skills:
+
+```
+spawner_skill_research → spawner_skill_new → spawner_skill_score
+```
+
+Skills must score **80+** on our 100-point rubric to ship.
+
+See [SKILL_CREATION_GUIDE.md](docs/SKILL_CREATION_GUIDE.md) for details.
 
 ---
 
@@ -301,29 +360,50 @@ Claude: Loading payments squad: payments-flow (lead), stripe-webhooks, error-han
 
 ```
 vibeship-spawner/
-├── spawner-v2/           # MCP Server (Cloudflare Worker)
-│   ├── src/
-│   │   ├── index.ts      # Main worker, MCP routing
-│   │   ├── tools/        # MCP tool implementations
-│   │   ├── validation/   # Code checking
-│   │   ├── skills/       # Skill loading (internal)
-│   │   └── db/           # D1 database operations
-│   └── migrations/       # D1 schema
-├── docs/V2/              # Documentation (PRD, Architecture, etc.)
-├── web/                  # Web UI (SvelteKit)
-└── archive/              # Historical code
-
-~/.spawner/skills/        # LOCAL SKILLS (separate repo)
-├── development/          # 31 skills
-├── data/                 # 6 skills
-├── ai/                   # 3 skills
-├── design/               # 4 skills
-├── frameworks/           # 6 skills
-├── marketing/            # 33 skills
-└── ...                   # 105 total
+├── spawner-v2/              # MCP Server (Cloudflare Worker)
+│   ├── src/                 # TypeScript source
+│   └── skills/              # 273 skills (synced)
+├── docs/                    # Documentation
+│   ├── ARCHITECTURE.md      # How it works
+│   ├── SKILL_CREATION_GUIDE.md
+│   └── SKILL_SYNC.md        # Keeping repos aligned
+├── scripts/                 # Automation
+│   ├── sync-skills.js       # Sync skills between repos
+│   └── generate-skills-json.js
+└── web/                     # Website (SvelteKit)
 ```
 
-**Skills repo:** [vibeforge1111/vibeship-spawner-skills](https://github.com/vibeforge1111/vibeship-spawner-skills)
+**Skills repo:** [vibeship-spawner-skills](https://github.com/vibeforge1111/vibeship-spawner-skills)
+
+---
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|------------|
+| Runtime | Cloudflare Workers |
+| Database | Cloudflare D1 (SQLite) |
+| Cache | Cloudflare KV |
+| Skills | Local YAML files (zero API cost) |
+| Protocol | MCP (Model Context Protocol) |
+| Language | TypeScript + Zod |
+
+---
+
+## Development
+
+```bash
+# Clone and install
+git clone https://github.com/vibeforge1111/vibeship-spawner
+cd vibeship-spawner/spawner-v2
+npm install
+
+# Run locally
+wrangler dev
+
+# Deploy
+wrangler deploy
+```
 
 ---
 
@@ -331,43 +411,11 @@ vibeship-spawner/
 
 | Doc | Purpose |
 |-----|---------|
-| [Tutorial](docs/TUTORIAL.md) | Getting started guide |
-| [PRD](docs/V2/PRD.md) | Product requirements |
-| [Architecture](docs/V2/ARCHITECTURE.md) | Technical deep dive |
-| [Skill Creation Guide](docs/V2/SKILL_CREATION_GUIDE.md) | How to build skills |
-| [Roadmap](docs/V2/ROADMAP.md) | What to build when |
-
----
-
-## Development
-
-### Local Development
-
-```bash
-cd spawner-v2
-npm install
-wrangler dev
-```
-
-### Deploy
-
-```bash
-wrangler deploy
-```
-
-### Test with Claude Desktop
-
-1. Run `wrangler dev`
-2. Update MCP config to use `http://localhost:8787/mcp`
-3. Restart Claude Desktop
-
----
-
-## Requirements
-
-- Claude Desktop or Claude Code
-- Node.js 18+
-- Wrangler CLI (for development)
+| [Tutorial](docs/TUTORIAL.md) | Getting started |
+| [Architecture](docs/ARCHITECTURE.md) | How it works |
+| [Skill Creation](docs/SKILL_CREATION_GUIDE.md) | Building skills |
+| [Skill Sync](docs/SKILL_SYNC.md) | Keeping repos aligned |
+| [Security](docs/SECURITY.md) | Security guidelines |
 
 ---
 
@@ -377,4 +425,7 @@ MIT
 
 ---
 
-Built with VibeShip. "You vibe. It ships."
+<p align="center">
+  <strong>Built with VibeShip</strong><br>
+  "You vibe. It ships."
+</p>
