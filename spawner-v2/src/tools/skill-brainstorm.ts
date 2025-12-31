@@ -638,7 +638,26 @@ spawner_skill_brainstorm({
   skill_idea: "${input.skill_idea}",
   area: "boundaries"  // or edges, collaboration, audience
 })
-\`\`\``;
+\`\`\`${input.area === 'collaboration' ? `
+
+---
+
+## Want to explore orchestration patterns?
+
+If you're thinking about how multiple skills should work **together as a team**, use the orchestration brainstorm:
+
+\`\`\`
+spawner_orchestrate_brainstorm({
+  action: "start",
+  goal: "Build [your project description]"
+})
+\`\`\`
+
+This will help you choose:
+- **Sequential** vs **Parallel** execution
+- **Hub-spoke** (lead skill) vs **Pipeline** (assembly line)
+- **Quality gates** for critical work
+- Pre-built **teams** that match your project` : ''}`;
 
   return { content: [{ type: 'text', text: output }] };
 }

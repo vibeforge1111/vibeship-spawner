@@ -19,8 +19,13 @@
  * - spawner_skill_score (quality scoring against 100-point rubric)
  * - spawner_skill_upgrade (enhance existing skills)
  *
- * Orchestration Tool:
+ * Orchestration Tools:
  * - orchestrate (main entry point - auto-detects context)
+ * - workflow (multi-agent coordination: workflows, teams, contracts)
+ * - orchestrate_brainstorm (interactive guide to choose orchestration pattern)
+ *
+ * Agent Communication Tools:
+ * - emit (notifications for progress, handoffs, errors)
  *
  * Onboarding Tool:
  * - setup (check configuration, get setup guides, verify requirements)
@@ -53,6 +58,8 @@ import { skillBrainstormToolDefinition, executeSkillBrainstorm } from './skill-b
 import { orchestrateToolDefinition, executeOrchestrate } from './orchestrate.js';
 import { setupToolDefinition, executeSetup } from './setup.js';
 import { emitToolDefinition, executeEmit } from './emit.js';
+import { workflowToolDefinition, executeWorkflow } from './workflow.js';
+import { orchestrateBrainstormDefinition, executeOrchestrateBrainstorm } from './orchestrate-brainstorm.js';
 
 // =============================================================================
 // Register all tools
@@ -150,6 +157,18 @@ registerTool({
   execute: (env, args, _userId) => executeEmit(env, args as Parameters<typeof executeEmit>[1]),
 });
 
+// Workflow Orchestration Tool
+registerTool({
+  definition: workflowToolDefinition,
+  execute: (env, args, _userId) => executeWorkflow(env, args as Parameters<typeof executeWorkflow>[1]),
+});
+
+// Orchestration Brainstorm Tool
+registerTool({
+  definition: orchestrateBrainstormDefinition,
+  execute: (env, args, _userId) => executeOrchestrateBrainstorm(env, args as Parameters<typeof executeOrchestrateBrainstorm>[1]),
+});
+
 // =============================================================================
 // Re-exports for backwards compatibility
 // =============================================================================
@@ -177,6 +196,8 @@ export {
   orchestrateToolDefinition,
   setupToolDefinition,
   emitToolDefinition,
+  workflowToolDefinition,
+  orchestrateBrainstormDefinition,
 };
 
 // Re-export executors for direct access if needed
@@ -198,4 +219,6 @@ export {
   executeOrchestrate,
   executeSetup,
   executeEmit,
+  executeWorkflow,
+  executeOrchestrateBrainstorm,
 };
