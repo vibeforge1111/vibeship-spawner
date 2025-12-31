@@ -1,0 +1,258 @@
+# Browser Extension Builder Sharp Edges
+
+sharp_edges:
+  - id: mv3-service-worker
+    summary: Service worker terminates unexpectedly
+    severity: high
+    situation: Background scripts stop working in Manifest V3
+    why: |
+      MV3 service workers are short-lived.
+      No persistent background pages.
+      State lost on termination.
+      Different from MV2.
+    solution: |
+      ## MV3 Service Worker Lifecycle
+
+      ### The Problem
+      - Service workers terminate after ~30 seconds idle
+      - State in memory is lost
+      - Can't rely on global variables
+
+      ### Solution: Persistent Storage
+      ```javascript
+      // BAD: State lost on termination
+      let userData = {};
+
+      // GOOD: Use storage
+      chrome.storage.local.get(['userData'], ({ userData }) => {
+        // Use stored data
+      });
+      ```
+
+      ### Keeping Alive (When Necessary)
+      ```javascript
+      // Use alarms for periodic work
+      chrome.alarms.create('keepAlive', { periodInMinutes: 1 });
+
+      chrome.alarms.onAlarm.addListener((alarm) => {
+        if (alarm.name === 'keepAlive') {
+          // Do periodic work
+        }
+      });
+      ```
+
+      ### Port Connection (Short-term Keep Alive)
+      ```javascript
+      // From popup/content script
+      const port = chrome.runtime.connect({ name: 'keepAlive' });
+
+      // In service worker
+      chrome.runtime.onConnect.addListener((port) => {
+        if (port.name === 'keepAlive') {
+          // Connection keeps worker alive
+        }
+      });
+      ```
+
+      ### Don't Fight It
+      - Design for ephemeral workers
+      - Store state in chrome.storage
+      - Use alarms, not setInterval
+      - Accept the MV3 model
+    symptoms:
+      - Background script randomly stops
+      - State resets unexpectedly
+      - Timers don't fire
+      - "Service worker was terminated"
+    detection_pattern: "service worker|terminate|MV3|background.*stop"
+
+  - id: content-script-isolation
+    summary: Content script can't access page JavaScript
+    severity: medium
+    situation: Can't read page's JavaScript variables
+    why: |
+      Content scripts run in isolated world.
+      Security feature, not bug.
+      Can't access page's window object.
+      DOM is shared, JS is not.
+    solution: |
+      ## Accessing Page Context
+
+      ### The Isolation
+      ```
+      Page World: window.pageVar = "value"
+      Content Script World: window.pageVar === undefined
+      ```
+
+      ### Inject Script Into Page
+      ```javascript
+      // content.js
+      function injectScript(fn) {
+        const script = document.createElement('script');
+        script.textContent = `(${fn.toString()})()`;
+        document.documentElement.appendChild(script);
+        script.remove();
+      }
+
+      injectScript(() => {
+        // This runs in page context
+        window.postMessage({
+          type: 'FROM_PAGE',
+          data: window.somePageVariable
+        }, '*');
+      });
+
+      // Listen for response
+      window.addEventListener('message', (event) => {
+        if (event.data.type === 'FROM_PAGE') {
+          console.log(event.data.data);
+        }
+      });
+      ```
+
+      ### Manifest Configuration
+      ```json
+      {
+        "content_scripts": [{
+          "matches": ["<all_urls>"],
+          "js": ["content.js"],
+          "world": "MAIN"  // Run in page context (MV3)
+        }]
+      }
+      ```
+
+      ### When to Use Each
+      | World | Use Case |
+      |-------|----------|
+      | ISOLATED | DOM manipulation, safe |
+      | MAIN | Access page variables, riskier |
+    symptoms:
+      - Can't read page variables
+      - window.X is undefined
+      - Page APIs not accessible
+      - Need to intercept requests
+    detection_pattern: "page variable|window\\.|isolated|can't access"
+
+  - id: store-rejection
+    summary: Extension rejected from Chrome Web Store
+    severity: high
+    situation: Extension rejected, unclear why
+    why: |
+      Policy violations.
+      Misleading description.
+      Excessive permissions.
+      Spam/quality issues.
+    solution: |
+      ## Avoiding Store Rejection
+
+      ### Common Rejection Reasons
+      | Reason | Fix |
+      |--------|-----|
+      | Too many permissions | Request only what you need |
+      | Misleading description | Match description to functionality |
+      | Single-purpose violation | One clear purpose |
+      | Functionality issue | Test thoroughly |
+      | Spam | Unique, valuable functionality |
+
+      ### Permission Best Practices
+      ```json
+      // BAD: Over-requesting
+      {
+        "permissions": ["<all_urls>", "tabs", "history", "bookmarks"]
+      }
+
+      // GOOD: Minimal
+      {
+        "permissions": ["storage"],
+        "optional_permissions": ["tabs"],
+        "host_permissions": ["https://specific-site.com/*"]
+      }
+      ```
+
+      ### Review Process Tips
+      - Clear, accurate description
+      - Good screenshots
+      - Privacy policy URL
+      - Explain each permission
+      - Respond quickly to reviews
+
+      ### Appeal Process
+      1. Read rejection email carefully
+      2. Fix specific issues mentioned
+      3. Submit appeal with changes
+      4. Be patient (can take weeks)
+    symptoms:
+      - Rejection email received
+      - "Policy violation" mentioned
+      - Extension removed from store
+      - Appeals denied
+    detection_pattern: "rejected|store|policy|violation|removed"
+
+  - id: cross-browser-compatibility
+    summary: Extension works in Chrome but not Firefox
+    severity: medium
+    situation: Need to support multiple browsers
+    why: |
+      Different APIs.
+      Different manifest versions.
+      Different store requirements.
+      Promise vs callback APIs.
+    solution: |
+      ## Cross-Browser Extensions
+
+      ### API Differences
+      | Chrome | Firefox |
+      |--------|---------|
+      | chrome.* | browser.* |
+      | Callbacks | Promises |
+      | MV3 required | MV2 still works |
+
+      ### Polyfill Solution
+      ```javascript
+      // Use webextension-polyfill
+      // npm install webextension-polyfill
+
+      import browser from 'webextension-polyfill';
+
+      // Works in both browsers
+      const data = await browser.storage.local.get('key');
+      ```
+
+      ### Manifest Differences
+      ```json
+      // Chrome MV3
+      {
+        "manifest_version": 3,
+        "background": {
+          "service_worker": "background.js"
+        }
+      }
+
+      // Firefox (still supports MV2)
+      {
+        "manifest_version": 2,
+        "background": {
+          "scripts": ["background.js"]
+        }
+      }
+      ```
+
+      ### Build System
+      ```javascript
+      // Use build tool to generate both manifests
+      // webpack, vite, or custom script
+
+      // package.json
+      {
+        "scripts": {
+          "build:chrome": "BUILD_TARGET=chrome vite build",
+          "build:firefox": "BUILD_TARGET=firefox vite build"
+        }
+      }
+      ```
+    symptoms:
+      - Works in Chrome, fails in Firefox
+      - "browser is not defined"
+      - Different behavior across browsers
+      - Need to support both stores
+    detection_pattern: "Firefox|cross-browser|browser\\.|polyfill"

@@ -1,0 +1,271 @@
+# 3D Web Experience Sharp Edges
+
+sharp_edges:
+  - id: webgl-context-lost
+    summary: 3D scene crashes or goes black
+    severity: high
+    situation: Scene works then suddenly goes black/crashes
+    why: |
+      GPU context lost.
+      Too many WebGL contexts.
+      Memory overflow.
+      Mobile GPU limits.
+    solution: |
+      ## Handling WebGL Context Loss
+
+      ### Detection
+      ```javascript
+      const canvas = renderer.domElement;
+
+      canvas.addEventListener('webglcontextlost', (event) => {
+        event.preventDefault();
+        // Show fallback
+        setShowFallback(true);
+      });
+
+      canvas.addEventListener('webglcontextrestored', () => {
+        // Reinitialize scene
+        initScene();
+        setShowFallback(false);
+      });
+      ```
+
+      ### Prevention
+      - Only one Canvas/WebGL context per page
+      - Dispose of unused resources
+      - Limit texture sizes
+      - Watch memory usage
+
+      ### R3F Cleanup
+      ```jsx
+      useEffect(() => {
+        return () => {
+          // Cleanup on unmount
+          scene.traverse((object) => {
+            if (object.geometry) object.geometry.dispose();
+            if (object.material) {
+              if (Array.isArray(object.material)) {
+                object.material.forEach(m => m.dispose());
+              } else {
+                object.material.dispose();
+              }
+            }
+          });
+        };
+      }, []);
+      ```
+
+      ### Memory Limits
+      | Device | Safe Texture Memory |
+      |--------|---------------------|
+      | Desktop | 512MB |
+      | iPhone | 256MB |
+      | Android mid | 128MB |
+      | Android low | 64MB |
+    symptoms:
+      - Black screen after running
+      - "WebGL context lost" errors
+      - Scene disappears randomly
+      - Crashes on mobile
+    detection_pattern: "context.*lost|black screen|crash|disappear"
+
+  - id: huge-model-files
+    summary: 3D models are too large to load quickly
+    severity: high
+    situation: Models take forever to load, users bounce
+    why: |
+      Unoptimized exports from 3D software.
+      High poly counts.
+      Uncompressed textures.
+      Multiple materials.
+    solution: |
+      ## Model Size Optimization
+
+      ### Target Sizes
+      | Model Type | Max File Size | Max Triangles |
+      |------------|---------------|---------------|
+      | Hero model | 2-5MB | 100K |
+      | Product model | 1-2MB | 50K |
+      | Background object | <500KB | 10K |
+      | Mobile | <1MB total | 30K |
+
+      ### Optimization Steps
+      ```bash
+      # 1. Check current size
+      ls -lh model.glb
+
+      # 2. Compress with gltf-transform
+      npx @gltf-transform/cli optimize model.glb optimized.glb \
+        --compress draco \
+        --texture-resize 1024 \
+        --texture-compress webp
+
+      # 3. Check new size
+      ls -lh optimized.glb
+      ```
+
+      ### In Blender
+      1. Decimate modifier (reduce polys)
+      2. Limited dissolve
+      3. Bake textures to single material
+      4. Resize textures to 1024x1024 max
+      5. Export as GLB with Draco
+
+      ### Lazy Loading
+      ```jsx
+      // Don't load until in viewport
+      const { ref, inView } = useInView();
+
+      return (
+        <div ref={ref}>
+          {inView && <Canvas><Model /></Canvas>}
+        </div>
+      );
+      ```
+    symptoms:
+      - 20MB+ model files
+      - Loading takes 10+ seconds
+      - Mobile users bounce
+      - Spinner forever
+    detection_pattern: "slow|loading|large|MB|file size|optimize"
+
+  - id: shader-errors
+    summary: Shaders fail on certain devices
+    severity: medium
+    situation: Custom shaders work on some devices, crash on others
+    why: |
+      GLSL version differences.
+      Precision issues on mobile.
+      Missing extensions.
+      Driver bugs.
+    solution: |
+      ## Cross-Device Shaders
+
+      ### Safe Practices
+      ```glsl
+      // Always declare precision on mobile
+      precision mediump float;
+
+      // Avoid highp on mobile fragment shaders
+      // Use mediump by default
+
+      // Check extension availability
+      #ifdef GL_OES_standard_derivatives
+        // Use extension
+      #endif
+      ```
+
+      ### R3F Shader Material
+      ```jsx
+      import { shaderMaterial } from '@react-three/drei';
+      import { extend } from '@react-three/fiber';
+
+      const MyMaterial = shaderMaterial(
+        { uTime: 0, uColor: new THREE.Color('red') },
+        // Vertex shader
+        `
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        // Fragment shader
+        `
+          precision mediump float;
+          varying vec2 vUv;
+          uniform float uTime;
+          void main() {
+            gl_FragColor = vec4(vUv, sin(uTime), 1.0);
+          }
+        `
+      );
+
+      extend({ MyMaterial });
+      ```
+
+      ### Fallback Strategy
+      ```jsx
+      const [useCustomShader, setUseCustomShader] = useState(true);
+
+      // Detect if shaders work
+      useEffect(() => {
+        const gl = canvas.getContext('webgl');
+        if (!gl.getExtension('OES_standard_derivatives')) {
+          setUseCustomShader(false);
+        }
+      }, []);
+      ```
+    symptoms:
+      - Works on Chrome, fails on Safari
+      - Works on desktop, fails on mobile
+      - Pink/magenta materials (shader error)
+      - Console shader compilation errors
+    detection_pattern: "shader|GLSL|pink|magenta|compile.*error"
+
+  - id: orbit-controls-conflict
+    summary: 3D controls interfere with page scroll
+    severity: medium
+    situation: Can't scroll page when cursor is over 3D
+    why: |
+      OrbitControls captures all input.
+      Scroll events consumed.
+      Touch events conflict.
+      UX nightmare.
+    solution: |
+      ## Controls vs Page Interaction
+
+      ### Disable Scroll on Controls
+      ```jsx
+      <OrbitControls
+        enableZoom={false} // Disable scroll zoom
+        enablePan={false}  // Disable panning
+        // Or limit zoom to buttons only
+      />
+      ```
+
+      ### Only Enable on Interaction
+      ```jsx
+      function Scene() {
+        const [controlsEnabled, setControlsEnabled] = useState(false);
+
+        return (
+          <div
+            onMouseEnter={() => setControlsEnabled(true)}
+            onMouseLeave={() => setControlsEnabled(false)}
+          >
+            <Canvas>
+              <OrbitControls enabled={controlsEnabled} />
+            </Canvas>
+          </div>
+        );
+      }
+      ```
+
+      ### Mobile Touch Handling
+      ```jsx
+      <OrbitControls
+        touches={{
+          ONE: THREE.TOUCH.ROTATE,
+          TWO: THREE.TOUCH.DOLLY_PAN,
+        }}
+        // Prevent scroll interference
+        domElement={canvasRef.current}
+      />
+      ```
+
+      ### Alternative: Scroll Controls
+      ```jsx
+      // Use scroll for 3D, not orbit
+      import { ScrollControls } from '@react-three/drei';
+
+      <ScrollControls pages={3}>
+        <Model />
+      </ScrollControls>
+      ```
+    symptoms:
+      - Can't scroll when over 3D
+      - Pinch zoom zooms 3D not page
+      - Frustrating mobile experience
+      - Users trapped in 3D
+    detection_pattern: "scroll|zoom|controls|stuck|can't scroll"

@@ -1,0 +1,225 @@
+# Scroll Experience Sharp Edges
+
+sharp_edges:
+  - id: scroll-jank
+    summary: Animations stutter during scroll
+    severity: high
+    situation: Scroll animations aren't smooth 60fps
+    why: |
+      Animating wrong properties.
+      Too many elements animating.
+      Heavy JavaScript on scroll.
+      No GPU acceleration.
+    solution: |
+      ## Fixing Scroll Jank
+
+      ### Only Animate These
+      ```css
+      /* GPU-accelerated, smooth */
+      transform: translateX(), translateY(), scale(), rotate()
+      opacity: 0 to 1
+
+      /* Triggers layout, causes jank */
+      width, height, top, left, margin, padding
+      ```
+
+      ### Force GPU Acceleration
+      ```css
+      .animated-element {
+        will-change: transform;
+        transform: translateZ(0); /* Force GPU layer */
+      }
+      ```
+
+      ### Throttle Scroll Events
+      ```javascript
+      // Don't do this
+      window.addEventListener('scroll', heavyFunction);
+
+      // Do this instead
+      let ticking = false;
+      window.addEventListener('scroll', () => {
+        if (!ticking) {
+          requestAnimationFrame(() => {
+            heavyFunction();
+            ticking = false;
+          });
+          ticking = true;
+        }
+      });
+
+      // Or use GSAP (handles this automatically)
+      ```
+
+      ### Debug Performance
+      - Chrome DevTools → Performance tab
+      - Record scroll, look for red frames
+      - Check "Rendering" → Paint flashing
+      - Profile on mobile device
+    symptoms:
+      - Choppy animations
+      - Laggy scroll
+      - CPU spikes during scroll
+      - Mobile especially bad
+    detection_pattern: "scroll.*jank|stutter|laggy|choppy|not smooth"
+
+  - id: parallax-on-mobile
+    summary: Parallax breaks on mobile devices
+    severity: high
+    situation: Parallax effects glitch on iOS/Android
+    why: |
+      Mobile browsers handle scroll differently.
+      iOS momentum scrolling conflicts.
+      Transform during scroll is tricky.
+      Performance varies wildly.
+    solution: |
+      ## Mobile-Safe Parallax
+
+      ### Detection
+      ```javascript
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      // Or better: check viewport width
+      const isMobile = window.innerWidth < 768;
+      ```
+
+      ### Reduce or Disable
+      ```javascript
+      if (isMobile) {
+        // Simpler animations
+        gsap.to('.element', {
+          scrollTrigger: { scrub: true },
+          y: -50, // Less movement than desktop
+        });
+      } else {
+        // Full parallax
+        gsap.to('.element', {
+          scrollTrigger: { scrub: true },
+          y: -200,
+        });
+      }
+      ```
+
+      ### iOS-Specific Fix
+      ```css
+      /* Helps with iOS scroll issues */
+      .scroll-container {
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .parallax-layer {
+        transform: translate3d(0, 0, 0);
+        backface-visibility: hidden;
+      }
+      ```
+
+      ### Alternative: CSS Only
+      ```css
+      /* Works better on mobile */
+      @supports (animation-timeline: scroll()) {
+        .parallax {
+          animation: parallax linear;
+          animation-timeline: scroll();
+        }
+      }
+      ```
+    symptoms:
+      - Glitchy on iPhone
+      - Stuttering on scroll
+      - Elements jumping
+      - Works on desktop, broken on mobile
+    detection_pattern: "mobile|iOS|iPhone|Android|touch|parallax.*broken"
+
+  - id: accessibility-scroll
+    summary: Scroll experience is inaccessible
+    severity: medium
+    situation: Screen readers and keyboard users can't use the site
+    why: |
+      Animations hide content.
+      Scroll hijacking breaks navigation.
+      No reduced motion support.
+      Focus management ignored.
+    solution: |
+      ## Accessible Scroll Experiences
+
+      ### Respect Reduced Motion
+      ```css
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          transition-duration: 0.01ms !important;
+          scroll-behavior: auto !important;
+        }
+      }
+      ```
+
+      ```javascript
+      const prefersReducedMotion = window.matchMedia(
+        '(prefers-reduced-motion: reduce)'
+      ).matches;
+
+      if (!prefersReducedMotion) {
+        initScrollAnimations();
+      }
+      ```
+
+      ### Content Always Accessible
+      - Don't hide content behind animations
+      - Ensure text is readable without JS
+      - Provide skip links
+      - Test with screen reader
+
+      ### Keyboard Navigation
+      ```javascript
+      // Ensure scroll sections are keyboard navigable
+      document.querySelectorAll('.scroll-section').forEach(section => {
+        section.setAttribute('tabindex', '0');
+      });
+      ```
+    symptoms:
+      - Failed accessibility audit
+      - Can't navigate with keyboard
+      - Screen reader doesn't work
+      - Vestibular disorder complaints
+    detection_pattern: "accessible|a11y|screen reader|keyboard|reduced motion"
+
+  - id: content-below-fold
+    summary: Critical content hidden below animations
+    severity: medium
+    situation: Users have to scroll through animations to find content
+    why: |
+      Prioritized experience over content.
+      Long scroll to reach info.
+      SEO suffering.
+      Mobile users bounce.
+    solution: |
+      ## Content-First Scroll Design
+
+      ### Above-the-Fold Content
+      - Key message visible immediately
+      - CTA visible without scroll
+      - Value proposition clear
+      - Skip animation option
+
+      ### Progressive Enhancement
+      ```
+      Level 1: Content readable without JS
+      Level 2: Basic styling and layout
+      Level 3: Scroll animations enhance
+      ```
+
+      ### SEO Considerations
+      - Text in DOM, not just in canvas
+      - Proper heading hierarchy
+      - Content not hidden by default
+      - Fast initial load
+
+      ### Quick Exit Points
+      - Clear navigation always visible
+      - Skip to content links
+      - Don't trap users in experience
+    symptoms:
+      - High bounce rate
+      - Low time on page (paradoxically)
+      - SEO ranking issues
+      - User complaints about finding info
+    detection_pattern: "can't find|where is|too much scroll|bounce"

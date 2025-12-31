@@ -1,0 +1,268 @@
+# Telegram Bot Builder Sharp Edges
+
+sharp_edges:
+  - id: rate-limits
+    summary: Bot gets rate limited by Telegram
+    severity: high
+    situation: Bot stops responding or messages fail
+    why: |
+      Too many messages per second.
+      Bulk messaging without throttling.
+      Not handling 429 errors.
+      Webhook flooding.
+    solution: |
+      ## Telegram Rate Limits
+
+      ### Know the Limits
+      | Action | Limit |
+      |--------|-------|
+      | Messages to user | 30/sec |
+      | Messages to group | 20/min |
+      | Bulk notifications | 30/sec total |
+      | API calls | Varies |
+
+      ### Throttling Implementation
+      ```javascript
+      import Bottleneck from 'bottleneck';
+
+      const limiter = new Bottleneck({
+        maxConcurrent: 1,
+        minTime: 33, // ~30 per second
+      });
+
+      async function sendMessage(chatId, text) {
+        return limiter.schedule(() =>
+          bot.telegram.sendMessage(chatId, text)
+        );
+      }
+      ```
+
+      ### Handle 429 Errors
+      ```javascript
+      bot.catch((err, ctx) => {
+        if (err.response?.error_code === 429) {
+          const retryAfter = err.response.parameters?.retry_after || 30;
+          console.log(`Rate limited. Retry after ${retryAfter}s`);
+          // Queue for retry
+        }
+      });
+      ```
+
+      ### Bulk Messaging
+      ```javascript
+      async function broadcastMessage(userIds, message) {
+        for (const userId of userIds) {
+          try {
+            await sendMessage(userId, message);
+            await sleep(50); // 50ms between messages
+          } catch (err) {
+            if (err.response?.error_code === 403) {
+              // User blocked bot
+              await markUserInactive(userId);
+            }
+          }
+        }
+      }
+      ```
+    symptoms:
+      - "Too Many Requests" errors
+      - Messages not delivering
+      - 429 error codes
+      - Bot seems slow
+    detection_pattern: "rate limit|429|too many|throttle"
+
+  - id: webhook-not-working
+    summary: Webhook not receiving updates
+    severity: high
+    situation: Bot works locally but not in production
+    why: |
+      HTTPS required for webhooks.
+      Wrong webhook URL.
+      Certificate issues.
+      Firewall blocking.
+    solution: |
+      ## Webhook Troubleshooting
+
+      ### Requirements
+      - HTTPS only (no self-signed in prod)
+      - Port 443, 80, 88, or 8443
+      - Valid SSL certificate
+      - Publicly accessible URL
+
+      ### Check Webhook Status
+      ```bash
+      curl "https://api.telegram.org/bot<TOKEN>/getWebhookInfo"
+      ```
+
+      ### Common Fixes
+      ```javascript
+      // 1. Set webhook explicitly
+      bot.telegram.setWebhook('https://your-domain.com/webhook');
+
+      // 2. Delete old webhook first
+      bot.telegram.deleteWebhook();
+
+      // 3. Check pending updates
+      const info = await bot.telegram.getWebhookInfo();
+      console.log(info);
+      ```
+
+      ### Local Development
+      ```bash
+      # Use ngrok for local testing
+      ngrok http 3000
+
+      # Then set webhook to ngrok URL
+      ```
+
+      ### Vercel/Serverless Issues
+      - Ensure function is accessible
+      - Check function logs
+      - Verify environment variables
+      - Test endpoint directly
+    symptoms:
+      - Works with polling, not webhook
+      - No logs in production
+      - getWebhookInfo shows errors
+      - Updates not arriving
+    detection_pattern: "webhook|not working|production|deploy"
+
+  - id: user-state-management
+    summary: Bot loses user context between messages
+    severity: medium
+    situation: Multi-step flows break, bot forgets user state
+    why: |
+      No state persistence.
+      Using in-memory storage.
+      Serverless cold starts.
+      Not tracking conversations.
+    solution: |
+      ## User State Management
+
+      ### State Storage Options
+      | Storage | Best For |
+      |---------|----------|
+      | Redis | Fast, temporary state |
+      | PostgreSQL | Persistent data |
+      | SQLite | Simple bots |
+      | Telegraf sessions | Development |
+
+      ### Telegraf Sessions
+      ```javascript
+      import { session } from 'telegraf';
+
+      // In-memory (development only)
+      bot.use(session());
+
+      // Redis (production)
+      import { Redis } from '@telegraf/session/redis';
+
+      bot.use(session({
+        store: Redis({ url: process.env.REDIS_URL }),
+      }));
+
+      // Use session
+      bot.command('start', (ctx) => {
+        ctx.session.step = 'awaiting_name';
+        ctx.reply('What is your name?');
+      });
+
+      bot.on('text', (ctx) => {
+        if (ctx.session.step === 'awaiting_name') {
+          ctx.session.name = ctx.message.text;
+          ctx.session.step = 'awaiting_email';
+          ctx.reply('What is your email?');
+        }
+      });
+      ```
+
+      ### Scene/Wizard Pattern
+      ```javascript
+      import { Scenes } from 'telegraf';
+
+      const wizard = new Scenes.WizardScene(
+        'onboarding',
+        (ctx) => {
+          ctx.reply('Step 1: Enter your name');
+          return ctx.wizard.next();
+        },
+        (ctx) => {
+          ctx.wizard.state.name = ctx.message.text;
+          ctx.reply('Step 2: Enter your email');
+          return ctx.wizard.next();
+        },
+        (ctx) => {
+          const { name } = ctx.wizard.state;
+          ctx.reply(`Done! Welcome ${name}`);
+          return ctx.scene.leave();
+        }
+      );
+      ```
+    symptoms:
+      - Multi-step flows fail
+      - "Start over" needed frequently
+      - User data lost
+      - Inconsistent behavior
+    detection_pattern: "state|session|forgot|lost|context"
+
+  - id: blocked-users
+    summary: Users block bot but you keep trying to message
+    severity: medium
+    situation: Error logs full of "bot blocked by user"
+    why: |
+      Not tracking who blocked.
+      Wasting API calls.
+      Filling logs with errors.
+      Affecting rate limits.
+    solution: |
+      ## Handling Blocked Users
+
+      ### Detect Block
+      ```javascript
+      async function sendSafe(chatId, message) {
+        try {
+          await bot.telegram.sendMessage(chatId, message);
+          return { success: true };
+        } catch (err) {
+          if (err.response?.error_code === 403) {
+            // User blocked bot or deleted account
+            await markUserInactive(chatId);
+            return { success: false, blocked: true };
+          }
+          throw err;
+        }
+      }
+      ```
+
+      ### Track Active Users
+      ```sql
+      -- Users table
+      CREATE TABLE users (
+        telegram_id BIGINT PRIMARY KEY,
+        username TEXT,
+        is_active BOOLEAN DEFAULT true,
+        blocked_at TIMESTAMP
+      );
+      ```
+
+      ### Clean Broadcast List
+      ```javascript
+      async function broadcast(message) {
+        const activeUsers = await db.users.findMany({
+          where: { is_active: true }
+        });
+
+        for (const user of activeUsers) {
+          const result = await sendSafe(user.telegram_id, message);
+          if (result.blocked) {
+            // Already marked inactive in sendSafe
+          }
+        }
+      }
+      ```
+    symptoms:
+      - Lots of 403 errors
+      - Broadcast failing silently
+      - Wasted API calls
+      - Inaccurate user counts
+    detection_pattern: "403|blocked|forbidden|can't send"

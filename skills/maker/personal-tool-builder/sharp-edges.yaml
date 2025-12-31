@@ -1,0 +1,300 @@
+# Personal Tool Builder Sharp Edges
+
+sharp_edges:
+  - id: works-on-my-machine
+    summary: Tool only works in your specific environment
+    severity: medium
+    situation: Script fails when you try to share it
+    why: |
+      Hardcoded absolute paths.
+      Relies on your installed tools.
+      Assumes your OS/shell.
+      Uses your auth tokens.
+    solution: |
+      ## Making Tools Portable
+
+      ### Common Portability Issues
+      | Issue | Fix |
+      |-------|-----|
+      | Hardcoded paths | Use ~ or env vars |
+      | Specific shell | Declare shell in shebang |
+      | Missing deps | Check and prompt to install |
+      | Auth tokens | Use config file or env |
+      | OS-specific | Test on other OS or use cross-platform libs |
+
+      ### Path Portability
+      ```javascript
+      // Bad
+      const dataFile = '/Users/yourname/data.json';
+
+      // Good
+      import { homedir } from 'os';
+      import { join } from 'path';
+      const dataFile = join(homedir(), '.mytool', 'data.json');
+      ```
+
+      ### Dependency Checking
+      ```javascript
+      import { execSync } from 'child_process';
+
+      function checkDep(cmd, installHint) {
+        try {
+          execSync(`which ${cmd}`, { stdio: 'ignore' });
+        } catch {
+          console.error(`Missing: ${cmd}`);
+          console.error(`Install: ${installHint}`);
+          process.exit(1);
+        }
+      }
+
+      checkDep('ffmpeg', 'brew install ffmpeg');
+      ```
+
+      ### Cross-Platform Considerations
+      ```javascript
+      import { platform } from 'os';
+
+      const isWindows = platform() === 'win32';
+      const isMac = platform() === 'darwin';
+      const isLinux = platform() === 'linux';
+
+      // Path separator
+      import { sep } from 'path';
+      // Use sep instead of hardcoded / or \
+      ```
+    symptoms:
+      - "Works on my machine"
+      - Scripts failing for others
+      - Path not found errors
+      - Command not found errors
+    detection_pattern: "doesn't work|your machine|path|install|depend"
+
+  - id: config-hell
+    summary: Configuration becomes unmanageable
+    severity: medium
+    situation: Too many config options making the tool unusable
+    why: |
+      Adding options instead of opinions.
+      Fear of making decisions.
+      Every edge case becomes an option.
+      Config file larger than the tool.
+    solution: |
+      ## Taming Configuration
+
+      ### The Config Hierarchy
+      ```
+      Best to worst:
+      1. Smart defaults (no config needed)
+      2. Single config file
+      3. Environment variables
+      4. Command-line flags
+      5. Interactive prompts
+
+      Use sparingly:
+      6. Config directory with multiple files
+      7. Config inheritance/merging
+      ```
+
+      ### Opinionated Defaults
+      ```javascript
+      // Instead of 10 options, pick reasonable defaults
+      const defaults = {
+        outputDir: join(homedir(), '.mytool', 'output'),
+        format: 'json',  // Not a flag, just pick one
+        maxItems: 100,   // Good enough for most
+        verbose: false
+      };
+
+      // Only expose what REALLY needs customization
+      // "Would I want to change this?" - not "Could someone?"
+      ```
+
+      ### Config File Pattern
+      ```javascript
+      // ~/.mytool/config.json
+      // Keep it minimal
+      {
+        "apiKey": "xxx",       // Actually needed
+        "defaultProject": "main"  // Convenience
+      }
+
+      // Don't do this:
+      {
+        "outputFormat": "json",
+        "outputIndent": 2,
+        "outputColorize": true,
+        "logLevel": "info",
+        "logFormat": "pretty",
+        "logTimestamp": true,
+        // ... 50 more options
+      }
+      ```
+
+      ### When to Add Options
+      | Add option if... | Don't add if... |
+      |------------------|-----------------|
+      | Users ask repeatedly | You imagine someone might want |
+      | Security/auth related | It's a "nice to have" |
+      | Fundamental behavior change | It's a micro-preference |
+      | Environment-specific | You can pick a good default |
+    symptoms:
+      - Config file is huge
+      - Users confused by options
+      - You forget what options exist
+      - Every bug fix adds a flag
+    detection_pattern: "config|option|flag|setting|customize"
+
+  - id: abandoned-tool
+    summary: Personal tool becomes unmaintained
+    severity: low
+    situation: Tool you built is now broken and you don't want to fix it
+    why: |
+      Built for old workflow.
+      Dependencies broke.
+      Lost interest.
+      No documentation for yourself.
+    solution: |
+      ## Sustainable Personal Tools
+
+      ### Design for Abandonment
+      ```
+      Assume future-you won't remember:
+      - Why you built this
+      - How it works
+      - Where the data is
+      - What the dependencies do
+
+      Build accordingly:
+      - README with WHY, not just WHAT
+      - Simple architecture
+      - Minimal dependencies
+      - Data in standard formats
+      ```
+
+      ### Minimal Dependency Strategy
+      | Approach | When to Use |
+      |----------|-------------|
+      | Zero deps | Simple scripts |
+      | Core deps only | CLI tools |
+      | Lock versions | Important tools |
+      | Bundle deps | Distribution |
+
+      ### Self-Documenting Pattern
+      ```javascript
+      #!/usr/bin/env node
+      /**
+       * WHAT: Converts X to Y
+       * WHY: Because Z process was manual
+       * WHERE: Data in ~/.mytool/
+       * DEPS: Needs ffmpeg installed
+       *
+       * Last used: 2024-01
+       * Still works as of: 2024-01
+       */
+
+      // Tool code here
+      ```
+
+      ### Graceful Degradation
+      ```javascript
+      // When things break, fail helpfully
+      try {
+        await runMainFeature();
+      } catch (err) {
+        console.error('Tool broken. Error:', err.message);
+        console.error('');
+        console.error('Data location: ~/.mytool/data.json');
+        console.error('You can manually access your data there.');
+        process.exit(1);
+      }
+      ```
+
+      ### When to Let Go
+      ```
+      Signs to abandon:
+      - Haven't used in 6+ months
+      - Problem no longer exists
+      - Better tool now exists
+      - Would rebuild differently
+
+      How to abandon gracefully:
+      - Archive in clear state
+      - Note why abandoned
+      - Export data to standard format
+      - Don't delete (might want later)
+      ```
+    symptoms:
+      - Script hasn't run in months
+      - Don't remember how it works
+      - Dependencies outdated
+      - Workflow has changed
+    detection_pattern: "abandon|old|broken|maintain|forgot"
+
+  - id: security-in-personal-tools
+    summary: Personal tools with security vulnerabilities
+    severity: high
+    situation: Your personal tool exposes sensitive data or access
+    why: |
+      "It's just for me" mentality.
+      Credentials in code.
+      No input validation.
+      Accidental exposure.
+    solution: |
+      ## Security in Personal Tools
+
+      ### Common Mistakes
+      | Risk | Mitigation |
+      |------|------------|
+      | API keys in code | Use env vars or config file |
+      | Tool exposed on network | Bind to localhost only |
+      | No input validation | Validate even your own input |
+      | Logs contain secrets | Sanitize logging |
+      | Git commits with secrets | .gitignore config files |
+
+      ### Credential Management
+      ```javascript
+      // Never in code
+      const API_KEY = 'sk-xxx'; // BAD
+
+      // Environment variable
+      const API_KEY = process.env.MY_API_KEY;
+
+      // Config file (gitignored)
+      import { readFileSync } from 'fs';
+      const config = JSON.parse(
+        readFileSync(join(homedir(), '.mytool', 'config.json'))
+      );
+      const API_KEY = config.apiKey;
+      ```
+
+      ### Localhost-Only Servers
+      ```javascript
+      // If your tool has a web UI
+      import express from 'express';
+      const app = express();
+
+      // ALWAYS bind to localhost for personal tools
+      app.listen(3000, '127.0.0.1', () => {
+        console.log('Running on http://localhost:3000');
+      });
+
+      // NEVER do this for personal tools:
+      // app.listen(3000, '0.0.0.0') // Exposes to network!
+      ```
+
+      ### Before Sharing
+      ```
+      Checklist:
+      [ ] No hardcoded credentials
+      [ ] Config file is gitignored
+      [ ] README mentions credential setup
+      [ ] No personal paths in code
+      [ ] No sensitive data in repo
+      [ ] Reviewed git history for secrets
+      ```
+    symptoms:
+      - API keys in source code
+      - Tool accessible on network
+      - Credentials in git history
+      - Personal data exposed
+    detection_pattern: "security|credential|secret|key|token|password|exposed"
