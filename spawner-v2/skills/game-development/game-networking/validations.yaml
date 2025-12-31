@@ -1,0 +1,555 @@
+# Validations - Game Networking & Multiplayer
+# Code pattern detection for networking issues
+
+id: game-networking
+version: "1.0.0"
+
+# ============================================================================
+# SECURITY VALIDATIONS
+# ============================================================================
+
+validations:
+  # ---------------------------------------------------------------------------
+  # CLIENT TRUST VIOLATIONS
+  # ---------------------------------------------------------------------------
+
+  - id: trusting_client_position
+    name: "Client Position Trust"
+    description: "Accepting position data directly from client without validation"
+    severity: critical
+    category: security
+    pattern: |
+      player\.(position|pos|location|transform)\s*=\s*(data|packet|message|msg|payload|event\.data)\.
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.cs"
+      - "**/*.cpp"
+    message: |
+      CRITICAL: Never trust client-reported position!
+      Server must simulate movement from inputs.
+    fix_suggestion: |
+      Instead of:
+        player.position = data.position;
+
+      Do:
+        // Client sends inputs, not position
+        const input = validateInput(data.input);
+        player.position = simulateMovement(player, input);
+    learn_more: "https://gafferongames.com/post/client_server_connection/"
+
+  - id: trusting_client_health
+    name: "Client Health Trust"
+    description: "Accepting health/damage values directly from client"
+    severity: critical
+    category: security
+    pattern: |
+      (player|entity|character)\.(health|hp|damage|armor)\s*=\s*(data|packet|message|msg|payload)\.
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.cs"
+    message: |
+      CRITICAL: Never trust client-reported health!
+      Godmode hacks exploit this vulnerability.
+    fix_suggestion: |
+      Server calculates all damage. Client sends attack actions,
+      server validates hit and calculates damage.
+
+  - id: client_side_hit_detection
+    name: "Client Hit Detection"
+    description: "Processing hit/damage events reported by client"
+    severity: critical
+    category: security
+    pattern: |
+      on\(['"]?(hit|damage|kill|headshot)['"]?,\s*(?:function\s*)?\([^)]*\)\s*(?:=>)?\s*\{[^}]*apply(?:Damage|Hit)
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: |
+      CRITICAL: Client-side hit detection enables aimbots!
+      Server must perform all hit detection.
+    fix_suggestion: |
+      Client sends: { type: 'shoot', origin, direction, timestamp }
+      Server performs: raycast with lag compensation, validates hit
+
+  - id: no_input_rate_limit
+    name: "Missing Input Rate Limiting"
+    description: "Processing client inputs without rate limiting"
+    severity: high
+    category: security
+    pattern: |
+      on\(['"]?(input|move|action)['"]?,.*\{(?!.*(?:rateLimit|throttle|lastInput|inputCount))
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: |
+      HIGH: Missing input rate limiting allows speed hacks!
+      Limit inputs per second (e.g., max 64/second).
+    fix_suggestion: |
+      const inputCounts = new Map();
+      const MAX_INPUTS_PER_SEC = 64;
+
+      socket.on('input', (data) => {
+        const count = inputCounts.get(socket.id) ?? 0;
+        if (count >= MAX_INPUTS_PER_SEC) {
+          flagPlayer(socket.id, 'input_flood');
+          return;
+        }
+        inputCounts.set(socket.id, count + 1);
+        // process input
+      });
+
+  # ---------------------------------------------------------------------------
+  # DETERMINISM VIOLATIONS
+  # ---------------------------------------------------------------------------
+
+  - id: math_random_in_simulation
+    name: "Non-Deterministic Random"
+    description: "Using Math.random() in game simulation code"
+    severity: critical
+    category: determinism
+    pattern: |
+      Math\.random\(\)
+    file_patterns:
+      - "**/game*.ts"
+      - "**/simulation*.ts"
+      - "**/world*.ts"
+      - "**/entity*.ts"
+      - "**/physics*.ts"
+    exclude_patterns:
+      - "**/*.test.*"
+      - "**/*.spec.*"
+      - "**/ui/**"
+    message: |
+      CRITICAL: Math.random() breaks determinism!
+      Use seeded PRNG for lockstep/rollback games.
+    fix_suggestion: |
+      class SeededRandom {
+        constructor(private seed: number) {}
+
+        next(): number {
+          let t = this.seed += 0x6D2B79F5;
+          t = Math.imul(t ^ t >>> 15, t | 1);
+          t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+          return ((t ^ t >>> 14) >>> 0) / 4294967296;
+        }
+      }
+
+      const rng = new SeededRandom(sharedSeed);
+      const value = rng.next(); // Deterministic!
+
+  - id: date_now_in_simulation
+    name: "System Time in Simulation"
+    description: "Using Date.now() or new Date() in deterministic simulation"
+    severity: high
+    category: determinism
+    pattern: |
+      (Date\.now\(\)|new Date\(\))
+    file_patterns:
+      - "**/simulation*.ts"
+      - "**/game-state*.ts"
+      - "**/world*.ts"
+      - "**/tick*.ts"
+    message: |
+      HIGH: System time varies between machines!
+      Use synchronized game tick for deterministic simulation.
+    fix_suggestion: |
+      // Use game tick instead of real time
+      class GameClock {
+        private tick = 0;
+        private tickRate = 60;
+
+        getCurrentTick(): number {
+          return this.tick;
+        }
+
+        getGameTime(): number {
+          return this.tick / this.tickRate;
+        }
+      }
+
+  - id: float_equality
+    name: "Floating Point Equality"
+    description: "Comparing floats with == or === in deterministic code"
+    severity: medium
+    category: determinism
+    pattern: |
+      ===?\s*[0-9]+\.[0-9]+|[0-9]+\.[0-9]+\s*===?
+    file_patterns:
+      - "**/simulation*.ts"
+      - "**/physics*.ts"
+      - "**/collision*.ts"
+    message: |
+      MEDIUM: Float comparison varies across platforms!
+      Use epsilon comparison or fixed-point math.
+    fix_suggestion: |
+      const EPSILON = 0.0001;
+
+      function floatEquals(a: number, b: number): boolean {
+        return Math.abs(a - b) < EPSILON;
+      }
+
+  - id: unordered_iteration
+    name: "Non-Deterministic Iteration"
+    description: "Iterating objects/maps without sorting in deterministic code"
+    severity: high
+    category: determinism
+    pattern: |
+      for\s*\(\s*(?:const|let|var)\s+\w+\s+in\s+\w+|Object\.keys\([^)]+\)\.(?:forEach|map)|\.forEach\(
+    file_patterns:
+      - "**/simulation*.ts"
+      - "**/tick*.ts"
+      - "**/lockstep*.ts"
+    message: |
+      HIGH: Iteration order may vary!
+      Sort before iterating for determinism.
+    fix_suggestion: |
+      // BAD
+      for (const id in players) { ... }
+
+      // GOOD
+      const sortedIds = Object.keys(players).sort();
+      for (const id of sortedIds) { ... }
+
+  # ---------------------------------------------------------------------------
+  # PERFORMANCE ISSUES
+  # ---------------------------------------------------------------------------
+
+  - id: json_stringify_for_packets
+    name: "JSON for Network Packets"
+    description: "Using JSON.stringify for game state packets"
+    severity: medium
+    category: performance
+    pattern: |
+      JSON\.stringify\([^)]+\).*(?:send|emit|broadcast)
+    file_patterns:
+      - "**/network*.ts"
+      - "**/server*.ts"
+      - "**/socket*.ts"
+    message: |
+      MEDIUM: JSON is verbose for game state.
+      Use binary protocol (msgpack, protobuf) at scale.
+    fix_suggestion: |
+      // Use msgpack for 30-50% smaller payloads
+      import { encode, decode } from '@msgpack/msgpack';
+
+      socket.send(encode(gameState));
+
+  - id: full_state_broadcast
+    name: "Broadcasting Full State"
+    description: "Sending complete game state to all clients every tick"
+    severity: high
+    category: performance
+    pattern: |
+      broadcast\(.*gameState|clients\.forEach.*send.*(?:state|entities|world)
+    file_patterns:
+      - "**/server*.ts"
+      - "**/network*.ts"
+    message: |
+      HIGH: Full state broadcast doesn't scale!
+      Use delta compression and interest management.
+    fix_suggestion: |
+      // Delta compression
+      const delta = computeDelta(lastAckedState, currentState);
+      client.send(compressDelta(delta));
+
+      // Interest management
+      const nearbyEntities = spatialGrid.query(player.position, viewRadius);
+      client.send(filterEntities(state, nearbyEntities));
+
+  - id: blocking_io_in_tick
+    name: "Blocking I/O in Game Loop"
+    description: "Synchronous I/O in tick/update function"
+    severity: critical
+    category: performance
+    pattern: |
+      (readFileSync|writeFileSync|execSync|query\([^)]*\)(?!\.then))
+    file_patterns:
+      - "**/tick*.ts"
+      - "**/update*.ts"
+      - "**/game-loop*.ts"
+    message: |
+      CRITICAL: Blocking I/O stalls entire game!
+      Use async patterns or background workers.
+    fix_suggestion: |
+      // Move I/O outside tick loop
+      class AsyncSaveManager {
+        private pendingSaves: GameState[] = [];
+
+        queueSave(state: GameState) {
+          this.pendingSaves.push(structuredClone(state));
+        }
+
+        async processSaves() {
+          while (this.pendingSaves.length > 0) {
+            const state = this.pendingSaves.shift();
+            await saveToDatabase(state);
+          }
+        }
+      }
+
+  - id: unbounded_history
+    name: "Unbounded State History"
+    description: "Pushing to history array without cleanup"
+    severity: high
+    category: performance
+    pattern: |
+      history\.push\([^)]+\)(?!.*(?:shift|splice|slice|\.length\s*>))
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: |
+      HIGH: Unbounded history causes memory leak!
+      Cap history buffer size.
+    fix_suggestion: |
+      const MAX_HISTORY = 300; // ~5 seconds at 60 tick
+
+      function addToHistory(state: GameState) {
+        history.push(state);
+        while (history.length > MAX_HISTORY) {
+          history.shift();
+        }
+      }
+
+  # ---------------------------------------------------------------------------
+  # PROTOCOL ISSUES
+  # ---------------------------------------------------------------------------
+
+  - id: no_sequence_number
+    name: "Missing Sequence Numbers"
+    description: "Network packets without sequence numbers"
+    severity: medium
+    category: protocol
+    pattern: |
+      send\(\s*\{(?!.*(?:seq|sequence|tick|frame))
+    file_patterns:
+      - "**/network*.ts"
+      - "**/socket*.ts"
+    message: |
+      MEDIUM: Packets need sequence numbers!
+      Required for ordering, deduplication, and ack.
+    fix_suggestion: |
+      let sequenceNumber = 0;
+
+      function sendPacket(data: any) {
+        socket.send({
+          seq: sequenceNumber++,
+          timestamp: Date.now(),
+          ...data
+        });
+      }
+
+  - id: no_packet_ack
+    name: "Missing Acknowledgment System"
+    description: "Sending reliable data without acknowledgment"
+    severity: medium
+    category: protocol
+    pattern: |
+      send\(.*type:\s*['"](?:spawn|despawn|item|inventory|chat)['"](?!.*ack)
+    file_patterns:
+      - "**/network*.ts"
+    message: |
+      MEDIUM: Important events need acknowledgment!
+      Implement ack/retry for reliable delivery.
+    fix_suggestion: |
+      class ReliableChannel {
+        private pending = new Map<number, { data: any, retries: number }>();
+        private seq = 0;
+
+        send(data: any) {
+          const id = this.seq++;
+          this.pending.set(id, { data, retries: 0 });
+          this.socket.send({ ...data, reliableId: id });
+          this.scheduleRetry(id);
+        }
+
+        onAck(id: number) {
+          this.pending.delete(id);
+        }
+
+        private scheduleRetry(id: number) {
+          setTimeout(() => {
+            const pending = this.pending.get(id);
+            if (pending && pending.retries < 5) {
+              pending.retries++;
+              this.socket.send({ ...pending.data, reliableId: id });
+              this.scheduleRetry(id);
+            }
+          }, 100);
+        }
+      }
+
+  # ---------------------------------------------------------------------------
+  # LAG COMPENSATION
+  # ---------------------------------------------------------------------------
+
+  - id: missing_timestamp
+    name: "Missing Client Timestamp"
+    description: "Shot/action packets without client timestamp"
+    severity: high
+    category: lag_compensation
+    pattern: |
+      send\(\s*\{[^}]*type:\s*['"](?:shoot|fire|attack|ability)['"][^}]*\}(?!.*timestamp)
+    file_patterns:
+      - "**/client*.ts"
+      - "**/input*.ts"
+    message: |
+      HIGH: Actions need timestamps for lag compensation!
+      Server uses timestamp to rewind world state.
+    fix_suggestion: |
+      function sendShot(origin: Vec3, direction: Vec3) {
+        socket.send({
+          type: 'shoot',
+          origin,
+          direction,
+          clientTimestamp: Date.now(),  // When player clicked
+          clientTick: currentTick        // Game tick when fired
+        });
+      }
+
+  # ---------------------------------------------------------------------------
+  # INTERPOLATION
+  # ---------------------------------------------------------------------------
+
+  - id: direct_state_render
+    name: "Rendering Server State Directly"
+    description: "Rendering remote entities from server state without interpolation"
+    severity: medium
+    category: visual
+    pattern: |
+      entity\.(position|transform)\s*=\s*serverState\.|render\(serverState\)
+    file_patterns:
+      - "**/render*.ts"
+      - "**/client*.ts"
+      - "**/game*.ts"
+    message: |
+      MEDIUM: Direct rendering causes jitter!
+      Buffer and interpolate for smooth visuals.
+    fix_suggestion: |
+      class RemoteEntityRenderer {
+        private stateBuffer: StateSnapshot[] = [];
+        private renderDelay = 100; // ms behind real-time
+
+        onServerState(state: EntityState, serverTime: number) {
+          this.stateBuffer.push({ state, serverTime });
+        }
+
+        getInterpolatedState(): EntityState {
+          const renderTime = Date.now() - this.renderDelay;
+          // Interpolate between buffered states
+          return this.interpolate(renderTime);
+        }
+      }
+
+  # ---------------------------------------------------------------------------
+  # MATCHMAKING
+  # ---------------------------------------------------------------------------
+
+  - id: hardcoded_matchmaking
+    name: "Hardcoded Matchmaking Parameters"
+    description: "Magic numbers in matchmaking without configuration"
+    severity: low
+    category: matchmaking
+    pattern: |
+      (?:ratingRange|skillDiff|queueTime|expandRate)\s*[=:]\s*\d+(?!\s*[,}])
+    file_patterns:
+      - "**/matchmaking*.ts"
+      - "**/matchmaker*.ts"
+    message: |
+      LOW: Hardcoded matchmaking values hurt tuning.
+      Use configuration for easy adjustment.
+    fix_suggestion: |
+      const MATCHMAKING_CONFIG = {
+        initialRatingRange: 100,
+        expandRatePerSecond: 10,
+        maxRatingRange: 500,
+        maxQueueTimeSeconds: 120,
+        teamSizeBalance: true
+      };
+
+  # ---------------------------------------------------------------------------
+  # WEBRTC
+  # ---------------------------------------------------------------------------
+
+  - id: missing_turn_fallback
+    name: "Missing TURN Server Fallback"
+    description: "WebRTC without TURN server configuration"
+    severity: high
+    category: connectivity
+    pattern: |
+      RTCPeerConnection\(\s*\{[^}]*iceServers:\s*\[[^\]]*stun[^\]]*\](?![^\]]*turn)
+    file_patterns:
+      - "**/webrtc*.ts"
+      - "**/p2p*.ts"
+      - "**/connection*.ts"
+    message: |
+      HIGH: STUN alone fails for symmetric NAT!
+      ~15% of players need TURN relay fallback.
+    fix_suggestion: |
+      const config = {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          {
+            urls: 'turn:your-server.com:3478',
+            username: 'user',
+            credential: 'pass'
+          }
+        ]
+      };
+
+# ============================================================================
+# VALIDATION PROFILES
+# ============================================================================
+
+profiles:
+  competitive_shooter:
+    description: "Strict validations for competitive FPS games"
+    enabled:
+      - trusting_client_position
+      - trusting_client_health
+      - client_side_hit_detection
+      - no_input_rate_limit
+      - missing_timestamp
+    severity_overrides:
+      json_stringify_for_packets: high
+
+  casual_coop:
+    description: "Relaxed validations for cooperative games"
+    enabled:
+      - trusting_client_position
+      - blocking_io_in_tick
+      - unbounded_history
+    disabled:
+      - json_stringify_for_packets
+      - hardcoded_matchmaking
+
+  lockstep_rts:
+    description: "Determinism-focused for RTS/simulation games"
+    enabled:
+      - math_random_in_simulation
+      - date_now_in_simulation
+      - float_equality
+      - unordered_iteration
+    severity_overrides:
+      float_equality: critical
+
+  rollback_fighting:
+    description: "Rollback netcode validations for fighting games"
+    enabled:
+      - math_random_in_simulation
+      - unbounded_history
+      - direct_state_render
+    custom:
+      - id: large_rollback_window
+        pattern: "maxRollback\\s*[=:]\\s*(?:[89]|\\d{2,})"
+        message: "Rollback window > 7 frames may feel bad"
+        severity: medium
+
+  p2p_casual:
+    description: "P2P game validations"
+    enabled:
+      - missing_turn_fallback
+      - no_packet_ack
+    disabled:
+      - client_side_hit_detection  # P2P may accept this tradeoff

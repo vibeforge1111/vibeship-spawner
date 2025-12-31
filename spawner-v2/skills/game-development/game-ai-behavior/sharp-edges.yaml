@@ -1,0 +1,485 @@
+# Sharp Edges - Game AI & NPC Behavior
+# Critical gotchas, pitfalls, and hard-won lessons
+
+skill_id: game-ai-behavior
+version: "1.0.0"
+
+sharp_edges:
+  state_machine_explosion:
+    severity: high
+    title: "State Machine Transition Explosion"
+    description: |
+      Adding states to a flat FSM causes quadratic growth in possible transitions.
+      A 10-state FSM can have up to 90 transitions. At 20 states, that's 380.
+    symptoms:
+      - "Giant switch statement that keeps growing"
+      - "New states require changes in multiple existing states"
+      - "Can't remember all the ways to reach a state"
+      - "Bugs where AI gets stuck in unexpected state"
+    detection: |
+      Count states and transitions. If transitions > states * 2, you have a problem.
+    solution: |
+      1. Use Hierarchical State Machine (HFSM) - group related states
+      2. Switch to Behavior Tree for complex AI
+      3. Use state stacks for temporary states (stunned, knockback)
+
+      ```csharp
+      // HFSM: CombatState contains sub-states
+      class CombatState : State {
+          StateMachine subFSM = new StateMachine();
+          // Approach, Attack, Retreat are sub-states
+          // Only need transitions WITHIN combat
+      }
+      ```
+    learn_more:
+      - "https://gameprogrammingpatterns.com/state.html"
+      - "https://www.gamedeveloper.com/design/the-behavior-tree-ai-of-halo-2"
+
+  pathfinding_performance:
+    severity: critical
+    title: "A* Performance Kills Frame Rate"
+    description: |
+      Pathfinding is O(n log n) where n is nodes explored. On large maps with
+      many simultaneous requests, this destroys performance. A single long
+      path can explore 10,000+ nodes.
+    symptoms:
+      - "Frame spikes when NPCs spawn or change targets"
+      - "Hitching during combat with many enemies"
+      - "Profile shows pathfinding taking 5ms+"
+    detection: |
+      Profile pathfinding time. Any single path > 1ms is a problem.
+      Multiple AI requesting paths on same frame causes spikes.
+    solution: |
+      1. **Request queue** - spread paths across frames
+      2. **Async/coroutine** - don't block main thread
+      3. **Hierarchical pathfinding** - high-level graph + local detail
+      4. **Path caching** - same start/end = cached result
+      5. **Early termination** - stop after N nodes, return partial
+
+      ```csharp
+      public class PathRequestQueue {
+          private Queue<PathRequest> pending = new();
+          private int maxPerFrame = 3;
+
+          public void Update() {
+              int processed = 0;
+              while (pending.Count > 0 && processed < maxPerFrame) {
+                  var request = pending.Dequeue();
+                  StartCoroutine(ProcessPathAsync(request));
+                  processed++;
+              }
+          }
+      }
+      ```
+    learn_more:
+      - "https://www.redblobgames.com/pathfinding/a-star/implementation.html"
+
+  behavior_tree_evaluation:
+    severity: high
+    title: "BT Evaluation Order Causes Unpredictable Behavior"
+    description: |
+      Behavior trees evaluate from root every tick. If you don't understand
+      selector vs sequence evaluation, AI will behave erratically. Common
+      issue: lower priority behaviors interrupt higher priority ones.
+    symptoms:
+      - "AI flickers between behaviors rapidly"
+      - "Higher priority behavior never triggers"
+      - "AI seems to ignore conditions"
+      - "Running node gets cancelled unexpectedly"
+    detection: |
+      Add logging to node Enter/Exit. Watch for rapid transitions.
+    solution: |
+      1. **Understand evaluation** - Selector tries children until success,
+         Sequence requires all children to succeed
+      2. **Use decorators** - Cooldowns, locks, one-shot
+      3. **Interrupt handling** - running nodes need cleanup
+      4. **Priority locks** - don't re-evaluate during critical actions
+
+      ```csharp
+      // Lock decorator prevents re-evaluation
+      public class LockDecorator : BTNode {
+          private bool isLocked = false;
+
+          public override NodeState Execute(Blackboard bb) {
+              if (isLocked) {
+                  // Continue current execution
+                  return child.Execute(bb);
+              }
+
+              isLocked = true;
+              var result = child.Execute(bb);
+
+              if (result != NodeState.Running) {
+                  isLocked = false;
+              }
+              return result;
+          }
+      }
+      ```
+
+  perception_cost:
+    severity: high
+    title: "Perception Systems Eat CPU Budget"
+    description: |
+      Naive perception checks every AI against every potential target every
+      frame. With 50 AI and 10 targets, that's 500 checks per frame.
+      Each check might include raycasts (expensive!).
+    symptoms:
+      - "Performance drops with more NPCs"
+      - "Profiler shows CanSee/LineOfSight as hot"
+      - "Frame rate inversely proportional to enemy count"
+    detection: |
+      Profile perception system. Watch raycast counts per frame.
+    solution: |
+      1. **Stagger updates** - each AI updates perception on different frames
+      2. **Spatial partitioning** - only check nearby entities
+      3. **Cache results** - don't re-check every frame
+      4. **Tiered checks** - distance first, angle second, raycast last
+
+      ```csharp
+      public bool CanSee(Entity target) {
+          // Tier 1: Distance (cheap)
+          float distSq = (target.Position - Position).sqrMagnitude;
+          if (distSq > sightRange * sightRange) return false;
+
+          // Tier 2: Angle (medium)
+          Vector3 toTarget = (target.Position - Position).normalized;
+          if (Vector3.Dot(Forward, toTarget) < cosHalfFOV) return false;
+
+          // Tier 3: Raycast (expensive - do last!)
+          return !Physics.Linecast(EyePosition, target.Position, occlusionMask);
+      }
+      ```
+
+  decision_frequency:
+    severity: medium
+    title: "AI Decisions Too Fast or Too Slow"
+    description: |
+      Deciding every frame wastes CPU and causes jittery behavior.
+      Deciding too slowly makes AI feel unresponsive. Different systems
+      need different update rates.
+    symptoms:
+      - "AI switches targets every frame (jitter)"
+      - "AI takes forever to notice player"
+      - "Inconsistent reaction times"
+    detection: |
+      Log decision timestamps. Check for sub-100ms decision intervals.
+    solution: |
+      1. **Tiered update rates**:
+         - Perception: every 100-200ms
+         - Target selection: every 200-500ms
+         - Path updates: every 500ms-1s
+         - High-level goals: every 1-2s
+
+      2. **Event-driven triggers** for immediate responses:
+         - Damage taken -> immediate combat check
+         - Player enters range -> immediate perception
+
+      ```csharp
+      public class AIBrain {
+          private float perceptionTimer = 0;
+          private float decisionTimer = 0;
+
+          void Update() {
+              // Different timers for different systems
+              perceptionTimer += Time.deltaTime;
+              if (perceptionTimer >= 0.15f) {
+                  UpdatePerception();
+                  perceptionTimer = 0;
+              }
+
+              decisionTimer += Time.deltaTime;
+              if (decisionTimer >= 0.3f) {
+                  MakeDecision();
+                  decisionTimer = 0;
+              }
+          }
+
+          // Immediate reaction to important events
+          public void OnDamageTaken(DamageInfo info) {
+              SetTarget(info.Attacker);
+              ForceDecisionUpdate();
+          }
+      }
+      ```
+
+  multiplayer_determinism:
+    severity: critical
+    title: "Non-Deterministic AI Causes Multiplayer Desync"
+    description: |
+      If AI runs on each client, any non-determinism causes divergence.
+      Common culprits: System.Random, Time.time, floating point order,
+      hash table iteration order.
+    symptoms:
+      - "AI in different positions on different clients"
+      - "Players see AI doing different things"
+      - "Desync after extended play sessions"
+    detection: |
+      Record AI state snapshots on multiple clients. Compare for drift.
+    solution: |
+      **Option A: Server-authoritative AI** (recommended)
+      - AI runs only on server
+      - Clients receive AI state updates
+      - No determinism issues
+
+      **Option B: Deterministic AI**
+      - Seeded RNG synced at match start
+      - Fixed timestep for AI
+      - Avoid floats where possible (use fixed-point)
+      - Sort collections before iteration
+
+      ```csharp
+      public class DeterministicAI {
+          private System.Random rng;  // Seeded, not UnityEngine.Random
+
+          public void Initialize(int seed) {
+              rng = new System.Random(seed);
+          }
+
+          public bool ShouldAttack() {
+              // Deterministic random
+              return rng.NextDouble() > 0.5;
+          }
+      }
+      ```
+
+  navmesh_generation:
+    severity: medium
+    title: "NavMesh Gaps and Edge Cases"
+    description: |
+      Auto-generated navmesh often has gaps near geometry, thin connections,
+      or missing areas. AI gets stuck or takes bizarre paths.
+    symptoms:
+      - "AI walks into walls"
+      - "AI takes long detour around simple obstacle"
+      - "AI stops at invisible barriers"
+      - "Path works in editor but not in build"
+    detection: |
+      Visualize navmesh. Walk AI through all intended paths manually.
+    solution: |
+      1. **Increase agent radius buffer** in navmesh settings
+      2. **Use NavMesh Links** for jumps/drops
+      3. **Add NavMesh Obstacles** for dynamic blockers
+      4. **Test with visualization** enabled
+
+      ```csharp
+      // Runtime navmesh obstacle for doors
+      public class Door : MonoBehaviour {
+          private NavMeshObstacle obstacle;
+
+          void Start() {
+              obstacle = GetComponent<NavMeshObstacle>();
+              obstacle.carving = true;  // Carves hole in navmesh
+          }
+
+          public void Open() {
+              obstacle.enabled = false;  // Allow pathfinding through
+          }
+
+          public void Close() {
+              obstacle.enabled = true;   // Block pathfinding
+          }
+      }
+      ```
+
+  goap_action_spam:
+    severity: medium
+    title: "GOAP Replans Every Frame"
+    description: |
+      If world state changes frequently or goals have similar priorities,
+      GOAP replans constantly. Planning is expensive and causes
+      erratic behavior.
+    symptoms:
+      - "AI starts actions but never finishes them"
+      - "High CPU on GOAP planner"
+      - "AI seems indecisive"
+    detection: |
+      Log plan generation. More than 1-2 plans per second is suspicious.
+    solution: |
+      1. **Plan commitment** - don't replan while action is running
+      2. **Hysteresis** - require significant priority difference to switch goals
+      3. **World state smoothing** - don't flip boolean states rapidly
+      4. **Planning budget** - max plans per second
+
+      ```csharp
+      public class GOAPAgent {
+          private float planHysteresis = 0.2f;  // 20% better to switch
+          private float lastPlanTime = 0;
+          private float minPlanInterval = 0.5f;
+
+          public void Update() {
+              if (Time.time - lastPlanTime < minPlanInterval) return;
+              if (currentPlan != null && currentAction.IsRunning) {
+                  // Only replan if much better goal available
+                  var bestGoal = GetBestGoal();
+                  if (bestGoal.Priority < currentGoal.Priority * (1 + planHysteresis))
+                      return;  // Stick with current plan
+              }
+
+              Replan();
+              lastPlanTime = Time.time;
+          }
+      }
+      ```
+
+  utility_ai_tuning:
+    severity: medium
+    title: "Utility AI Response Curve Nightmares"
+    description: |
+      Without visualization, tuning utility AI curves is pure guesswork.
+      Bad curves lead to AI that never uses certain actions or has
+      bizarre priorities.
+    symptoms:
+      - "AI never picks certain actions"
+      - "Small input changes cause dramatic behavior shifts"
+      - "Can't understand why AI chose action X"
+    detection: |
+      Log all action scores for each decision. Look for score clustering.
+    solution: |
+      1. **Visualization is mandatory** - graph curves, show scores in real-time
+      2. **Start simple** - linear curves, add complexity later
+      3. **Normalize inputs** - all inputs should be 0-1
+      4. **Debug overlay** - show winning action and runner-up
+
+      ```csharp
+      // Debug visualization
+      public class UtilityDebugger : MonoBehaviour {
+          public AIAgent agent;
+
+          void OnGUI() {
+              int y = 10;
+              foreach (var action in agent.Actions) {
+                  float score = action.Score(agent);
+                  string bar = new string('|', (int)(score * 20));
+                  GUI.Label(new Rect(10, y, 400, 20),
+                           $"{action.Name}: {score:F2} {bar}");
+                  y += 20;
+              }
+          }
+      }
+      ```
+
+  steering_oscillation:
+    severity: medium
+    title: "Steering Behavior Oscillation"
+    description: |
+      Opposing steering forces cause AI to vibrate or orbit targets
+      instead of reaching them. Common with seek + obstacle avoidance.
+    symptoms:
+      - "AI vibrates near target"
+      - "AI orbits instead of approaching"
+      - "AI gets stuck between obstacles"
+    detection: |
+      Visualize steering vectors. Watch for rapidly alternating directions.
+    solution: |
+      1. **Arrival behavior** - slow down near target
+      2. **Prioritized steering** - high priority forces first
+      3. **Dead zone** - stop steering when very close to target
+      4. **Force damping** - limit rate of direction change
+
+      ```csharp
+      public Vector3 Arrive(Vector3 target) {
+          Vector3 toTarget = target - Position;
+          float distance = toTarget.magnitude;
+
+          // Slow down as we approach
+          float slowingRadius = 3.0f;
+          float targetSpeed = (distance < slowingRadius)
+              ? MaxSpeed * (distance / slowingRadius)
+              : MaxSpeed;
+
+          // Dead zone - stop adjusting
+          if (distance < 0.1f)
+              return -Velocity;  // Just brake
+
+          Vector3 desired = toTarget.normalized * targetSpeed;
+          return desired - Velocity;
+      }
+      ```
+
+symptom_index:
+  "AI stuck in corner":
+    - navmesh_generation
+    - steering_oscillation
+  "AI flickers between states":
+    - behavior_tree_evaluation
+    - decision_frequency
+  "Frame rate drops with enemies":
+    - pathfinding_performance
+    - perception_cost
+  "AI never attacks":
+    - behavior_tree_evaluation
+    - utility_ai_tuning
+  "Multiplayer AI desyncs":
+    - multiplayer_determinism
+  "AI acts erratic":
+    - decision_frequency
+    - goap_action_spam
+  "Giant switch statement":
+    - state_machine_explosion
+  "AI takes weird paths":
+    - navmesh_generation
+    - pathfinding_performance
+  "AI ignores player":
+    - perception_cost
+    - behavior_tree_evaluation
+  "AI too predictable":
+    - utility_ai_tuning
+    - decision_frequency
+
+red_flags:
+  code_smells:
+    - pattern: "if.*state.*==.*&&.*state.*=="
+      message: "Multiple state checks suggest FSM complexity explosion"
+      severity: medium
+
+    - pattern: "FindGameObjectsOfType.*every.*frame|Update.*FindObject"
+      message: "Expensive find operations in update loop"
+      severity: high
+
+    - pattern: "Random\\.value|Random\\.Range"
+      message: "Non-seeded random in AI may cause multiplayer desync"
+      severity: medium
+
+    - pattern: "Physics\\.Raycast.*foreach.*enemy|foreach.*Linecast"
+      message: "Multiple raycasts per frame in perception is expensive"
+      severity: high
+
+    - pattern: "path.*=.*FindPath.*Update\\(\\)"
+      message: "Synchronous pathfinding in Update blocks main thread"
+      severity: critical
+
+    - pattern: "while.*openList.*Count"
+      message: "A* main loop - ensure this runs async or has iteration limit"
+      severity: medium
+
+  architecture_smells:
+    - pattern: "switch.*case.*case.*case.*case.*case.*case"
+      message: "6+ cases in switch may indicate FSM needs refactoring"
+      severity: medium
+
+    - pattern: "public.*float.*=.*[0-9]+\\.?[0-9]*f"
+      message: "Magic number constants - consider data-driven approach"
+      severity: low
+
+emergency_responses:
+  ai_completely_broken:
+    symptoms:
+      - "AI does nothing"
+      - "AI stuck forever"
+      - "No state transitions"
+    immediate_actions:
+      - "Add extensive logging to state/BT nodes"
+      - "Check if Update/Tick is actually being called"
+      - "Verify initial state is set correctly"
+      - "Check if conditions always evaluate false"
+
+  performance_critical:
+    symptoms:
+      - "Game unplayable with AI enabled"
+      - "Frame rate under 30"
+    immediate_actions:
+      - "Profile to find hotspot (perception? pathfinding?)"
+      - "Reduce AI update frequency immediately (every 3rd frame)"
+      - "Add AI count limit"
+      - "Disable LOD'd AI (far from player)"

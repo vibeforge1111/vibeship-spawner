@@ -1,0 +1,374 @@
+# Animation Systems Validations
+# Code patterns to detect and validation rules
+
+skill_id: animation-systems
+version: "1.0.0"
+
+validations:
+  # Critical Issues
+  - id: instant-layer-weight
+    name: "Instant Layer Weight Change"
+    description: "Layer weight set instantly instead of interpolated"
+    severity: warning
+    languages: [csharp, gdscript]
+    patterns:
+      - regex: "SetLayerWeight\\s*\\([^,]+,\\s*[01]\\s*\\)"
+        message: "Setting layer weight to 0 or 1 instantly causes visual pops"
+      - regex: "SetLayerWeight\\s*\\([^,]+,\\s*[^M][^a][^t][^h]"
+        message: "Consider using Mathf.MoveTowards for smooth layer weight changes"
+    fix_hint: |
+      Use interpolation for smooth transitions:
+      ```csharp
+      currentWeight = Mathf.MoveTowards(currentWeight, targetWeight, speed * Time.deltaTime);
+      animator.SetLayerWeight(layerIndex, currentWeight);
+      ```
+
+  - id: ik-in-update
+    name: "IK Logic Outside OnAnimatorIK"
+    description: "IK position/rotation set outside proper callback"
+    severity: error
+    languages: [csharp]
+    patterns:
+      - regex: "void\\s+Update\\s*\\([^)]*\\)[^{]*\\{[^}]*SetIKPosition"
+        message: "IK must be set in OnAnimatorIK, not Update"
+      - regex: "void\\s+LateUpdate\\s*\\([^)]*\\)[^{]*SetIKPosition"
+        message: "IK must be set in OnAnimatorIK, not LateUpdate"
+    fix_hint: |
+      Move IK logic to OnAnimatorIK callback:
+      ```csharp
+      void OnAnimatorIK(int layerIndex)
+      {
+          animator.SetIKPositionWeight(AvatarIKGoal.LeftFoot, 1f);
+          animator.SetIKPosition(AvatarIKGoal.LeftFoot, targetPosition);
+      }
+      ```
+
+  - id: missing-trigger-reset
+    name: "Animation Trigger Not Reset"
+    description: "Trigger parameters not reset after use"
+    severity: warning
+    languages: [csharp]
+    patterns:
+      - regex: "SetTrigger\\s*\\([^)]+\\)(?![\\s\\S]{0,200}ResetTrigger)"
+        message: "SetTrigger without corresponding ResetTrigger can cause re-triggering"
+    fix_hint: |
+      Reset triggers after transition completes:
+      ```csharp
+      // In StateMachineBehaviour.OnStateEnter
+      animator.ResetTrigger("Attack");
+      ```
+
+  - id: animator-speed-zero
+    name: "Animator Speed Set to Zero"
+    description: "Setting animator speed to 0 stops all animation processing"
+    severity: warning
+    languages: [csharp]
+    patterns:
+      - regex: "animator\\.speed\\s*=\\s*0"
+        message: "animator.speed = 0 stops events and IK. Use SetFloat for playback speed."
+    fix_hint: |
+      Instead of stopping animator, use a pause state or time scale:
+      ```csharp
+      // Option 1: Speed parameter
+      animator.SetFloat("PlaybackSpeed", 0f);
+
+      // Option 2: Pause state in state machine
+      animator.SetBool("Paused", true);
+      ```
+
+  - id: crossfade-duration-zero
+    name: "Crossfade with Zero Duration"
+    description: "CrossFade called with 0 duration causes instant snap"
+    severity: warning
+    languages: [csharp]
+    patterns:
+      - regex: "CrossFade\\s*\\([^,]+,\\s*0\\s*[,)]"
+        message: "CrossFade with duration 0 causes instant snap - use at least 0.1"
+      - regex: "CrossFadeInFixedTime\\s*\\([^,]+,\\s*0\\s*[,)]"
+        message: "CrossFade with duration 0 causes instant snap"
+    fix_hint: |
+      Use a minimum blend duration:
+      ```csharp
+      animator.CrossFade("StateName", 0.15f); // 150ms blend
+      ```
+
+  - id: root-motion-without-callback
+    name: "Root Motion Without OnAnimatorMove"
+    description: "Using root motion but not implementing OnAnimatorMove"
+    severity: info
+    languages: [csharp]
+    patterns:
+      - regex: "applyRootMotion\\s*=\\s*true(?![\\s\\S]{0,500}OnAnimatorMove)"
+        message: "Consider implementing OnAnimatorMove for root motion control"
+    fix_hint: |
+      Implement OnAnimatorMove for precise control:
+      ```csharp
+      void OnAnimatorMove()
+      {
+          Vector3 deltaPosition = animator.deltaPosition;
+          transform.position += deltaPosition;
+          transform.rotation *= animator.deltaRotation;
+      }
+      ```
+
+  # Performance Issues
+  - id: getcomponent-in-animator-callback
+    name: "GetComponent in Animation Callback"
+    description: "GetComponent called every frame in animation callback"
+    severity: warning
+    languages: [csharp]
+    patterns:
+      - regex: "OnAnimatorIK[^}]*GetComponent"
+        message: "Cache GetComponent results - OnAnimatorIK runs every frame"
+      - regex: "OnAnimatorMove[^}]*GetComponent"
+        message: "Cache GetComponent results - OnAnimatorMove runs every frame"
+    fix_hint: |
+      Cache component references:
+      ```csharp
+      private Rigidbody rb;
+      void Awake() { rb = GetComponent<Rigidbody>(); }
+      ```
+
+  - id: raycast-in-ik
+    name: "Raycast in IK Callback Every Frame"
+    description: "Physics raycast in OnAnimatorIK without optimization"
+    severity: warning
+    languages: [csharp]
+    patterns:
+      - regex: "OnAnimatorIK[^}]*Physics\\.Raycast"
+        message: "Consider caching raycast results or reducing frequency"
+    fix_hint: |
+      Optimize raycast frequency:
+      ```csharp
+      private int ikUpdateFrame;
+      void OnAnimatorIK(int layerIndex)
+      {
+          // Only raycast every 3 frames
+          if (Time.frameCount % 3 == 0)
+          {
+              UpdateFootIKTargets();
+          }
+          ApplyFootIK();
+      }
+      ```
+
+  - id: string-parameter-access
+    name: "String-Based Animator Parameter Access"
+    description: "Using strings instead of hashed IDs for animator parameters"
+    severity: info
+    languages: [csharp]
+    patterns:
+      - regex: "SetFloat\\s*\\(\\s*\"[^\"]+\""
+        message: "Use Animator.StringToHash for parameter names to avoid GC alloc"
+      - regex: "SetBool\\s*\\(\\s*\"[^\"]+\""
+        message: "Use Animator.StringToHash for parameter names"
+      - regex: "SetTrigger\\s*\\(\\s*\"[^\"]+\""
+        message: "Use Animator.StringToHash for parameter names"
+    fix_hint: |
+      Cache parameter hashes:
+      ```csharp
+      private static readonly int SpeedHash = Animator.StringToHash("Speed");
+      private static readonly int JumpHash = Animator.StringToHash("Jump");
+
+      void Update()
+      {
+          animator.SetFloat(SpeedHash, currentSpeed);
+      }
+      ```
+
+  # State Machine Issues
+  - id: play-without-layer
+    name: "Play/CrossFade Without Layer Index"
+    description: "Animation play call missing layer index in multi-layer setup"
+    severity: info
+    languages: [csharp]
+    patterns:
+      - regex: "animator\\.Play\\s*\\([^,)]+\\)(?!.*\\d)"
+        message: "Consider specifying layer index for multi-layer animators"
+    fix_hint: |
+      Specify layer index explicitly:
+      ```csharp
+      animator.Play("StateName", 0);  // Layer 0
+      animator.CrossFade("StateName", 0.2f, 1);  // Layer 1
+      ```
+
+  - id: state-check-string
+    name: "State Check Using String"
+    description: "Checking animator state with string instead of hash"
+    severity: info
+    languages: [csharp]
+    patterns:
+      - regex: "IsName\\s*\\(\\s*\""
+        message: "Consider caching state name hash for frequent checks"
+    fix_hint: |
+      Use hashed state name:
+      ```csharp
+      private static readonly int IdleStateHash = Animator.StringToHash("Idle");
+
+      if (stateInfo.shortNameHash == IdleStateHash)
+      {
+          // In idle state
+      }
+      ```
+
+  # Event System Issues
+  - id: animation-event-heavy-logic
+    name: "Heavy Logic in Animation Event"
+    description: "Animation event handler doing expensive operations"
+    severity: warning
+    languages: [csharp]
+    patterns:
+      - regex: "public void \\w+Event\\s*\\([^)]*\\)[^{]*\\{[^}]*(Instantiate|GetComponent|Find|Load)"
+        message: "Animation events should be lightweight - defer heavy work"
+    fix_hint: |
+      Keep animation events lightweight:
+      ```csharp
+      // Bad - heavy work in event
+      public void SpawnEffectEvent()
+      {
+          Instantiate(effectPrefab, transform.position, Quaternion.identity);
+      }
+
+      // Good - use pooling and caching
+      public void SpawnEffectEvent()
+      {
+          effectPool.Spawn(cachedSpawnPoint.position);
+      }
+      ```
+
+  # Blend Tree Issues
+  - id: blend-tree-threshold-gap
+    name: "Blend Tree Threshold Gaps"
+    description: "Blend tree with gaps in threshold values"
+    severity: info
+    languages: [yaml, json]
+    patterns:
+      - regex: "threshold.*0\\.0.*threshold.*1\\.0"
+        message: "Consider adding intermediate blend tree samples"
+    fix_hint: |
+      Add samples at key interpolation points:
+      ```
+      Speed blend tree:
+      0.0 - Idle
+      0.3 - Walk_Slow  (often missed!)
+      0.6 - Walk
+      1.0 - Run
+      1.5 - Sprint
+      ```
+
+  # Unreal Engine Specific
+  - id: anim-bp-tick-every-frame
+    name: "Animation Blueprint Expensive Tick"
+    description: "Heavy logic in Animation Blueprint event graph"
+    severity: warning
+    languages: [cpp]
+    patterns:
+      - regex: "NativeUpdateAnimation[^}]*(LineTrace|GetAllActors|SpawnActor)"
+        message: "NativeUpdateAnimation runs every frame - avoid heavy operations"
+    fix_hint: |
+      Move expensive logic to gameplay code with lower frequency:
+      ```cpp
+      // In AnimInstance
+      void UMyAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
+      {
+          // Only use cached values here
+          Speed = CachedSpeed;
+      }
+
+      // Update cached values from gameplay code at lower frequency
+      void AMyCharacter::UpdateAnimationData()
+      {
+          AnimInstance->CachedSpeed = GetVelocity().Size();
+      }
+      ```
+
+  - id: montage-blend-out-not-handled
+    name: "Animation Montage Blend Out Not Handled"
+    description: "Montage played without handling blend out completion"
+    severity: info
+    languages: [cpp]
+    patterns:
+      - regex: "PlayAnimMontage\\s*\\([^)]+\\)(?![\\s\\S]{0,200}OnMontageBlendingOut)"
+        message: "Consider binding to OnMontageBlendingOut for cleanup"
+    fix_hint: |
+      Handle montage completion:
+      ```cpp
+      FOnMontageBlendingOutStarted BlendingOutDelegate;
+      BlendingOutDelegate.BindUObject(this, &AMyCharacter::OnAttackMontageBlendOut);
+      AnimInstance->Montage_Play(AttackMontage);
+      AnimInstance->Montage_SetBlendingOutDelegate(BlendingOutDelegate, AttackMontage);
+      ```
+
+  # Godot Specific
+  - id: animation-tree-not-active
+    name: "AnimationTree Not Activated"
+    description: "AnimationTree created but not set to active"
+    severity: warning
+    languages: [gdscript]
+    patterns:
+      - regex: "AnimationTree(?![\\s\\S]{0,100}active\\s*=\\s*true)"
+        message: "AnimationTree must have active = true to process"
+    fix_hint: |
+      Activate the animation tree:
+      ```gdscript
+      func _ready():
+          $AnimationTree.active = true
+      ```
+
+  - id: animation-callback-string
+    name: "Animation Callback Using String Method Name"
+    description: "Animation track calling method by string name"
+    severity: info
+    languages: [gdscript]
+    patterns:
+      - regex: "method_track_add_key\\([^)]*\"[^\"]+\""
+        message: "Consider using Callable for type-safe animation callbacks"
+    fix_hint: |
+      Use Callable in Godot 4:
+      ```gdscript
+      # Instead of string method name
+      animation.track_insert_key(track_idx, time, Callable(self, "my_method"))
+      ```
+
+validation_groups:
+  quick_check:
+    description: "Fast validation for common issues"
+    validations:
+      - instant-layer-weight
+      - missing-trigger-reset
+      - animator-speed-zero
+      - string-parameter-access
+
+  performance_audit:
+    description: "Performance-focused validation"
+    validations:
+      - getcomponent-in-animator-callback
+      - raycast-in-ik
+      - string-parameter-access
+      - animation-event-heavy-logic
+
+  state_machine_review:
+    description: "State machine best practices"
+    validations:
+      - missing-trigger-reset
+      - crossfade-duration-zero
+      - play-without-layer
+      - state-check-string
+
+  full_audit:
+    description: "Complete animation code review"
+    validations: all
+
+file_patterns:
+  include:
+    - "**/*Animator*.cs"
+    - "**/*Animation*.cs"
+    - "**/*IK*.cs"
+    - "**/*StateMachine*.cs"
+    - "**/*AnimBP*.cpp"
+    - "**/*AnimInstance*.cpp"
+    - "**/*.gd"  # Godot scripts
+  exclude:
+    - "**/Editor/**"
+    - "**/Test/**"
+    - "**/*.generated.*"

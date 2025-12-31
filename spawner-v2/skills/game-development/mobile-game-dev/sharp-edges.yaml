@@ -1,0 +1,824 @@
+# Mobile Game Development - Sharp Edges
+# Critical mobile-specific gotchas, pitfalls, and hard-won knowledge
+
+id: mobile-game-dev
+version: "1.0.0"
+
+sharp_edges:
+  - id: thermal-throttling
+    title: "Thermal Throttling Kills Performance Over Time"
+    severity: critical
+    category: performance
+    description: |
+      Mobile devices actively reduce CPU/GPU performance when they get hot. A game
+      that runs at 60 FPS for the first 5 minutes may drop to 20 FPS after 15 minutes.
+      This is not a bug in your game - it's the device protecting itself. You cannot
+      disable this; you must design around it.
+    symptom: |
+      - Game runs smoothly initially, then slows down after 10-15 minutes
+      - Device becomes noticeably warm/hot during gameplay
+      - Performance degrades even when nothing in-game has changed
+      - Frame rate drops correlate with device temperature, not game complexity
+      - iOS shows "iPhone needs to cool down" warning
+      - Android shows thermal warning or force-closes app
+    solution: |
+      1. **Leave thermal headroom** - Don't target 100% utilization:
+         ```csharp
+         // Target 80% of peak performance to leave thermal headroom
+         // This means if you can hit 60 FPS, design for 48 FPS sustained
+
+         // Adaptive quality that responds to thermal state
+         void Update()
+         {
+             float currentFPS = 1f / Time.smoothDeltaTime;
+
+             // If performance drops significantly, device is likely throttling
+             if (currentFPS < targetFPS * 0.7f && !isThrottled)
+             {
+                 isThrottled = true;
+                 ReduceQuality();
+                 Debug.LogWarning("Thermal throttling detected - reducing quality");
+             }
+         }
+         ```
+
+      2. **Test for 30+ minutes** - Short test sessions miss thermal issues.
+
+      3. **Implement battery saver mode** - Give players control:
+         - Lower frame rate cap
+         - Reduce visual effects
+         - Lower physics update rate
+
+      4. **Reduce sustained load**:
+         - Use idle throttling (15 FPS when no input)
+         - Pause background systems during menus
+         - Don't render what's not visible
+    tags:
+      - performance
+      - thermal
+      - sustained-load
+
+  - id: memory-pressure-os-kill
+    title: "OS Kills Apps Under Memory Pressure"
+    severity: critical
+    category: memory
+    description: |
+      Mobile operating systems aggressively kill background apps and even foreground
+      apps that use too much memory. iOS provides zero warning before killing your app.
+      Android gives a brief moment via onTrimMemory. If your game uses too much RAM,
+      it will be killed silently - players think it crashed.
+    symptom: |
+      - Game closes without error or crash report
+      - App disappears when switching to another app briefly
+      - Players report "random crashes" on lower-RAM devices
+      - Memory usage grows over time (memory leak)
+      - App killed after loading large levels
+      - No crash log in Crashlytics/Firebase
+    solution: |
+      ```csharp
+      // Unity - Memory pressure handling
+      public class MemoryPressureHandler : MonoBehaviour
+      {
+          [SerializeField] private float criticalMemoryMB = 50f;
+
+          void OnEnable()
+          {
+              // iOS low memory callback
+              Application.lowMemory += OnLowMemory;
+          }
+
+          void OnDisable()
+          {
+              Application.lowMemory -= OnLowMemory;
+          }
+
+          private void OnLowMemory()
+          {
+              Debug.LogError("[Memory] OS low memory warning - emergency cleanup!");
+
+              // 1. Unload all non-essential assets
+              Resources.UnloadUnusedAssets();
+
+              // 2. Force GC (normally avoid, but this is emergency)
+              GC.Collect();
+              GC.WaitForPendingFinalizers();
+              GC.Collect();
+
+              // 3. Reduce quality to lower memory footprint
+              QualitySettings.masterTextureLimit = 2; // Quarter resolution
+
+              // 4. Clear caches
+              ClearAudioCache();
+              ClearTextureCache();
+              TrimObjectPools();
+          }
+      }
+      ```
+
+      **Best practices:**
+      - Track memory usage continuously
+      - Set memory budgets per system (textures, audio, objects)
+      - Unload assets when leaving levels
+      - Use asset bundles for on-demand loading
+      - Test on 2GB RAM devices
+    tags:
+      - memory
+      - os-behavior
+      - crashes
+
+  - id: draw-call-limits
+    title: "Mobile Draw Call Limits Are Strict"
+    severity: critical
+    category: rendering
+    description: |
+      Mobile GPUs are optimized for throughput, not draw call overhead. Each draw call
+      has significant CPU cost. While a PC can handle 5000+ draw calls, mobile devices
+      struggle with 100+. This is the #1 performance issue in mobile games.
+    symptom: |
+      - Low frame rate despite simple visuals
+      - CPU-bound in profiler, not GPU-bound
+      - "Batches" count in stats is very high
+      - Adding objects tanks performance more than expected
+      - UI particularly impacts performance
+    solution: |
+      **Target: < 50 draw calls for low-end, < 100 for high-end**
+
+      1. **Sprite atlasing:**
+         ```csharp
+         // Combine sprites into atlases - same atlas = same draw call
+         // In Unity: Sprite Atlas asset, pack all UI sprites together
+         ```
+
+      2. **GPU Instancing:**
+         ```csharp
+         // Enable GPU Instancing on materials for identical meshes
+         // In Unity: Material settings > Enable GPU Instancing
+         ```
+
+      3. **Static/Dynamic Batching:**
+         - Static: Combine static objects at build time
+         - Dynamic: Combine similar objects at runtime
+
+      4. **UI batching:**
+         ```csharp
+         // Canvas batching rules:
+         // - Same material = same batch
+         // - Z-order interleaving breaks batching
+         // - Mask/RectMask2D breaks batching
+         // - Layout rebuilds break batching
+
+         // Separate Canvases for static vs dynamic UI
+         ```
+
+      5. **Reduce material variants:**
+         - Use Material Property Blocks instead of material copies
+         - Share materials where possible
+         - Use texture arrays for terrain/tiles
+    tags:
+      - rendering
+      - draw-calls
+      - batching
+
+  - id: touch-input-latency
+    title: "Touch Input Must Feel Instant"
+    severity: high
+    category: input
+    description: |
+      Touch input has inherent latency from screen digitizer, OS processing, and display
+      refresh. Any additional latency from your game (processing input next frame,
+      animation delays) makes the game feel unresponsive. Players notice > 50ms latency.
+    symptom: |
+      - Game feels "sluggish" or "laggy" despite good frame rate
+      - Button presses feel delayed
+      - Drag gestures feel imprecise or "behind" the finger
+      - Compared to other games, yours feels slower
+    solution: |
+      1. **Process input immediately:**
+         ```csharp
+         // WRONG: Processing input after physics/update
+         void LateUpdate()
+         {
+             HandleTouch(); // Too late!
+         }
+
+         // RIGHT: Process input first thing
+         void Update()
+         {
+             HandleTouch();  // First action in update
+             // Then game logic...
+         }
+         ```
+
+      2. **Respond visually immediately:**
+         ```csharp
+         // Button feedback on touch START, not touch END
+         void OnPointerDown(PointerEventData eventData)
+         {
+             PlayButtonPressAnimation();  // Immediate feedback
+             PlayHapticFeedback();
+         }
+
+         void OnPointerUp(PointerEventData eventData)
+         {
+             TriggerButtonAction();  // Actual action on release
+         }
+         ```
+
+      3. **Use high refresh rate if available:**
+         ```csharp
+         // On 120Hz devices, targeting 120 FPS halves input latency
+         if (Screen.currentResolution.refreshRateRatio.value > 60)
+         {
+             Application.targetFrameRate = 120;
+         }
+         ```
+
+      4. **Predictive touch for drag gestures:**
+         - Anticipate finger movement direction
+         - Render predicted position slightly ahead
+    tags:
+      - input
+      - touch
+      - latency
+
+  - id: background-foreground-lifecycle
+    title: "App Lifecycle Requires Careful Handling"
+    severity: critical
+    category: lifecycle
+    description: |
+      Mobile apps constantly transition between foreground, background, and terminated
+      states. Phone calls, notifications, app switching, screen lock - all interrupt
+      your game. If you don't handle these transitions, players lose progress or
+      experience bugs.
+    symptom: |
+      - Audio continues playing when app is backgrounded
+      - Game state lost when returning from background
+      - Timers continue running during pause, causing time skips
+      - Multiplayer desyncs after returning from background
+      - Music restarts from beginning on resume
+    solution: |
+      ```csharp
+      public class LifecycleHandler : MonoBehaviour
+      {
+          private bool _wasPaused;
+          private float _pauseStartTime;
+
+          // Called when app loses focus (notification center, control center)
+          void OnApplicationFocus(bool hasFocus)
+          {
+              if (!hasFocus)
+              {
+                  // Mute audio immediately (brief focus loss)
+                  AudioListener.pause = true;
+              }
+              else if (!_wasPaused)
+              {
+                  AudioListener.pause = false;
+              }
+          }
+
+          // Called when app goes to background
+          void OnApplicationPause(bool pauseStatus)
+          {
+              if (pauseStatus)
+              {
+                  // GOING TO BACKGROUND
+                  _wasPaused = true;
+                  _pauseStartTime = Time.realtimeSinceStartup;
+
+                  // 1. Save state IMMEDIATELY - OS may kill app
+                  SaveManager.Instance.QuickSave();
+
+                  // 2. Pause everything
+                  Time.timeScale = 0f;
+                  AudioListener.pause = true;
+
+                  // 3. Disconnect from servers (optional - reconnect on resume)
+                  NetworkManager.Instance.Pause();
+              }
+              else
+              {
+                  // RETURNING TO FOREGROUND
+                  _wasPaused = false;
+                  float pauseDuration = Time.realtimeSinceStartup - _pauseStartTime;
+
+                  // 1. Resume systems
+                  AudioListener.pause = false;
+
+                  // 2. Handle time passage
+                  if (pauseDuration > 300f)  // 5 minutes
+                  {
+                      HandleLongAbsence(pauseDuration);
+                  }
+
+                  // 3. Reconnect to servers
+                  NetworkManager.Instance.Reconnect();
+
+                  // 4. Resume game (or show menu)
+                  ShowResumeMenu();
+              }
+          }
+      }
+      ```
+    tags:
+      - lifecycle
+      - pause
+      - background
+
+  - id: device-fragmentation
+    title: "Device Fragmentation Is Worse Than You Think"
+    severity: high
+    category: compatibility
+    description: |
+      There are thousands of Android devices with different screen sizes, aspect ratios,
+      GPUs, RAM amounts, and OS versions. iOS is better but still has variation. A game
+      that works on your test devices may break on others in unexpected ways.
+    symptom: |
+      - 1-star reviews saying "doesn't work on my [device]"
+      - UI elements cut off on certain aspect ratios (tall phones, tablets)
+      - Shader errors on specific GPU families (Mali, Adreno, PowerVR)
+      - Game crashes on low-RAM devices
+      - Touch areas misaligned on notched devices
+      - Black bars or stretched visuals on unusual resolutions
+    solution: |
+      1. **Aspect ratio handling:**
+         ```csharp
+         // Support range: 16:9 (old phones) to 21:9 (modern phones) to 4:3 (tablets)
+         float aspectRatio = (float)Screen.width / Screen.height;
+
+         if (aspectRatio > 2f)  // Very tall phone
+         {
+             // Letterbox or expand view
+         }
+         else if (aspectRatio < 1.5f)  // Tablet
+         {
+             // Pillarbox or expand view
+         }
+         ```
+
+      2. **Safe area for notches:**
+         ```csharp
+         Rect safeArea = Screen.safeArea;
+         // Adjust UI to fit within safe area
+         // Keep critical UI away from edges
+         ```
+
+      3. **GPU-specific issues:**
+         ```csharp
+         // Mali GPUs: Avoid dependent texture reads, complex shaders
+         // Adreno: Generally more capable, but watch for driver bugs
+         // PowerVR: Great performance but older devices only
+
+         string gpu = SystemInfo.graphicsDeviceName.ToLower();
+         if (gpu.Contains("mali"))
+         {
+             UseSimplifiedShaders();
+         }
+         ```
+
+      4. **Test on device farms:**
+         - AWS Device Farm
+         - Firebase Test Lab
+         - Samsung Remote Test Lab
+         - BrowserStack
+    tags:
+      - fragmentation
+      - compatibility
+      - android
+
+  - id: store-guidelines-rejection
+    title: "App Store Rejections Are Common and Painful"
+    severity: high
+    category: deployment
+    description: |
+      Apple's App Store and Google's Play Store have extensive guidelines. Violations
+      result in rejection, delays, and sometimes account penalties. Many developers
+      are surprised by requirements they didn't know about.
+    symptom: |
+      - App rejected during review
+      - "Metadata Rejected" or "Binary Rejected" emails
+      - Long delays between updates (especially iOS)
+      - App removed from store after policy change
+      - Account warning or suspension
+    solution: |
+      **Common rejection reasons and fixes:**
+
+      1. **Privacy violations:**
+         - Include privacy policy URL
+         - Add App Tracking Transparency (iOS 14.5+)
+         - Justify camera/microphone permissions
+         - Implement "Delete My Data" feature
+
+      2. **In-app purchase issues:**
+         - Use platform IAP (no third-party payment for digital goods)
+         - Restore purchases button is required
+         - Clear pricing in local currency
+         - No "free trial" without disclosure
+
+      3. **Content issues:**
+         - Age rating must match content
+         - No real-money gambling without license
+         - User-generated content needs moderation
+         - No copyrighted material
+
+      4. **Technical issues:**
+         - iOS: Must work on latest two iOS versions
+         - Android: Must target latest API level (within 1 year)
+         - No placeholder content or "coming soon"
+         - App must be functional during review
+
+      5. **Pre-submission checklist:**
+         ```
+         [ ] Privacy policy linked
+         [ ] GDPR consent implemented (EU users)
+         [ ] ATT prompt implemented (iOS)
+         [ ] Age rating set correctly
+         [ ] All IAP products created in store console
+         [ ] Restore purchases implemented
+         [ ] Test account provided for review
+         [ ] Screenshot/video matches app content
+         ```
+    tags:
+      - app-store
+      - play-store
+      - submission
+
+  - id: anr-freezes
+    title: "ANR (App Not Responding) Freezes Get You Killed"
+    severity: critical
+    category: performance
+    description: |
+      Android monitors how long the main thread is blocked. If it exceeds 5 seconds
+      (foreground) or 10 seconds (background), Android shows an "App Not Responding"
+      dialog. Users can force-close. High ANR rate gets your app demoted in Play Store.
+    symptom: |
+      - "App Not Responding" dialog appears
+      - Google Play Console shows ANR rate warnings
+      - "Freeze" during loading or heavy operations
+      - App becomes unresponsive during network calls
+      - UI stops updating while processing
+    solution: |
+      1. **Never block main thread:**
+         ```csharp
+         // WRONG: Synchronous network call
+         void Start()
+         {
+             var response = HttpClient.Get(url);  // BLOCKS!
+         }
+
+         // RIGHT: Async operation
+         async void Start()
+         {
+             var response = await HttpClient.GetAsync(url);
+         }
+         ```
+
+      2. **Heavy operations off main thread:**
+         ```csharp
+         // Unity Job System for heavy calculations
+         var job = new HeavyCalculationJob { input = data };
+         var handle = job.Schedule();
+         // Continue other work...
+         handle.Complete();
+         var result = job.output;
+         ```
+
+      3. **Show loading indicator:**
+         - Any operation > 200ms should show loading UI
+         - Keeps users informed that app is working
+
+      4. **Chunk heavy work:**
+         ```csharp
+         // Spread work across frames
+         IEnumerator ProcessLargeData(List<Data> items)
+         {
+             int perFrame = 10;
+             for (int i = 0; i < items.Count; i++)
+             {
+                 ProcessItem(items[i]);
+                 if (i % perFrame == 0)
+                 {
+                     yield return null;  // Next frame
+                 }
+             }
+         }
+         ```
+    tags:
+      - anr
+      - freeze
+      - threading
+
+  - id: battery-reputation
+    title: "Battery Drain Destroys Your Reputation"
+    severity: high
+    category: battery
+    description: |
+      Mobile users are hyper-aware of battery drain. A game that drains 30% battery
+      in an hour will get uninstalled and negative reviews. Battery drain is often
+      mentioned in reviews before gameplay concerns.
+    symptom: |
+      - Reviews mention "battery hog" or "drains battery"
+      - Players report device getting hot
+      - Short play sessions despite engaging gameplay
+      - Uninstalls correlate with battery usage reports
+    solution: |
+      1. **Frame rate management:**
+         ```csharp
+         // Don't run at 60 FPS when 30 FPS is fine
+         void OnSceneLoaded(Scene scene)
+         {
+             if (scene.name.Contains("Menu"))
+             {
+                 Application.targetFrameRate = 30;
+             }
+             else
+             {
+                 Application.targetFrameRate = 60;
+             }
+         }
+
+         // Idle throttling - drop to 15 FPS when no input
+         if (Time.time - lastInputTime > 5f)
+         {
+             Application.targetFrameRate = 15;
+         }
+         ```
+
+      2. **Reduce GPU work:**
+         - Disable post-processing when possible
+         - Use simpler shaders for battery saver mode
+         - Reduce particle effects
+
+      3. **Reduce CPU work:**
+         - Reduce physics update rate
+         - Use aggressive culling
+         - Spread calculations across frames
+
+      4. **Sensor management:**
+         - Disable GPS/location when not needed
+         - Reduce accelerometer polling
+         - Turn off gyroscope when not active
+
+      5. **Offer battery saver mode:**
+         - Visible option in settings
+         - 30 FPS cap, reduced effects
+         - Communicate trade-offs clearly
+    tags:
+      - battery
+      - optimization
+      - user-experience
+
+  - id: startup-time-kills-retention
+    title: "Slow Startup Kills Day-1 Retention"
+    severity: critical
+    category: performance
+    description: |
+      Mobile players expect instant gratification. If your game takes more than 5
+      seconds to show interactive content, you lose a significant percentage of
+      new users. Cold start time is critical for retention.
+    symptom: |
+      - Low day-1 retention despite good gameplay
+      - High uninstall rate before first play session
+      - Analytics shows drop-off before first level
+      - Competitors with similar games have better retention
+    solution: |
+      1. **Splash screen strategy:**
+         ```csharp
+         // Show interactive loading, not static splash
+         // - Logo with animation
+         // - Tips or lore
+         // - Mini-game while loading
+
+         // Measure time to interactive
+         float startTime = Time.realtimeSinceStartup;
+         // ... load essential assets only ...
+         float loadTime = Time.realtimeSinceStartup - startTime;
+         Analytics.LogEvent("time_to_interactive", loadTime);
+         ```
+
+      2. **Lazy loading:**
+         - Load only what's needed for first screen
+         - Load rest in background while playing tutorial
+         - Use asset bundles for on-demand loading
+
+      3. **Reduce initial download:**
+         - Keep APK/IPA small (< 100MB)
+         - Use App Bundles (Android) for split APKs
+         - On Demand Resources (iOS) for optional content
+
+      4. **Warm start optimization:**
+         - Save state to avoid full reload
+         - Keep critical assets in memory
+         - Resume where player left off
+    tags:
+      - startup
+      - retention
+      - loading
+
+  - id: audio-interruption
+    title: "Audio Interruptions Must Be Handled Gracefully"
+    severity: medium
+    category: audio
+    description: |
+      Mobile audio is constantly interrupted: phone calls, notifications, other apps,
+      system sounds. Your game must respond appropriately. iOS particularly has strict
+      audio session requirements.
+    symptom: |
+      - Game audio continues during phone call
+      - Audio doesn't resume after interruption
+      - Music playback stops other apps' audio permanently
+      - Volume doesn't respond to system controls
+      - Silent mode doesn't work
+    solution: |
+      ```csharp
+      // Unity audio session setup (iOS)
+      public class AudioSessionHandler : MonoBehaviour
+      {
+          void Start()
+          {
+              // Allow mixing with other apps unless gameplay critical
+              #if UNITY_IOS
+              UnityEngine.iOS.Device.hideHomeButton = false;
+              // Audio session configured in Xcode
+              #endif
+          }
+
+          void OnApplicationFocus(bool hasFocus)
+          {
+              if (!hasFocus)
+              {
+                  // Mute immediately on focus loss
+                  AudioListener.pause = true;
+              }
+              else
+              {
+                  // Resume if game isn't paused
+                  if (!GameManager.Instance.IsPaused)
+                  {
+                      AudioListener.pause = false;
+                      ResumeMusicFromPosition();
+                  }
+              }
+          }
+      }
+      ```
+
+      **Best practices:**
+      - Respect silent/vibrate mode (check ringer status)
+      - Pause your audio when other apps take audio focus
+      - Resume music from last position, not beginning
+      - Duck music volume for sound effects
+      - Test with Bluetooth headphones (connect/disconnect)
+    tags:
+      - audio
+      - interruption
+      - ios
+
+# ==============================================================================
+# SYMPTOM INDEX
+# Quick lookup: "I'm seeing X" -> likely cause
+# ==============================================================================
+symptom_index:
+  - symptom: "Performance degrades after 10-15 minutes"
+    likely_causes:
+      - thermal-throttling
+      - memory-pressure-os-kill
+    check_first: "Monitor device temperature and memory usage over time"
+
+  - symptom: "Game closes without crash report"
+    likely_causes:
+      - memory-pressure-os-kill
+      - anr-freezes
+    check_first: "Check memory usage on low-RAM device"
+
+  - symptom: "Low frame rate despite simple visuals"
+    likely_causes:
+      - draw-call-limits
+    check_first: "Check batch count in profiler/stats"
+
+  - symptom: "Game feels sluggish or laggy"
+    likely_causes:
+      - touch-input-latency
+      - thermal-throttling
+    check_first: "Test input response time, check frame timing"
+
+  - symptom: "Audio issues on interruption"
+    likely_causes:
+      - audio-interruption
+      - background-foreground-lifecycle
+    check_first: "Test with phone call, notification, app switch"
+
+  - symptom: "App rejected from store"
+    likely_causes:
+      - store-guidelines-rejection
+    check_first: "Read rejection reason, check guidelines"
+
+  - symptom: "Works on my device, broken on others"
+    likely_causes:
+      - device-fragmentation
+      - thermal-throttling
+    check_first: "Test on device farm, check GPU family"
+
+  - symptom: "Players complain about battery drain"
+    likely_causes:
+      - battery-reputation
+      - thermal-throttling
+    check_first: "Profile with battery monitoring tools"
+
+  - symptom: "Low retention despite good gameplay"
+    likely_causes:
+      - startup-time-kills-retention
+      - battery-reputation
+    check_first: "Measure time-to-interactive"
+
+  - symptom: "App Not Responding dialog"
+    likely_causes:
+      - anr-freezes
+    check_first: "Check for main thread blocking operations"
+
+# ==============================================================================
+# RED FLAGS
+# Patterns in code that should trigger immediate investigation
+# ==============================================================================
+red_flags:
+  - pattern: "Application\\.targetFrameRate\\s*=\\s*-1"
+    severity: critical
+    message: "Uncapped frame rate on mobile drains battery and causes thermal throttling"
+    edge_id: thermal-throttling
+
+  - pattern: "Resources\\.Load.*Update|Resources\\.Load.*FixedUpdate"
+    severity: critical
+    message: "Synchronous loading in Update blocks main thread - causes ANR"
+    edge_id: anr-freezes
+
+  - pattern: "WWW\\s*=\\s*new\\s+WWW"
+    severity: high
+    message: "WWW is deprecated and blocks. Use UnityWebRequest with async"
+    edge_id: anr-freezes
+
+  - pattern: "Thread\\.Sleep"
+    severity: critical
+    message: "Thread.Sleep on main thread causes ANR"
+    edge_id: anr-freezes
+
+  - pattern: "GC\\.Collect\\(\\).*Update|GC\\.Collect\\(\\).*FixedUpdate"
+    severity: critical
+    message: "GC.Collect in update loop causes frame spikes"
+    edge_id: thermal-throttling
+
+  - pattern: "new\\s+Texture2D.*Update"
+    severity: high
+    message: "Creating textures in Update causes memory growth and GC pressure"
+    edge_id: memory-pressure-os-kill
+
+  - pattern: "Screen\\.SetResolution"
+    severity: high
+    message: "Changing resolution at runtime may cause issues on some devices"
+    edge_id: device-fragmentation
+
+  - pattern: "Input\\.GetMouseButton"
+    severity: medium
+    message: "Mouse input on mobile - use Input.GetTouch for proper touch handling"
+    edge_id: touch-input-latency
+
+  - pattern: "OnApplicationPause(?!.*Save)"
+    severity: high
+    message: "OnApplicationPause without save - state will be lost if app is killed"
+    edge_id: background-foreground-lifecycle
+
+  - pattern: "AudioSource\\.Play\\(\\)(?!.*OnApplicationFocus)"
+    severity: medium
+    message: "Playing audio without focus handling - may continue during interruption"
+    edge_id: audio-interruption
+
+  - pattern: "PlayerPrefs\\.(SetString|SetInt|SetFloat)(?!.*Save)"
+    severity: medium
+    message: "PlayerPrefs without explicit Save may not persist on mobile"
+    edge_id: background-foreground-lifecycle
+
+  - pattern: "QualitySettings\\.SetQualityLevel\\(3\\)|QualitySettings\\.SetQualityLevel\\(4\\)"
+    severity: medium
+    message: "High quality preset may throttle on mobile devices"
+    edge_id: thermal-throttling
+
+  - pattern: "yield\\s+return\\s+null.*while\\s*\\(true\\)"
+    severity: medium
+    message: "Infinite coroutine without throttling may impact battery"
+    edge_id: battery-reputation
+
+  - pattern: "Input\\.location\\.Start"
+    severity: medium
+    message: "GPS location drains battery - ensure you stop when not needed"
+    edge_id: battery-reputation
+
+references:
+  - title: "Apple Human Interface Guidelines - Mobile"
+    url: "https://developer.apple.com/design/human-interface-guidelines/ios"
+  - title: "Android Performance Guidelines"
+    url: "https://developer.android.com/topic/performance"
+  - title: "Unity Mobile Optimization"
+    url: "https://docs.unity3d.com/Manual/MobileOptimizationPracticalGuide.html"
+  - title: "App Store Review Guidelines"
+    url: "https://developer.apple.com/app-store/review/guidelines/"
+  - title: "Google Play Policy Center"
+    url: "https://play.google.com/about/developer-content-policy/"

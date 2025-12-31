@@ -1,0 +1,566 @@
+# Validations - Game Monetization Code Patterns
+# Automated checks for monetization implementation issues
+
+id: game-monetization
+version: "1.0.0"
+
+# Validation categories:
+# - security: Vulnerabilities that could be exploited
+# - economy: Issues that could break game economy
+# - compliance: Regulatory and platform policy violations
+# - ux: User experience anti-patterns
+# - analytics: Missing or incorrect tracking
+
+validations:
+  # === SECURITY VALIDATIONS ===
+  - id: client-side-currency
+    category: security
+    severity: critical
+    name: "Client-Side Currency Manipulation"
+    description: |
+      Currency values stored or calculated on client can be modified by cheaters.
+      All currency operations must be validated server-side.
+    pattern:
+      regex: "(localStorage|sessionStorage|PlayerPrefs)\\.(set|get).*(currency|gold|gems|coins|credits|money)"
+      flags: "i"
+    languages: ["javascript", "typescript", "csharp"]
+    bad_example: |
+      // VULNERABLE: Client-side currency storage
+      function addGold(amount) {
+        const current = parseInt(localStorage.getItem('gold') || '0');
+        localStorage.setItem('gold', current + amount);
+      }
+    good_example: |
+      // SECURE: Server-validated currency
+      async function addGold(amount, transactionId) {
+        const response = await fetch('/api/currency/add', {
+          method: 'POST',
+          body: JSON.stringify({
+            currency: 'gold',
+            amount,
+            transactionId,
+            signature: await signRequest(transactionId)
+          })
+        });
+        return response.json(); // Server is source of truth
+      }
+    fix: "Move all currency operations to server-side with proper validation"
+
+  - id: unvalidated-purchase
+    category: security
+    severity: critical
+    name: "Unvalidated In-App Purchase"
+    description: |
+      IAP receipts must be validated server-side with Apple/Google.
+      Client-only validation can be bypassed to get free items.
+    pattern:
+      regex: "(purchaseProduct|buyProduct|makePurchase).*(?!.*validateReceipt|verifyPurchase|serverValidate)"
+      flags: "i"
+    languages: ["javascript", "typescript", "swift", "kotlin"]
+    bad_example: |
+      // VULNERABLE: No receipt validation
+      async function completePurchase(productId) {
+        const result = await iap.purchaseProduct(productId);
+        if (result.success) {
+          grantItem(productId); // Directly granting without validation!
+        }
+      }
+    good_example: |
+      // SECURE: Server-side receipt validation
+      async function completePurchase(productId) {
+        const result = await iap.purchaseProduct(productId);
+        if (result.success) {
+          // Validate receipt with server (which validates with Apple/Google)
+          const validation = await fetch('/api/iap/validate', {
+            method: 'POST',
+            body: JSON.stringify({
+              receipt: result.receipt,
+              productId,
+              platform: Platform.OS
+            })
+          });
+
+          if (validation.ok) {
+            const { granted } = await validation.json();
+            updateInventory(granted); // Server already granted items
+          }
+        }
+      }
+    fix: "Always validate IAP receipts server-side before granting items"
+
+  - id: exposed-pricing-logic
+    category: security
+    severity: high
+    name: "Pricing Logic Exposed to Client"
+    description: |
+      Discount calculations, dynamic pricing, and special offer logic
+      should not be in client code where it can be reverse-engineered or manipulated.
+    pattern:
+      regex: "(discount|price|offer).*=.*\\d+.*[%\\*\\/]|calculatePrice|applyDiscount"
+      flags: "i"
+    languages: ["javascript", "typescript"]
+    bad_example: |
+      // VULNERABLE: Client-side discount calculation
+      function getDiscountedPrice(basePrice, userLevel) {
+        let discount = 0;
+        if (userLevel > 10) discount = 0.1;
+        if (userLevel > 50) discount = 0.2;
+        if (isWhale(user)) discount = 0.3; // Exposes whale detection!
+        return basePrice * (1 - discount);
+      }
+    good_example: |
+      // SECURE: Server provides final prices
+      async function getStoreItems() {
+        const response = await fetch('/api/store/items', {
+          headers: { Authorization: getAuthToken() }
+        });
+        // Server calculates all discounts and returns final prices
+        return response.json();
+      }
+    fix: "Fetch final prices from server; don't calculate discounts client-side"
+
+  # === ECONOMY VALIDATIONS ===
+  - id: unbounded-currency-grant
+    category: economy
+    severity: high
+    name: "Unbounded Currency Grant"
+    description: |
+      Currency grants without upper bounds can be exploited or cause
+      hyperinflation through bugs or exploits.
+    pattern:
+      regex: "(grant|add|give)(Currency|Gold|Gems|Coins)\\s*\\([^)]*\\)(?!.*Math\\.min|limit|cap|max)"
+      flags: "i"
+    languages: ["javascript", "typescript", "csharp", "python"]
+    bad_example: |
+      // RISKY: No bounds on currency grant
+      function grantDailyReward(player, streak) {
+        const reward = 100 * Math.pow(2, streak); // Exponential = disaster
+        player.addGold(reward);
+      }
+    good_example: |
+      // SAFE: Bounded currency grants
+      const DAILY_REWARD_CAP = 10000;
+
+      function grantDailyReward(player, streak) {
+        const baseReward = 100 * Math.min(streak, 30); // Linear, capped at 30 days
+        const reward = Math.min(baseReward, DAILY_REWARD_CAP);
+
+        // Log for economy monitoring
+        economyLogger.log('GRANT', {
+          player: player.id,
+          type: 'daily_reward',
+          amount: reward,
+          streak
+        });
+
+        player.addGold(reward);
+      }
+    fix: "Always cap currency grants and log for economy monitoring"
+
+  - id: missing-currency-sink
+    category: economy
+    severity: medium
+    name: "Currency Source Without Sink"
+    description: |
+      Every currency faucet needs corresponding drains, or the economy inflates.
+      Check that new currency sources have matching sinks.
+    pattern:
+      regex: "(reward|grant|earn|receive)(Currency|Gold|Coins|Gems).*(?!.*spend|cost|consume|sink)"
+      flags: "i"
+    languages: ["javascript", "typescript"]
+    bad_example: |
+      // RISKY: Reward without corresponding sink
+      function onLevelComplete(player, level) {
+        player.grantGold(level * 500);
+        player.grantGems(level * 10);
+        // Where does this currency go? No sinks mentioned!
+      }
+    good_example: |
+      // BALANCED: Document and track economy flow
+      function onLevelComplete(player, level) {
+        const goldReward = level * 500;
+        const gemReward = level * 10;
+
+        player.grantGold(goldReward);
+        player.grantGems(gemReward);
+
+        // Track for economy balance
+        economyTracker.recordSource({
+          player: player.id,
+          source: 'level_complete',
+          gold: goldReward,
+          gems: gemReward
+        });
+
+        // Economy design doc specifies sinks:
+        // - Gold: Equipment upgrades (level*300), repairs (level*100)
+        // - Gems: Cosmetics (500-2000), skips (50-100)
+      }
+    fix: "Document currency sinks for every source and track flow"
+
+  - id: hardcoded-economy-values
+    category: economy
+    severity: medium
+    name: "Hardcoded Economy Values"
+    description: |
+      Economy values (prices, rewards, rates) hardcoded in client make
+      live balancing impossible without app updates.
+    pattern:
+      regex: "(price|cost|reward|rate)\\s*[:=]\\s*\\d{2,}"
+      flags: "i"
+    languages: ["javascript", "typescript", "csharp"]
+    bad_example: |
+      // INFLEXIBLE: Hardcoded prices
+      const STORE = {
+        sword: { price: 500 },
+        shield: { price: 350 },
+        potion: { price: 50 }
+      };
+    good_example: |
+      // FLEXIBLE: Server-driven prices
+      class StoreManager {
+        async loadPrices() {
+          const config = await fetch('/api/config/store');
+          this.prices = await config.json();
+          this.lastUpdate = Date.now();
+        }
+
+        getPrice(item) {
+          // Fallback to defaults, but prefer server values
+          return this.prices[item] ?? FALLBACK_PRICES[item];
+        }
+      }
+    fix: "Load economy values from server/remote config for live tuning"
+
+  # === COMPLIANCE VALIDATIONS ===
+  - id: missing-probability-disclosure
+    category: compliance
+    severity: critical
+    name: "Loot Box Without Probability Disclosure"
+    description: |
+      Many jurisdictions require displaying gacha/loot box probabilities.
+      Missing disclosures can result in store removal or legal action.
+    pattern:
+      regex: "(lootbox|gacha|randomBox|chest|pack)\\.(open|pull|buy)(?!.*showRates|displayProbability|rateDisclosure)"
+      flags: "i"
+    languages: ["javascript", "typescript"]
+    bad_example: |
+      // NON-COMPLIANT: No rate disclosure
+      function openLootBox(boxId) {
+        const roll = Math.random();
+        if (roll < 0.01) return 'legendary';
+        if (roll < 0.10) return 'epic';
+        return 'common';
+      }
+    good_example: |
+      // COMPLIANT: Rates disclosed and accessible
+      const LOOT_BOX_RATES = {
+        legendary: 0.01,  // 1%
+        epic: 0.09,       // 9%
+        rare: 0.20,       // 20%
+        common: 0.70      // 70%
+      };
+
+      function openLootBox(boxId) {
+        // Rates are displayed in UI before purchase
+        // Button: "View Drop Rates" -> shows LOOT_BOX_RATES
+
+        const roll = Math.random();
+        let cumulative = 0;
+        for (const [rarity, rate] of Object.entries(LOOT_BOX_RATES)) {
+          cumulative += rate;
+          if (roll < cumulative) return rarity;
+        }
+      }
+
+      function showLootBoxRates(boxId) {
+        ui.showModal({
+          title: 'Drop Rates',
+          content: Object.entries(LOOT_BOX_RATES)
+            .map(([r, p]) => `${r}: ${(p * 100).toFixed(1)}%`)
+            .join('\n')
+        });
+      }
+    fix: "Display probability rates before any random purchase"
+
+  - id: missing-age-gate
+    category: compliance
+    severity: high
+    name: "IAP Without Age Verification"
+    description: |
+      Games with IAP targeting or accessible to children need age gates
+      and parental consent mechanisms for COPPA/GDPR-K compliance.
+    pattern:
+      regex: "(purchase|buy|iap)(?!.*ageVerify|parentalConsent|ageGate)"
+      flags: "i"
+    languages: ["javascript", "typescript"]
+    bad_example: |
+      // NON-COMPLIANT: No age consideration
+      async function buyGems(amount) {
+        await iap.purchase(`gems_${amount}`);
+        grantGems(amount);
+      }
+    good_example: |
+      // COMPLIANT: Age-aware purchase flow
+      async function buyGems(amount) {
+        const user = await getUser();
+
+        if (user.age < 13 || !user.ageVerified) {
+          const parentalApproval = await requestParentalConsent({
+            action: 'purchase',
+            amount,
+            item: 'gems'
+          });
+
+          if (!parentalApproval) {
+            return { blocked: true, reason: 'PARENTAL_CONSENT_REQUIRED' };
+          }
+        }
+
+        await iap.purchase(`gems_${amount}`);
+        grantGems(amount);
+      }
+    fix: "Implement age verification and parental consent for minors"
+
+  - id: region-unaware-monetization
+    category: compliance
+    severity: high
+    name: "Region-Unaware Monetization Feature"
+    description: |
+      Loot boxes, certain payment methods, and pricing must respect
+      regional regulations. Serving banned features causes legal issues.
+    pattern:
+      regex: "(gacha|lootbox|gambling)(?!.*checkRegion|regionAllowed|geoCheck)"
+      flags: "i"
+    languages: ["javascript", "typescript"]
+    bad_example: |
+      // NON-COMPLIANT: No regional awareness
+      function showGachaShop() {
+        ui.showScreen('gacha_shop');
+      }
+    good_example: |
+      // COMPLIANT: Region-aware features
+      const BANNED_GACHA_REGIONS = ['BE', 'NL'];
+
+      async function showGachaShop() {
+        const region = await getPlayerRegion();
+
+        if (BANNED_GACHA_REGIONS.includes(region)) {
+          ui.showScreen('direct_purchase_shop');
+          return;
+        }
+
+        ui.showScreen('gacha_shop');
+      }
+    fix: "Check player region before showing region-restricted features"
+
+  # === UX VALIDATIONS ===
+  - id: hidden-real-price
+    category: ux
+    severity: high
+    name: "Real Currency Price Hidden"
+    description: |
+      Showing only premium currency price without real money equivalent
+      is a dark pattern that regulators are targeting.
+    pattern:
+      regex: "(price|cost).*gems|diamonds|crystals(?!.*\\$|USD|EUR|real|currency)"
+      flags: "i"
+    languages: ["javascript", "typescript"]
+    bad_example: |
+      // DARK PATTERN: Only shows gems
+      function renderStoreItem(item) {
+        return `
+          <div class="item">
+            <span>${item.name}</span>
+            <span class="price">${item.gems} Gems</span>
+          </div>
+        `;
+      }
+    good_example: |
+      // TRANSPARENT: Shows both currencies
+      function renderStoreItem(item) {
+        const realPrice = convertToRealCurrency(item.gems);
+        return `
+          <div class="item">
+            <span>${item.name}</span>
+            <span class="price">${item.gems} Gems</span>
+            <span class="real-price">(~${realPrice})</span>
+          </div>
+        `;
+      }
+    fix: "Always show approximate real currency value alongside premium currency"
+
+  - id: purchase-without-confirmation
+    category: ux
+    severity: medium
+    name: "Purchase Without Confirmation"
+    description: |
+      One-click purchases without confirmation lead to accidental purchases,
+      refunds, and negative reviews.
+    pattern:
+      regex: "(onClick|onPress|onTap).*purchase|buy(?!.*confirm|modal|dialog)"
+      flags: "i"
+    languages: ["javascript", "typescript"]
+    bad_example: |
+      // RISKY: One-click purchase
+      <Button onClick={() => buyItem(item.id)}>
+        Buy for 500 Gems
+      </Button>
+    good_example: |
+      // SAFE: Confirmation required
+      <Button onClick={() => showPurchaseConfirmation(item)}>
+        Buy for 500 Gems
+      </Button>
+
+      function showPurchaseConfirmation(item) {
+        ui.showModal({
+          title: 'Confirm Purchase',
+          content: `Buy ${item.name} for ${item.price} Gems (~$${item.realPrice})?`,
+          buttons: [
+            { text: 'Cancel', action: 'close' },
+            { text: 'Confirm', action: () => buyItem(item.id) }
+          ]
+        });
+      }
+    fix: "Require confirmation for all purchases, especially premium currency"
+
+  - id: aggressive-popup
+    category: ux
+    severity: medium
+    name: "Aggressive Monetization Popup"
+    description: |
+      Popups that interrupt gameplay to push purchases cause player frustration
+      and have high uninstall rates.
+    pattern:
+      regex: "(onDeath|onFail|onGameOver).*showOffer|showPurchase|showAd"
+      flags: "i"
+    languages: ["javascript", "typescript"]
+    bad_example: |
+      // AGGRESSIVE: Death triggers purchase prompt
+      function onPlayerDeath() {
+        showPopup({
+          title: 'Continue?',
+          message: 'Buy a revive for just 50 gems!',
+          buttons: ['Buy', 'Watch Ad', 'Give Up']
+        });
+      }
+    good_example: |
+      // RESPECTFUL: Non-blocking offer
+      function onPlayerDeath() {
+        showDeathScreen({
+          stats: getRunStats(),
+          rewards: calculateRewards(),
+          // Optional, non-pushy upsell
+          tip: canAffordRevive() ? 'Tap menu for revive options' : null
+        });
+      }
+    fix: "Avoid interrupting gameplay with purchase prompts"
+
+  # === ANALYTICS VALIDATIONS ===
+  - id: untracked-purchase
+    category: analytics
+    severity: high
+    name: "Purchase Without Analytics"
+    description: |
+      All purchases must be tracked for revenue attribution, LTV calculation,
+      and fraud detection. Untracked purchases are invisible to business.
+    pattern:
+      regex: "(purchase|buy|grant)(?!.*analytics|track|log|event)"
+      flags: "i"
+    languages: ["javascript", "typescript"]
+    bad_example: |
+      // BLIND: No tracking
+      async function completePurchase(item) {
+        await iap.purchase(item.sku);
+        grantItem(item.id);
+      }
+    good_example: |
+      // TRACKED: Full analytics
+      async function completePurchase(item) {
+        const result = await iap.purchase(item.sku);
+
+        analytics.track('purchase_complete', {
+          item_id: item.id,
+          item_name: item.name,
+          price_usd: item.priceUSD,
+          price_local: item.priceLocal,
+          currency: item.currency,
+          sku: item.sku,
+          transaction_id: result.transactionId,
+          is_first_purchase: await isFirstPurchase(),
+          session_number: getSessionNumber(),
+          days_since_install: getDaysSinceInstall()
+        });
+
+        grantItem(item.id);
+      }
+    fix: "Track all purchase events with full context for LTV analysis"
+
+  - id: missing-funnel-tracking
+    category: analytics
+    severity: medium
+    name: "Purchase Funnel Not Tracked"
+    description: |
+      Without funnel tracking, you can't identify where players drop off
+      in the purchase flow. Every step needs an event.
+    pattern:
+      regex: "showStore|openShop(?!.*analytics|track|funnel)"
+      flags: "i"
+    languages: ["javascript", "typescript"]
+    bad_example: |
+      // BLIND: No funnel visibility
+      function openStore() {
+        ui.showScreen('store');
+      }
+    good_example: |
+      // TRACKED: Full funnel
+      function openStore(source) {
+        analytics.track('store_opened', { source });
+        ui.showScreen('store');
+      }
+
+      function viewItem(item) {
+        analytics.track('item_viewed', {
+          item_id: item.id,
+          price: item.price,
+          time_in_store: getTimeInStore()
+        });
+      }
+
+      function addToCart(item) {
+        analytics.track('add_to_cart', { item_id: item.id });
+      }
+
+      function initiateCheckout(items) {
+        analytics.track('checkout_started', {
+          items: items.map(i => i.id),
+          total: calculateTotal(items)
+        });
+      }
+
+      function completePurchase(result) {
+        analytics.track('purchase_complete', { ... });
+      }
+
+      function abandonCart(items) {
+        analytics.track('cart_abandoned', {
+          items: items.map(i => i.id),
+          total: calculateTotal(items),
+          time_in_checkout: getTimeInCheckout()
+        });
+      }
+    fix: "Track every step of purchase funnel for optimization"
+
+# Summary of validation rules
+summary:
+  total_rules: 16
+  by_category:
+    security: 3
+    economy: 3
+    compliance: 3
+    ux: 3
+    analytics: 2
+  by_severity:
+    critical: 4
+    high: 8
+    medium: 4

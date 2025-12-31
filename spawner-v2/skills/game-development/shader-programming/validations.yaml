@@ -1,0 +1,267 @@
+# Shader Programming Validations
+# Automated checks to catch common shader issues
+
+validations:
+  # ============================================================================
+  # CRITICAL - Will definitely cause problems
+  # ============================================================================
+
+  - id: shader-texture-loop
+    name: Texture Sample in Loop
+    severity: critical
+    type: regex
+    pattern:
+      - 'for\s*\([^)]+\)\s*\{[^}]*(?:texture|tex2D|Sample)\s*\('
+      - 'while\s*\([^)]+\)\s*\{[^}]*(?:texture|tex2D|Sample)\s*\('
+    message: "Texture sampling inside loop causes severe performance degradation. GPU cannot parallelize dependent memory fetches."
+    fix_action: "Unroll the loop, precompute UVs, or use texture arrays with single fetch"
+    applies_to:
+      - "*.glsl"
+      - "*.hlsl"
+      - "*.shader"
+      - "*.frag"
+      - "*.vert"
+      - "*.cginc"
+
+  - id: shader-mobile-highp-abuse
+    name: Excessive highp Usage (Mobile)
+    severity: critical
+    type: regex
+    pattern:
+      - 'precision\s+highp\s+float\s*;[\s\S]*precision\s+highp\s+float'
+      - 'highp\s+(?:vec[234]|mat[234])\s+\w+\s*=.*(?:color|Color|uv|UV|normal|Normal)'
+    message: "Using highp for colors/UVs/normals wastes mobile GPU cycles. These work fine at mediump."
+    fix_action: "Use mediump for colors, UVs, normals. Reserve highp for positions and accumulated values."
+    applies_to:
+      - "*.glsl"
+      - "*.frag"
+      - "*.vert"
+
+  - id: shader-grabpass-mobile
+    name: GrabPass in Mobile Shader
+    severity: critical
+    type: regex
+    pattern:
+      - 'GrabPass\s*\{'
+      - '_GrabTexture'
+      - '_CameraOpaqueTexture'
+    message: "GrabPass forces tile resolve on mobile TBDR GPUs. Extremely expensive and can cause visual artifacts."
+    fix_action: "Use distortion with depth buffer, or bake effect differently. Avoid framebuffer reads on mobile."
+    applies_to:
+      - "*.shader"
+
+  # ============================================================================
+  # ERROR - Likely bugs or serious issues
+  # ============================================================================
+
+  - id: shader-branch-on-sample
+    name: Branching on Texture Sample
+    severity: error
+    type: regex
+    pattern:
+      - 'if\s*\(.*(?:texture|tex2D|Sample)\s*\([^)]+\)\s*(?:\.[xyzwrgba]+)?\s*[<>=!]'
+      - '(?:texture|tex2D|Sample)\s*\([^)]+\).*\?\s*'
+    message: "Branching based on texture sample creates divergent execution paths and prevents texture prefetch."
+    fix_action: "Use mix/lerp with the sample value, or restructure to avoid the branch."
+    applies_to:
+      - "*.glsl"
+      - "*.hlsl"
+      - "*.shader"
+      - "*.frag"
+      - "*.cginc"
+
+  - id: shader-unguarded-division
+    name: Potential Division by Zero
+    severity: error
+    type: regex
+    pattern:
+      - '/\s*(?!\d)[a-zA-Z_]\w*(?!\s*[\?\+\-\*])'
+      - '/\s*\([^)]+\)(?!\s*[\?\+])'
+    message: "Division without zero check can cause NaN/Inf artifacts that propagate through rendering."
+    fix_action: "Use max(denominator, epsilon) or rcp() with safe fallback."
+    applies_to:
+      - "*.glsl"
+      - "*.hlsl"
+      - "*.shader"
+      - "*.frag"
+      - "*.cginc"
+
+  - id: shader-normalize-zero
+    name: Normalize Potentially Zero Vector
+    severity: error
+    type: regex
+    pattern:
+      - 'normalize\s*\(\s*(?:[a-zA-Z_]\w*\s*-\s*[a-zA-Z_]\w*|[a-zA-Z_]\w*\s*\*\s*0)'
+    message: "normalize(zero vector) produces NaN. This commonly happens with direction vectors."
+    fix_action: "Check length > epsilon before normalizing, or use safe_normalize that returns fallback."
+    applies_to:
+      - "*.glsl"
+      - "*.hlsl"
+      - "*.shader"
+      - "*.frag"
+      - "*.cginc"
+
+  - id: shader-variant-explosion
+    name: Too Many Shader Variants
+    severity: error
+    type: regex
+    pattern:
+      - '(?:#pragma\s+multi_compile(?:_local)?\s+[^\n]+\n){6,}'
+    message: "More than 6 multi_compile lines creates 64+ shader variants. Build times and memory will suffer."
+    fix_action: "Consolidate keywords, use multi_compile_local, or switch to runtime branching for minor features."
+    applies_to:
+      - "*.shader"
+
+  - id: shader-srgb-manual-conversion
+    name: Manual sRGB Conversion
+    severity: warning
+    type: regex
+    pattern:
+      - 'pow\s*\([^,]+,\s*2\.2\s*\)'
+      - 'pow\s*\([^,]+,\s*0\.454'
+      - 'pow\s*\([^,]+,\s*1\.0\s*/\s*2\.2'
+    message: "Manual gamma conversion detected. This often indicates color space confusion."
+    fix_action: "Use proper sRGB texture sampling and framebuffer settings. Let hardware handle conversion."
+    applies_to:
+      - "*.glsl"
+      - "*.hlsl"
+      - "*.shader"
+      - "*.frag"
+      - "*.cginc"
+
+  # ============================================================================
+  # WARNING - Potential issues to review
+  # ============================================================================
+
+  - id: shader-discard-without-prepass
+    name: Discard Without Depth Prepass
+    severity: warning
+    type: regex
+    pattern:
+      - 'discard\s*;'
+      - 'clip\s*\([^)]+\)\s*;'
+    message: "discard/clip breaks early-Z optimization. Ensure opaque pass or depth prepass handles depth."
+    fix_action: "Use depth prepass for alpha-tested geometry, or consider alpha blending if possible."
+    applies_to:
+      - "*.glsl"
+      - "*.hlsl"
+      - "*.shader"
+      - "*.frag"
+      - "*.cginc"
+
+  - id: shader-fragcoord-no-offset
+    name: FragCoord Without Half-Pixel Offset
+    severity: warning
+    type: regex
+    pattern:
+      - 'gl_FragCoord\s*\.\s*xy\s*/\s*[a-zA-Z_]\w*(?!\s*\+)'
+      - '_ScreenParams\s*\.\s*xy'
+    message: "Using FragCoord for UV without 0.5 offset can cause sampling at texel boundaries."
+    fix_action: "Use (gl_FragCoord.xy + 0.5) / screenSize for pixel-center sampling."
+    applies_to:
+      - "*.glsl"
+      - "*.frag"
+
+  - id: shader-matrix-in-fragment
+    name: Matrix Multiply in Fragment Shader
+    severity: warning
+    type: regex
+    pattern:
+      - '(?:mat[234]|float[234]x[234])\s*\*\s*(?:vec[234]|float[234]).*(?:gl_Position|SV_Position)'
+    message: "Full matrix multiplication in fragment shader is expensive. Consider vertex shader."
+    fix_action: "Move matrix transforms to vertex shader and interpolate results."
+    applies_to:
+      - "*.glsl"
+      - "*.hlsl"
+      - "*.frag"
+
+  - id: shader-unrolled-blur
+    name: Non-Separable Blur Implementation
+    severity: warning
+    type: regex
+    pattern:
+      - '(?:texture|tex2D)\s*\([^)]+(?:offset|OFFSET)[^)]+\)[\s\S]{0,200}(?:texture|tex2D)\s*\([^)]+(?:offset|OFFSET)[^)]+\)[\s\S]{0,200}(?:texture|tex2D)\s*\([^)]+(?:offset|OFFSET)'
+    message: "Blur appears non-separable. 9-tap 2D = 9 samples, separable = 6 samples (2 passes of 3)."
+    fix_action: "Use separable blur: horizontal pass + vertical pass. More efficient for larger kernels."
+    applies_to:
+      - "*.glsl"
+      - "*.hlsl"
+      - "*.shader"
+      - "*.frag"
+
+  - id: shader-no-precision-qualifier
+    name: Missing Precision Qualifier
+    severity: warning
+    type: regex
+    pattern:
+      - '^(?!.*precision\s+(?:highp|mediump|lowp)).*(?:uniform|varying|in|out)\s+(?:vec|mat|float)'
+    message: "No precision qualifier in GLSL ES. Defaults may vary by platform."
+    fix_action: "Explicitly set precision: mediump for most values, highp for positions."
+    applies_to:
+      - "*.glsl"
+      - "*.frag"
+      - "*.vert"
+
+  - id: shader-redundant-normalize
+    name: Redundant Normalize Calls
+    severity: warning
+    type: regex
+    pattern:
+      - 'normalize\s*\(\s*normalize\s*\('
+      - 'normalize\s*\([^)]*\)\s*\*\s*\w+\s*;[\s\S]{0,100}normalize\s*\('
+    message: "Normalizing already-normalized vectors wastes GPU cycles."
+    fix_action: "Track which vectors are already normalized. Remove redundant calls."
+    applies_to:
+      - "*.glsl"
+      - "*.hlsl"
+      - "*.shader"
+      - "*.frag"
+      - "*.cginc"
+
+  - id: shader-hardcoded-resolution
+    name: Hardcoded Resolution Values
+    severity: warning
+    type: regex
+    pattern:
+      - '(?:1920|1080|1280|720|3840|2160)\.0'
+      - '/\s*(?:1920|1080|1280|720|3840|2160)(?:\.0)?'
+    message: "Hardcoded resolution will break on different screen sizes and aspect ratios."
+    fix_action: "Pass resolution as uniform. Use _ScreenParams in Unity or equivalent."
+    applies_to:
+      - "*.glsl"
+      - "*.hlsl"
+      - "*.shader"
+      - "*.frag"
+
+  # ============================================================================
+  # BEST PRACTICES
+  # ============================================================================
+
+  - id: shader-vec4-partial
+    name: Partial Vector Initialization
+    severity: warning
+    type: regex
+    pattern:
+      - 'vec[34]\s*\(\s*[a-zA-Z_]\w*\s*,\s*[a-zA-Z_]\w*\s*\)'
+      - 'float[34]\s*\(\s*[a-zA-Z_]\w*\s*,\s*[a-zA-Z_]\w*\s*\)'
+    message: "Partial vector construction may have unintended behavior. Explicit is better."
+    fix_action: "Use vec4(x, y, z, w) or vec4(vec2, z, w) for clarity."
+    applies_to:
+      - "*.glsl"
+      - "*.hlsl"
+      - "*.frag"
+      - "*.vert"
+
+  - id: shader-magic-numbers
+    name: Magic Numbers Without Constants
+    severity: warning
+    type: regex
+    pattern:
+      - '\*\s*(?:0\.0[1-9]|0\.[2-9]\d*|[1-9]\.\d+)(?!\s*(?:\+|/|\*|\-|\)|;|,|\]))'
+    message: "Magic numbers make shaders hard to tune and understand."
+    fix_action: "Define constants with descriptive names: const float ROUGHNESS_SCALE = 0.5;"
+    applies_to:
+      - "*.glsl"
+      - "*.hlsl"
+      - "*.shader"
+      - "*.frag"

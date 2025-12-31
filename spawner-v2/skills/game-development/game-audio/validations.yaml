@@ -1,0 +1,381 @@
+# Game Audio Validations
+# Code patterns to detect and validate in audio implementations
+
+skill_id: game-audio
+version: 1.0.0
+
+validations:
+  # Critical Issues
+  - id: runtime-audiosource-creation
+    name: "Runtime AudioSource Creation"
+    description: "Creating AudioSources at runtime causes GC allocation"
+    severity: error
+    category: performance
+    languages: [csharp]
+    pattern: |
+      (AddComponent\s*<\s*AudioSource\s*>|
+       new\s+AudioSource|
+       Instantiate.*Audio|
+       gameObject\.AddComponent.*AudioSource)
+    fix: |
+      Use audio source pooling:
+      ```csharp
+      // Instead of: var source = gameObject.AddComponent<AudioSource>();
+      var source = audioPool.Get();
+      source.clip = clip;
+      source.Play();
+      // When done: audioPool.Return(source);
+      ```
+    tags: [gc, pooling, performance]
+
+  - id: unmanaged-playoneshot
+    name: "Unmanaged PlayOneShot Calls"
+    description: "PlayOneShot without voice limiting can exhaust voices"
+    severity: warning
+    category: performance
+    languages: [csharp]
+    pattern: |
+      \.PlayOneShot\s*\(
+    context_check: |
+      Check if called within a managed audio system or directly on AudioSource
+    fix: |
+      Route through audio manager with voice limiting:
+      ```csharp
+      // Instead of: audioSource.PlayOneShot(clip);
+      AudioManager.Instance.PlaySFX(clip, position, priority);
+      ```
+    tags: [voices, performance]
+
+  - id: synchronous-audio-load
+    name: "Synchronous Audio Loading"
+    description: "Loading audio synchronously blocks main thread"
+    severity: error
+    category: performance
+    languages: [csharp]
+    pattern: |
+      Resources\.Load\s*<\s*AudioClip\s*>\s*\(
+    fix: |
+      Use async loading:
+      ```csharp
+      // Instead of: var clip = Resources.Load<AudioClip>("path");
+      var request = Resources.LoadAsync<AudioClip>("path");
+      await request;
+      var clip = request.asset as AudioClip;
+      ```
+    tags: [loading, performance, async]
+
+  - id: audio-from-wrong-thread
+    name: "Audio API from Background Thread"
+    description: "Unity audio API must be called from main thread"
+    severity: error
+    category: threading
+    languages: [csharp]
+    pattern: |
+      (Task\.Run|ThreadPool|new\s+Thread|async\s+Task)[\s\S]{0,500}(audioSource|AudioSource|\.Play\(|\.Stop\(|\.volume)
+    fix: |
+      Queue audio operations for main thread:
+      ```csharp
+      // Use main thread dispatcher
+      MainThreadDispatcher.Enqueue(() => {
+          audioSource.Play();
+      });
+      ```
+    tags: [threading, safety]
+
+  - id: missing-audio-unload
+    name: "Missing Audio Resource Unload"
+    description: "Loaded audio clips without corresponding unload"
+    severity: warning
+    category: memory
+    languages: [csharp]
+    pattern: |
+      Resources\.Load.*AudioClip
+    negative_pattern: |
+      Resources\.UnloadAsset|Resources\.UnloadUnusedAssets
+    fix: |
+      Track and unload audio resources:
+      ```csharp
+      // When done with clip:
+      Resources.UnloadAsset(clip);
+      // Or during scene transitions:
+      Resources.UnloadUnusedAssets();
+      ```
+    tags: [memory, loading]
+
+  # Quality Issues
+  - id: linear-volume-scale
+    name: "Linear Volume Scale"
+    description: "Using linear volume instead of logarithmic (dB)"
+    severity: info
+    category: quality
+    languages: [csharp]
+    pattern: |
+      \.volume\s*=\s*[0-9.]+f?\s*[;,)]
+    context_check: |
+      Check if value is computed using Log or decibel conversion
+    fix: |
+      Convert to decibels for perceptually correct volume:
+      ```csharp
+      // Linear to dB conversion
+      float LinearToDecibel(float linear)
+      {
+          return linear > 0.0001f
+              ? 20f * Mathf.Log10(linear)
+              : -80f;
+      }
+
+      // Use with AudioMixer exposed parameter
+      mixer.SetFloat("MasterVolume", LinearToDecibel(slider.value));
+      ```
+    tags: [audio-quality, mixing]
+
+  - id: hardcoded-audio-path
+    name: "Hardcoded Audio Path"
+    description: "Audio paths hardcoded in gameplay code"
+    severity: info
+    category: architecture
+    languages: [csharp]
+    pattern: |
+      (Load|PlayOneShot|clip\s*=)\s*.*["'].*\.(wav|mp3|ogg|aif)["']
+    fix: |
+      Use audio event IDs or ScriptableObject references:
+      ```csharp
+      // Define audio events in ScriptableObject
+      [CreateAssetMenu]
+      public class AudioEventLibrary : ScriptableObject
+      {
+          public AudioEvent playerJump;
+          public AudioEvent playerLand;
+          // ...
+      }
+
+      // Reference in code
+      audioManager.Play(audioLibrary.playerJump);
+      ```
+    tags: [architecture, maintainability]
+
+  - id: missing-spatial-setup
+    name: "Missing Spatial Audio Configuration"
+    description: "3D audio source without proper spatial settings"
+    severity: warning
+    category: configuration
+    languages: [csharp]
+    pattern: |
+      spatialBlend\s*=\s*1(?![\s\S]{0,200}(minDistance|maxDistance|rolloffMode))
+    fix: |
+      Configure spatial audio properties:
+      ```csharp
+      source.spatialBlend = 1f;
+      source.rolloffMode = AudioRolloffMode.Logarithmic;
+      source.minDistance = 2f;
+      source.maxDistance = 50f;
+      source.spread = 45f;
+      ```
+    tags: [spatial, configuration]
+
+  - id: no-audio-priority
+    name: "Missing Audio Priority"
+    description: "AudioSource without priority setting"
+    severity: info
+    category: voice-management
+    languages: [csharp]
+    pattern: |
+      AudioSource[\s\S]{0,100}\.Play\(\)(?![\s\S]{0,50}priority)
+    fix: |
+      Set audio priority (0=highest, 256=lowest):
+      ```csharp
+      source.priority = 0;   // Critical sounds (player, UI)
+      source.priority = 128; // Normal sounds (environment)
+      source.priority = 256; // Low priority (distant ambient)
+      ```
+    tags: [priority, voice-management]
+
+  # FMOD/Wwise Specific
+  - id: fmod-event-not-released
+    name: "FMOD Event Not Released"
+    description: "FMOD EventInstance created but never released"
+    severity: error
+    category: memory
+    languages: [csharp]
+    pattern: |
+      (CreateInstance|RuntimeManager\.CreateInstance)(?![\s\S]{0,500}(\.release\(\)|STOP_MODE\.ALLOWFADEOUT))
+    fix: |
+      Always release FMOD events:
+      ```csharp
+      // One-shot event
+      instance.start();
+      instance.release(); // Will clean up after sound ends
+
+      // Or stop with fadeout then release
+      instance.stop(FMOD.Studio.STOP_MODE.ALLOWFADEOUT);
+      instance.release();
+      ```
+    tags: [fmod, memory]
+
+  - id: fmod-bank-not-unloaded
+    name: "FMOD Bank Not Unloaded"
+    description: "FMOD bank loaded but never unloaded"
+    severity: warning
+    category: memory
+    languages: [csharp]
+    pattern: |
+      RuntimeManager\.LoadBank(?![\s\S]{0,1000}UnloadBank)
+    fix: |
+      Unload banks on scene exit:
+      ```csharp
+      void OnDestroy()
+      {
+          FMODUnity.RuntimeManager.UnloadBank("SceneAudio");
+      }
+      ```
+    tags: [fmod, memory, banks]
+
+  - id: wwise-event-not-stopped
+    name: "Wwise Event Not Stopped"
+    description: "Wwise event posted without stop handling"
+    severity: warning
+    category: memory
+    languages: [csharp]
+    pattern: |
+      PostEvent(?![\s\S]{0,500}(StopPlayingID|Stop\(|ExecuteActionOnEvent.*Stop))
+    fix: |
+      Track and stop Wwise events:
+      ```csharp
+      uint playingId = AkSoundEngine.PostEvent("PlayAmbient", gameObject);
+
+      // When done:
+      AkSoundEngine.StopPlayingID(playingId);
+      // Or stop all on object:
+      AkSoundEngine.StopAll(gameObject);
+      ```
+    tags: [wwise, memory]
+
+  # Platform-Specific
+  - id: mobile-uncompressed-audio
+    name: "Uncompressed Audio on Mobile"
+    description: "PCM or uncompressed audio in mobile build"
+    severity: error
+    category: platform
+    languages: [csharp]
+    pattern: |
+      compressionFormat\s*=\s*AudioCompressionFormat\.PCM
+    context_check: |
+      Check if this is for mobile platform settings
+    fix: |
+      Use compressed formats on mobile:
+      ```csharp
+      #if UNITY_IOS || UNITY_ANDROID
+          settings.compressionFormat = AudioCompressionFormat.Vorbis;
+          settings.quality = 0.5f; // Lower quality for mobile
+      #endif
+      ```
+    tags: [mobile, compression, platform]
+
+  - id: too-many-streaming-sources
+    name: "Too Many Streaming Audio Sources"
+    description: "Multiple streaming sources can cause I/O bottlenecks"
+    severity: warning
+    category: performance
+    languages: [csharp]
+    pattern: |
+      loadType\s*=\s*AudioClipLoadType\.Streaming
+    context_check: |
+      Count streaming sources - should be limited to 2-4
+    fix: |
+      Limit streaming sources:
+      - Maximum 2-4 simultaneous streaming sources
+      - Use CompressedInMemory for short-medium files
+      - Reserve streaming for music and long ambiences
+    tags: [streaming, performance, io]
+
+# Validation categories
+categories:
+  performance:
+    description: "Performance-impacting patterns"
+    default_severity: warning
+
+  memory:
+    description: "Memory management issues"
+    default_severity: error
+
+  threading:
+    description: "Thread safety violations"
+    default_severity: error
+
+  quality:
+    description: "Audio quality improvements"
+    default_severity: info
+
+  configuration:
+    description: "Missing or wrong configuration"
+    default_severity: warning
+
+  architecture:
+    description: "Code architecture issues"
+    default_severity: info
+
+  voice-management:
+    description: "Audio voice management"
+    default_severity: warning
+
+  platform:
+    description: "Platform-specific issues"
+    default_severity: error
+
+# Quick reference for common fixes
+quick_fixes:
+  pooling: |
+    Create audio source pool at initialization:
+    ```csharp
+    private void InitPool(int size)
+    {
+        pool = new Queue<AudioSource>(size);
+        for (int i = 0; i < size; i++)
+        {
+            var go = new GameObject("PooledAudio");
+            go.transform.SetParent(transform);
+            var source = go.AddComponent<AudioSource>();
+            source.playOnAwake = false;
+            pool.Enqueue(source);
+        }
+    }
+    ```
+
+  async_loading: |
+    Use async/await for audio loading:
+    ```csharp
+    public async Task<AudioClip> LoadClipAsync(string path)
+    {
+        var request = Resources.LoadAsync<AudioClip>(path);
+        while (!request.isDone)
+            await Task.Yield();
+        return request.asset as AudioClip;
+    }
+    ```
+
+  db_conversion: |
+    Convert linear volume to decibels:
+    ```csharp
+    public static float LinearToDb(float linear)
+    {
+        return linear > 0.0001f ? 20f * Mathf.Log10(linear) : -80f;
+    }
+
+    public static float DbToLinear(float db)
+    {
+        return Mathf.Pow(10f, db / 20f);
+    }
+    ```
+
+  voice_priority: |
+    Implement priority-based voice management:
+    ```csharp
+    public enum AudioPriority
+    {
+        Critical = 0,    // Player, UI
+        High = 64,       // Enemies, important SFX
+        Normal = 128,    // General SFX
+        Low = 192,       // Ambient details
+        Lowest = 256     // Background filler
+    }
+    ```

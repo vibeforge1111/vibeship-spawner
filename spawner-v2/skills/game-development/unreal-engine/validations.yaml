@@ -1,0 +1,293 @@
+# Unreal Engine Validations
+# Automated checks to catch common Unreal C++ mistakes
+
+validations:
+  # ============================================================================
+  # CRITICAL - Memory and Crash Issues
+  # ============================================================================
+
+  - id: ue-raw-uobject-pointer
+    name: Raw UObject Pointer
+    severity: critical
+    type: regex
+    pattern: '^\s*(UObject|AActor|UActorComponent|ACharacter|APawn|AController|USceneComponent|UPrimitiveComponent|UMeshComponent|UStaticMeshComponent|USkeletalMeshComponent|UWidgetComponent)\s*\*\s+\w+\s*[;=](?!.*//.*UPROPERTY)'
+    message: "UObject pointer without UPROPERTY. Garbage collector won't track this - potential crash."
+    fix_action: "Add UPROPERTY() macro above the declaration"
+    applies_to:
+      - "*.h"
+      - "*.cpp"
+
+  - id: ue-constructor-world-access
+    name: World Access in Constructor
+    severity: critical
+    type: regex
+    pattern: 'A\w+::\w+\(\)[^}]*(GetWorld\(\)|GetGameInstance\(\)|GetFirstPlayerController\(\)|SpawnActor|FindActor)'
+    message: "Accessing World/Game systems in constructor. World doesn't exist yet - will crash."
+    fix_action: "Move to PostInitializeComponents() or BeginPlay()"
+    applies_to:
+      - "*.cpp"
+
+  - id: ue-unchecked-cast
+    name: Unchecked Cast Result
+    severity: error
+    type: regex
+    pattern: 'Cast<\w+>\s*\([^)]+\)\s*->'
+    message: "Using Cast result without null check. Will crash if cast fails."
+    fix_action: "Use if (auto* Var = Cast<Type>(Source)) { ... }"
+    applies_to:
+      - "*.cpp"
+
+  - id: ue-missing-generated-body
+    name: Missing GENERATED_BODY
+    severity: critical
+    type: regex
+    pattern: 'class\s+\w+_API\s+\w+\s*:\s*public\s+\w+[^}]*\{(?![^}]*GENERATED_BODY)'
+    message: "UCLASS without GENERATED_BODY() macro. Reflection won't work."
+    fix_action: "Add GENERATED_BODY() as first line in class body"
+    applies_to:
+      - "*.h"
+
+  # ============================================================================
+  # HIGH - Performance Issues
+  # ============================================================================
+
+  - id: ue-tick-getallactors
+    name: GetAllActorsOfClass in Tick
+    severity: error
+    type: regex
+    pattern: 'Tick\s*\([^)]*\)\s*\{[^}]*(GetAllActorsOfClass|GetAllActorsWithTag|GetAllActorsWithInterface)'
+    message: "GetAllActorsOfClass in Tick is O(n) every frame. Cache references instead."
+    fix_action: "Cache actor references in BeginPlay and update on spawn/destroy events"
+    applies_to:
+      - "*.cpp"
+
+  - id: ue-tick-multicast
+    name: Multicast RPC in Tick
+    severity: error
+    type: regex
+    pattern: 'Tick\s*\([^)]*\)\s*\{[^}]*Multicast_'
+    message: "Multicast RPC in Tick causes bandwidth explosion. Use replicated properties instead."
+    fix_action: "Replicate state with UPROPERTY(Replicated) and OnRep"
+    applies_to:
+      - "*.cpp"
+
+  - id: ue-synchronous-load-gameplay
+    name: Synchronous Asset Load
+    severity: warning
+    type: regex
+    pattern: 'LoadSynchronous\s*\(\s*\)(?!.*BeginPlay|.*PreloadAssets|.*Init)'
+    message: "Synchronous asset loading during gameplay causes frame hitches."
+    fix_action: "Use async loading with FStreamableManager::RequestAsyncLoad"
+    applies_to:
+      - "*.cpp"
+
+  - id: ue-fstring-in-tick
+    name: FString Operations in Tick
+    severity: warning
+    type: regex
+    pattern: 'Tick\s*\([^)]*\)\s*\{[^}]*(FString::Printf|FString\s+\w+\s*=|\.Append\(|FName\s*\(.*FString)'
+    message: "FString allocation in Tick causes GC pressure. Cache strings or use FName."
+    fix_action: "Cache FString results or use FName for comparisons"
+    applies_to:
+      - "*.cpp"
+
+  - id: ue-new-in-tick
+    name: Object Allocation in Tick
+    severity: warning
+    type: regex
+    pattern: 'Tick\s*\([^)]*\)\s*\{[^}]*new\s+\w+'
+    message: "Memory allocation in Tick causes fragmentation. Use object pooling."
+    fix_action: "Pre-allocate objects or use TArray with Reserve()"
+    applies_to:
+      - "*.cpp"
+
+  # ============================================================================
+  # HIGH - Replication Issues
+  # ============================================================================
+
+  - id: ue-replicated-no-authority-check
+    name: Replicated Property Without Authority
+    severity: warning
+    type: regex
+    pattern: '(Health|Ammo|Score|Mana|Stamina|Lives)\s*[-+]=(?!.*HasAuthority|.*ROLE_Authority|.*GetLocalRole)'
+    message: "Modifying replicated property without authority check. Changes may be overwritten."
+    fix_action: "Add if (HasAuthority()) check before modifying"
+    applies_to:
+      - "*.cpp"
+
+  - id: ue-missing-getlifetimereplicatedprops
+    name: Replicated Without GetLifetimeReplicatedProps
+    severity: error
+    type: regex
+    pattern: 'UPROPERTY\s*\([^)]*Replicated[^)]*\)(?![^;]*GetLifetimeReplicatedProps)'
+    message: "Replicated property requires GetLifetimeReplicatedProps override."
+    fix_action: "Implement GetLifetimeReplicatedProps and add DOREPLIFETIME macro"
+    applies_to:
+      - "*.h"
+
+  - id: ue-server-rpc-no-validation
+    name: Server RPC Without Validation
+    severity: warning
+    type: regex
+    pattern: 'UFUNCTION\s*\(\s*Server\s*,\s*Reliable\s*\)'
+    message: "Server RPC without WithValidation. Vulnerable to cheating."
+    fix_action: "Add WithValidation specifier and implement _Validate function"
+    applies_to:
+      - "*.h"
+
+  # ============================================================================
+  # MEDIUM - Best Practices
+  # ============================================================================
+
+  - id: ue-hard-asset-reference
+    name: Hard Asset Reference
+    severity: warning
+    type: regex
+    pattern: 'UPROPERTY\s*\([^)]*\)\s*(UStaticMesh|USkeletalMesh|UTexture2D|UMaterialInterface|USoundBase|UAnimMontage|UAnimSequence|UParticleSystem)\s*\*'
+    message: "Hard asset reference loads asset immediately. Consider TSoftObjectPtr for on-demand loading."
+    fix_action: "Use TSoftObjectPtr<Type> for assets that aren't always needed"
+    applies_to:
+      - "*.h"
+
+  - id: ue-loadobject-path
+    name: LoadObject With Path String
+    severity: warning
+    type: regex
+    pattern: 'LoadObject<[^>]+>\s*\(\s*nullptr\s*,\s*TEXT\s*\('
+    message: "LoadObject with path string may fail in packaged build if asset not cooked."
+    fix_action: "Use TSoftObjectPtr or ensure asset is in Primary Asset list"
+    applies_to:
+      - "*.cpp"
+
+  - id: ue-tick-enabled-default
+    name: Tick Enabled by Default
+    severity: info
+    type: regex
+    pattern: 'PrimaryActorTick\.bCanEverTick\s*=\s*true'
+    message: "Actor ticks by default. Only enable if truly needed per-frame."
+    fix_action: "Set to false if Tick not needed. Use timers for periodic updates."
+    applies_to:
+      - "*.cpp"
+
+  - id: ue-public-member-no-uproperty
+    name: Public Member Without UPROPERTY
+    severity: warning
+    type: regex
+    pattern: 'public:\s*\n\s*(?!UPROPERTY|UFUNCTION|GENERATED|virtual|static|explicit|friend|using|template|class|struct|enum)[A-Z]\w+\s*\*?\s+\w+\s*[;=]'
+    message: "Public member without UPROPERTY won't be visible to Blueprint or serialization."
+    fix_action: "Add UPROPERTY() or move to private if internal"
+    applies_to:
+      - "*.h"
+
+  - id: ue-beginplay-no-super
+    name: BeginPlay Without Super
+    severity: error
+    type: regex
+    pattern: 'void\s+\w+::BeginPlay\s*\(\s*\)\s*\{(?![^}]*Super::BeginPlay)'
+    message: "BeginPlay override without Super::BeginPlay() call."
+    fix_action: "Add Super::BeginPlay() at start of function"
+    applies_to:
+      - "*.cpp"
+
+  - id: ue-endplay-no-super
+    name: EndPlay Without Super
+    severity: error
+    type: regex
+    pattern: 'void\s+\w+::EndPlay\s*\([^)]*\)\s*\{(?![^}]*Super::EndPlay)'
+    message: "EndPlay override without Super::EndPlay() call."
+    fix_action: "Add Super::EndPlay(EndPlayReason) at end of function"
+    applies_to:
+      - "*.cpp"
+
+  - id: ue-ensure-vs-check
+    name: ensure() in Performance Path
+    severity: warning
+    type: regex
+    pattern: 'Tick\s*\([^)]*\)\s*\{[^}]*(ensure|ensureMsg|ensureAlways)'
+    message: "ensure() in Tick generates reports in shipping builds. Use check() for fatal or remove."
+    fix_action: "Use check() for fatal errors, or handle gracefully without assert"
+    applies_to:
+      - "*.cpp"
+
+  # ============================================================================
+  # INFO - Style and Conventions
+  # ============================================================================
+
+  - id: ue-magic-numbers
+    name: Magic Numbers
+    severity: info
+    type: regex
+    pattern: '(SetTimer|Delay)\s*\([^)]*,\s*\d+\.\d+f?\s*,'
+    message: "Magic number in timer. Consider using named constant or UPROPERTY."
+    fix_action: "Define as const or UPROPERTY for easier tuning"
+    applies_to:
+      - "*.cpp"
+
+  - id: ue-text-macro-missing
+    name: Hardcoded String
+    severity: info
+    type: regex
+    pattern: 'UE_LOG\s*\([^,]+,\s*\w+\s*,\s*"'
+    message: "Hardcoded string in UE_LOG. Use TEXT() macro for Unicode safety."
+    fix_action: "Wrap string in TEXT() macro"
+    applies_to:
+      - "*.cpp"
+
+  - id: ue-blueprint-callable-no-category
+    name: BlueprintCallable Without Category
+    severity: info
+    type: regex
+    pattern: 'UFUNCTION\s*\(\s*BlueprintCallable\s*\)(?![^;]*Category)'
+    message: "BlueprintCallable without Category makes function hard to find in Blueprint."
+    fix_action: "Add Category = \"MyCategory\" to UFUNCTION specifiers"
+    applies_to:
+      - "*.h"
+
+  - id: ue-deprecated-api
+    name: Deprecated API Usage
+    severity: warning
+    type: regex
+    pattern: '(FPaths::GameDir|FPaths::GameContentDir|UProperty|GetPlayerPawn\(0\)|GetPlayerController\(0\))'
+    message: "Using deprecated Unreal API. Check migration guide for replacement."
+    fix_action: "Update to current API: FPaths::ProjectDir, FProperty, GetPlayerPawn(GetWorld(), 0)"
+    applies_to:
+      - "*.cpp"
+      - "*.h"
+
+  # ============================================================================
+  # Blueprint-specific (for .uasset analysis if applicable)
+  # ============================================================================
+
+  - id: ue-blueprint-cast-unconnected
+    name: Unconnected Cast Failure Pin
+    severity: warning
+    type: regex
+    pattern: 'CastFailed.*=.*None'
+    message: "Blueprint Cast node has unconnected failure pin. Handle the failure case."
+    fix_action: "Connect Cast Failed pin to handle when cast returns nullptr"
+    applies_to:
+      - "*.uasset"
+
+  # ============================================================================
+  # Header Organization
+  # ============================================================================
+
+  - id: ue-include-order
+    name: Include Order
+    severity: info
+    type: regex
+    pattern: '#include\s+"[^"]+\.generated\.h"(?!\s*$)'
+    message: "*.generated.h must be the last include in the file."
+    fix_action: "Move *.generated.h to be the last #include"
+    applies_to:
+      - "*.h"
+
+  - id: ue-missing-pragma-once
+    name: Missing pragma once
+    severity: warning
+    type: regex
+    pattern: '^(?!.*#pragma once)(?=.*UCLASS|.*USTRUCT|.*UENUM)'
+    message: "Header file missing #pragma once. Can cause duplicate definition errors."
+    fix_action: "Add #pragma once at the top of the header file"
+    applies_to:
+      - "*.h"

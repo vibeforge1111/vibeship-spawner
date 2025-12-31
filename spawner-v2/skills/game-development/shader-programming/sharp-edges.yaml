@@ -1,0 +1,346 @@
+# Shader Programming Sharp Edges
+# Critical gotchas that cause real problems in production
+
+sharp_edges:
+  - id: shader-branching-performance
+    summary: Dynamic branching kills GPU parallelism
+    severity: critical
+    situation: Using if/else statements with per-pixel varying conditions
+    why: |
+      GPUs execute in SIMD groups (warps/wavefronts of 32-64 threads). When threads
+      in a group take different branches, ALL branches execute for everyone - the
+      GPU masks out results. A simple if/else can double your shader cost.
+    solution: |
+      1. Replace with math: mix(), step(), smoothstep(), saturate()
+      2. Use conditional assignment: result = condition ? a : b (still branches, but simpler)
+      3. If unavoidable, make branches coherent (nearby pixels take same branch)
+      4. Profile! Sometimes branches are fine if condition is mostly uniform
+    symptoms:
+      - Shader runs same speed with branch always true vs mixed
+      - GPU profiler shows low occupancy
+      - Frame time spikes on certain view angles
+      - Mobile performance drastically worse than desktop
+    detection_pattern: 'if\s*\([^)]*[a-zA-Z_][a-zA-Z0-9_]*\s*[<>=!]'
+    version_range: "*"
+    red_flags:
+      - Nested if statements in fragment shader
+      - Loop with conditional break based on texture sample
+      - Per-pixel discard based on complex calculation
+
+  - id: shader-texture-sampling-cost
+    summary: Texture samples are expensive and latency-bound
+    severity: high
+    situation: Sampling many textures or sampling inside loops
+    why: |
+      Texture samples have ~300-600 cycle latency. GPUs hide this with parallelism,
+      but only if you have enough threads. Too many samples = low occupancy = waiting
+      on memory. Mobile is 10x worse due to bandwidth limits.
+    solution: |
+      1. Combine textures (pack into RGBA channels)
+      2. Use separable filters (1D + 1D instead of 2D)
+      3. Lower resolution for distant/blurred samples
+      4. Use texture arrays instead of sampling multiple textures
+      5. Prefer bilinear over trilinear when quality allows
+    symptoms:
+      - GPU memory bandwidth at max
+      - Adding more samples tanks framerate linearly
+      - Mobile devices throttle/overheat
+      - Texture cache misses in profiler
+    detection_pattern: 'texture\s*\(|tex2D\s*\(|Sample\s*\('
+    version_range: "*"
+    red_flags:
+      - More than 8 texture samples per pixel
+      - Texture sample inside a loop
+      - Dependent texture read (UV from previous sample)
+
+  - id: shader-precision-mobile
+    summary: Float precision destroys mobile performance
+    severity: critical
+    situation: Using highp/float everywhere instead of mediump/half
+    why: |
+      Mobile GPUs (Mali, Adreno, PowerVR) are 2-4x slower with 32-bit floats.
+      Desktop GPUs don't care, so developers don't notice until mobile testing.
+      Colors, UVs, normals all work fine with 16-bit precision.
+    solution: |
+      1. Default to mediump in GLSL, half in HLSL
+      2. Use highp only for: world positions, depth, accumulated values
+      3. Test on actual mobile devices - emulators lie about precision
+      4. Watch for precision artifacts: banding, Z-fighting, UV swimming
+    symptoms:
+      - Mobile runs at 1/3 desktop framerate
+      - Shader compiles but performance is terrible
+      - No visible quality difference between precisions
+      - GPU time dominated by ALU, not memory
+    detection_pattern: 'precision\s+highp|float\s+[a-zA-Z]|vec[234]\s+[a-zA-Z]'
+    version_range: "*"
+    red_flags:
+      - No precision qualifiers in GLSL ES shader
+      - Using float4x4 for normal transforms
+      - Full precision for color calculations
+
+  - id: shader-variants-explosion
+    summary: Shader keywords cause exponential variant explosion
+    severity: high
+    situation: Adding shader_feature or multi_compile keywords liberally
+    why: |
+      N keywords = 2^N shader variants. 10 keywords = 1024 variants to compile,
+      store, and potentially load at runtime. Build times explode, memory balloons,
+      and shader loading causes stutters.
+    solution: |
+      1. Use multi_compile_local (Unity) for per-material keywords
+      2. Group mutually exclusive features: multi_compile _ A B C (not _ A, _ B, _ C)
+      3. Use uber-shaders with dynamic branches for minor features
+      4. Strip unused variants in build settings
+      5. Consider shader_feature for editor-only toggles
+    symptoms:
+      - Build takes hours, most time on shaders
+      - Memory usage much higher than expected
+      - Hitching when new materials appear
+      - "Shader keyword limit exceeded" errors
+    detection_pattern: 'multi_compile|shader_feature|#pragma multi_compile'
+    version_range: "*"
+    red_flags:
+      - More than 8 multi_compile lines in one shader
+      - Nested #if with multiple keywords
+      - Using multi_compile for rarely-used features
+
+  - id: shader-overdraw
+    summary: Transparent objects and effects cause massive overdraw
+    severity: high
+    situation: Layered transparent effects, particles, or alpha-tested geometry
+    why: |
+      Overdraw means the same pixel is shaded multiple times. Opaque objects
+      with depth testing: 1x. Transparents without depth write: Nx per layer.
+      Alpha-tested breaks early-Z. A 4-layer effect = 4x fragment cost.
+    solution: |
+      1. Sort transparent objects back-to-front
+      2. Use depth pre-pass for alpha-tested geometry
+      3. Reduce particle overdraw with soft particles, lower density
+      4. Use stencil buffer to limit effect areas
+      5. Consider OIT (Order-Independent Transparency) for complex scenes
+    symptoms:
+      - Framerate tanks when looking at transparent objects
+      - GPU fragment shader time spikes
+      - Performance varies wildly by camera angle
+      - Particles destroy mobile performance
+    detection_pattern: 'Blend\s+|alpha|transparent|discard|clip\s*\('
+    version_range: "*"
+    red_flags:
+      - Multiple overlapping full-screen post effects
+      - Dense particle systems with alpha blending
+      - Alpha testing without depth pre-pass
+
+  - id: shader-mobile-gpu-architecture
+    summary: Mobile GPUs work fundamentally differently
+    severity: critical
+    situation: Desktop shader running poorly or incorrectly on mobile
+    why: |
+      Mobile GPUs use tile-based deferred rendering (TBDR). They render to
+      on-chip memory tiles, then write to RAM once. This means:
+      - Framebuffer reads are expensive (resolve tile first)
+      - Discard/alpha-test can break optimizations
+      - Memory bandwidth is precious
+      Desktop GPUs use immediate mode - different tradeoffs entirely.
+    solution: |
+      1. Avoid framebuffer fetches (grab pass, camera opaque texture)
+      2. Minimize render target switches
+      3. Use MSAA instead of post-process AA (cheaper on TBDR)
+      4. Batch draw calls aggressively
+      5. Test on actual mobile hardware, not just scaled-down desktop
+    symptoms:
+      - Effect works on desktop, fails or crawls on mobile
+      - Battery drains unusually fast
+      - GPU thermal throttling
+      - Artifacts only visible on certain mobile GPUs
+    detection_pattern: null
+    version_range: "*"
+    red_flags:
+      - Using GrabPass or camera opaque texture in mobile shader
+      - Multiple render texture switches per frame
+      - Post-process effects on mobile without testing
+
+  - id: shader-half-pixel-offset
+    summary: UV coordinate precision and half-pixel offsets
+    severity: medium
+    situation: Texture sampling appearing blurry or misaligned
+    why: |
+      UV (0,0) is the corner of the first texel, not its center. When sampling
+      at integer pixel coordinates without offset, you hit the texel boundary
+      and bilinear filtering blurs between 4 texels. Need 0.5/resolution offset.
+    solution: |
+      1. For pixel-perfect sampling: uv = (pixelCoord + 0.5) / textureSize
+      2. For screen-space effects: pass half-pixel offset as uniform
+      3. Use texelFetch() for exact texel reads (no filtering)
+      4. Consider point filtering for pixel art
+    symptoms:
+      - Post-processing looks slightly blurry
+      - Pixel art has shimmer or blur
+      - Sampling specific texture locations gives wrong values
+      - Off-by-one errors in compute shaders
+    detection_pattern: 'gl_FragCoord|SV_Position|VPOS'
+    version_range: "*"
+    red_flags:
+      - Dividing FragCoord by resolution without 0.5 offset
+      - Expecting exact values from texture sample
+
+  - id: shader-derivative-discontinuity
+    summary: dFdx/dFdy undefined at triangle edges
+    severity: medium
+    situation: Using ddx/ddy/fwidth for procedural effects or anti-aliasing
+    why: |
+      Screen-space derivatives are computed in 2x2 pixel quads. At triangle edges,
+      adjacent pixels may be from different triangles with completely different
+      values. This causes seams, flickering, and broken anti-aliasing.
+    solution: |
+      1. Pass derivatives from vertex shader for critical values
+      2. Accept artifacts at edges for post-effects (usually fine)
+      3. For procedural textures, compute analytic derivatives
+      4. Use textureGrad() with known gradient values
+    symptoms:
+      - Seams visible at mesh edges
+      - Procedural patterns flicker or have hard edges
+      - fwidth-based AA has bright/dark lines at silhouettes
+    detection_pattern: 'dFdx|dFdy|ddx|ddy|fwidth'
+    version_range: "*"
+    red_flags:
+      - Using fwidth on world position for silhouettes
+      - ddx/ddy on values that change across triangles
+
+  - id: shader-color-space-mismatch
+    summary: Mixing linear and gamma color spaces
+    severity: high
+    situation: Colors appear washed out, too dark, or incorrect
+    why: |
+      Textures are often sRGB (gamma encoded). Math should be linear. If you
+      sample sRGB without conversion, multiply colors, then output - result is
+      wrong. Most engines handle this, but custom shaders can break it.
+    solution: |
+      1. Sample sRGB textures as sRGB (hardware converts to linear)
+      2. Do all math in linear space
+      3. Output to sRGB framebuffer (hardware converts back)
+      4. For manual conversion: linear = pow(srgb, 2.2), srgb = pow(linear, 1/2.2)
+    symptoms:
+      - Colors look "off" compared to source art
+      - Lighting results too dark or too bright
+      - Color blending has unexpected hue shifts
+      - HDR values clip incorrectly
+    detection_pattern: 'pow\s*\([^,]+,\s*2\.2|pow\s*\([^,]+,\s*0\.45'
+    version_range: "*"
+    red_flags:
+      - Manual gamma conversion in shader without understanding pipeline
+      - Mixing sRGB and linear textures without annotation
+
+  - id: shader-z-fighting
+    summary: Depth buffer precision causes flickering overlap
+    severity: medium
+    situation: Coplanar or nearly coplanar surfaces flicker between each other
+    why: |
+      Depth buffers have limited precision (usually 24-bit). Precision is non-linear -
+      much more resolution near camera, almost none in distance. Two surfaces at
+      z=1000 might map to the same depth value.
+    solution: |
+      1. Push near plane as far as possible
+      2. Use reverse-Z for more uniform precision (1 at near, 0 at far)
+      3. Add polygon offset / depth bias for decals
+      4. Avoid coplanar geometry when possible
+      5. Use logarithmic depth buffer for extreme ranges
+    symptoms:
+      - Distant geometry flickers/z-fights
+      - Decals flicker on surfaces
+      - Shadow acne near light
+      - Works close up, breaks in distance
+    detection_pattern: 'gl_FragDepth|SV_Depth|ZWrite|Offset\s*-?\d'
+    version_range: "*"
+    red_flags:
+      - Near plane < 0.1 with far plane > 10000
+      - Decals without depth bias
+      - Multiple overlapping meshes at same position
+
+# ============================================================================
+# SYMPTOM INDEX
+# ============================================================================
+symptom_index:
+  "shader runs slow":
+    - shader-branching-performance
+    - shader-texture-sampling-cost
+    - shader-precision-mobile
+    - shader-overdraw
+
+  "mobile performance terrible":
+    - shader-precision-mobile
+    - shader-mobile-gpu-architecture
+    - shader-texture-sampling-cost
+    - shader-overdraw
+
+  "build takes forever":
+    - shader-variants-explosion
+
+  "flickering artifacts":
+    - shader-z-fighting
+    - shader-derivative-discontinuity
+
+  "colors look wrong":
+    - shader-color-space-mismatch
+    - shader-precision-mobile
+
+  "blurry rendering":
+    - shader-half-pixel-offset
+    - shader-texture-sampling-cost
+
+  "effect works on desktop not mobile":
+    - shader-mobile-gpu-architecture
+    - shader-precision-mobile
+    - shader-texture-sampling-cost
+
+  "shader compiles slow":
+    - shader-variants-explosion
+
+  "visual seams at edges":
+    - shader-derivative-discontinuity
+    - shader-half-pixel-offset
+
+  "particles kill framerate":
+    - shader-overdraw
+    - shader-texture-sampling-cost
+
+# ============================================================================
+# RED FLAGS
+# ============================================================================
+red_flags:
+  code_patterns:
+    - pattern: 'for\s*\([^)]*\)\s*\{[^}]*texture'
+      issue: "Texture sampling inside loop"
+      severity: critical
+
+    - pattern: 'if\s*\([^)]*texture\s*\('
+      issue: "Branching based on texture sample"
+      severity: high
+
+    - pattern: 'discard|clip\s*\('
+      issue: "Potential early-Z break"
+      severity: medium
+
+    - pattern: '#pragma\s+multi_compile(?!_local)'
+      issue: "Global shader keywords - variant explosion risk"
+      severity: medium
+
+    - pattern: 'GrabPass|_CameraOpaqueTexture'
+      issue: "Framebuffer fetch - expensive on mobile"
+      severity: high
+
+    - pattern: 'tex2Dlod|textureLod.*,\s*0\.0\s*\)'
+      issue: "Forcing mip 0 - cache unfriendly"
+      severity: low
+
+  architecture_smells:
+    - smell: "All shaders using highp precision"
+      risk: "Mobile will run at fraction of potential speed"
+      fix: "Audit and convert to mediump where safe"
+
+    - smell: "No shader LOD system for effects"
+      risk: "Full-quality shaders even when minimal on screen"
+      fix: "Implement quality levels based on distance/screen coverage"
+
+    - smell: "Post-processing in single uber-pass"
+      risk: "Can't skip unused effects, harder to optimize"
+      fix: "Separate passes with ability to skip"

@@ -1,0 +1,500 @@
+# Animation Systems Sharp Edges
+# Critical gotchas, performance traps, and hard-won lessons
+
+skill_id: animation-systems
+version: "1.0.0"
+
+sharp_edges:
+  - id: root-motion-network-desync
+    severity: critical
+    title: "Root Motion Network Desynchronization"
+    description: |
+      Root motion in networked games causes position desync between clients.
+      Animation-driven movement doesn't account for network latency.
+    symptoms:
+      - "Characters teleport or rubber-band"
+      - "Player position differs between clients"
+      - "Attacks miss despite appearing to hit"
+      - "Characters slide after animation ends"
+    cause: |
+      Root motion applies delta movement each frame. With network latency,
+      clients animate at different times, accumulating position errors.
+    solution: |
+      1. Server-authoritative position, client-side animation
+      2. Snapshot root motion destination, lerp to it
+      3. Use root motion for visuals only, code for actual movement
+      4. Send target position with animation trigger
+
+      ```csharp
+      // Network-safe root motion
+      [Command]
+      void CmdPlayAttack(Vector3 startPos, Vector3 targetPos)
+      {
+          // Server validates and broadcasts
+          RpcPlayAttackAnimation(startPos, targetPos);
+      }
+
+      [ClientRpc]
+      void RpcPlayAttackAnimation(Vector3 startPos, Vector3 targetPos)
+      {
+          // Client plays animation but lerps to authoritative position
+          StartCoroutine(AnimateToPosition(startPos, targetPos, attackDuration));
+      }
+      ```
+    references:
+      - "GDC: Networking in For Honor"
+    tags: [networking, root-motion, multiplayer]
+
+  - id: blend-tree-foot-sync
+    severity: high
+    title: "Blend Tree Foot Synchronization"
+    description: |
+      Blending between locomotion animations with different foot timing
+      causes feet to blend through the ground or float.
+    symptoms:
+      - "Feet clip through ground during walk-to-run transition"
+      - "Character appears to hover at certain blend values"
+      - "Foot IK goes crazy trying to compensate"
+      - "Legs twist unnaturally during blends"
+    cause: |
+      Animation A has left foot down at frame 10, Animation B has right foot down.
+      Blending 50/50 puts both feet at half-height = floating.
+    solution: |
+      1. **Sync markers**: Tag foot contact points in all blend animations
+      2. **Matching**: Only blend animations at matching foot phases
+      3. **Normalized time**: Ensure all locomotion loops have same phase
+      4. **Animation authoring**: Create animations with matched timing
+
+      ```
+      Walk cycle:    [L down]----[R down]----[L down]
+      Run cycle:     [L down]----[R down]----[L down]
+                          ↑           ↑
+                     Sync points must align
+      ```
+
+      Unity: Use "Foot IK" on Humanoid with proper foot contacts
+      Unreal: Use Sync Groups in Anim Graph
+    tags: [blend-tree, locomotion, foot-sync]
+
+  - id: animation-compression-artifacts
+    severity: medium
+    title: "Animation Compression Destroying Quality"
+    description: |
+      Aggressive animation compression causes visible artifacts,
+      especially on extremities and fast movements.
+    symptoms:
+      - "Fingers jitter or pop"
+      - "Weapon wobbles unnaturally"
+      - "Fast swings have visible stepping"
+      - "Facial animation looks robotic"
+    cause: |
+      Default compression settings optimize for size, not quality.
+      Keyframe reduction removes important in-betweens.
+      Quaternion compression loses precision on small bones.
+    solution: |
+      Per-bone compression settings:
+      ```
+      Spine/Major bones: Normal compression (0.5 degrees)
+      Hands/Fingers: Reduced compression (0.1 degrees)
+      Weapons/Props: Minimal compression
+      Facial: Minimal compression
+      Fast actions: Increase keyframe density
+
+      Unity AnimationClip settings:
+      - Rotation Error: 0.5 (default) → 0.1 for fingers
+      - Position Error: Increase precision for IK targets
+
+      Unreal:
+      - Per-track compression settings
+      - "Bitwise Compress Only" for important bones
+      ```
+    tags: [compression, quality, mobile]
+
+  - id: state-machine-any-state-trap
+    severity: high
+    title: "Any State Transition Trap"
+    description: |
+      "Any State" transitions that trigger unexpectedly, creating
+      animation loops or preventing normal state flow.
+    symptoms:
+      - "Character stuck in animation loop"
+      - "Can't exit a state despite meeting conditions"
+      - "State machine behaves differently than expected"
+      - "Same animation plays repeatedly"
+    cause: |
+      Any State checks EVERY frame, ignoring current state.
+      If condition is met, it transitions even from the target state.
+      Creates: A → B → A → B infinite loop.
+    solution: |
+      1. **Guard conditions**: Check current state in transition
+      2. **Can Transition To Self = false**: Prevent self-transitions
+      3. **Exit time requirements**: Add minimum time in state
+      4. **Use specific transitions**: Avoid Any State when possible
+
+      ```csharp
+      // In animator controller:
+      // Any State → HitReact
+      // Conditions: TookDamage = true
+      // Settings: Can Transition To Self = FALSE
+
+      // Reset trigger after transition
+      void OnStateEnter(Animator animator, AnimatorStateInfo stateInfo, int layerIndex)
+      {
+          if (stateInfo.IsName("HitReact"))
+          {
+              animator.ResetTrigger("TookDamage");
+          }
+      }
+      ```
+    tags: [state-machine, any-state, transitions]
+
+  - id: ik-performance-cost
+    severity: high
+    title: "IK Solver Performance Explosion"
+    description: |
+      IK solvers are expensive and scale poorly with bone chains
+      and iteration counts.
+    symptoms:
+      - "Frame rate drops with many characters"
+      - "Animation update dominates profiler"
+      - "IK quality varies with frame rate"
+      - "Characters freeze momentarily"
+    cause: |
+      Each IK chain requires multiple iterations per frame.
+      Full-body IK can be 10x more expensive than FK.
+      IK runs on main thread, blocking gameplay.
+    solution: |
+      ```
+      IK Budget Guidelines (per character):
+      - Foot IK: 2 chains, 3 iterations each (~0.1ms)
+      - Hand IK: 2 chains, 3 iterations (~0.1ms)
+      - Look At: 1 chain, single pass (~0.02ms)
+      - Full Body: AVOID or LOD aggressively (~1-2ms)
+
+      LOD Strategy:
+      - Distance 0-10m: Full IK
+      - Distance 10-25m: Foot IK only
+      - Distance 25m+: No IK, baked animation
+
+      Optimization:
+      1. Reduce iteration count (3 is usually enough)
+      2. Skip IK when not visible
+      3. Update IK at reduced frequency (every 2-3 frames)
+      4. Use analytical IK for 2-bone chains
+      ```
+    tags: [performance, ik, optimization]
+
+  - id: additive-reference-pose-mismatch
+    severity: critical
+    title: "Additive Animation Reference Pose Mismatch"
+    description: |
+      Additive animations created with wrong reference pose cause
+      extreme deformation or bone explosion.
+    symptoms:
+      - "Character explodes when additive plays"
+      - "Bones rotate to impossible angles"
+      - "Additive looks completely different on different bases"
+      - "Subtle additive becomes extreme"
+    cause: |
+      Additive = TargetPose - ReferencePose
+      If ReferencePose doesn't match base animation pose,
+      the delta is wrong and compounds.
+    solution: |
+      1. **Use consistent reference pose**: Usually T-pose or first frame
+      2. **Create additive from same base**:
+         ```
+         Walking + Tired Additive = Walking Tired
+         Reference for Tired Additive = Walking (first frame)
+         ```
+      3. **Test on multiple bases**: Verify additive works on all intended bases
+      4. **Clamp extreme values**: Limit bone rotations
+
+      Unity:
+      - Set "Additive Reference Pose" in animation import
+      - Use same rig reference pose for all additives
+
+      Unreal:
+      - "Apply Mesh Space Additive" vs "Local Space"
+      - Define reference pose in skeleton
+    tags: [additive, reference-pose, critical]
+
+  - id: animation-event-timing-frame-rate
+    severity: medium
+    title: "Animation Events Miss at Low Frame Rates"
+    description: |
+      Animation events can be skipped when frame rate drops,
+      causing gameplay desync.
+    symptoms:
+      - "Footstep sounds don't play at low FPS"
+      - "Damage frame never triggers"
+      - "VFX spawns at wrong time"
+      - "Events work in editor, fail in build"
+    cause: |
+      Events fire when animation time crosses event time.
+      Large delta times can skip over events entirely.
+      Single-frame events are most vulnerable.
+    solution: |
+      ```csharp
+      // Option 1: Use event ranges instead of points
+      // Event at frame 10-12 instead of exactly frame 10
+
+      // Option 2: Check event window in code
+      public class SafeAnimationEvents : StateMachineBehaviour
+      {
+          public float damageWindowStart = 0.3f;
+          public float damageWindowEnd = 0.5f;
+          private bool damageDealt = false;
+
+          public override void OnStateUpdate(Animator animator,
+              AnimatorStateInfo stateInfo, int layerIndex)
+          {
+              float normalizedTime = stateInfo.normalizedTime % 1f;
+
+              if (!damageDealt &&
+                  normalizedTime >= damageWindowStart &&
+                  normalizedTime <= damageWindowEnd)
+              {
+                  // Deal damage
+                  damageDealt = true;
+              }
+          }
+
+          public override void OnStateExit(Animator animator,
+              AnimatorStateInfo stateInfo, int layerIndex)
+          {
+              damageDealt = false;
+          }
+      }
+      ```
+    tags: [events, frame-rate, reliability]
+
+  - id: humanoid-retarget-scale-issues
+    severity: medium
+    title: "Humanoid Retargeting Scale Problems"
+    description: |
+      Retargeted animations look wrong due to different character
+      proportions and scale.
+    symptoms:
+      - "Hands don't reach targets"
+      - "Feet float or clip through ground"
+      - "Animations look stretched or compressed"
+      - "IK targets are in wrong positions"
+    cause: |
+      Humanoid retargeting normalizes animations but can't account
+      for all proportion differences. Arm length ratios, leg length,
+      spine curvature all affect results.
+    solution: |
+      1. **Match proportions**: Design characters with similar ratios
+      2. **Use IK for contacts**: Hands reaching objects, feet on ground
+      3. **Per-character adjustments**: Scale offsets for specific bones
+      4. **Motion warping**: Adjust root motion for character scale
+
+      ```
+      Character A (source): Arm reach 1.0m
+      Character B (target): Arm reach 0.8m
+
+      Without correction: B's hands don't reach objects
+      With IK correction: IK pulls hands to target positions
+
+      Per-bone scale adjustment:
+      - Import animation with "Preserve Hierarchy"
+      - Apply bone-level scale multipliers
+      ```
+    tags: [retargeting, humanoid, scale]
+
+  - id: layer-weight-interpolation
+    severity: medium
+    title: "Animation Layer Weight Popping"
+    description: |
+      Instantly changing layer weights causes visible pops
+      and unnatural transitions.
+    symptoms:
+      - "Upper body snaps when aiming"
+      - "Visible pop when enabling layer"
+      - "Blending looks unnatural"
+    cause: |
+      Setting layer weight from 0 to 1 instantly blends
+      current pose with layer pose in one frame.
+    solution: |
+      ```csharp
+      public class LayerWeightController : MonoBehaviour
+      {
+          private Animator animator;
+          private float targetWeight;
+          private float currentWeight;
+          private int layerIndex = 1;
+
+          [SerializeField] private float blendSpeed = 5f;
+
+          void Update()
+          {
+              // Smoothly interpolate layer weight
+              currentWeight = Mathf.MoveTowards(currentWeight, targetWeight,
+                  blendSpeed * Time.deltaTime);
+              animator.SetLayerWeight(layerIndex, currentWeight);
+          }
+
+          public void EnableLayer()
+          {
+              targetWeight = 1f;
+          }
+
+          public void DisableLayer()
+          {
+              targetWeight = 0f;
+          }
+      }
+      ```
+    tags: [layers, blending, transitions]
+
+  - id: motion-matching-memory
+    severity: high
+    title: "Motion Matching Memory Explosion"
+    description: |
+      Motion matching pose databases can consume massive memory,
+      especially with large motion capture libraries.
+    symptoms:
+      - "Memory usage spikes on animation load"
+      - "Long load times"
+      - "Out of memory on consoles"
+      - "Can't fit all characters in memory"
+    cause: |
+      Each frame of motion capture becomes a searchable pose.
+      30 minutes of mocap at 30fps = 54,000 poses
+      Each pose stores bone transforms + velocities + trajectory
+    solution: |
+      ```
+      Memory Optimization:
+      1. Reduce pose database resolution (15fps vs 30fps)
+      2. Compress pose data (quantize, delta encoding)
+      3. Cluster similar poses, store representatives
+      4. Stream pose data (load chunks as needed)
+      5. Share databases between similar characters
+
+      Typical budgets:
+      - Main character: 50-100MB pose database
+      - NPCs: 10-20MB shared database
+      - Crowds: 2-5MB minimal database
+
+      Compression techniques:
+      - Store deltas from previous pose
+      - Quantize floats to 16-bit
+      - PCA dimensionality reduction on features
+      ```
+    tags: [motion-matching, memory, optimization]
+
+symptom_index:
+  "character teleports":
+    - root-motion-network-desync
+  "feet clip through ground":
+    - blend-tree-foot-sync
+    - humanoid-retarget-scale-issues
+  "fingers jitter":
+    - animation-compression-artifacts
+  "stuck in animation loop":
+    - state-machine-any-state-trap
+  "frame rate drops":
+    - ik-performance-cost
+  "bones explode":
+    - additive-reference-pose-mismatch
+  "events don't fire":
+    - animation-event-timing-frame-rate
+  "animation looks stretched":
+    - humanoid-retarget-scale-issues
+  "snap when aiming":
+    - layer-weight-interpolation
+  "out of memory":
+    - motion-matching-memory
+  "character slides":
+    - root-motion-network-desync
+    - blend-tree-foot-sync
+  "character rubber-bands":
+    - root-motion-network-desync
+  "weapon wobbles":
+    - animation-compression-artifacts
+  "can't exit state":
+    - state-machine-any-state-trap
+
+red_flags:
+  code_patterns:
+    - pattern: "animator.SetLayerWeight\\(.*,\\s*[01]\\)"
+      message: "Instant layer weight changes cause pops - use interpolation"
+      severity: medium
+
+    - pattern: "OnAnimatorIK.*for.*loop"
+      message: "IK in loops is very expensive - consider LOD or caching"
+      severity: high
+
+    - pattern: "Any State.*transition"
+      message: "Any State transitions need 'Can Transition To Self = false'"
+      severity: medium
+
+    - pattern: "animator.speed\\s*=\\s*0"
+      message: "Pausing animator stops events and IK - use time scale or pause state"
+      severity: medium
+
+  architecture_smells:
+    - smell: "State machine with 30+ states at one level"
+      message: "Consider hierarchical state machine or blend trees"
+
+    - smell: "IK on every character regardless of distance"
+      message: "Implement IK LOD system based on camera distance"
+
+    - smell: "Root motion on all locomotion in networked game"
+      message: "Consider code-driven movement with animation-only visuals"
+
+    - smell: "Multiple additive layers stacking"
+      message: "Limit to 2-3 additive layers, check reference poses match"
+
+  performance_thresholds:
+    - metric: "Animation update time"
+      warning: "2ms per character"
+      critical: "5ms per character"
+
+    - metric: "IK iterations"
+      warning: "5 iterations per chain"
+      critical: "10 iterations per chain"
+
+    - metric: "Active bone count"
+      warning: "100 bones per character"
+      critical: "200 bones per character"
+
+    - metric: "Simultaneous blend tree samples"
+      warning: "8 samples"
+      critical: "16 samples"
+
+engine_specific:
+  unity:
+    - issue: "Animator.Update in FixedUpdate"
+      problem: "Animator should run in Update, not FixedUpdate"
+      solution: "Set Animator.updateMode to Normal or UnscaledTime"
+
+    - issue: "ApplyRootMotion with CharacterController"
+      problem: "Root motion can fight physics controller"
+      solution: "Use OnAnimatorMove to manually apply root motion"
+
+    - issue: "Generic vs Humanoid rig"
+      problem: "Generic rigs don't support retargeting or IK"
+      solution: "Use Humanoid for characters, Generic for props/creatures"
+
+  unreal:
+    - issue: "Blueprint animation graph complexity"
+      problem: "Complex Anim Blueprints are hard to debug"
+      solution: "Use Linked Anim Graphs to modularize"
+
+    - issue: "Root motion authority in multiplayer"
+      problem: "Client root motion desyncs from server"
+      solution: "Use movement component replication, not root motion"
+
+    - issue: "Control Rig in every tick"
+      problem: "Control Rig is expensive per-frame"
+      solution: "Use LOD to disable Control Rig at distance"
+
+  godot:
+    - issue: "AnimationTree state machine vs blend tree confusion"
+      problem: "Using wrong node type for the job"
+      solution: "StateMachine for discrete states, BlendSpace for continuous"
+
+    - issue: "Root motion scale"
+      problem: "Root motion doesn't account for character scale"
+      solution: "Manually scale delta in _process"

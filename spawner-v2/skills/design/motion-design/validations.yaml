@@ -1,0 +1,272 @@
+# Motion Design Validations
+# Automated checks to catch animation anti-patterns and accessibility issues
+
+validations:
+  - id: missing-reduced-motion
+    name: Missing prefers-reduced-motion Support
+    severity: error
+    type: regex
+    pattern: '@keyframes\s+\w+|animation:\s*\w+|animation-name:\s*\w+'
+    negative_pattern: 'prefers-reduced-motion'
+    message: "Animation defined without prefers-reduced-motion support in the file."
+    fix_action: "Add @media (prefers-reduced-motion: reduce) { ... } query to disable or reduce animations"
+    applies_to:
+      - "*.css"
+      - "*.scss"
+      - "*.less"
+    test_cases:
+      should_match:
+        - "@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }"
+        - "animation: slideIn 300ms ease-out"
+        - "animation-name: bounce"
+      should_not_match:
+        - "@media (prefers-reduced-motion: reduce) { animation: none; }"
+
+  - id: layout-property-transition
+    name: Layout-Triggering Animation
+    severity: error
+    type: regex
+    pattern: 'transition:\s*[^;]*(width|height|left|right|top|bottom|margin|padding)[^;]*\d+m?s'
+    message: "Animating layout properties causes jank. Use transform instead."
+    fix_action: "Replace width/height with scale, left/top/right/bottom with translate"
+    applies_to:
+      - "*.css"
+      - "*.scss"
+      - "*.tsx"
+      - "*.jsx"
+    test_cases:
+      should_match:
+        - "transition: width 300ms ease"
+        - "transition: height 200ms, opacity 200ms"
+        - "transition: left 150ms linear"
+        - "transition: margin-top 300ms"
+      should_not_match:
+        - "transition: transform 300ms ease"
+        - "transition: opacity 200ms"
+        - "width: 100px"
+
+  - id: linear-easing-transform
+    name: Linear Easing on Transform
+    severity: warning
+    type: regex
+    pattern: 'transition:\s*[^;]*(transform|translate|scale|rotate)[^;]*linear'
+    message: "Linear easing on movement looks robotic. Use ease-out for entrances, ease-in for exits."
+    fix_action: "Replace linear with ease-out (entrances) or ease-in (exits) or custom cubic-bezier"
+    applies_to:
+      - "*.css"
+      - "*.scss"
+    test_cases:
+      should_match:
+        - "transition: transform 300ms linear"
+        - "transition: translateX 200ms linear"
+        - "transition: scale 150ms linear"
+      should_not_match:
+        - "transition: opacity 200ms linear"
+        - "transition: transform 300ms ease-out"
+        - "transition: transform 300ms cubic-bezier(0.4, 0, 0.2, 1)"
+
+  - id: excessive-animation-duration
+    name: Animation Duration Too Long
+    severity: warning
+    type: regex
+    pattern: '(animation-duration|transition-duration|transition:\s*\w+):\s*([1-9][0-9]{3,}ms|[1-9](\.\d+)?s(?!\s*infinite))'
+    message: "Animation over 1 second feels sluggish for functional UI. Keep under 500ms."
+    fix_action: "Reduce duration to 200-500ms for functional UI transitions"
+    applies_to:
+      - "*.css"
+      - "*.scss"
+    test_cases:
+      should_match:
+        - "animation-duration: 1500ms"
+        - "transition-duration: 2s"
+        - "transition: opacity 1200ms"
+      should_not_match:
+        - "animation-duration: 300ms"
+        - "transition-duration: 0.3s"
+        - "animation: spin 2s linear infinite"
+
+  - id: permanent-will-change
+    name: Permanent will-change Property
+    severity: warning
+    type: regex
+    pattern: '^\s*will-change:\s*(transform|opacity|all|auto)'
+    negative_pattern: ':hover|:focus|:active'
+    message: "will-change applied permanently wastes GPU memory. Apply only during animation."
+    fix_action: "Move will-change to :hover state or apply dynamically via JavaScript"
+    applies_to:
+      - "*.css"
+      - "*.scss"
+    test_cases:
+      should_match:
+        - ".card { will-change: transform; }"
+        - "will-change: opacity"
+      should_not_match:
+        - ".card:hover { will-change: transform; }"
+        - ".card:focus { will-change: transform; }"
+
+  - id: missing-animation-cleanup-react
+    name: Missing Animation Cleanup in React
+    severity: error
+    type: regex
+    pattern: 'requestAnimationFrame\s*\('
+    negative_pattern: 'cancelAnimationFrame'
+    message: "requestAnimationFrame without cancelAnimationFrame causes memory leaks."
+    fix_action: "Store RAF ID and call cancelAnimationFrame in useEffect cleanup"
+    applies_to:
+      - "*.tsx"
+      - "*.jsx"
+      - "*.ts"
+      - "*.js"
+    test_cases:
+      should_match:
+        - "requestAnimationFrame(animate)"
+        - "requestAnimationFrame(() => {})"
+      should_not_match:
+        - "const id = requestAnimationFrame(animate); cancelAnimationFrame(id)"
+
+  - id: infinite-animation-no-pause
+    name: Infinite Animation Without Visibility Control
+    severity: warning
+    type: regex
+    pattern: 'animation:\s*[^;]+infinite'
+    negative_pattern: 'animation-play-state|IntersectionObserver|visibilitychange'
+    message: "Infinite animation runs even when not visible, wasting battery."
+    fix_action: "Add animation-play-state control or pause with Intersection Observer"
+    applies_to:
+      - "*.css"
+      - "*.scss"
+    test_cases:
+      should_match:
+        - "animation: spin 1s linear infinite"
+        - "animation: pulse 2s ease-in-out infinite"
+      should_not_match:
+        - ".spinner { animation-play-state: paused; }"
+
+  - id: no-easing-function
+    name: Transition Without Easing Function
+    severity: info
+    type: regex
+    pattern: 'transition:\s*(\w+(-\w+)?)\s+\d+m?s\s*;'
+    message: "Transition missing easing function. Defaults to ease which may not be intended."
+    fix_action: "Explicitly specify easing: ease-out for entrances, ease-in for exits"
+    applies_to:
+      - "*.css"
+      - "*.scss"
+    test_cases:
+      should_match:
+        - "transition: opacity 200ms;"
+        - "transition: transform 300ms;"
+      should_not_match:
+        - "transition: opacity 200ms ease-out;"
+        - "transition: transform 300ms cubic-bezier(0.4, 0, 0.2, 1);"
+
+  - id: gsap-no-kill
+    name: GSAP Timeline Without Kill
+    severity: warning
+    type: regex
+    pattern: 'gsap\.(timeline|to|from|fromTo)\s*\('
+    negative_pattern: '\.kill\(|\.clear\(|gsap\.killTweensOf'
+    message: "GSAP animations should be killed on component unmount to prevent memory leaks."
+    fix_action: "Call timeline.kill() or gsap.killTweensOf(element) in cleanup"
+    applies_to:
+      - "*.tsx"
+      - "*.jsx"
+      - "*.ts"
+      - "*.js"
+    test_cases:
+      should_match:
+        - "gsap.to(element, { x: 100 })"
+        - "const tl = gsap.timeline()"
+      should_not_match:
+        - "tl.kill()"
+        - "gsap.killTweensOf(element)"
+
+  - id: framer-motion-no-exit
+    name: Framer Motion Without Exit Animation
+    severity: info
+    type: regex
+    pattern: '<motion\.\w+[^>]*animate=[^>]*>'
+    negative_pattern: 'exit=|AnimatePresence'
+    message: "Motion component may disappear abruptly without exit animation."
+    fix_action: "Add exit prop and wrap in AnimatePresence for smooth exit"
+    applies_to:
+      - "*.tsx"
+      - "*.jsx"
+    test_cases:
+      should_match:
+        - '<motion.div animate={{ opacity: 1 }}>'
+        - "<motion.span animate={controls}>"
+      should_not_match:
+        - '<motion.div animate={{ opacity: 1 }} exit={{ opacity: 0 }}>'
+        - "<AnimatePresence><motion.div /></AnimatePresence>"
+
+  - id: scale-missing-transform-origin
+    name: Scale Animation Missing transform-origin
+    severity: info
+    type: regex
+    pattern: '(scale\s*\(|transform:\s*[^;]*scale)'
+    negative_pattern: 'transform-origin'
+    message: "Scale animation defaults to center. Verify this is the intended origin point."
+    fix_action: "Add transform-origin if scaling should occur from a specific point (e.g., top-left for dropdowns)"
+    applies_to:
+      - "*.css"
+      - "*.scss"
+    test_cases:
+      should_match:
+        - "transform: scale(1.1)"
+        - "scale(0)"
+      should_not_match:
+        - "transform: scale(1.1); transform-origin: top left;"
+
+  - id: transition-all-performance
+    name: Transition All Properties
+    severity: warning
+    type: regex
+    pattern: 'transition:\s*all\s+\d+m?s'
+    message: "transition: all animates every property change, causing performance issues."
+    fix_action: "Specify exact properties: transition: transform 200ms, opacity 200ms"
+    applies_to:
+      - "*.css"
+      - "*.scss"
+    test_cases:
+      should_match:
+        - "transition: all 300ms ease"
+        - "transition: all 0.3s"
+      should_not_match:
+        - "transition: transform 300ms, opacity 300ms"
+        - "transition: color 200ms ease"
+
+  - id: hover-only-animation-trigger
+    name: Animation Only on Hover (Mobile Issue)
+    severity: info
+    type: regex
+    pattern: ':hover\s*\{[^}]*animation:'
+    message: "Animation triggered only on hover won't work on touch devices."
+    fix_action: "Consider adding touch/click trigger or providing non-hover alternative"
+    applies_to:
+      - "*.css"
+      - "*.scss"
+    test_cases:
+      should_match:
+        - ".card:hover { animation: pulse 1s; }"
+      should_not_match:
+        - ".card { animation: pulse 1s; }"
+        - ".card:active { animation: pulse 1s; }"
+
+  - id: negative-animation-delay
+    name: Negative Animation Delay Overuse
+    severity: info
+    type: regex
+    pattern: 'animation-delay:\s*-\d+m?s'
+    message: "Negative animation delay can cause jarring starts. Ensure this is intentional."
+    fix_action: "Verify negative delay creates the desired 'mid-animation start' effect"
+    applies_to:
+      - "*.css"
+      - "*.scss"
+    test_cases:
+      should_match:
+        - "animation-delay: -200ms"
+        - "animation-delay: -0.5s"
+      should_not_match:
+        - "animation-delay: 200ms"
+        - "animation-delay: 0s"

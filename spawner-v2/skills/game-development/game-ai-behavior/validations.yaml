@@ -1,0 +1,438 @@
+# Validations - Game AI & NPC Behavior
+# Code quality checks and pattern detection
+
+skill_id: game-ai-behavior
+version: "1.0.0"
+
+validations:
+  # ===================
+  # CRITICAL ISSUES
+  # ===================
+
+  synchronous_pathfinding:
+    id: "ai-sync-pathfind"
+    severity: critical
+    title: "Synchronous Pathfinding in Update"
+    description: "Blocking pathfinding calls in Update cause frame spikes"
+    languages: ["csharp", "cpp", "gdscript"]
+    patterns:
+      - regex: "void\\s+Update\\s*\\([^)]*\\)[^}]*FindPath\\s*\\("
+        message: "Pathfinding in Update() blocks main thread"
+      - regex: "void\\s+Update\\s*\\([^)]*\\)[^}]*CalculatePath\\s*\\("
+        message: "Path calculation in Update() blocks main thread"
+      - regex: "_process\\s*\\([^)]*\\)[^}]*find_path\\s*\\("
+        message: "Pathfinding in _process() blocks main thread"
+    fix: |
+      Use async pathfinding or coroutines:
+      ```csharp
+      IEnumerator RequestPath(Vector3 target) {
+          var request = new PathRequest(transform.position, target);
+          pathManager.RequestPath(request);
+          while (!request.IsComplete) yield return null;
+          path = request.Result;
+      }
+      ```
+
+  expensive_find_in_loop:
+    id: "ai-expensive-find"
+    severity: critical
+    title: "Expensive Find Operations in AI Loop"
+    description: "FindGameObjects is O(n) and should not run every frame"
+    languages: ["csharp"]
+    patterns:
+      - regex: "void\\s+Update\\s*\\([^)]*\\)[^}]*FindGameObject"
+        message: "FindGameObject in Update is expensive - cache references"
+      - regex: "void\\s+Update\\s*\\([^)]*\\)[^}]*FindObjectsOfType"
+        message: "FindObjectsOfType in Update is very expensive"
+      - regex: "foreach.*FindGameObjectsWithTag"
+        message: "Finding objects in loop - use cached list"
+    fix: |
+      Cache object references:
+      ```csharp
+      private List<Enemy> cachedEnemies;
+      private float cacheRefreshTime = 1f;
+
+      void Start() {
+          InvokeRepeating(nameof(RefreshCache), 0, cacheRefreshTime);
+      }
+
+      void RefreshCache() {
+          cachedEnemies = FindObjectsOfType<Enemy>().ToList();
+      }
+      ```
+
+  raycast_per_frame_per_target:
+    id: "ai-raycast-spam"
+    severity: critical
+    title: "Multiple Raycasts Per Frame"
+    description: "Raycasting for each target each frame is expensive"
+    languages: ["csharp", "cpp"]
+    patterns:
+      - regex: "foreach.*\\{[^}]*Physics\\.Raycast"
+        message: "Raycast inside foreach loop - consider staggering"
+      - regex: "for\\s*\\([^)]*\\)[^}]*Physics\\.Linecast"
+        message: "Linecast inside for loop - use tiered checks"
+      - regex: "void\\s+Update[^}]*foreach[^}]*Raycast"
+        message: "Multiple raycasts per frame in perception"
+    fix: |
+      Stagger perception and use tiered checks:
+      ```csharp
+      // Check distance first (cheap), then angle, then raycast
+      if (distanceSquared > maxRangeSq) return false;
+      if (Vector3.Dot(forward, toTarget) < cosFOV) return false;
+      return !Physics.Linecast(eye, target, occlusionMask);
+      ```
+
+  # ===================
+  # HIGH SEVERITY
+  # ===================
+
+  non_deterministic_random:
+    id: "ai-nondeterministic-random"
+    severity: high
+    title: "Non-Deterministic Random in AI"
+    description: "UnityEngine.Random is not seedable and causes multiplayer desync"
+    languages: ["csharp"]
+    patterns:
+      - regex: "Random\\.value"
+        message: "Random.value is not deterministic - use seeded System.Random"
+      - regex: "Random\\.Range\\s*\\("
+        message: "Random.Range is not deterministic for multiplayer"
+      - regex: "UnityEngine\\.Random"
+        message: "UnityEngine.Random not recommended for AI decisions"
+    fix: |
+      Use seeded random for deterministic behavior:
+      ```csharp
+      private System.Random rng;
+
+      public void Initialize(int seed) {
+          rng = new System.Random(seed);
+      }
+
+      public float GetRandomValue() {
+          return (float)rng.NextDouble();
+      }
+      ```
+    context: "Only applies to multiplayer games requiring determinism"
+
+  giant_state_switch:
+    id: "ai-state-explosion"
+    severity: high
+    title: "State Machine Complexity Explosion"
+    description: "Large switch statement indicates FSM needs refactoring"
+    languages: ["csharp", "cpp", "gdscript"]
+    patterns:
+      - regex: "switch\\s*\\([^)]*state[^)]*\\)[^}]*case[^}]*case[^}]*case[^}]*case[^}]*case[^}]*case"
+        message: "6+ state cases - consider hierarchical FSM or behavior tree"
+      - regex: "if.*state.*==.*else if.*state.*==.*else if.*state.*==.*else if.*state"
+        message: "Multiple state checks - refactor to state pattern"
+    fix: |
+      Use hierarchical state machine or behavior tree:
+      ```csharp
+      // Instead of giant switch, use state pattern
+      public abstract class AIState {
+          public abstract void Enter();
+          public abstract void Update();
+          public abstract void Exit();
+      }
+
+      // Or consider behavior tree for complex logic
+      ```
+
+  magic_number_thresholds:
+    id: "ai-magic-numbers"
+    severity: high
+    title: "Hardcoded AI Thresholds"
+    description: "Magic numbers make AI difficult to tune and balance"
+    languages: ["csharp", "cpp", "gdscript"]
+    patterns:
+      - regex: "if\\s*\\([^)]*health\\s*[<>]=?\\s*[0-9]+"
+        message: "Hardcoded health threshold - use configurable value"
+      - regex: "if\\s*\\([^)]*distance\\s*[<>]=?\\s*[0-9]+\\.?[0-9]*"
+        message: "Hardcoded distance threshold - extract to constant"
+      - regex: "awareness\\s*[<>]=?\\s*0\\.[0-9]+"
+        message: "Hardcoded awareness threshold - make data-driven"
+    fix: |
+      Use ScriptableObject or config:
+      ```csharp
+      [CreateAssetMenu]
+      public class AIConfig : ScriptableObject {
+          public float AttackRange = 5f;
+          public float FleeHealthPercent = 0.3f;
+          public float AwarenessThreshold = 0.7f;
+      }
+
+      // Usage
+      if (health < config.FleeHealthPercent * maxHealth) Flee();
+      ```
+
+  unthrottled_perception:
+    id: "ai-unthrottled-perception"
+    severity: high
+    title: "Perception System Without Throttling"
+    description: "Perception running every frame for all AI is expensive"
+    languages: ["csharp"]
+    patterns:
+      - regex: "void\\s+Update\\s*\\([^)]*\\)[^}]*UpdatePerception"
+        message: "Perception in Update - add throttling/staggering"
+      - regex: "void\\s+Update\\s*\\([^)]*\\)[^}]*CheckVisibility"
+        message: "Visibility check every frame - stagger across frames"
+    fix: |
+      Stagger perception updates:
+      ```csharp
+      private float perceptionTimer;
+      private const float PerceptionInterval = 0.15f;
+
+      void Update() {
+          perceptionTimer += Time.deltaTime;
+          if (perceptionTimer >= PerceptionInterval) {
+              UpdatePerception();
+              perceptionTimer = 0;
+          }
+      }
+      ```
+
+  # ===================
+  # MEDIUM SEVERITY
+  # ===================
+
+  allocations_in_update:
+    id: "ai-update-allocations"
+    severity: medium
+    title: "Memory Allocations in AI Update"
+    description: "Allocating in hot loops causes GC spikes"
+    languages: ["csharp"]
+    patterns:
+      - regex: "void\\s+Update[^}]*new\\s+List"
+        message: "List allocation in Update causes GC pressure"
+      - regex: "void\\s+Update[^}]*\\.ToList\\(\\)"
+        message: "ToList() allocates - cache the list"
+      - regex: "void\\s+Update[^}]*new\\s+Dictionary"
+        message: "Dictionary allocation in Update loop"
+      - regex: "void\\s+Update[^}]*\\.ToArray\\(\\)"
+        message: "ToArray() allocates - reuse array"
+    fix: |
+      Cache and reuse collections:
+      ```csharp
+      private List<Enemy> nearbyEnemies = new List<Enemy>();
+
+      void UpdatePerception() {
+          nearbyEnemies.Clear();  // Reuse, don't reallocate
+          foreach (var enemy in cachedEnemyList) {
+              if (IsNearby(enemy)) nearbyEnemies.Add(enemy);
+          }
+      }
+      ```
+
+  missing_null_checks:
+    id: "ai-null-checks"
+    severity: medium
+    title: "Missing Null Checks on AI Targets"
+    description: "Targets can be destroyed mid-behavior, causing errors"
+    languages: ["csharp"]
+    patterns:
+      - regex: "target\\.position"
+        message: "Access target.position without null check"
+      - regex: "currentTarget\\.transform"
+        message: "Access target transform without null check"
+      - regex: "enemy\\.(position|transform|Health)"
+        message: "Direct enemy property access - target may be dead"
+    fix: |
+      Always check target validity:
+      ```csharp
+      void Update() {
+          if (target == null || !target.gameObject.activeInHierarchy) {
+              target = null;
+              TransitionTo<IdleState>();
+              return;
+          }
+          // Safe to use target
+      }
+      ```
+
+  behavior_tree_depth:
+    id: "ai-bt-depth"
+    severity: medium
+    title: "Deep Behavior Tree Nesting"
+    description: "Deeply nested BTs are hard to debug and visualize"
+    languages: ["csharp", "gdscript"]
+    patterns:
+      - regex: "Selector\\s*\\{[^}]*Selector\\s*\\{[^}]*Selector"
+        message: "3+ levels of nested Selectors - consider subtrees"
+      - regex: "Sequence\\s*\\{[^}]*Sequence\\s*\\{[^}]*Sequence\\s*\\{[^}]*Sequence"
+        message: "Deep nested Sequences - flatten or use subtrees"
+    fix: |
+      Extract to subtrees:
+      ```csharp
+      // Instead of deep nesting
+      var combatSubtree = new Subtree("Combat", new Selector(
+          new AttackSequence(),
+          new DefendSequence()
+      ));
+
+      var root = new Selector(
+          combatSubtree,
+          investigateSubtree,
+          patrolSubtree
+      );
+      ```
+
+  goap_missing_procedural_check:
+    id: "ai-goap-procedural"
+    severity: medium
+    title: "GOAP Action Missing Procedural Precondition"
+    description: "Actions need runtime validity checks beyond world state"
+    languages: ["csharp"]
+    patterns:
+      - regex: "class\\s+\\w+Action[^}]*Preconditions[^}]*(?!.*CheckProceduralPrecondition)"
+        message: "GOAP action may need procedural precondition check"
+    fix: |
+      Add procedural precondition:
+      ```csharp
+      public class AttackAction : GOAPAction {
+          public override bool CheckProceduralPrecondition(Agent agent) {
+              // Runtime checks that can't be in static world state
+              return agent.Weapon != null &&
+                     agent.Weapon.HasAmmo &&
+                     !agent.IsStunned;
+          }
+      }
+      ```
+
+  # ===================
+  # LOW SEVERITY (SUGGESTIONS)
+  # ===================
+
+  missing_ai_visualization:
+    id: "ai-no-debug-viz"
+    severity: low
+    title: "AI Without Debug Visualization"
+    description: "Debug visualization is essential for tuning AI"
+    languages: ["csharp"]
+    patterns:
+      - regex: "class\\s+\\w+(AI|Brain|Controller)[^}]+(?!.*OnDrawGizmos)"
+        message: "Consider adding OnDrawGizmos for AI debugging"
+      - regex: "class\\s+\\w+Perception[^}]+(?!.*Debug\\.Draw)"
+        message: "Perception system should have debug visualization"
+    fix: |
+      Add gizmos for debugging:
+      ```csharp
+      void OnDrawGizmosSelected() {
+          // Sight range
+          Gizmos.color = Color.yellow;
+          Gizmos.DrawWireSphere(transform.position, sightRange);
+
+          // FOV
+          Gizmos.color = Color.red;
+          Vector3 leftBound = Quaternion.Euler(0, -fov/2, 0) * transform.forward;
+          Vector3 rightBound = Quaternion.Euler(0, fov/2, 0) * transform.forward;
+          Gizmos.DrawLine(transform.position, transform.position + leftBound * sightRange);
+          Gizmos.DrawLine(transform.position, transform.position + rightBound * sightRange);
+
+          // Current target
+          if (currentTarget != null) {
+              Gizmos.color = Color.green;
+              Gizmos.DrawLine(transform.position, currentTarget.position);
+          }
+      }
+      ```
+
+  steering_without_arrival:
+    id: "ai-no-arrival"
+    severity: low
+    title: "Seek Without Arrival Behavior"
+    description: "Pure seek causes oscillation near target"
+    languages: ["csharp"]
+    patterns:
+      - regex: "Seek\\s*\\([^)]*\\)[^}]*(?!.*Arrive|slowingRadius|arrivalRadius)"
+        message: "Seek behavior should include arrival slowdown"
+    fix: |
+      Add arrival behavior:
+      ```csharp
+      Vector3 Seek(Vector3 target) {
+          Vector3 toTarget = target - transform.position;
+          float distance = toTarget.magnitude;
+
+          // Arrival behavior
+          float speed = (distance < arrivalRadius)
+              ? maxSpeed * (distance / arrivalRadius)
+              : maxSpeed;
+
+          if (distance < deadZone) return -velocity; // Brake
+
+          return toTarget.normalized * speed - velocity;
+      }
+      ```
+
+# Validation groups for different contexts
+validation_groups:
+  performance:
+    - ai-sync-pathfind
+    - ai-expensive-find
+    - ai-raycast-spam
+    - ai-unthrottled-perception
+    - ai-update-allocations
+
+  multiplayer:
+    - ai-nondeterministic-random
+    - ai-sync-pathfind
+
+  architecture:
+    - ai-state-explosion
+    - ai-magic-numbers
+    - ai-bt-depth
+    - ai-goap-procedural
+
+  quality:
+    - ai-null-checks
+    - ai-no-debug-viz
+    - ai-no-arrival
+
+# Auto-fix templates
+auto_fixes:
+  throttle_perception:
+    before: |
+      void Update() {
+          UpdatePerception();
+      }
+    after: |
+      private float perceptionTimer;
+      private const float PerceptionInterval = 0.15f;
+
+      void Update() {
+          perceptionTimer += Time.deltaTime;
+          if (perceptionTimer >= PerceptionInterval) {
+              UpdatePerception();
+              perceptionTimer = 0;
+          }
+      }
+
+  cache_find_result:
+    before: |
+      void Update() {
+          var enemies = FindObjectsOfType<Enemy>();
+          foreach (var enemy in enemies) { ... }
+      }
+    after: |
+      private List<Enemy> cachedEnemies = new List<Enemy>();
+      private float cacheTimer;
+
+      void Update() {
+          cacheTimer += Time.deltaTime;
+          if (cacheTimer >= 1f) {
+              cachedEnemies.Clear();
+              cachedEnemies.AddRange(FindObjectsOfType<Enemy>());
+              cacheTimer = 0;
+          }
+          foreach (var enemy in cachedEnemies) { ... }
+      }
+
+  seeded_random:
+    before: |
+      float value = Random.value;
+    after: |
+      // Initialize once with synced seed
+      private System.Random rng = new System.Random(gameSeed);
+
+      // Usage
+      float value = (float)rng.NextDouble();

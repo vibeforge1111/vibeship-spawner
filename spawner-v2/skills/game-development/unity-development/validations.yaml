@@ -1,0 +1,361 @@
+# Unity Development Validations
+# Automated regex checks to catch common Unity mistakes in C# code
+
+validations:
+  # ==============================================================================
+  # CRITICAL: These patterns indicate serious performance or correctness issues
+  # ==============================================================================
+
+  - id: unity-getcomponent-in-update
+    name: GetComponent in Update Loop
+    severity: error
+    type: regex
+    pattern: 'void\s+(Update|FixedUpdate|LateUpdate)\s*\([^)]*\)[^}]*GetComponent\s*<'
+    message: "GetComponent called in Update loop. Cache the component reference in Awake or Start."
+    fix_action: |
+      Cache in Awake:
+      private ComponentType _cached;
+      void Awake() => _cached = GetComponent<ComponentType>();
+    applies_to:
+      - "*.cs"
+
+  - id: unity-getcomponent-in-update-nongeneric
+    name: GetComponent (non-generic) in Update
+    severity: error
+    type: regex
+    pattern: 'void\s+(Update|FixedUpdate|LateUpdate)\s*\([^)]*\)[^}]*GetComponent\s*\(\s*typeof'
+    message: "GetComponent(typeof()) called in Update. Cache the reference."
+    fix_action: "Cache in Awake using the generic version: GetComponent<T>()"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-find-at-runtime
+    name: Find Methods at Runtime
+    severity: error
+    type: regex
+    pattern: 'void\s+(Update|FixedUpdate|Start|OnEnable)\s*\([^)]*\)[^}]*(GameObject\.Find|FindObjectOfType|FindObjectsOfType|FindGameObjectsWithTag)'
+    message: "Find methods are expensive. Use SerializeField references or event-based architecture."
+    fix_action: |
+      Replace with:
+      [SerializeField] private TargetType _target;
+      Or use a ScriptableObject registry pattern.
+    applies_to:
+      - "*.cs"
+
+  - id: unity-find-any-usage
+    name: Find Methods Usage (Warning)
+    severity: warning
+    type: regex
+    pattern: '(GameObject\.Find\s*\(|FindObjectOfType\s*<|FindObjectsOfType\s*<|FindGameObjectsWithTag\s*\()'
+    message: "Find methods should be avoided. Consider using direct references or registries."
+    fix_action: "Use [SerializeField] references or ScriptableObject registries"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-physics-in-update
+    name: Physics Operations in Update
+    severity: error
+    type: regex
+    pattern: 'void\s+Update\s*\([^)]*\)[^}]*(\.AddForce|\.AddTorque|\.velocity\s*=|\.angularVelocity\s*=|\.MovePosition|\.MoveRotation)'
+    message: "Physics operations should be in FixedUpdate, not Update."
+    fix_action: "Move physics code to FixedUpdate()"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-instantiate-destroy-loop
+    name: Instantiate/Destroy Pattern
+    severity: error
+    type: regex
+    pattern: 'Instantiate\s*\([^)]+\)[^}]{0,500}Destroy\s*\([^)]+\)'
+    message: "Instantiate/Destroy pattern detected. Use object pooling for frequently spawned objects."
+    fix_action: "Implement an object pool - reuse objects instead of creating/destroying"
+    applies_to:
+      - "*.cs"
+
+  # ==============================================================================
+  # HIGH: Performance issues that will cause problems at scale
+  # ==============================================================================
+
+  - id: unity-new-in-update
+    name: Object Allocation in Update
+    severity: warning
+    type: regex
+    pattern: 'void\s+(Update|FixedUpdate|LateUpdate)\s*\([^)]*\)[^}]*new\s+(Vector3|Vector2|Quaternion|List|Dictionary|HashSet|StringBuilder)\s*\('
+    message: "Creating new objects in Update causes GC pressure. Reuse or cache."
+    fix_action: |
+      Cache and reuse:
+      private Vector3 _cachedVector;
+      void Update() { _cachedVector.Set(x, y, z); }
+    applies_to:
+      - "*.cs"
+
+  - id: unity-string-concat-update
+    name: String Concatenation in Update
+    severity: warning
+    type: regex
+    pattern: 'void\s+(Update|FixedUpdate|LateUpdate)\s*\([^)]*\)[^}]*(\+\s*"|\+\s*\w+\.ToString\(\))'
+    message: "String concatenation in Update allocates memory. Use StringBuilder or cache."
+    fix_action: "Use StringBuilder or string interpolation outside hot paths"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-animator-string-update
+    name: Animator String Parameter in Update
+    severity: warning
+    type: regex
+    pattern: 'void\s+Update\s*\([^)]*\)[^}]*_?[aA]nimator\s*\.\s*(SetFloat|SetBool|SetInteger|SetTrigger)\s*\(\s*"'
+    message: "String-based Animator parameter in Update. Cache hash with Animator.StringToHash."
+    fix_action: |
+      Cache the hash:
+      private static readonly int SpeedHash = Animator.StringToHash("Speed");
+      void Update() { animator.SetFloat(SpeedHash, speed); }
+    applies_to:
+      - "*.cs"
+
+  - id: unity-sendmessage
+    name: SendMessage Usage
+    severity: warning
+    type: regex
+    pattern: '\.(SendMessage|BroadcastMessage|SendMessageUpwards)\s*\('
+    message: "SendMessage is slow and error-prone. Use direct calls, interfaces, or events."
+    fix_action: "Use interfaces, UnityEvents, or direct method calls"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-tag-compare-string
+    name: Tag Comparison with String
+    severity: warning
+    type: regex
+    pattern: '\.tag\s*==\s*"'
+    message: "String comparison for tags. Use CompareTag() for better performance."
+    fix_action: 'Replace with: gameObject.CompareTag("TagName")'
+    applies_to:
+      - "*.cs"
+
+  - id: unity-coroutine-no-stop
+    name: StartCoroutine Without Stop
+    severity: warning
+    type: regex
+    pattern: 'StartCoroutine\s*\([^)]+\)(?![^}]*(StopCoroutine|StopAllCoroutines))'
+    message: "Coroutine started without stop logic. May cause memory leaks."
+    fix_action: |
+      Track and stop coroutines:
+      private Coroutine _routine;
+      void OnEnable() { _routine = StartCoroutine(MyRoutine()); }
+      void OnDisable() { if (_routine != null) StopCoroutine(_routine); }
+    applies_to:
+      - "*.cs"
+
+  - id: unity-async-void
+    name: Async Void Method
+    severity: warning
+    type: regex
+    pattern: 'async\s+void\s+\w+\s*\('
+    message: "async void cannot be cancelled or awaited. Use async UniTaskVoid or async Task."
+    fix_action: "Use UniTask: async UniTaskVoid MethodName() with CancellationToken"
+    applies_to:
+      - "*.cs"
+
+  # ==============================================================================
+  # MEDIUM: Code quality issues that may cause subtle bugs
+  # ==============================================================================
+
+  - id: unity-missing-requirecomponent
+    name: GetComponent Without RequireComponent
+    severity: info
+    type: regex
+    pattern: 'GetComponent<(Rigidbody|Rigidbody2D|Collider|Collider2D|Animator|AudioSource)>\s*\(\s*\)(?![^}]*\[RequireComponent)'
+    message: "GetComponent for common component without RequireComponent attribute."
+    fix_action: "Add [RequireComponent(typeof(ComponentType))] to the class"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-destroy-immediate
+    name: DestroyImmediate Usage
+    severity: warning
+    type: regex
+    pattern: 'DestroyImmediate\s*\('
+    message: "DestroyImmediate should only be used in editor scripts. Use Destroy() in runtime."
+    fix_action: "Replace with Destroy() for runtime, keep DestroyImmediate only in Editor scripts"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-camera-main
+    name: Camera.main in Update
+    severity: warning
+    type: regex
+    pattern: 'void\s+Update\s*\([^)]*\)[^}]*Camera\.main'
+    message: "Camera.main does a FindWithTag internally. Cache the reference."
+    fix_action: |
+      Cache in Awake:
+      private Camera _mainCamera;
+      void Awake() => _mainCamera = Camera.main;
+    applies_to:
+      - "*.cs"
+
+  - id: unity-null-check-pattern
+    name: Potentially Incorrect Null Check
+    severity: info
+    type: regex
+    pattern: 'if\s*\(\s*\w+\s*!=\s*null\s*\)[^}]*\.(transform|gameObject|GetComponent)'
+    message: "Unity objects may pass C# null check but still be destroyed. Use Unity's bool operator."
+    fix_action: 'Use: if (obj) { } instead of if (obj != null) { }'
+    applies_to:
+      - "*.cs"
+
+  - id: unity-resources-load-update
+    name: Resources.Load in Update
+    severity: error
+    type: regex
+    pattern: 'void\s+Update\s*\([^)]*\)[^}]*Resources\.Load'
+    message: "Resources.Load in Update is extremely expensive. Load and cache in Awake/Start."
+    fix_action: "Load in Awake/Start and cache the reference"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-addressables-no-release
+    name: Addressables Load Without Release
+    severity: warning
+    type: regex
+    pattern: 'Addressables\.LoadAssetAsync(?![^}]*Addressables\.Release)'
+    message: "Addressables load without apparent release. Remember to release handles."
+    fix_action: |
+      Track and release:
+      private AsyncOperationHandle _handle;
+      void OnDestroy() { if (_handle.IsValid()) Addressables.Release(_handle); }
+    applies_to:
+      - "*.cs"
+
+  - id: unity-getcomponents-update
+    name: GetComponents (plural) in Update
+    severity: error
+    type: regex
+    pattern: 'void\s+(Update|FixedUpdate)\s*\([^)]*\)[^}]*GetComponents\s*[<\(]'
+    message: "GetComponents allocates a new array every call. Use GetComponentsNonAlloc."
+    fix_action: |
+      Use non-allocating version:
+      private ComponentType[] _buffer = new ComponentType[10];
+      void Update() { int count = GetComponents(_buffer); }
+    applies_to:
+      - "*.cs"
+
+  - id: unity-raycast-allocating
+    name: Allocating Raycast in Update
+    severity: warning
+    type: regex
+    pattern: 'void\s+Update\s*\([^)]*\)[^}]*Physics\.RaycastAll\s*\('
+    message: "RaycastAll allocates. Use RaycastNonAlloc with pre-allocated buffer."
+    fix_action: |
+      Use non-allocating version:
+      private RaycastHit[] _hits = new RaycastHit[10];
+      void Update() { int count = Physics.RaycastNonAlloc(ray, _hits); }
+    applies_to:
+      - "*.cs"
+
+  - id: unity-overlap-allocating
+    name: Allocating Overlap in Update
+    severity: warning
+    type: regex
+    pattern: 'void\s+Update\s*\([^)]*\)[^}]*Physics\.(OverlapSphere|OverlapBox|OverlapCapsule)\s*\([^)]*\)'
+    message: "Overlap methods allocate. Use OverlapNonAlloc variants."
+    fix_action: |
+      Use non-allocating version:
+      private Collider[] _colliders = new Collider[10];
+      void Update() { int count = Physics.OverlapSphereNonAlloc(pos, radius, _colliders); }
+    applies_to:
+      - "*.cs"
+
+  # ==============================================================================
+  # INFO: Best practice suggestions
+  # ==============================================================================
+
+  - id: unity-magic-numbers
+    name: Magic Numbers in Game Logic
+    severity: info
+    type: regex
+    pattern: '(speed|velocity|force|damage|health|gravity)\s*[+\-*/]=?\s*\d+\.\d+'
+    message: "Consider using SerializeField or ScriptableObject for game constants."
+    fix_action: |
+      Use configurable values:
+      [SerializeField] private float _speed = 5f;
+      Or use ScriptableObject for shared configuration.
+    applies_to:
+      - "*.cs"
+
+  - id: unity-public-field
+    name: Public Field Without SerializeField
+    severity: info
+    type: regex
+    pattern: 'public\s+(int|float|string|bool|Vector[23]|Transform|GameObject)\s+\w+\s*;'
+    message: "Public fields are serialized by default. Consider [SerializeField] private for encapsulation."
+    fix_action: "Use: [SerializeField] private TypeName _fieldName;"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-hardcoded-layer
+    name: Hardcoded Layer Number
+    severity: info
+    type: regex
+    pattern: 'LayerMask\s*\.\s*GetMask\s*\(\s*\d+|1\s*<<\s*\d+'
+    message: "Hardcoded layer numbers are fragile. Use LayerMask.GetMask with names."
+    fix_action: 'Use: LayerMask.GetMask("LayerName") or [SerializeField] LayerMask'
+    applies_to:
+      - "*.cs"
+
+  - id: unity-awake-getcomponent-null
+    name: GetComponent Without Null Check in Awake
+    severity: info
+    type: regex
+    pattern: 'void\s+Awake\s*\(\s*\)[^}]*=\s*GetComponent\s*<[^>]+>\s*\(\s*\)\s*;(?![^}]*!=\s*null|[^}]*==\s*null)'
+    message: "GetComponent in Awake without null check. Component might not exist."
+    fix_action: |
+      Add null check or use TryGetComponent:
+      if (!TryGetComponent<ComponentType>(out _cached))
+      {
+          Debug.LogError("Missing required component", this);
+      }
+    applies_to:
+      - "*.cs"
+
+  - id: unity-linq-in-update
+    name: LINQ in Update Loop
+    severity: warning
+    type: regex
+    pattern: 'void\s+(Update|FixedUpdate)\s*\([^)]*\)[^}]*\.(Where|Select|OrderBy|FirstOrDefault|ToList|ToArray|Count\(\))'
+    message: "LINQ methods allocate. Use loops or cache results."
+    fix_action: "Replace LINQ with for loops in hot paths"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-debug-log-build
+    name: Debug.Log Without Conditional
+    severity: info
+    type: regex
+    pattern: 'Debug\.(Log|LogWarning|LogError)\s*\([^)]+\)'
+    message: "Debug.Log calls remain in builds. Consider using [Conditional] or removing for release."
+    fix_action: |
+      Wrap with conditional:
+      [Conditional("UNITY_EDITOR")]
+      void Log(string msg) => Debug.Log(msg);
+    applies_to:
+      - "*.cs"
+
+  - id: unity-invoke-string
+    name: String-Based Invoke
+    severity: warning
+    type: regex
+    pattern: '\.(Invoke|InvokeRepeating|CancelInvoke)\s*\(\s*"'
+    message: "String-based Invoke is slow and error-prone. Use coroutines or async."
+    fix_action: "Replace with coroutines or async/await patterns"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-foreach-update
+    name: Foreach on Collection in Update
+    severity: info
+    type: regex
+    pattern: 'void\s+Update\s*\([^)]*\)[^}]*foreach\s*\([^)]*\s+in\s+\w+\)'
+    message: "foreach may allocate enumerator. Consider using for loop in hot paths."
+    fix_action: "Use for loop: for (int i = 0; i < list.Count; i++)"
+    applies_to:
+      - "*.cs"

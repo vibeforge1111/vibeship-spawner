@@ -1,0 +1,552 @@
+# Color Theory Sharp Edges
+# Critical mistakes that make interfaces inaccessible, inconsistent, or visually broken
+
+sharp_edges:
+  - id: color-space-mismatch
+    summary: Colors look different across devices due to color space differences
+    severity: high
+    situation: |
+      Designed colors on MacBook Pro with P3 display, colors look wrong on standard
+      sRGB monitors. Or exported from Figma/design tool with different color profile
+      than browser renders.
+    why: |
+      Display P3 has 25% more colors than sRGB. Colors designed in P3 get clipped
+      when converted to sRGB. Different browsers handle color profiles differently.
+      Most users don't have calibrated displays. That perfect blue you picked might
+      render as muddy purple on a cheap monitor.
+    solution: |
+      1. Design in sRGB for maximum compatibility
+      2. If using P3 for impact, provide sRGB fallback:
+
+      color: #2563EB;                           /* sRGB fallback */
+      color: color(display-p3 0.2 0.39 0.92);   /* P3 enhancement */
+
+      3. Test on multiple devices including:
+         - Cheap external monitors
+         - Windows laptops
+         - Android phones
+         - Older displays
+
+      4. Use relative color syntax for consistent results:
+         color: oklch(from var(--brand) l c h);
+    symptoms:
+      - "Colors look different on my other monitor"
+      - "The blue looks purple on Windows"
+      - "Brand colors don't match print materials"
+      - Export from Figma looks different in browser
+    detection_pattern: 'color\(display-p3(?!.*#[0-9a-fA-F]{6})'
+
+  - id: contrast-ratio-failures
+    summary: Text or UI elements fail WCAG contrast requirements
+    severity: critical
+    situation: |
+      Gray text on white for "softer" appearance, light colored text on colored
+      backgrounds, disabled states that are completely invisible, focus rings
+      that don't meet contrast.
+    why: |
+      WCAG 2.1 requires 4.5:1 for normal text, 3:1 for large text and UI components.
+      This isn't arbitrary - 15% of users have some form of vision impairment.
+      Even users with perfect vision struggle in bright sunlight or with screen glare.
+      Low contrast is the #1 accessibility failure on the web.
+    solution: |
+      Minimum contrast ratios:
+      - Normal text (<18px): 4.5:1 (WCAG AA)
+      - Large text (>=18px bold or 24px): 3:1
+      - UI components and graphics: 3:1
+      - Enhanced (AAA): 7:1 normal, 4.5:1 large
+
+      Common fixes:
+      # BAD: Soft gray
+      color: #9CA3AF; /* on white = 2.9:1 FAILS */
+
+      # GOOD: Readable gray
+      color: #6B7280; /* on white = 5.0:1 PASSES */
+
+      Tools: WebAIM Contrast Checker, Stark, Chrome DevTools
+    symptoms:
+      - Accessibility audit failures
+      - "I can't read this in sunlight"
+      - Users zooming or highlighting text
+      - Complaints about readability
+    detection_pattern: 'text-gray-[345]00|color:\s*#[9-f][9-f][9-f]|color:\s*#[c-f][c-f][c-f][c-f][c-f][c-f]'
+
+  - id: color-blindness-invisible
+    summary: Color choices that disappear for color blind users
+    severity: critical
+    situation: |
+      Red/green for error/success states, heatmaps using red-yellow-green,
+      charts with colors only distinguishable by hue, "click the green button"
+      instructions.
+    why: |
+      8% of men and 0.5% of women have color vision deficiency. The most common
+      (deuteranopia, protanopia) makes red and green look nearly identical.
+      Your beautiful red error state is invisible to 1 in 12 male users.
+    solution: |
+      1. Never use color as the ONLY indicator:
+         BAD: Red border = error
+         GOOD: Red border + X icon + "Invalid email" text
+
+      2. Use colorblind-safe palettes:
+         SAFE: Blue/Orange (distinguishable in all types)
+         SAFE: Blue/Yellow
+         SAFE: Purple/Yellow
+         RISKY: Red/Green
+
+      3. Add patterns or textures:
+         Error: Red + diagonal stripes
+         Success: Green + solid fill
+
+      4. Test with simulation tools:
+         - Sim Daltonism (Mac)
+         - Color Oracle (Windows)
+         - Figma: Stark plugin
+         - Chrome DevTools > Rendering > Emulate vision deficiencies
+    symptoms:
+      - "I can't tell error from success"
+      - Color blind users report issues
+      - "Which line is which on this chart?"
+      - Support tickets about missing indicators
+    detection_pattern: null
+
+  - id: cultural-color-meaning
+    summary: Using colors with different meanings across cultures
+    severity: medium
+    situation: |
+      Using red for positive elements (celebrations, good numbers) for Western
+      audiences, white for weddings in Asian markets, green for safety in
+      countries where it has religious significance.
+    why: |
+      Red means luck in China, danger in West. White means purity in West,
+      death in parts of Asia. Green is religious in Islamic cultures.
+      Purple is mourning in some countries. Your "celebration" UI might
+      feel like a funeral in another market.
+    solution: |
+      Cultural considerations:
+
+      RED:
+      - West: Danger, stop, error, passion
+      - East Asia: Luck, prosperity, celebration
+      - Adjust: Use for positive financial indicators in Asia
+
+      WHITE:
+      - West: Purity, cleanliness, weddings
+      - East Asia: Death, mourning, funerals
+      - Adjust: Avoid all-white backgrounds for somber content
+
+      GREEN:
+      - West: Go, success, nature, money
+      - Islamic: Sacred, religious significance
+      - Adjust: Avoid for secular/commercial contexts in some regions
+
+      YELLOW:
+      - West: Caution, happiness
+      - Some Asian: Imperial, sacred
+      - Adjust: Check context for authority
+
+      Solutions:
+      1. Research target market color associations
+      2. User test with local audiences
+      3. Consider offering regional color themes
+      4. Use more neutral colors for core UI
+    symptoms:
+      - Negative feedback from international users
+      - Low conversion in specific markets
+      - Cultural misunderstanding reports
+      - "This doesn't feel right" feedback
+    detection_pattern: null
+
+  - id: dark-mode-saturation-burn
+    summary: Saturated colors that hurt eyes in dark mode
+    severity: high
+    situation: |
+      Using the same vibrant brand colors in dark mode as light mode,
+      neon accents on dark backgrounds, fully saturated status colors.
+    why: |
+      Human eyes are more sensitive to saturated colors in low light.
+      That pleasant blue in light mode becomes eye-searing neon in dark.
+      Saturated colors on dark backgrounds cause halation (fuzzy glow)
+      and eye strain during extended use.
+    solution: |
+      Desaturate colors for dark mode:
+
+      Light mode:
+      --blue-500: oklch(55% 0.25 240);  /* Full saturation */
+
+      Dark mode:
+      --blue-500: oklch(60% 0.18 240);  /* Reduced chroma, higher lightness */
+
+      Rules:
+      1. Reduce saturation (chroma) by 15-25%
+      2. Increase lightness by 5-10%
+      3. Never use neon/fluorescent colors
+      4. Test in actual dark environment
+
+      Example transformations:
+      Light #2563EB -> Dark #60A5FA (lighter, less saturated)
+      Light #DC2626 -> Dark #F87171 (lighter, less saturated)
+      Light #16A34A -> Dark #4ADE80 (lighter, less saturated)
+    symptoms:
+      - "Dark mode hurts my eyes"
+      - Users switching back to light mode
+      - Colors appear to glow or vibrate
+      - Complaints about "neon" appearance
+    detection_pattern: 'dark:.*(?:bg|text|border)-(?:red|green|blue|yellow|purple|pink)-[5-9]00'
+
+  - id: oklch-browser-support
+    summary: Using OKLCH without fallbacks for older browsers
+    severity: medium
+    situation: |
+      Embracing OKLCH for perceptually uniform colors without providing
+      fallbacks for Safari < 15.4, Chrome < 111, Firefox < 113.
+    why: |
+      OKLCH is the future of color in CSS, but older browsers don't support it.
+      Colors will simply not render, leaving you with browser defaults or
+      transparent elements. As of 2024, ~10% of users may lack support.
+    solution: |
+      Always provide fallbacks:
+
+      /* Fallback first, modern browsers override */
+      .button {
+        background: #2563EB;                /* sRGB fallback */
+        background: oklch(55% 0.25 240);    /* OKLCH for modern */
+      }
+
+      Or use @supports:
+      .button {
+        background: #2563EB;
+      }
+
+      @supports (color: oklch(0% 0 0)) {
+        .button {
+          background: oklch(55% 0.25 240);
+        }
+      }
+
+      Or CSS custom properties with fallbacks:
+      :root {
+        --color-primary: #2563EB;
+      }
+
+      @supports (color: oklch(0% 0 0)) {
+        :root {
+          --color-primary: oklch(55% 0.25 240);
+        }
+      }
+    symptoms:
+      - Colors missing in Safari
+      - "Everything is transparent"
+      - Older browser users see broken UI
+      - QA reports inconsistent colors
+    detection_pattern: 'oklch\([^)]+\)(?!.*#[0-9a-fA-F])'
+
+  - id: gamma-curve-mismatch
+    summary: Colors render differently due to display gamma differences
+    severity: medium
+    situation: |
+      Designing on Mac (gamma 2.2) for Windows users (historically gamma 1.8),
+      or colors that look washed out on some displays and crushed on others.
+    why: |
+      Gamma controls how brightness values map to actual light output.
+      Different gamma = different midtone rendering. A 50% gray might look
+      40% on one display and 60% on another. This affects perceived contrast
+      and color relationships.
+    solution: |
+      1. Design with gamma in mind:
+         - Test on both Mac and Windows
+         - Check midtones specifically (50% gray)
+         - Avoid relying on subtle tonal differences
+
+      2. Use perceptually uniform color spaces:
+         - OKLCH and OKLAB account for perception
+         - Avoid HSL which ignores gamma
+
+      3. Increase contrast for safety:
+         - Don't rely on 4.6:1 (barely passing)
+         - Aim for 6:1+ to handle gamma variance
+
+      4. Test on multiple displays:
+         - Cheap monitors
+         - Mobile devices
+         - Projectors if relevant
+    symptoms:
+      - "Looks washed out on Windows"
+      - "Colors are too dark on my monitor"
+      - Inconsistent appearance across devices
+      - "The contrast was fine on my machine"
+    detection_pattern: null
+
+  - id: transparent-overlay-math
+    summary: Stacking transparent colors produces unexpected results
+    severity: medium
+    situation: |
+      Using rgba() overlays that compound unexpectedly, transparent hover
+      states that darken existing colors wrong, modal backdrops that
+      interact badly with page colors.
+    why: |
+      Color math is not intuitive. rgba(0,0,0,0.5) twice is not rgba(0,0,0,1).
+      Alpha compositing follows specific formulas. Transparent colors on
+      transparent backgrounds produce unexpected intermediate colors.
+    solution: |
+      1. Calculate composite colors:
+         Compositing formula:
+         Result = (Foreground * Alpha) + (Background * (1 - Alpha))
+
+      2. Avoid stacking transparency:
+         BAD: overlay1 (50% black) + overlay2 (50% black)
+         GOOD: Single calculated overlay (75% black)
+
+      3. Use solid colors where possible:
+         Instead of: rgba(0,0,0,0.1) on #FFFFFF
+         Use: #E5E5E5 (pre-calculated)
+
+      4. For hover states, calculate the final color:
+         Base: #3B82F6
+         Hover: #2563EB (calculated darker, not transparent overlay)
+
+      5. Be explicit about backdrop colors:
+         --modal-backdrop: rgba(0, 0, 0, 0.5);
+         /* Document: Use on white/light backgrounds only */
+    symptoms:
+      - Hover states look wrong on colored backgrounds
+      - Modal backdrop too dark or too light
+      - Stacked elements have unexpected colors
+      - "The transparency looks muddy"
+    detection_pattern: 'rgba\([^)]+\)[^;]*rgba\([^)]+\)'
+
+  - id: print-color-mismatch
+    summary: Screen colors don't match printed output
+    severity: medium
+    situation: |
+      Brand colors look different when printed, PDF exports have wrong colors,
+      marketing materials don't match website.
+    why: |
+      RGB is additive (light), CMYK is subtractive (ink). Not all RGB colors
+      are printable - the RGB gamut is larger than CMYK. Bright, saturated
+      screen colors become dull in print. Blue screens notoriously print purple.
+    solution: |
+      1. Define print colors separately:
+         Screen: #2563EB (RGB)
+         Print: C:85 M:50 Y:0 K:0 (CMYK)
+
+      2. Use Pantone for brand consistency:
+         Screen: #2563EB
+         Pantone: 2728 C
+
+      3. Test print early:
+         - Print color samples before finalizing
+         - Review on actual paper stock
+
+      4. For web-to-print (PDFs, etc.):
+         - Embed color profiles
+         - Convert to CMYK in final export
+         - Accept that exact match is impossible
+
+      5. Document both values:
+         Brand Blue:
+         - Hex: #2563EB
+         - RGB: 37, 99, 235
+         - CMYK: 85, 50, 0, 0
+         - Pantone: 2728 C
+    symptoms:
+      - "Print doesn't match screen"
+      - Vibrant colors look dull printed
+      - Blue turns purple in print
+      - Brand inconsistency across media
+    detection_pattern: null
+
+  - id: hsl-perceptual-nonuniformity
+    summary: Using HSL for color manipulation produces visually uneven results
+    severity: medium
+    situation: |
+      Creating color scales by adjusting HSL lightness evenly, assuming
+      equal L values produce equal perceived brightness across hues.
+    why: |
+      HSL is mathematically convenient but perceptually wrong. Yellow at
+      L:50% looks much brighter than blue at L:50%. This is why OKLCH
+      was created - its L (lightness) IS perceptually uniform.
+    solution: |
+      HSL vs OKLCH comparison:
+      hsl(60, 100%, 50%)  = Yellow (very bright)
+      hsl(240, 100%, 50%) = Blue (much darker looking)
+
+      Both have L:50% but vastly different perceived brightness!
+
+      Use OKLCH for scales:
+      oklch(50% 0.25 90)  = Yellow
+      oklch(50% 0.25 240) = Blue
+      These actually look equally bright.
+
+      When to use each:
+      - HSL: Quick color picker, minor adjustments
+      - OKLCH: Color scales, harmonies, accessibility
+      - OKLAB: Color mixing, gradients
+
+      Migration:
+      /* Old HSL scale */
+      --blue-500: hsl(220, 90%, 50%);
+
+      /* New OKLCH scale */
+      --blue-500: oklch(55% 0.23 250);
+    symptoms:
+      - Color scales look uneven
+      - Some colors "pop" more than others
+      - Accessibility passes but feels wrong
+      - Gradients have unexpected bright spots
+    detection_pattern: 'hsl\([^)]+\).*hsl\([^)]+\)'
+
+  - id: semantic-color-drift
+    summary: Same semantic meaning using different colors across the app
+    severity: high
+    situation: |
+      Success is green in forms but blue in toasts, error is red in inputs
+      but orange in alerts, warning severity inconsistent between features.
+    why: |
+      Users learn color meanings. If green = success in one place and
+      something else elsewhere, they lose trust in the color system.
+      Inconsistency increases cognitive load and causes mistakes.
+    solution: |
+      Define semantic colors once, use everywhere:
+
+      :root {
+        /* Semantic colors - single source of truth */
+        --color-success: oklch(55% 0.20 145);
+        --color-success-bg: oklch(95% 0.05 145);
+
+        --color-danger: oklch(55% 0.22 25);
+        --color-danger-bg: oklch(95% 0.05 25);
+
+        --color-warning: oklch(55% 0.18 85);
+        --color-warning-bg: oklch(95% 0.05 85);
+
+        --color-info: oklch(55% 0.20 240);
+        --color-info-bg: oklch(95% 0.05 240);
+      }
+
+      Documentation:
+      - SUCCESS: Completed actions, valid states, positive metrics
+      - DANGER: Errors, destructive actions, failures
+      - WARNING: Cautions, degraded states, approaching limits
+      - INFO: Neutral information, tips, help
+
+      Audit regularly for drift.
+    symptoms:
+      - "Which green is the success green?"
+      - Designers picking different colors
+      - Users confused by inconsistent feedback
+      - Design review catches color mismatches
+    detection_pattern: null
+
+  - id: focus-ring-contrast-failure
+    summary: Focus indicators that don't meet contrast requirements
+    severity: critical
+    situation: |
+      Light blue focus rings on white backgrounds, focus styles that blend
+      with adjacent colors, or removing focus outlines entirely.
+    why: |
+      WCAG 2.2 requires focus indicators to have 3:1 contrast against
+      adjacent colors. Keyboard users MUST be able to see where they are.
+      This is a critical accessibility requirement.
+    solution: |
+      Focus ring requirements:
+      - 3:1 contrast against adjacent colors
+      - 2px minimum thickness
+      - Must not be only color (pattern/shape helps)
+
+      Implementation:
+      /* Accessible focus ring */
+      button:focus-visible {
+        outline: 2px solid #2563EB;      /* Passes on white */
+        outline-offset: 2px;              /* Separates from button */
+      }
+
+      /* High contrast alternative */
+      button:focus-visible {
+        outline: 2px solid #000;
+        outline-offset: 2px;
+        box-shadow: 0 0 0 4px #FFF;      /* White gap */
+      }
+
+      /* Never do this */
+      *:focus { outline: none; }          /* CRIME */
+
+      Test focus on all background colors in your app.
+    symptoms:
+      - Keyboard users can't see focus
+      - Accessibility audit failures
+      - "Where am I?" when tabbing
+      - Focus disappears on certain backgrounds
+    detection_pattern: 'outline:\s*(none|0)|outline-width:\s*0'
+
+# ============================================================================
+# SYMPTOM INDEX
+# Maps common symptoms to their root causes
+# ============================================================================
+symptom_index:
+  "colors look different on other monitors":
+    - color-space-mismatch
+    - gamma-curve-mismatch
+
+  "can't read the text":
+    - contrast-ratio-failures
+    - hsl-perceptual-nonuniformity
+
+  "color blind users report issues":
+    - color-blindness-invisible
+
+  "dark mode hurts my eyes":
+    - dark-mode-saturation-burn
+
+  "colors missing or transparent":
+    - oklch-browser-support
+
+  "hover states look wrong":
+    - transparent-overlay-math
+
+  "print doesn't match screen":
+    - print-color-mismatch
+
+  "colors feel inconsistent":
+    - semantic-color-drift
+    - hsl-perceptual-nonuniformity
+
+  "can't see focus ring":
+    - focus-ring-contrast-failure
+    - contrast-ratio-failures
+
+  "international users complain":
+    - cultural-color-meaning
+
+# ============================================================================
+# RED FLAGS
+# Patterns that should trigger immediate review
+# ============================================================================
+red_flags:
+  - pattern: 'text-gray-[345]00 bg-white'
+    severity: critical
+    message: "Low contrast text - likely fails WCAG 4.5:1 requirement"
+    action: "Use text-gray-600 or darker for body text"
+
+  - pattern: 'outline:\s*none|outline:\s*0[^.]'
+    severity: critical
+    message: "Focus outline removed without replacement"
+    action: "Add focus-visible styles with visible indicator"
+
+  - pattern: 'color:\s*#[c-f]{6}'
+    severity: high
+    message: "Very light color used - check contrast ratio"
+    action: "Verify 4.5:1 contrast against background"
+
+  - pattern: 'bg-red-.*bg-green-|bg-green-.*bg-red-'
+    severity: high
+    message: "Red/green combination - problematic for color blind users"
+    action: "Add icons or text to differentiate, or use blue/orange"
+
+  - pattern: 'dark:bg-\w+-[89]00'
+    severity: medium
+    message: "High saturation color in dark mode"
+    action: "Consider reducing saturation for dark mode comfort"
+
+  - pattern: 'oklch\([^)]+\)(?!.*(?:#[0-9a-fA-F]{6}|rgb))'
+    severity: medium
+    message: "OKLCH without fallback - may not render in older browsers"
+    action: "Add hex or rgb fallback before OKLCH declaration"

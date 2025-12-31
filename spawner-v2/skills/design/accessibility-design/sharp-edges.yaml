@@ -1,0 +1,556 @@
+# Accessibility Design Sharp Edges
+# Critical mistakes that exclude users with disabilities and create legal liability
+
+sharp_edges:
+  - id: aria-misuse
+    summary: Using ARIA incorrectly makes things worse than no ARIA at all
+    severity: critical
+    situation: |
+      Adding aria-label to elements that already have accessible names,
+      using role="button" on clickable divs without keyboard handling,
+      aria-hidden="true" on visible interactive content.
+    why: |
+      ARIA overrides native semantics. Incorrect ARIA creates confusion for screen reader
+      users who hear conflicting information. A button with role="button" that doesn't
+      respond to Enter/Space is worse than a div - users expect it to work.
+      First rule of ARIA: Don't use ARIA if you can use native HTML.
+    solution: |
+      # BEFORE USING ARIA, ask:
+      # 1. Can I use a native HTML element instead? (Usually yes)
+      # 2. Am I implementing ALL expected behaviors?
+      # 3. Have I tested with actual screen readers?
+
+      # BAD: ARIA on element with accessible name
+      <button aria-label="Submit">Submit</button>
+      <!-- Now screen reader says "Submit Submit" -->
+
+      # BAD: role without behavior
+      <div role="button">Click me</div>
+      <!-- No keyboard support, not focusable -->
+
+      # GOOD: Native HTML
+      <button type="submit">Submit</button>
+
+      # GOOD: If ARIA is necessary, implement fully
+      <div role="button" tabindex="0"
+           onkeydown="handleKeyDown(event)"
+           onclick="handleClick()">
+        Click me
+      </div>
+    symptoms:
+      - Screen reader announces elements incorrectly
+      - Keyboard users can't activate "buttons"
+      - Elements announced as clickable but aren't
+      - Double announcements of labels
+    detection_pattern: 'role="button"(?![^>]*tabindex)|aria-hidden="true"[^>]*(?:onclick|href)'
+
+  - id: focus-trap-escape
+    summary: Modal focus traps that don't allow escape
+    severity: critical
+    situation: |
+      Custom modal or dialog implementation that traps focus but has no escape route.
+      Focus cycles within modal but Escape key doesn't close it, no visible close button,
+      or close button isn't keyboard accessible.
+    why: |
+      Keyboard and screen reader users are literally trapped. They cannot close the modal
+      or return to the main page content. This is a complete blocker - not a minor issue.
+      WCAG 2.1.2 requires that content not trap keyboard focus.
+    solution: |
+      # Focus trap implementation requirements:
+      1. Focus moves to modal on open
+      2. Tab cycles through modal elements only
+      3. Shift+Tab cycles backwards
+      4. Escape key closes modal
+      5. Close button is focusable and announced
+      6. Focus returns to trigger element on close
+
+      # Use native dialog element (handles most of this)
+      <dialog id="modal">
+        <button autofocus onclick="modal.close()">Close</button>
+      </dialog>
+
+      # Or implement manually:
+      modal.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeModal();
+        if (e.key === 'Tab') trapFocus(e);
+      });
+
+      function closeModal() {
+        modal.hidden = true;
+        triggerButton.focus(); // Return focus!
+      }
+    symptoms:
+      - Users report being "stuck" in popups
+      - Pressing Escape does nothing
+      - Tab key doesn't move focus as expected
+      - Support tickets about "frozen" interface
+    detection_pattern: 'role="dialog"(?![^>]*(?:aria-modal|onkeydown))'
+
+  - id: dynamic-content-not-announced
+    summary: Dynamic content updates not announced to screen reader users
+    severity: high
+    situation: |
+      Search results update, form validation errors appear, notifications display,
+      counter changes - all without any announcement to screen reader users.
+      They don't know anything changed.
+    why: |
+      Screen readers only read what they're pointed at. Dynamic content that appears
+      elsewhere on screen is invisible unless explicitly announced. Users miss
+      critical information, error feedback, and confirmation of actions.
+    solution: |
+      # Use ARIA live regions for dynamic content
+
+      # For status messages (non-urgent)
+      <div role="status" aria-live="polite">
+        <!-- Updates here are announced at next pause -->
+        3 results found
+      </div>
+
+      # For errors/alerts (urgent)
+      <div role="alert">
+        <!-- Interrupts immediately -->
+        Your session will expire in 5 minutes
+      </div>
+
+      # For loading states
+      <div aria-live="polite" aria-busy="true">
+        Loading...
+      </div>
+
+      Key rules:
+      1. Live region must exist in DOM BEFORE content changes
+      2. Use polite for most cases, assertive only for critical
+      3. Keep messages brief and actionable
+      4. Do not announce every keystroke (debounce search)
+    symptoms:
+      - Screen reader users miss notifications
+      - Form errors not communicated
+      - Users don't know search results updated
+      - Users confused whether anything happened
+    detection_pattern: null
+
+  - id: touch-target-too-small
+    summary: Interactive elements smaller than minimum touch target size
+    severity: high
+    situation: |
+      Icon buttons at 24px, links in dense text, close buttons in corners,
+      checkbox labels that don't expand the clickable area.
+    why: |
+      Small targets cause frustration for everyone and are impossible for users
+      with motor impairments. WCAG 2.5.8 requires 24x24px minimum (AA) and recommends
+      44x44px (AAA). Apple and Google both require 44px minimum.
+    solution: |
+      # Minimum sizes:
+      # WCAG AA: 24x24 CSS pixels
+      # WCAG AAA / Mobile: 44x44 CSS pixels
+
+      # Padding expands touch target
+      <button style="padding: 12px;">
+        <svg width="20" height="20"><!-- icon --></svg>
+      </button>
+      <!-- 20px icon + 24px padding = 44px target -->
+
+      # Pseudo-element expansion (invisible)
+      .icon-button {
+        position: relative;
+      }
+      .icon-button::after {
+        content: '';
+        position: absolute;
+        inset: -12px; /* Expands target invisibly */
+      }
+
+      # Labels expand checkbox targets
+      <label>
+        <input type="checkbox" />
+        <span>Remember me</span>
+      </label>
+      <!-- Entire label is clickable -->
+    symptoms:
+      - High error rate on mobile
+      - Users tapping wrong elements
+      - Frustration with icons/small links
+      - Motor-impaired users cannot interact
+    detection_pattern: 'width:\s*[0-2]?[0-9]px.*height:\s*[0-2]?[0-9]px|p-1\s|padding:\s*[0-4]px'
+
+  - id: heading-structure-chaos
+    summary: Missing, skipped, or illogical heading hierarchy
+    severity: high
+    situation: |
+      Page has no h1, jumps from h1 to h4, uses headings for styling only,
+      or has multiple h1s in main content (aside from header/logo).
+    why: |
+      Screen reader users navigate by headings - it's like a table of contents.
+      Skip levels (h1 to h3) create confusion. Multiple h1s or missing h1 breaks
+      document structure. Headings used for styling (not structure) create false landmarks.
+    solution: |
+      # Proper heading hierarchy
+      <h1>Page Title</h1>           <!-- One per page -->
+        <h2>Section 1</h2>          <!-- Major sections -->
+          <h3>Subsection 1.1</h3>   <!-- Subsections -->
+          <h3>Subsection 1.2</h3>
+        <h2>Section 2</h2>
+          <h3>Subsection 2.1</h3>
+            <h4>Detail 2.1.1</h4>   <!-- Deeper nesting -->
+
+      # Rules:
+      - Exactly one h1 per page (the page title)
+      - Never skip levels (h1 -> h3)
+      - Use for structure, not styling
+      - If you need the style without the semantics, use CSS classes
+
+      # Checking structure:
+      document.querySelectorAll('h1, h2, h3, h4, h5, h6')
+    symptoms:
+      - Screen reader users can't navigate page
+      - Users lost and confused about location
+      - Headings list in screen reader is useless
+      - SEO penalties for poor structure
+    detection_pattern: '<h3[^>]*>(?![^<]*<\/h3>[^<]*<h2)|<h4[^>]*>(?![^<]*<\/h4>[^<]*<h3)'
+
+  - id: low-contrast-text
+    summary: Text that fails WCAG contrast requirements
+    severity: critical
+    situation: |
+      Light gray text on white backgrounds, placeholder text too faint,
+      disabled states that are invisible, colored text on colored backgrounds.
+    why: |
+      Affects 20%+ of users: low vision, color blindness, aging eyes, bright
+      sunlight viewing, poor monitors. WCAG requires 4.5:1 for normal text,
+      3:1 for large text. This is also one of the most common accessibility lawsuit triggers.
+    solution: |
+      # Minimum contrast ratios (WCAG AA):
+      - Normal text (<18px): 4.5:1
+      - Large text (18px+ or 14px bold): 3:1
+      - UI components and graphics: 3:1
+
+      # BAD: Common failures
+      #999999 on #FFFFFF → 2.85:1 (FAILS)
+      #CCCCCC on #F5F5F5 → 1.4:1 (FAILS)
+
+      # GOOD: Passing combinations
+      #595959 on #FFFFFF → 7.0:1 (AAA)
+      #767676 on #FFFFFF → 4.54:1 (AA)
+
+      # Tools:
+      - Chrome DevTools > Rendering > Emulate vision deficiencies
+      - WebAIM Contrast Checker
+      - Stark Figma plugin
+      - Polypane color contrast tool
+    symptoms:
+      - Users complain they cannot read the text
+      - Users zooming constantly
+      - Complaints about specific pages/sections
+      - Accessibility audit failures
+    detection_pattern: 'color:\s*#[cdef][cdef][cdef]|text-gray-[34]00\s|opacity:\s*0\.[0-4]'
+
+  - id: images-without-alt
+    summary: Images missing alt text or using meaningless alt text
+    severity: critical
+    situation: |
+      Images with no alt attribute, alt="image", alt="IMG_1234.jpg",
+      or decorative images with descriptive alt text.
+    why: |
+      Screen readers either skip images without alt (confusing) or read filename
+      (useless). Images are 30%+ of web content - missing alt means missing 30% of
+      your content for blind users. Also SEO penalty and legal liability.
+    solution: |
+      # Decision tree for alt text:
+
+      # 1. Decorative image? (borders, spacers, backgrounds)
+      <img src="decorative.png" alt="" />
+      <!-- Empty alt, announced as nothing -->
+
+      # 2. Contains text?
+      <img src="logo.png" alt="Acme Corporation" />
+      <!-- Include ALL text in image -->
+
+      # 3. Is a link/button?
+      <a href="/search"><img src="search.png" alt="Search" /></a>
+      <!-- Describe function, not appearance -->
+
+      # 4. Informative image?
+      <img src="chart.png" alt="Sales up 40% from Q1 to Q2 2024" />
+      <!-- Describe the information conveyed -->
+
+      # 5. Complex image needing long description?
+      <figure>
+        <img src="infographic.png" alt="2024 market overview infographic" />
+        <figcaption>
+          <a href="/infographic-text">Full text description</a>
+        </figcaption>
+      </figure>
+    symptoms:
+      - Screen readers say "image" with no context
+      - Filenames read aloud
+      - Blind users miss critical information
+      - Accessibility lawsuits
+    detection_pattern: '<img(?![^>]*alt=)|alt=""|alt="image"|alt="img"|alt="photo"'
+
+  - id: form-input-no-label
+    summary: Form inputs without programmatically associated labels
+    severity: critical
+    situation: |
+      Inputs with placeholder only, labels not connected via for/id,
+      visual label present but not associated, aria-label used incorrectly.
+    why: |
+      Screen reader users hear "edit text" with no context of what to enter.
+      Clicking label doesn't focus input. Placeholder disappears when typing,
+      leaving users unsure what field they're in. Most common WCAG failure.
+    solution: |
+      # Method 1: for/id association (preferred)
+      <label for="email">Email address</label>
+      <input type="email" id="email" name="email" />
+
+      # Method 2: Wrapping (works but less flexible)
+      <label>
+        Email address
+        <input type="email" name="email" />
+      </label>
+
+      # Method 3: aria-labelledby (for complex layouts)
+      <span id="email-label">Email address</span>
+      <input type="email" aria-labelledby="email-label" />
+
+      # Method 4: aria-label (when no visible label - avoid if possible)
+      <input type="search" aria-label="Search products" />
+
+      # NEVER rely on placeholder alone:
+      # BAD: <input placeholder="Email" />
+      # Placeholder is a hint, not a label
+    symptoms:
+      - Screen reader says "edit text" with no context
+      - Clicking labels doesn't focus inputs
+      - Users forget what field they're filling
+      - Form abandonment
+    detection_pattern: '<input(?![^>]*(?:aria-label|id="[^"]+"))|<input[^>]*id="([^"]+)"(?![^<]*for="\1")'
+
+  - id: keyboard-inaccessible-content
+    summary: Interactive content that cannot be reached or activated via keyboard
+    severity: critical
+    situation: |
+      Custom dropdowns, sliders, date pickers built with divs that aren't focusable.
+      onClick handlers without keyboard equivalents. Content revealed only on hover.
+      tabindex="-1" on interactive elements that should be focusable.
+    why: |
+      15-20% of users navigate via keyboard: screen reader users, motor impairments,
+      power users, temporary injuries. If it can't be reached and activated by
+      keyboard, it doesn't exist for these users. WCAG 2.1.1 requires full keyboard access.
+    solution: |
+      # Make elements focusable:
+      # Native elements (<button>, <a>, <input>) are already focusable
+
+      # Custom elements need tabindex="0":
+      <div role="button" tabindex="0" onclick="..." onkeydown="...">
+        Custom Button
+      </div>
+
+      # Keyboard activation (for custom controls):
+      element.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          handleClick();
+        }
+      });
+
+      # Test: Can you Tab to it and activate with Enter/Space?
+      # If no, it's inaccessible.
+
+      # Hover content must have keyboard equivalent:
+      .tooltip { display: none; }
+      .trigger:hover .tooltip,
+      .trigger:focus .tooltip { display: block; }
+    symptoms:
+      - Tab key skips elements
+      - Can't activate buttons with keyboard
+      - Dropdown menus inaccessible
+      - Features inaccessible to keyboard users
+    detection_pattern: 'onclick="[^"]*"(?![^>]*(?:onkeydown|tabindex|button|<a))'
+
+  - id: auto-playing-media
+    summary: Audio or video that plays automatically
+    severity: high
+    situation: |
+      Background videos, audio players, auto-playing hero videos,
+      video ads that play without user action.
+    why: |
+      Interferes with screen reader output (audio overlap), startles users,
+      can trigger seizures (flashing), wastes data/battery on mobile,
+      disrupts users in quiet environments. WCAG requires user control.
+    solution: |
+      # BAD
+      <video autoplay>
+      <audio autoplay>
+
+      # ACCEPTABLE (if essential): Muted + controls
+      <video autoplay muted playsinline>
+        <track kind="captions" src="captions.vtt" srclang="en">
+      </video>
+      <button onclick="togglePlay()">Play/Pause</button>
+
+      # BEST: No autoplay
+      <video controls>
+        <track kind="captions" src="captions.vtt" srclang="en">
+      </video>
+
+      # Rules for auto-playing content:
+      - Must be muted (autoplay muted)
+      - Must have visible pause control
+      - Should stop after 5 seconds
+      - Must have reduced motion alternative
+      - Must not auto-restart
+    symptoms:
+      - Screen reader users can't hear announcements
+      - Complaints about noise
+      - Users immediately leaving page
+      - Battery/data complaints on mobile
+    detection_pattern: '<video[^>]*autoplay(?![^>]*muted)|<audio[^>]*autoplay'
+
+  - id: missing-language-attribute
+    summary: Page or content sections missing language declaration
+    severity: medium
+    situation: |
+      HTML element without lang attribute, or content in different language
+      without lang attribute on that element.
+    why: |
+      Screen readers use lang attribute to determine pronunciation. Without it,
+      French text might be read with English pronunciation (incomprehensible).
+      Also affects translation tools and search engines.
+    solution: |
+      # Set page language
+      <html lang="en">
+
+      # Set different language for sections
+      <p>The French word for hello is <span lang="fr">bonjour</span>.</p>
+
+      # Common language codes:
+      - en (English)
+      - es (Spanish)
+      - fr (French)
+      - de (German)
+      - zh (Chinese)
+      - ja (Japanese)
+      - ar (Arabic - also add dir="rtl")
+
+      # Validate with:
+      document.documentElement.lang // Should not be empty
+    symptoms:
+      - Foreign words mispronounced by screen readers
+      - Translation tools confused
+      - SEO issues for multilingual sites
+    detection_pattern: '<html(?![^>]*lang=)'
+
+  - id: timing-without-extension
+    summary: Time limits that cannot be extended or disabled
+    severity: high
+    situation: |
+      Session timeouts, timed forms, auto-advancing carousels,
+      any action that expires or changes without user control.
+    why: |
+      Users with disabilities need more time: screen reader users read slower,
+      users with cognitive disabilities process slower, motor-impaired users
+      type slower. WCAG 2.2.1 requires user control over timing.
+    solution: |
+      # Session timeout: Warn and allow extension
+      function warnBeforeTimeout() {
+        // Show modal 2 minutes before expiry
+        showModal({
+          message: "Session expires in 2 minutes",
+          actions: [
+            { label: "Extend session", action: extendSession },
+            { label: "Log out now", action: logout }
+          ],
+          // Focus the extend button
+          autoFocus: 'extend'
+        });
+      }
+
+      # Carousels: Let user control
+      <div role="region" aria-label="Featured items">
+        <button aria-label="Pause rotation">Pause</button>
+        <button aria-label="Previous slide">Previous</button>
+        <button aria-label="Next slide">Next</button>
+      </div>
+
+      # WCAG timing requirements:
+      - User can turn off time limit, OR
+      - User can extend time (at least 10x), OR
+      - Time limit is 20+ hours
+    symptoms:
+      - Users lose work due to timeouts
+      - Can't complete forms in time
+      - Carousels change before users finish reading
+      - Frustration complaints
+    detection_pattern: 'setTimeout.*logout|setInterval.*next.*slide'
+
+# ============================================================================
+# SYMPTOM INDEX - Quick lookup for common problems
+# ============================================================================
+symptom_index:
+  - symptom: "Screen reader says 'button button' or 'link link'"
+    likely_cause: aria-misuse
+    quick_check: "Check for aria-label duplicating visible text"
+
+  - symptom: "Users can't close modal"
+    likely_cause: focus-trap-escape
+    quick_check: "Test: Does Escape key close it? Is close button focusable?"
+
+  - symptom: "Form errors not announced"
+    likely_cause: dynamic-content-not-announced
+    quick_check: "Check for role='alert' or aria-live on error messages"
+
+  - symptom: "Mobile users tapping wrong things"
+    likely_cause: touch-target-too-small
+    quick_check: "Measure touch targets - minimum 44x44px"
+
+  - symptom: "Screen reader navigation is useless"
+    likely_cause: heading-structure-chaos
+    quick_check: "Check heading hierarchy with browser extension"
+
+  - symptom: "Users can't read text"
+    likely_cause: low-contrast-text
+    quick_check: "Run contrast checker - need 4.5:1 for body text"
+
+  - symptom: "Screen reader says 'image' with no context"
+    likely_cause: images-without-alt
+    quick_check: "Check all img tags for meaningful alt text"
+
+  - symptom: "Screen reader says 'edit text' with no label"
+    likely_cause: form-input-no-label
+    quick_check: "Verify each input has label with matching for/id"
+
+  - symptom: "Can't use feature with keyboard"
+    likely_cause: keyboard-inaccessible-content
+    quick_check: "Tab through page - can you reach and activate everything?"
+
+  - symptom: "Video/audio interrupts screen reader"
+    likely_cause: auto-playing-media
+    quick_check: "Check for autoplay attribute without muted"
+
+# ============================================================================
+# RED FLAGS - Patterns that require immediate attention
+# ============================================================================
+red_flags:
+  - pattern: "outline: none|outline: 0"
+    risk: "Removes focus indicator for keyboard users"
+    action: "Add focus-visible styles as replacement"
+
+  - pattern: '<img(?![^>]*alt)'
+    risk: "Image without alt text - screen readers skip or read filename"
+    action: "Add meaningful alt or alt='' for decorative"
+
+  - pattern: 'tabindex="[1-9]'
+    risk: "Positive tabindex creates unpredictable tab order"
+    action: "Use only tabindex='0' or tabindex='-1'"
+
+  - pattern: 'aria-hidden="true".*onclick'
+    risk: "Hidden from screen readers but clickable - confusing"
+    action: "Remove aria-hidden or make non-interactive"
+
+  - pattern: "autoplay(?!.*muted)"
+    risk: "Auto-playing audio interferes with screen readers"
+    action: "Add muted or remove autoplay"
+
+  - pattern: '<a.*href.*<img(?![^>]*alt)'
+    risk: "Link with image but no text - screen reader says 'link'"
+    action: "Add alt text describing link destination"

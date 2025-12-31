@@ -1,0 +1,538 @@
+# Godot 4 Development - Sharp Edges
+# Gotchas, pitfalls, and hard-won knowledge
+
+id: godot-development
+version: "1.0.0"
+
+sharp_edges:
+  - id: ready-vs-enter-tree
+    title: "_ready vs _enter_tree Timing"
+    severity: high
+    category: lifecycle
+    description: |
+      _enter_tree is called when a node enters the scene tree, BEFORE its
+      children are ready. _ready is called AFTER all children are ready.
+      Using @onready or accessing children in _enter_tree will fail.
+    symptom: |
+      - Null reference errors when accessing child nodes
+      - @onready variables are null
+      - Signals connected in _enter_tree don't fire as expected
+    solution: |
+      ```gdscript
+      # WRONG: Children not ready yet
+      func _enter_tree() -> void:
+          $HealthBar.max_value = max_health  # Error: null
+
+      # CORRECT: Use _ready for child access
+      func _ready() -> void:
+          $HealthBar.max_value = max_health  # Works
+
+      # Use _enter_tree only for:
+      # - Connecting to parent/tree signals
+      # - Setting up before children initialize
+      # - Adding to groups early
+      ```
+    tags:
+      - lifecycle
+      - initialization
+      - null-reference
+
+  - id: signal-memory-leaks
+    title: "Signal Connections Cause Memory Leaks"
+    severity: critical
+    category: memory
+    description: |
+      When object A connects to object B's signal, B holds a reference to A.
+      If A is freed while B still exists, B has a dangling reference.
+      If B is an autoload (never freed), A is never garbage collected.
+    symptom: |
+      - Memory usage grows over time
+      - Errors about "freed object" when signals emit
+      - Game slows down after many scene changes
+    solution: |
+      ```gdscript
+      # Option 1: Disconnect in _exit_tree
+      func _ready() -> void:
+          EventBus.game_event.connect(_on_game_event)
+
+      func _exit_tree() -> void:
+          if EventBus.game_event.is_connected(_on_game_event):
+              EventBus.game_event.disconnect(_on_game_event)
+
+      # Option 2: Use one-shot for single-use signals
+      enemy.died.connect(_on_enemy_died, CONNECT_ONE_SHOT)
+
+      # Option 3: Use Callable with CONNECT_DEFERRED (auto-cleanup)
+      # Godot 4.2+ handles some cases automatically
+
+      # Option 4: Weak references for optional listeners
+      # (advanced - use with caution)
+      ```
+    tags:
+      - memory
+      - signals
+      - leaks
+
+  - id: get-node-in-process
+    title: "Calling get_node() Every Frame"
+    severity: high
+    category: performance
+    description: |
+      get_node(), $, and get_tree().get_nodes_in_group() traverse the scene
+      tree. Calling them every frame in _process or _physics_process wastes
+      CPU cycles. Cache references in _ready.
+    symptom: |
+      - Poor frame rate with many nodes
+      - Profiler shows high "Idle" time in scripts
+      - Game stutters during complex scenes
+    solution: |
+      ```gdscript
+      # WRONG: Tree traversal every frame
+      func _process(delta: float) -> void:
+          var player = $"../Player"
+          var enemies = get_tree().get_nodes_in_group("enemies")
+
+      # CORRECT: Cache in _ready
+      @onready var player: CharacterBody2D = $"../Player"
+      var enemies: Array[Node]
+
+      func _ready() -> void:
+          enemies = get_tree().get_nodes_in_group("enemies")
+          # Update cache when enemies change
+          get_tree().node_added.connect(_on_node_added)
+
+      func _process(delta: float) -> void:
+          # Use cached references
+          player.take_damage(1)
+      ```
+    tags:
+      - performance
+      - caching
+      - optimization
+
+  - id: autoload-state-abuse
+    title: "Storing Game State in Autoloads"
+    severity: medium
+    category: architecture
+    description: |
+      Using autoloads as global state containers creates tight coupling,
+      makes testing difficult, and causes issues with scene reloading.
+      Player health in an autoload persists across game restarts.
+    symptom: |
+      - Restarting game doesn't reset state
+      - Difficult to write unit tests
+      - Changing one autoload breaks many scripts
+      - Circular dependencies between autoloads
+    solution: |
+      ```gdscript
+      # BAD: Global state autoload
+      # Global.gd
+      var player_health = 100
+      var player_coins = 0
+
+      # GOOD: State on actual objects
+      # Player.gd
+      extends CharacterBody2D
+      var health: int = 100
+      var coins: int = 0
+
+      # Use autoloads for:
+      # - EventBus (signals only, no state)
+      # - SaveManager (load/save, transient)
+      # - AudioManager (plays sounds, no game state)
+      # - SceneManager (transitions, no game state)
+      ```
+    tags:
+      - architecture
+      - state-management
+      - testing
+
+  - id: physics-process-vs-process
+    title: "Using _process for Physics"
+    severity: high
+    category: physics
+    description: |
+      _process runs every visual frame (variable rate). _physics_process runs
+      at fixed intervals (default 60 Hz). Physics calculations in _process
+      cause jitter, tunneling, and non-deterministic behavior.
+    symptom: |
+      - Movement speed varies with frame rate
+      - Objects pass through walls at low FPS
+      - Multiplayer desync
+      - Physics behave differently on different machines
+    solution: |
+      ```gdscript
+      # WRONG: Physics in _process
+      func _process(delta: float) -> void:
+          velocity += gravity * delta
+          move_and_slide()
+
+      # CORRECT: Physics in _physics_process
+      func _physics_process(delta: float) -> void:
+          velocity += gravity * delta
+          move_and_slide()
+
+      # _process is for:
+      # - Visual updates (sprite animation)
+      # - UI updates
+      # - Audio triggers
+      # - Non-gameplay timers
+      ```
+    tags:
+      - physics
+      - determinism
+      - framerate
+
+  - id: export-variable-gotchas
+    title: "@export Variable Pitfalls"
+    severity: medium
+    category: gdscript
+    description: |
+      Exported variables have subtle behaviors: default values in code can be
+      overridden by scene values, resources are shared by default, and some
+      types don't export well.
+    symptom: |
+      - Changing default in code doesn't affect existing scenes
+      - All instances share the same resource/array
+      - Exported dictionaries don't save properly
+    solution: |
+      ```gdscript
+      # Issue 1: Default override
+      @export var speed: float = 100.0  # Changed to 200.0 in code
+      # Existing scenes still have 100.0 saved!
+      # Fix: Reset in inspector or delete .tscn and recreate
+
+      # Issue 2: Shared resources
+      @export var inventory: Array = []  # Shared across instances!
+      # Fix: Initialize in _ready
+      var inventory: Array
+      func _ready() -> void:
+          inventory = []
+
+      # Issue 3: Resource sharing
+      @export var stats: Resource  # Same instance if not unique
+      # Fix: Make unique in inspector OR:
+      func _ready() -> void:
+          stats = stats.duplicate()
+
+      # Issue 4: Complex types
+      @export var data: Dictionary  # Limited editor support
+      # Fix: Use custom Resource class instead
+      ```
+    tags:
+      - export
+      - inspector
+      - resources
+
+  - id: gdscript-vs-csharp
+    title: "GDScript vs C# Tradeoffs"
+    severity: medium
+    category: language-choice
+    description: |
+      GDScript is tightly integrated with Godot but slower than C#.
+      C# has better performance and tooling but requires more setup and
+      has some engine integration quirks.
+    considerations:
+      gdscript_pros:
+        - Native integration, hot reload works perfectly
+        - Simpler syntax, faster prototyping
+        - Smaller build sizes
+        - Better documentation and community examples
+        - No external dependencies
+      gdscript_cons:
+        - Slower execution (10-100x vs C#)
+        - Limited static analysis
+        - No shared code with other platforms
+      csharp_pros:
+        - Better performance for heavy computation
+        - Excellent IDE support (VS, Rider)
+        - Share code with server/other projects
+        - Strong typing, better refactoring
+      csharp_cons:
+        - Hot reload issues in Godot 4
+        - Larger export sizes (.NET runtime)
+        - Some API differences from GDScript
+        - Fewer community examples
+    recommendation: |
+      Use GDScript for most game code. Use C# for:
+      - Complex AI calculations
+      - Procedural generation algorithms
+      - Server-shared game logic
+      - Large team projects needing strict typing
+
+  - id: tilemap-performance
+    title: "TileMap Performance Issues"
+    severity: medium
+    category: performance
+    description: |
+      Large TileMaps with many layers or complex tile data can cause
+      performance issues. Runtime tile modification is expensive.
+    symptom: |
+      - Low FPS with large maps
+      - Stuttering when modifying tiles
+      - Long load times for tile-heavy scenes
+    solution: |
+      ```gdscript
+      # 1. Use multiple TileMapLayers instead of one TileMap with layers
+      # (Godot 4.3+ TileMapLayer is faster)
+
+      # 2. Chunk large maps
+      # Only load visible chunks
+
+      # 3. Batch tile operations
+      # BAD: Set tiles one by one
+      for x in 1000:
+          for y in 1000:
+              tilemap.set_cell(0, Vector2i(x, y), source, atlas)
+
+      # BETTER: Use set_cells_terrain_connect for terrain
+      # Or queue changes and apply in batches
+
+      # 4. Disable navigation/physics on decorative layers
+      # In TileSet, only enable collision on necessary layers
+      ```
+    tags:
+      - performance
+      - tilemap
+      - optimization
+
+  - id: scene-tree-order
+    title: "Scene Tree Processing Order"
+    severity: medium
+    category: lifecycle
+    description: |
+      Nodes process in tree order (top to bottom). If node A depends on
+      node B's state and B is below A, A sees stale data.
+    symptom: |
+      - One-frame delays in reactions
+      - Inconsistent behavior depending on scene structure
+      - "Teleporting" objects
+    solution: |
+      ```gdscript
+      # The tree processes top-to-bottom:
+      # Player (processes first)
+      # Enemy (processes second, sees Player's NEW position)
+      # UI (processes last, sees current state)
+
+      # If order matters:
+      # 1. Rearrange nodes in tree
+      # 2. Use process_priority (lower = earlier)
+      func _ready() -> void:
+          process_priority = -1  # Process before default (0)
+
+      # 3. Use signals for guaranteed timing
+      # 4. Use call_deferred for next-frame operations
+      call_deferred("late_update")
+      ```
+    tags:
+      - lifecycle
+      - ordering
+      - timing
+
+  - id: input-handling-mistakes
+    title: "Input Handling Anti-patterns"
+    severity: medium
+    category: input
+    description: |
+      Common mistakes with Godot's input system: not using Input Map,
+      checking input in wrong callbacks, and missing _unhandled_input.
+    symptom: |
+      - Input "eaten" by UI
+      - Actions fire multiple times
+      - Input doesn't work in certain scenes
+    solution: |
+      ```gdscript
+      # 1. Use Input Map (Project Settings > Input Map)
+      # DON'T hardcode keys
+      if Input.is_key_pressed(KEY_SPACE):  # Bad
+      if Input.is_action_pressed("jump"):   # Good
+
+      # 2. Choose correct callback
+      # _input: ALL input, including handled
+      # _unhandled_input: Input not consumed by UI
+      # _physics_process: Poll-based input for movement
+
+      func _unhandled_input(event: InputEvent) -> void:
+          if event.is_action_pressed("interact"):
+              interact()
+              get_viewport().set_input_as_handled()
+
+      func _physics_process(delta: float) -> void:
+          # Movement input (continuous)
+          var direction = Input.get_vector("left", "right", "up", "down")
+
+      # 3. UI blocking input
+      # Control nodes consume input by default
+      # Use mouse_filter = MOUSE_FILTER_IGNORE on overlays
+      ```
+    tags:
+      - input
+      - ui
+      - events
+
+  - id: shader-performance
+    title: "Shader Performance Gotchas"
+    severity: medium
+    category: rendering
+    description: |
+      Shaders can tank performance if not careful. Texture reads in
+      loops, complex math per pixel, and too many uniforms hurt FPS.
+    symptom: |
+      - GPU-bound performance (profiler shows high GPU time)
+      - Frame rate drops with shader effects
+      - Mobile devices struggle with effects
+    solution: |
+      ```glsl
+      // 1. Minimize texture reads
+      // BAD: Sample in loop
+      for (int i = 0; i < 10; i++) {
+          color += texture(tex, uv + offset * float(i));
+      }
+
+      // GOOD: Precompute, use texture LOD
+      color = textureLod(tex, uv, 2.0);  // Lower LOD = faster
+
+      // 2. Avoid branching
+      // BAD: if/else per pixel
+      if (condition) { ... }
+
+      // GOOD: Use mix/step
+      color = mix(color1, color2, step(0.5, value));
+
+      // 3. Reduce overdraw
+      // Use DEPTH_TEST when possible
+      // Sort transparent objects back-to-front
+
+      // 4. Use simpler shaders on mobile
+      // Check: if ANDROID or if IOS
+      ```
+    tags:
+      - shaders
+      - performance
+      - gpu
+
+  - id: resource-preloading
+    title: "Resource Loading Stalls"
+    severity: high
+    category: performance
+    description: |
+      load() and preload() block the main thread. Loading large resources
+      during gameplay causes stuttering. Use background loading.
+    symptom: |
+      - Game freezes when entering new areas
+      - Stuttering when spawning enemies
+      - Long transitions between scenes
+    solution: |
+      ```gdscript
+      # preload() - Loads at script parse time (good for small, always-used)
+      const BulletScene = preload("res://bullet.tscn")
+
+      # load() - Loads when called (blocks!)
+      var resource = load("res://big_texture.png")  # Stalls!
+
+      # Background loading (non-blocking)
+      func load_level_async(path: String) -> void:
+          ResourceLoader.load_threaded_request(path)
+
+      func _process(delta: float) -> void:
+          var status = ResourceLoader.load_threaded_get_status(path)
+          if status == ResourceLoader.THREAD_LOAD_LOADED:
+              var level = ResourceLoader.load_threaded_get(path)
+              get_tree().change_scene_to_packed(level)
+
+      # Preload during loading screen
+      # Use ResourceLoader.load_threaded_request for each asset
+      # Show progress with load_threaded_get_status
+      ```
+    tags:
+      - loading
+      - performance
+      - threading
+
+symptom_index:
+  "null reference":
+    - ready-vs-enter-tree
+    - get-node-in-process
+  "memory leak":
+    - signal-memory-leaks
+  "game slows down":
+    - signal-memory-leaks
+    - get-node-in-process
+    - tilemap-performance
+    - resource-preloading
+  "inconsistent physics":
+    - physics-process-vs-process
+  "frame rate issues":
+    - get-node-in-process
+    - shader-performance
+    - tilemap-performance
+  "state persists":
+    - autoload-state-abuse
+  "values not updating":
+    - export-variable-gotchas
+  "input not working":
+    - input-handling-mistakes
+  "scene takes forever to load":
+    - resource-preloading
+  "one frame delay":
+    - scene-tree-order
+  "stutter":
+    - resource-preloading
+    - tilemap-performance
+
+red_flags:
+  - pattern: "get_node\\(.*\\).*_process"
+    message: "Calling get_node() in _process - cache reference in @onready"
+    edge_id: get-node-in-process
+
+  - pattern: "get_tree\\(\\)\\.get_nodes_in_group.*_process"
+    message: "get_nodes_in_group() in _process - cache the array"
+    edge_id: get-node-in-process
+
+  - pattern: "\\$.*_process"
+    message: "Using $ in _process - cache with @onready"
+    edge_id: get-node-in-process
+
+  - pattern: "func _process.*move_and_slide"
+    message: "Physics in _process - use _physics_process instead"
+    edge_id: physics-process-vs-process
+
+  - pattern: "func _process.*velocity"
+    message: "Modifying velocity in _process - use _physics_process"
+    edge_id: physics-process-vs-process
+
+  - pattern: "@export var.*: Array = \\[\\]"
+    message: "Exported array with default [] is shared - initialize in _ready"
+    edge_id: export-variable-gotchas
+
+  - pattern: "@export var.*: Dictionary = \\{\\}"
+    message: "Exported dictionary with default {} is shared - initialize in _ready"
+    edge_id: export-variable-gotchas
+
+  - pattern: "func _enter_tree.*@onready"
+    message: "_enter_tree runs before @onready - use _ready for child access"
+    edge_id: ready-vs-enter-tree
+
+  - pattern: "connect\\(.*\\)(?!.*disconnect)"
+    message: "Signal connected but never disconnected - check for memory leaks"
+    edge_id: signal-memory-leaks
+
+  - pattern: "load\\(.*\\).*_process"
+    message: "load() in _process blocks main thread - use preload or async loading"
+    edge_id: resource-preloading
+
+  - pattern: "is_key_pressed\\(KEY_"
+    message: "Hardcoded key - use Input Map actions instead"
+    edge_id: input-handling-mistakes
+
+  - pattern: "Input\\.is_.*_pressed\\(\".*\"\\).*_process.*move"
+    message: "Consider using _physics_process for movement input"
+    edge_id: physics-process-vs-process
+
+references:
+  - title: "Godot Best Practices"
+    url: "https://docs.godotengine.org/en/stable/tutorials/best_practices/"
+  - title: "GDScript Style Guide"
+    url: "https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_styleguide.html"
+  - title: "Optimization Docs"
+    url: "https://docs.godotengine.org/en/stable/tutorials/performance/"

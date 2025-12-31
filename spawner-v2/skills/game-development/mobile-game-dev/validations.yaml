@@ -1,0 +1,441 @@
+# Mobile Game Development Validations
+# Automated regex checks to catch common mobile game development mistakes
+
+validations:
+  # ==============================================================================
+  # CRITICAL: These patterns indicate serious mobile-specific issues
+  # ==============================================================================
+
+  - id: mobile-uncapped-framerate
+    name: Uncapped Frame Rate on Mobile
+    severity: error
+    type: regex
+    pattern: 'Application\.targetFrameRate\s*=\s*-1'
+    message: "Uncapped frame rate (-1) on mobile causes battery drain and thermal throttling. Set explicit cap (30/60)."
+    fix_action: |
+      Set appropriate frame rate:
+      Application.targetFrameRate = 60; // or 30 for battery saver
+    applies_to:
+      - "*.cs"
+      - "*.gd"
+
+  - id: mobile-sync-loading-update
+    name: Synchronous Loading in Update
+    severity: error
+    type: regex
+    pattern: 'void\s+(Update|FixedUpdate|LateUpdate)\s*\([^)]*\)[^}]*(Resources\.Load|Addressables\.LoadAsset(?!Async))'
+    message: "Synchronous loading in Update blocks main thread - causes ANR on Android."
+    fix_action: |
+      Use async loading:
+      var handle = Addressables.LoadAssetAsync<GameObject>(key);
+      await handle;
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-thread-sleep-main
+    name: Thread.Sleep on Main Thread
+    severity: error
+    type: regex
+    pattern: 'Thread\.Sleep\s*\(\s*\d+'
+    message: "Thread.Sleep blocks main thread - causes ANR on Android (5s limit)."
+    fix_action: |
+      Use async/await or coroutines:
+      await Task.Delay(milliseconds);
+      // or
+      yield return new WaitForSeconds(seconds);
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-gc-in-update
+    name: GC.Collect in Hot Path
+    severity: error
+    type: regex
+    pattern: 'void\s+(Update|FixedUpdate|LateUpdate)\s*\([^)]*\)[^}]*GC\.Collect'
+    message: "GC.Collect in Update causes frame spikes. Only call during loading screens."
+    fix_action: "Move GC.Collect to loading screens or scene transitions only"
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-www-deprecated
+    name: Deprecated WWW Class
+    severity: error
+    type: regex
+    pattern: 'new\s+WWW\s*\('
+    message: "WWW class is deprecated and blocks main thread. Use UnityWebRequest."
+    fix_action: |
+      Replace with async UnityWebRequest:
+      using (var request = UnityWebRequest.Get(url))
+      {
+          await request.SendWebRequest();
+      }
+    applies_to:
+      - "*.cs"
+
+  # ==============================================================================
+  # HIGH: Performance issues that will cause problems on mobile
+  # ==============================================================================
+
+  - id: mobile-texture-create-update
+    name: Texture Creation in Update
+    severity: error
+    type: regex
+    pattern: 'void\s+Update\s*\([^)]*\)[^}]*new\s+Texture2D\s*\('
+    message: "Creating Texture2D in Update causes memory growth and GC spikes."
+    fix_action: "Create textures once and reuse. Pool textures if needed."
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-raycast-allocating
+    name: Allocating Raycast in Hot Path
+    severity: warning
+    type: regex
+    pattern: 'void\s+(Update|FixedUpdate)\s*\([^)]*\)[^}]*Physics\.RaycastAll\s*\('
+    message: "RaycastAll allocates array every call. Use RaycastNonAlloc with buffer."
+    fix_action: |
+      Use non-allocating version:
+      private RaycastHit[] _hits = new RaycastHit[10];
+      int count = Physics.RaycastNonAlloc(ray, _hits);
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-overlap-allocating
+    name: Allocating Physics Overlap
+    severity: warning
+    type: regex
+    pattern: 'void\s+(Update|FixedUpdate)\s*\([^)]*\)[^}]*Physics\.(OverlapSphere|OverlapBox|OverlapCapsule)\s*\([^)]+\)'
+    message: "Overlap methods allocate arrays. Use NonAlloc variants."
+    fix_action: |
+      private Collider[] _results = new Collider[20];
+      int count = Physics.OverlapSphereNonAlloc(pos, radius, _results);
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-linq-in-update
+    name: LINQ Allocation in Update
+    severity: warning
+    type: regex
+    pattern: 'void\s+(Update|FixedUpdate)\s*\([^)]*\)[^}]*\.(Where|Select|OrderBy|FirstOrDefault|ToList|ToArray|Any\(\)|Count\(\))'
+    message: "LINQ methods allocate on every call. Use loops for hot paths."
+    fix_action: "Replace LINQ with for/foreach loops in Update methods"
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-string-format-update
+    name: String Formatting in Update
+    severity: warning
+    type: regex
+    pattern: 'void\s+Update\s*\([^)]*\)[^}]*(string\.Format|String\.Format|\$"|\+\s*\w+\.ToString\(\))'
+    message: "String operations in Update cause GC allocations. Cache or use StringBuilder."
+    fix_action: |
+      Cache strings or use StringBuilder:
+      private StringBuilder _sb = new StringBuilder();
+      _sb.Clear().Append("Score: ").Append(score);
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-debug-log-release
+    name: Debug.Log Without Conditional
+    severity: warning
+    type: regex
+    pattern: 'Debug\.(Log|LogWarning|LogError)\s*\([^)]+\)'
+    message: "Debug.Log in release builds impacts performance. Use conditional compilation."
+    fix_action: |
+      Wrap with conditional:
+      #if UNITY_EDITOR || DEVELOPMENT_BUILD
+      Debug.Log(message);
+      #endif
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-camera-main-update
+    name: Camera.main in Update
+    severity: warning
+    type: regex
+    pattern: 'void\s+(Update|FixedUpdate|LateUpdate)\s*\([^)]*\)[^}]*Camera\.main'
+    message: "Camera.main searches by tag every call. Cache the reference."
+    fix_action: |
+      Cache in Start:
+      private Camera _mainCamera;
+      void Start() => _mainCamera = Camera.main;
+    applies_to:
+      - "*.cs"
+
+  # ==============================================================================
+  # MEDIUM: Mobile-specific issues that may cause subtle problems
+  # ==============================================================================
+
+  - id: mobile-mouse-input
+    name: Mouse Input Instead of Touch
+    severity: warning
+    type: regex
+    pattern: 'Input\.(GetMouseButton|GetMouseButtonDown|GetMouseButtonUp|mousePosition)'
+    message: "Mouse input on mobile. Use Input.GetTouch or Input.touches for proper touch handling."
+    fix_action: |
+      Use touch input for mobile:
+      if (Input.touchCount > 0)
+      {
+          Touch touch = Input.GetTouch(0);
+          // handle touch.phase, touch.position
+      }
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-no-pause-save
+    name: OnApplicationPause Without Save
+    severity: warning
+    type: regex
+    pattern: 'void\s+OnApplicationPause\s*\([^)]*\)[^}]{0,200}$'
+    message: "OnApplicationPause without apparent save logic. State may be lost if OS kills app."
+    fix_action: |
+      Save state when pausing:
+      void OnApplicationPause(bool pauseStatus)
+      {
+          if (pauseStatus)
+          {
+              SaveManager.Instance.QuickSave();
+          }
+      }
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-playerprefs-no-save
+    name: PlayerPrefs Without Explicit Save
+    severity: warning
+    type: regex
+    pattern: 'PlayerPrefs\.(SetString|SetInt|SetFloat)\s*\([^)]+\)(?!.*PlayerPrefs\.Save)'
+    message: "PlayerPrefs changes may not persist on mobile without explicit Save()."
+    fix_action: |
+      Call Save after writing:
+      PlayerPrefs.SetInt("HighScore", score);
+      PlayerPrefs.Save(); // Required for mobile
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-high-quality-preset
+    name: High Quality Preset on Mobile
+    severity: info
+    type: regex
+    pattern: 'QualitySettings\.SetQualityLevel\s*\(\s*[3-6]\s*[,)]'
+    message: "High quality presets (3+) may cause thermal throttling on mobile."
+    fix_action: "Consider using quality level 0-2 for mobile, with adaptive quality system"
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-location-start
+    name: GPS Location Without Management
+    severity: warning
+    type: regex
+    pattern: 'Input\.location\.Start\s*\([^)]*\)(?![^}]*Input\.location\.Stop)'
+    message: "GPS location started without apparent stop. Location drains battery."
+    fix_action: |
+      Stop location when not needed:
+      Input.location.Start();
+      // ... use location ...
+      Input.location.Stop();
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-gyroscope-enabled
+    name: Gyroscope Without Disable
+    severity: info
+    type: regex
+    pattern: 'Input\.gyro\.enabled\s*=\s*true(?![^}]*Input\.gyro\.enabled\s*=\s*false)'
+    message: "Gyroscope enabled without apparent disable. Sensors drain battery."
+    fix_action: "Disable gyroscope when not actively using it"
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-accelerometer-update
+    name: Accelerometer in Every Frame
+    severity: info
+    type: regex
+    pattern: 'void\s+Update\s*\([^)]*\)[^}]*Input\.acceleration'
+    message: "Reading accelerometer every frame. Consider reducing poll rate."
+    fix_action: |
+      Throttle accelerometer reads:
+      if (Time.frameCount % 3 == 0)  // Every 3rd frame
+      {
+          var acceleration = Input.acceleration;
+      }
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-no-vsync-control
+    name: VSync Without Mobile Consideration
+    severity: info
+    type: regex
+    pattern: 'QualitySettings\.vSyncCount\s*=\s*1'
+    message: "VSync adds latency. Consider vSyncCount=0 with targetFrameRate on mobile."
+    fix_action: |
+      For mobile, disable VSync and use frame rate cap:
+      QualitySettings.vSyncCount = 0;
+      Application.targetFrameRate = 60;
+    applies_to:
+      - "*.cs"
+
+  # ==============================================================================
+  # TOUCH INPUT PATTERNS
+  # ==============================================================================
+
+  - id: mobile-touch-small-targets
+    name: Potential Small Touch Target
+    severity: info
+    type: regex
+    pattern: 'RectTransform.*sizeDelta\s*=\s*new\s+Vector2\s*\(\s*\d{1,2}\s*,\s*\d{1,2}\s*\)'
+    message: "Small UI element size. Minimum touch target should be 44x44 points."
+    fix_action: "Ensure touch targets are at least 44x44 points for comfortable tapping"
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-hover-state
+    name: Hover State in Mobile UI
+    severity: info
+    type: regex
+    pattern: '(OnPointerEnter|OnMouseEnter|IPointerEnterHandler)'
+    message: "Hover state detected. Mobile has no hover - use press/release states instead."
+    fix_action: "Replace hover with pointer down/up states for mobile"
+    applies_to:
+      - "*.cs"
+
+  # ==============================================================================
+  # RENDERING AND GPU
+  # ==============================================================================
+
+  - id: mobile-realtime-reflection
+    name: Realtime Reflection Probes
+    severity: warning
+    type: regex
+    pattern: 'ReflectionProbeMode\s*\.\s*Realtime'
+    message: "Realtime reflection probes are expensive on mobile. Use baked probes."
+    fix_action: "Use ReflectionProbeMode.Baked for mobile"
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-realtime-shadows
+    name: Realtime Shadows Configuration
+    severity: info
+    type: regex
+    pattern: 'shadowType\s*=\s*LightShadows\.Hard|shadowType\s*=\s*LightShadows\.Soft'
+    message: "Realtime shadows are expensive on mobile. Consider baked shadows or no shadows."
+    fix_action: "Use baked shadows or disable for low-tier devices"
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-high-texture-resolution
+    name: High Texture Without Compression
+    severity: info
+    type: regex
+    pattern: 'new\s+Texture2D\s*\(\s*\d{4,}\s*,\s*\d{4,}'
+    message: "Large texture creation (4K+). Ensure ASTC/ETC2 compression for mobile."
+    fix_action: |
+      Use compressed formats:
+      // In import settings: Format = ASTC (iOS) or ETC2 (Android)
+      // Or use smaller textures with mipmaps
+    applies_to:
+      - "*.cs"
+
+  # ==============================================================================
+  # LIFECYCLE AND STATE
+  # ==============================================================================
+
+  - id: mobile-no-focus-handler
+    name: Audio Without Focus Handling
+    severity: warning
+    type: regex
+    pattern: 'AudioSource\.Play\s*\([^)]*\)'
+    message: "AudioSource.Play without OnApplicationFocus handling may cause audio issues during interruptions."
+    fix_action: |
+      Handle audio focus:
+      void OnApplicationFocus(bool hasFocus)
+      {
+          AudioListener.pause = !hasFocus;
+      }
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-infinite-coroutine
+    name: Infinite Coroutine Without Yield
+    severity: warning
+    type: regex
+    pattern: 'while\s*\(\s*true\s*\)\s*\{[^}]*yield\s+return\s+null'
+    message: "Infinite coroutine with yield return null runs every frame. Consider throttling."
+    fix_action: |
+      Throttle infinite coroutines:
+      while (true)
+      {
+          DoWork();
+          yield return new WaitForSeconds(0.1f);  // Not every frame
+      }
+    applies_to:
+      - "*.cs"
+
+  # ==============================================================================
+  # NETWORK AND ASYNC
+  # ==============================================================================
+
+  - id: mobile-sync-web-request
+    name: Synchronous Web Request
+    severity: error
+    type: regex
+    pattern: '(WebClient|HttpWebRequest).*Get(String|Stream)\s*\('
+    message: "Synchronous web requests block main thread - causes ANR. Use async."
+    fix_action: |
+      Use UnityWebRequest with async:
+      using (var request = UnityWebRequest.Get(url))
+      {
+          var operation = request.SendWebRequest();
+          while (!operation.isDone)
+          {
+              yield return null;
+          }
+      }
+    applies_to:
+      - "*.cs"
+
+  - id: mobile-large-json-parse
+    name: Large JSON Parse on Main Thread
+    severity: warning
+    type: regex
+    pattern: 'JsonUtility\.FromJson|JsonConvert\.Deserialize'
+    message: "JSON parsing on main thread may cause frame drops for large payloads."
+    fix_action: |
+      Move large JSON parsing off main thread:
+      await Task.Run(() => JsonUtility.FromJson<T>(json));
+    applies_to:
+      - "*.cs"
+
+  # ==============================================================================
+  # GODOT-SPECIFIC MOBILE CHECKS
+  # ==============================================================================
+
+  - id: mobile-godot-process-physics
+    name: Godot Physics in _process
+    severity: error
+    type: regex
+    pattern: 'func\s+_process\s*\([^)]*\)[^}]*(move_and_slide|velocity|apply_force)'
+    message: "Physics in _process causes inconsistent behavior. Use _physics_process."
+    fix_action: "Move physics code to _physics_process for fixed timestep"
+    applies_to:
+      - "*.gd"
+
+  - id: mobile-godot-get-node-process
+    name: Godot get_node in Process
+    severity: warning
+    type: regex
+    pattern: 'func\s+_process\s*\([^)]*\)[^}]*(get_node\(|\$)'
+    message: "get_node in _process is expensive. Cache with @onready."
+    fix_action: |
+      Cache references:
+      @onready var player = $"../Player"
+    applies_to:
+      - "*.gd"
+
+  - id: mobile-godot-load-process
+    name: Godot load in Process
+    severity: error
+    type: regex
+    pattern: 'func\s+_process\s*\([^)]*\)[^}]*load\s*\('
+    message: "load() in _process blocks. Use preload() or ResourceLoader.load_threaded."
+    fix_action: "Use preload for constants or async loading"
+    applies_to:
+      - "*.gd"
