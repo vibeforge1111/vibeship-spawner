@@ -1,0 +1,217 @@
+id: prompt-to-game
+skill: Prompt-to-Game Development
+version: "1.0"
+
+validations:
+  - id: eval-usage
+    pattern: 'eval\s*\([^)]*\)'
+    severity: error
+    message: "eval() detected - critical security vulnerability"
+    fix: "Remove eval and use safe alternatives like JSON.parse for data"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+    test_cases:
+      should_match:
+        - "eval(userInput)"
+        - "eval(`code ${variable}`)"
+      should_not_match:
+        - "JSON.parse(userInput)"
+        - "// eval is dangerous"
+
+  - id: exposed-api-key
+    pattern: '(?:api[_-]?key|secret|token|password)\s*[=:]\s*["\'][a-zA-Z0-9_-]{16,}["\']'
+    severity: error
+    message: "Hardcoded secret detected - use environment variables"
+    fix: "Move to .env file and access via process.env"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+    test_cases:
+      should_match:
+        - 'apiKey = "sk-1234567890abcdef"'
+        - "API_SECRET: 'abcdefghijklmnop'"
+      should_not_match:
+        - "apiKey = process.env.API_KEY"
+        - "const key = getSecret()"
+
+  - id: innerhtml-assignment
+    pattern: '\.innerHTML\s*=\s*[^"\'`]'
+    severity: warning
+    message: "innerHTML with variable - potential XSS vulnerability"
+    fix: "Use textContent or sanitize input"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+    test_cases:
+      should_match:
+        - "element.innerHTML = userInput"
+        - "div.innerHTML = getMessage()"
+      should_not_match:
+        - 'element.innerHTML = "<b>static</b>"'
+        - "element.textContent = userInput"
+
+  - id: no-framework-version
+    pattern: 'import.*(?:phaser|three|kaboom)(?!.*@)'
+    severity: info
+    message: "Framework import without version pin - may cause issues"
+    fix: "Pin version in package.json or specify in prompt"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+    test_cases:
+      should_match:
+        - "import Phaser from 'phaser'"
+        - "import * as THREE from 'three'"
+      should_not_match:
+        - "import Phaser from 'phaser@3.90.0'"
+
+  - id: global-variable-pollution
+    pattern: '^(?:var|let|const)\s+\w+\s*='
+    severity: warning
+    message: "Top-level variable may pollute global scope"
+    fix: "Wrap in module, class, or IIFE"
+    applies_to:
+      - "*.js"
+    test_cases:
+      should_match:
+        - "var game = new Phaser.Game()"
+        - "let score = 0"
+      should_not_match:
+        - "class Game { score = 0 }"
+        - "export const game = new Game()"
+
+  - id: console-log-production
+    pattern: 'console\.(log|debug|info)\s*\('
+    severity: info
+    message: "Console log may be leftover from debugging"
+    fix: "Remove or guard with development check"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+    test_cases:
+      should_match:
+        - "console.log('debug')"
+        - "console.debug(data)"
+      should_not_match:
+        - "console.error('critical')"
+        - "// console.log('removed')"
+
+  - id: single-file-too-large
+    pattern: '.{20000,}'
+    severity: warning
+    message: "File likely exceeds maintainable size - consider splitting"
+    fix: "Refactor into separate modules by concern"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+    test_cases:
+      should_match: []
+      should_not_match: []
+
+  - id: deep-nesting
+    pattern: '{\s*{\s*{\s*{\s*{'
+    severity: warning
+    message: "Deep nesting detected - hard to maintain and debug"
+    fix: "Extract nested logic into separate functions"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+    test_cases:
+      should_match:
+        - "if (a) { if (b) { if (c) { if (d) { if (e) {"
+      should_not_match:
+        - "if (a) { if (b) { } }"
+
+  - id: magic-number
+    pattern: '(?:width|height|speed|damage|health)\s*[=:]\s*\d{2,}'
+    severity: info
+    message: "Magic number detected - consider using named constant"
+    fix: "Extract to CONFIG object or constant"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+    test_cases:
+      should_match:
+        - "width = 800"
+        - "playerSpeed: 200"
+      should_not_match:
+        - "width = CONFIG.SCREEN_WIDTH"
+        - "const PLAYER_SPEED = 200"
+
+  - id: missing-error-handling
+    pattern: 'fetch\s*\([^)]*\)(?!\.then.*\.catch|.*try)'
+    severity: warning
+    message: "fetch without error handling"
+    fix: "Add .catch() or wrap in try/catch"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+    test_cases:
+      should_match:
+        - "fetch(url)"
+        - "fetch(url).then(r => r.json())"
+      should_not_match:
+        - "fetch(url).then().catch()"
+        - "try { await fetch(url) }"
+
+  - id: browser-api-in-shared
+    pattern: '(?:window|document|localStorage)\.'
+    severity: info
+    message: "Browser-only API - ensure not used in Node.js context"
+    fix: "Add runtime check or isolate to browser-only files"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+    test_cases:
+      should_match:
+        - "window.innerWidth"
+        - "document.querySelector"
+        - "localStorage.getItem"
+      should_not_match:
+        - "// window.innerWidth"
+        - "if (typeof window !== 'undefined')"
+
+validation_groups:
+  - name: security
+    description: Critical security checks for AI-generated code
+    validations:
+      - eval-usage
+      - exposed-api-key
+      - innerhtml-assignment
+
+  - name: code-quality
+    description: Code quality and maintainability checks
+    validations:
+      - global-variable-pollution
+      - console-log-production
+      - deep-nesting
+      - magic-number
+
+  - name: reliability
+    description: Error handling and robustness checks
+    validations:
+      - missing-error-handling
+      - browser-api-in-shared
+
+  - name: framework
+    description: Framework-specific checks
+    validations:
+      - no-framework-version
+      - single-file-too-large
+
+auto_fix_rules:
+  - id: remove-eval
+    pattern: 'eval\(([^)]+)\)'
+    replacement: 'JSON.parse($1) /* REVIEW: Was eval, verify data format */'
+    description: "Replace eval with JSON.parse (review needed)"
+
+  - id: fix-innerhtml
+    pattern: '(\w+)\.innerHTML\s*=\s*(\w+)'
+    replacement: '$1.textContent = $2 /* REVIEW: If HTML needed, sanitize */'
+    description: "Replace innerHTML with textContent (review needed)"
+
+  - id: add-catch-to-fetch
+    pattern: '(fetch\([^)]+\))((?!\.catch).)*$'
+    replacement: '$1.catch(err => console.error("Fetch error:", err))'
+    description: "Add basic error handling to fetch"
