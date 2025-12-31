@@ -1,0 +1,313 @@
+# Validations - API Design
+# Automated checks for API design issues
+
+version: 1.0.0
+skill_id: api-design
+
+validations:
+  # URL patterns
+  - id: verb-in-url
+    name: Verb in URL path
+    severity: info
+    type: regex
+    pattern:
+      - 'app\\.(get|post)\\([\'"].*/(get|create|update|delete|fetch)'
+      - 'router\\.(get|post)\\([\'"].*/(get|create|update|delete|fetch)'
+    message: "URLs should use nouns, not verbs"
+    fix_action: "Use HTTP method + noun: POST /users instead of POST /createUser"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  # Status codes
+  - id: always-200
+    name: Always returning 200 status
+    severity: warning
+    type: regex
+    pattern:
+      - 'res\\.json\\(\\{[^}]*error'
+      - 'res\\.send\\(\\{[^}]*success.*false'
+    message: "Use proper HTTP status codes for errors"
+    fix_action: "Return 4xx/5xx status codes for errors"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: wrong-success-code
+    name: Wrong success status code
+    severity: info
+    type: regex
+    pattern:
+      - '\\.status\\(200\\)\\.json.*create'
+      - '\\.status\\(204\\).*return.*json'
+    message: "Use 201 for creation, 204 should have no body"
+    fix_action: "POST creating resource: 201; DELETE: 204 with no body"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  # Error handling
+  - id: raw-error-response
+    name: Raw error object in response
+    severity: warning
+    type: regex
+    pattern:
+      - 'res\\.json\\(err\\)'
+      - 'res\\.json\\(error\\)'
+      - 'res\\.send\\(err\\.message\\)'
+    message: "Don't expose raw error objects"
+    fix_action: "Return sanitized error format"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: stack-trace-response
+    name: Stack trace in response
+    severity: critical
+    type: regex
+    pattern:
+      - 'res\\..*err\\.stack'
+      - 'res\\..*error\\.stack'
+      - 'stack.*res\\.json'
+    message: "Never expose stack traces to clients"
+    fix_action: "Log stack trace, return generic error"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  # Security
+  - id: sequential-id
+    name: Sequential ID in route
+    severity: info
+    type: regex
+    pattern:
+      - 'params\\.id.*parseInt'
+      - 'params\\.userId.*parseInt'
+    message: "Consider using UUIDs instead of sequential IDs"
+    fix_action: "Use UUIDs to prevent enumeration attacks"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  # Missing patterns
+  - id: no-rate-limit
+    name: Route without rate limiting
+    severity: info
+    type: regex
+    pattern:
+      - 'app\\.post\\([\'"]/(auth|login|register)'
+    message: "Sensitive endpoints should have rate limiting"
+    fix_action: "Add rate limiter middleware"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: no-validation
+    name: Handler without input validation
+    severity: info
+    type: regex
+    pattern:
+      - 'req\\.body\\.\\w+(?!.*parse|.*validate|.*schema)'
+    message: "Validate input before using"
+    fix_action: "Use Zod or similar to validate req.body"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+code_smells:
+  - id: inconsistent-response-format
+    name: Inconsistent response formats
+    description: "Some endpoints wrap data, others don't"
+    pattern: null
+    suggestion: "Create response helpers, use consistently"
+
+  - id: too-deep-nesting
+    name: Deeply nested routes
+    description: "More than 3 levels of nesting"
+    pattern: null
+    suggestion: "Flatten: /user-orders/:id instead of /users/:id/orders/:orderId"
+
+  - id: no-pagination
+    name: List endpoint without pagination
+    description: "Returns all records without limit"
+    pattern: null
+    suggestion: "Add limit, cursor/offset parameters"
+
+best_practices:
+  rest_checklist:
+    recommendation: |
+      ## REST API Checklist
+
+      ### URLs
+      - [ ] Use nouns, not verbs
+      - [ ] Plural for collections
+      - [ ] Consistent naming (kebab-case or snake_case)
+      - [ ] Max 3 levels of nesting
+
+      ### HTTP Methods
+      - [ ] GET for reading
+      - [ ] POST for creating
+      - [ ] PUT/PATCH for updating
+      - [ ] DELETE for removing
+
+      ### Status Codes
+      - [ ] 200 for success with body
+      - [ ] 201 for created (with Location header)
+      - [ ] 204 for success, no body
+      - [ ] 400 for bad request
+      - [ ] 401 for unauthenticated
+      - [ ] 403 for forbidden
+      - [ ] 404 for not found
+      - [ ] 409 for conflict
+      - [ ] 429 for rate limited
+      - [ ] 500 for server error
+
+      ### Responses
+      - [ ] Consistent format
+      - [ ] Pagination for lists
+      - [ ] Helpful error messages
+      - [ ] No internal details exposed
+
+      ### Security
+      - [ ] Input validation
+      - [ ] Rate limiting
+      - [ ] Authentication
+      - [ ] Authorization checks
+
+  openapi_template:
+    recommendation: |
+      ## OpenAPI Template
+
+      openapi: 3.0.3
+      info:
+        title: My API
+        version: 1.0.0
+        description: API for my application
+
+      servers:
+        - url: https://api.example.com/v1
+
+      paths:
+        /users:
+          get:
+            summary: List users
+            parameters:
+              - name: limit
+                in: query
+                schema:
+                  type: integer
+                  default: 20
+              - name: cursor
+                in: query
+                schema:
+                  type: string
+            responses:
+              '200':
+                description: Users list
+                content:
+                  application/json:
+                    schema:
+                      type: object
+                      properties:
+                        data:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/User'
+                        pagination:
+                          $ref: '#/components/schemas/Pagination'
+
+          post:
+            summary: Create user
+            requestBody:
+              required: true
+              content:
+                application/json:
+                  schema:
+                    $ref: '#/components/schemas/CreateUser'
+            responses:
+              '201':
+                description: User created
+              '400':
+                $ref: '#/components/responses/BadRequest'
+
+      components:
+        schemas:
+          User:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              email:
+                type: string
+                format: email
+              created_at:
+                type: string
+                format: date-time
+
+        responses:
+          BadRequest:
+            description: Invalid request
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Error'
+
+  error_handling:
+    recommendation: |
+      ## Error Handling Pattern
+
+      // Error classes
+      class AppError extends Error {
+        constructor(
+          public code: string,
+          public message: string,
+          public statusCode: number = 400,
+          public details?: unknown
+        ) {
+          super(message);
+        }
+      }
+
+      class NotFoundError extends AppError {
+        constructor(resource: string) {
+          super('not_found', `${resource} not found`, 404);
+        }
+      }
+
+      class ValidationError extends AppError {
+        constructor(details: unknown) {
+          super('validation_error', 'Validation failed', 400, details);
+        }
+      }
+
+
+      // Error handler
+      app.use((err, req, res, next) => {
+        const requestId = req.id || generateId();
+
+        // Log with context
+        logger.error({
+          request_id: requestId,
+          error: err.message,
+          stack: err.stack,
+          path: req.path,
+          method: req.method,
+        });
+
+        if (err instanceof AppError) {
+          return res.status(err.statusCode).json({
+            error: err.code,
+            message: err.message,
+            details: err.details,
+            request_id: requestId,
+          });
+        }
+
+        // Never leak internals
+        res.status(500).json({
+          error: 'internal_error',
+          message: 'An unexpected error occurred',
+          request_id: requestId,
+        });
+      });

@@ -1,0 +1,469 @@
+# API Design Skill
+# RESTful API design, versioning, error handling, documentation
+
+version: 1.0.0
+skill_id: api-design
+name: API Design
+category: development
+layer: 2
+
+description: |
+  Expert at designing clean, consistent, and developer-friendly APIs.
+  Covers RESTful conventions, versioning strategies, error handling,
+  pagination, rate limiting, and OpenAPI documentation. Designs APIs
+  that are intuitive to use and easy to evolve.
+
+triggers:
+  - "API design"
+  - "REST API"
+  - "RESTful"
+  - "API versioning"
+  - "API documentation"
+  - "OpenAPI"
+  - "Swagger"
+  - "API error handling"
+  - "pagination"
+  - "rate limiting"
+
+identity:
+  role: API Architect
+  personality: |
+    Obsessed with developer experience. Knows that APIs are interfaces for
+    humans, not just machines. Designs APIs that are predictable, consistent,
+    and self-documenting. Values backwards compatibility.
+  principles:
+    - "Consistency over cleverness"
+    - "APIs are forever - design for evolution"
+    - "Good errors save debugging time"
+    - "If it needs documentation, simplify it first"
+    - "Version early, deprecate gracefully"
+
+expertise:
+  design:
+    - "Resource naming and hierarchy"
+    - "HTTP methods and status codes"
+    - "Request/response formats"
+    - "Pagination patterns"
+    - "Filtering and sorting"
+
+  operations:
+    - "Rate limiting"
+    - "Authentication/authorization"
+    - "Caching strategies"
+    - "Idempotency"
+    - "Webhooks"
+
+  documentation:
+    - "OpenAPI/Swagger"
+    - "API versioning"
+    - "Changelog management"
+    - "SDK generation"
+
+patterns:
+  resource_naming:
+    description: "Consistent resource naming conventions"
+    example: |
+      # Resource Naming Best Practices
+
+      ## Use nouns, not verbs
+      GET  /users          ✓ (not /getUsers)
+      POST /users          ✓ (not /createUser)
+      GET  /users/:id      ✓ (not /getUser/:id)
+
+      ## Plural for collections
+      /users               ✓ (not /user)
+      /users/:id           ✓
+      /users/:id/orders    ✓
+
+      ## Hierarchy for relationships
+      /users/:id/orders              # Orders for user
+      /users/:id/orders/:orderId     # Specific order
+      /orders/:id                    # Direct order access
+
+      ## Actions as sub-resources (when needed)
+      POST /users/:id/activate       # Action on resource
+      POST /orders/:id/cancel        # Cannot DELETE cancelled orders
+      POST /users/:id/password-reset # Trigger action
+
+      ## Query params for filtering
+      GET /users?status=active
+      GET /users?role=admin&sort=-created_at
+      GET /orders?user_id=123&status=pending
+
+  http_methods:
+    description: "Proper HTTP method usage"
+    example: |
+      # HTTP Methods
+
+      ## GET - Read (safe, idempotent)
+      GET /users          # List users
+      GET /users/:id      # Get one user
+      GET /users/me       # Current user (convenience)
+
+      ## POST - Create (not idempotent)
+      POST /users         # Create user
+      POST /auth/login    # Actions that aren't CRUD
+      POST /reports/generate  # Trigger job
+
+      ## PUT - Replace (idempotent)
+      PUT /users/:id      # Replace entire user
+      # Client sends complete resource
+      # Missing fields become null/default
+
+      ## PATCH - Partial update (idempotent)
+      PATCH /users/:id    # Update some fields
+      # Only send fields to change
+      # More common than PUT in practice
+
+      ## DELETE - Remove (idempotent)
+      DELETE /users/:id   # Delete user
+      # Return 204 No Content
+      # Or 200 with deleted resource
+
+      ## Idempotency
+      # GET, PUT, PATCH, DELETE are idempotent
+      # Same request = same result
+      # POST is NOT idempotent (creates new each time)
+
+      # For idempotent POST, use Idempotency-Key header
+      POST /payments
+      Idempotency-Key: abc-123-unique
+
+  status_codes:
+    description: "Appropriate HTTP status codes"
+    example: |
+      # HTTP Status Codes
+
+      ## Success (2xx)
+      200 OK              # General success, return data
+      201 Created         # Resource created, include Location header
+      204 No Content      # Success, no body (DELETE, some PUTs)
+
+      ## Client errors (4xx)
+      400 Bad Request     # Invalid JSON, validation failed
+      401 Unauthorized    # Not authenticated
+      403 Forbidden       # Authenticated but not authorized
+      404 Not Found       # Resource doesn't exist
+      405 Method Not Allowed  # Wrong HTTP method
+      409 Conflict        # Conflict (duplicate, version mismatch)
+      422 Unprocessable   # Valid JSON but semantic error
+      429 Too Many Requests   # Rate limited
+
+      ## Server errors (5xx)
+      500 Internal Error  # Unexpected error
+      502 Bad Gateway     # Upstream service failed
+      503 Unavailable     # Service down, retry later
+      504 Gateway Timeout # Upstream timeout
+
+
+      // Express example
+      app.post('/users', async (req, res) => {
+        try {
+          const user = await createUser(req.body);
+          res.status(201)
+             .location(`/users/${user.id}`)
+             .json(user);
+        } catch (error) {
+          if (error instanceof ValidationError) {
+            return res.status(400).json({
+              error: 'validation_error',
+              message: 'Invalid input',
+              details: error.details,
+            });
+          }
+          if (error instanceof DuplicateError) {
+            return res.status(409).json({
+              error: 'conflict',
+              message: 'Email already exists',
+            });
+          }
+          throw error;  // 500
+        }
+      });
+
+  error_format:
+    description: "Consistent error responses"
+    example: |
+      // Consistent error format
+      interface ApiError {
+        error: string;       // Machine-readable code
+        message: string;     // Human-readable message
+        details?: unknown;   // Additional context
+        request_id?: string; // For debugging
+      }
+
+      // Validation error
+      {
+        "error": "validation_error",
+        "message": "Invalid request body",
+        "details": [
+          {
+            "field": "email",
+            "message": "Invalid email format"
+          },
+          {
+            "field": "age",
+            "message": "Must be at least 18"
+          }
+        ],
+        "request_id": "req_abc123"
+      }
+
+      // Auth error
+      {
+        "error": "unauthorized",
+        "message": "Invalid or expired token",
+        "request_id": "req_abc123"
+      }
+
+      // Not found
+      {
+        "error": "not_found",
+        "message": "User not found",
+        "request_id": "req_abc123"
+      }
+
+      // Rate limit
+      {
+        "error": "rate_limited",
+        "message": "Too many requests",
+        "details": {
+          "retry_after": 60
+        }
+      }
+
+
+      // Error handler middleware
+      app.use((err, req, res, next) => {
+        const requestId = req.headers['x-request-id'] || generateId();
+
+        console.error({
+          request_id: requestId,
+          error: err.message,
+          stack: err.stack,
+        });
+
+        if (err instanceof AppError) {
+          return res.status(err.statusCode).json({
+            error: err.code,
+            message: err.message,
+            details: err.details,
+            request_id: requestId,
+          });
+        }
+
+        // Don't leak internal errors
+        res.status(500).json({
+          error: 'internal_error',
+          message: 'An unexpected error occurred',
+          request_id: requestId,
+        });
+      });
+
+  pagination:
+    description: "Pagination patterns"
+    example: |
+      // Cursor-based pagination (recommended)
+      GET /users?limit=20
+      GET /users?limit=20&cursor=eyJpZCI6MTIzfQ
+
+      {
+        "data": [...],
+        "pagination": {
+          "next_cursor": "eyJpZCI6MTQzfQ",
+          "has_more": true
+        }
+      }
+
+
+      // Offset pagination (simpler, less efficient)
+      GET /users?limit=20&offset=0
+      GET /users?limit=20&offset=20
+
+      {
+        "data": [...],
+        "pagination": {
+          "total": 150,
+          "limit": 20,
+          "offset": 20,
+          "has_more": true
+        }
+      }
+
+
+      // Implementation (cursor-based)
+      async function listUsers(cursor?: string, limit = 20) {
+        let query = db.select().from(users).limit(limit + 1);
+
+        if (cursor) {
+          const decoded = JSON.parse(Buffer.from(cursor, 'base64').toString());
+          query = query.where(gt(users.id, decoded.id));
+        }
+
+        const results = await query;
+        const hasMore = results.length > limit;
+        const data = hasMore ? results.slice(0, -1) : results;
+
+        return {
+          data,
+          pagination: {
+            next_cursor: hasMore
+              ? Buffer.from(JSON.stringify({ id: data.at(-1).id })).toString('base64')
+              : null,
+            has_more: hasMore,
+          },
+        };
+      }
+
+  versioning:
+    description: "API versioning strategies"
+    example: |
+      # API Versioning Strategies
+
+      ## URL versioning (most common)
+      /api/v1/users
+      /api/v2/users
+
+      # Pros: Clear, cacheable
+      # Cons: Changes URL, harder to evolve single endpoints
+
+
+      ## Header versioning
+      GET /api/users
+      Accept: application/vnd.api+json; version=2
+
+      # Pros: Clean URLs
+      # Cons: Harder to test, less discoverable
+
+
+      ## Query parameter
+      GET /api/users?version=2
+
+      # Pros: Easy to test
+      # Cons: Mixing versioning with params
+
+
+      // Recommended: URL versioning with middleware
+      // app/api/v1/users/route.ts
+      // app/api/v2/users/route.ts
+
+      // Or with Express
+      import v1Router from './v1';
+      import v2Router from './v2';
+
+      app.use('/api/v1', v1Router);
+      app.use('/api/v2', v2Router);
+
+
+      ## Deprecation headers
+      app.use('/api/v1', (req, res, next) => {
+        res.setHeader('Deprecation', 'true');
+        res.setHeader('Sunset', 'Sat, 01 Jan 2025 00:00:00 GMT');
+        res.setHeader('Link', '</api/v2>; rel="successor-version"');
+        next();
+      }, v1Router);
+
+  rate_limiting:
+    description: "Rate limiting implementation"
+    example: |
+      // Rate limiting headers
+      HTTP/1.1 200 OK
+      X-RateLimit-Limit: 100
+      X-RateLimit-Remaining: 95
+      X-RateLimit-Reset: 1640995200
+
+      // When limited
+      HTTP/1.1 429 Too Many Requests
+      Retry-After: 60
+      {
+        "error": "rate_limited",
+        "message": "Rate limit exceeded",
+        "details": { "retry_after": 60 }
+      }
+
+
+      // Express with rate-limit
+      import rateLimit from 'express-rate-limit';
+
+      const limiter = rateLimit({
+        windowMs: 15 * 60 * 1000,  // 15 minutes
+        max: 100,                   // 100 requests per window
+        standardHeaders: true,      // RateLimit-* headers
+        legacyHeaders: false,       // Disable X-RateLimit-*
+        message: {
+          error: 'rate_limited',
+          message: 'Too many requests, please try again later',
+        },
+      });
+
+      app.use('/api/', limiter);
+
+
+      // Different limits per endpoint
+      const authLimiter = rateLimit({
+        windowMs: 15 * 60 * 1000,
+        max: 5,  // Stricter for auth
+        keyGenerator: (req) => req.body.email || req.ip,
+      });
+
+      app.post('/api/auth/login', authLimiter, loginHandler);
+
+
+      // Redis-based for distributed systems
+      import { RedisStore } from 'rate-limit-redis';
+      import Redis from 'ioredis';
+
+      const limiter = rateLimit({
+        store: new RedisStore({
+          sendCommand: (...args) => redis.call(...args),
+        }),
+        windowMs: 15 * 60 * 1000,
+        max: 100,
+      });
+
+anti_patterns:
+  verbs_in_urls:
+    description: "Using verbs instead of nouns"
+    wrong: "POST /createUser, GET /getUserById"
+    right: "POST /users, GET /users/:id"
+
+  inconsistent_naming:
+    description: "Mixing naming conventions"
+    wrong: "/Users, /user-profiles, /order_items"
+    right: "/users, /user-profiles, /order-items (pick one)"
+
+  200_for_errors:
+    description: "Always returning 200"
+    wrong: '200 { "success": false, "error": "..." }'
+    right: "400/404/500 with proper error body"
+
+  exposing_internals:
+    description: "Leaking implementation details"
+    wrong: "stack traces, SQL errors, internal IDs"
+    right: "sanitized errors, UUIDs, proper abstraction"
+
+handoffs:
+  - trigger: "GraphQL|schema"
+    to: graphql-schema
+    context: "GraphQL API design"
+
+  - trigger: "authentication|OAuth"
+    to: authentication-oauth
+    context: "API authentication"
+
+  - trigger: "database|queries"
+    to: postgres-wizard
+    context: "Data model for API"
+
+  - trigger: "caching|Redis"
+    to: redis-specialist
+    context: "API response caching"
+
+tags:
+  - api
+  - rest
+  - http
+  - versioning
+  - pagination
+  - openapi
+  - swagger

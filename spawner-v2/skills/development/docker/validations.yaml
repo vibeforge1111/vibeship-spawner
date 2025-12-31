@@ -1,0 +1,235 @@
+# Validations - Docker
+# Automated checks for Dockerfile issues
+
+version: 1.0.0
+skill_id: docker
+
+validations:
+  # Security
+  - id: running-as-root
+    name: No USER instruction (runs as root)
+    severity: warning
+    type: regex
+    pattern:
+      - '^(?!.*USER\s+\w).*$'
+    message: "Container will run as root - add USER instruction"
+    fix_action: "Add 'RUN adduser -S app' and 'USER app' before CMD"
+    applies_to:
+      - "Dockerfile*"
+
+  - id: secrets-in-args
+    name: Sensitive values in ARG/ENV
+    severity: error
+    type: regex
+    pattern:
+      - 'ARG\s+(API_KEY|SECRET|PASSWORD|TOKEN|PRIVATE_KEY)'
+      - 'ENV\s+\w*(PASSWORD|SECRET|KEY|TOKEN)\s*='
+    message: "Secrets in build args/env are visible in image layers"
+    fix_action: "Use runtime environment variables or Docker secrets"
+    applies_to:
+      - "Dockerfile*"
+
+  - id: add-instead-of-copy
+    name: Using ADD when COPY would work
+    severity: info
+    type: regex
+    pattern:
+      - 'ADD\s+[^h][^\s]+\s+[^\s]+'
+    message: "ADD has extra features (URL, tar extraction) - use COPY for local files"
+    fix_action: "Replace ADD with COPY unless you need URL or tar features"
+    applies_to:
+      - "Dockerfile*"
+
+  # Best practices
+  - id: latest-tag
+    name: Using :latest tag or no tag
+    severity: warning
+    type: regex
+    pattern:
+      - 'FROM\s+\w+:latest'
+      - 'FROM\s+\w+\s*$'
+    message: "Pin base image version for reproducible builds"
+    fix_action: "Use specific version: FROM node:20-alpine"
+    applies_to:
+      - "Dockerfile*"
+
+  - id: multiple-run-commands
+    name: Multiple RUN commands that should be combined
+    severity: info
+    type: regex
+    pattern:
+      - 'RUN\s+apt-get\s+update[\s\S]*RUN\s+apt-get\s+install'
+    message: "Combine RUN commands to reduce layers and cache issues"
+    fix_action: "Use: RUN apt-get update && apt-get install -y pkg"
+    applies_to:
+      - "Dockerfile*"
+
+  - id: apt-get-no-clean
+    name: apt-get without cleanup
+    severity: info
+    type: regex
+    pattern:
+      - 'apt-get\s+install(?![\s\S]*rm\s+-rf\s+/var/lib/apt)'
+    message: "Clean apt cache to reduce image size"
+    fix_action: "Add: && rm -rf /var/lib/apt/lists/*"
+    applies_to:
+      - "Dockerfile*"
+
+  - id: no-healthcheck
+    name: Missing HEALTHCHECK instruction
+    severity: info
+    type: regex
+    pattern:
+      - '^(?!.*HEALTHCHECK).*$'
+    message: "Consider adding HEALTHCHECK for container orchestration"
+    fix_action: "Add HEALTHCHECK CMD curl -f http://localhost/ || exit 1"
+    applies_to:
+      - "Dockerfile*"
+
+  # Cache efficiency
+  - id: copy-before-deps
+    name: Copying all files before installing dependencies
+    severity: warning
+    type: regex
+    pattern:
+      - 'COPY\s+\.\s+\.[\s\S]{0,50}RUN\s+(npm|pip|go)\s+(install|ci)'
+    message: "Copy dependency files first for better cache efficiency"
+    fix_action: "COPY package*.json ./ before npm install"
+    applies_to:
+      - "Dockerfile*"
+
+  # Compose specific
+  - id: compose-version-deprecated
+    name: Using deprecated version field in compose
+    severity: info
+    type: regex
+    pattern:
+      - '^version:\s*["\']'
+    message: "The 'version' field is obsolete in Docker Compose v2"
+    fix_action: "Remove version field - it's ignored"
+    applies_to:
+      - "docker-compose*.yml"
+      - "docker-compose*.yaml"
+      - "compose*.yml"
+      - "compose*.yaml"
+
+code_smells:
+  - id: large-base-image
+    name: Using full OS image instead of slim/alpine
+    description: "FROM ubuntu or FROM node instead of alpine variants"
+    pattern: 'FROM\s+(ubuntu|debian|node|python):\d+\s*$'
+    suggestion: "Use alpine or slim variants for smaller images"
+
+  - id: root-in-entrypoint
+    name: Entrypoint script that runs as root
+    description: "Entrypoint that doesn't drop privileges"
+    pattern: null
+    suggestion: "Switch to non-root user after setup"
+
+  - id: no-dockerignore
+    name: Missing .dockerignore file
+    description: "Project has Dockerfile but no .dockerignore"
+    pattern: null
+    suggestion: "Create .dockerignore to exclude node_modules, .git, etc."
+
+best_practices:
+  dockerfile_structure:
+    recommendation: |
+      Dockerfile best practices:
+
+      # 1. Use specific base image
+      FROM node:20-alpine
+
+      # 2. Set working directory
+      WORKDIR /app
+
+      # 3. Create non-root user early
+      RUN addgroup -S app && adduser -S app -G app
+
+      # 4. Copy dependency files first (for cache)
+      COPY package*.json ./
+
+      # 5. Install dependencies
+      RUN npm ci --only=production
+
+      # 6. Copy application code
+      COPY --chown=app:app . .
+
+      # 7. Switch to non-root user
+      USER app
+
+      # 8. Expose port
+      EXPOSE 3000
+
+      # 9. Add healthcheck
+      HEALTHCHECK --interval=30s --timeout=3s \
+        CMD wget -q --spider http://localhost:3000/health || exit 1
+
+      # 10. Define entrypoint/cmd
+      CMD ["node", "index.js"]
+
+  multi_stage:
+    recommendation: |
+      Multi-stage build template:
+
+      # Build stage
+      FROM node:20-alpine AS builder
+      WORKDIR /app
+
+      COPY package*.json ./
+      RUN npm ci
+
+      COPY . .
+      RUN npm run build
+
+      # Production stage
+      FROM node:20-alpine AS production
+      WORKDIR /app
+
+      RUN addgroup -S app && adduser -S app -G app
+
+      COPY --from=builder --chown=app:app /app/dist ./dist
+      COPY --from=builder --chown=app:app /app/node_modules ./node_modules
+      COPY --from=builder --chown=app:app /app/package.json ./
+
+      USER app
+      EXPOSE 3000
+      CMD ["node", "dist/index.js"]
+
+  dockerignore:
+    recommendation: |
+      Standard .dockerignore:
+
+      # Dependencies
+      node_modules
+      vendor
+      __pycache__
+
+      # Build outputs
+      dist
+      build
+      coverage
+      *.log
+
+      # Development
+      .git
+      .gitignore
+      .env*
+      *.md
+      docs
+      tests
+
+      # IDE
+      .vscode
+      .idea
+      *.swp
+
+      # Docker
+      Dockerfile*
+      docker-compose*
+      .docker
+
+      # Secrets (CRITICAL)
+      *.pem
+      *.key
+      secrets/

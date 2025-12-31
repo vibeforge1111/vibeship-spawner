@@ -1,0 +1,432 @@
+# Sharp Edges - Testing Strategies
+# The gotchas that cause test failures and false confidence
+
+version: 1.0.0
+skill_id: testing-strategies
+
+sharp_edges:
+  - id: flaky-async-tests
+    summary: Async tests that sometimes pass, sometimes fail
+    severity: critical
+    situation: |
+      Your test clicks a button and immediately checks for results. It passes
+      locally, fails in CI. You add a sleep(100), it works. Later it fails
+      again. You increase to sleep(500). CI is now slow and still flaky.
+    why: |
+      Arbitrary waits are racing against async operations. Sometimes the
+      operation finishes first, sometimes the wait finishes first. CI
+      machines are often slower, making flakiness more likely.
+    solution: |
+      # FIX FLAKY ASYNC TESTS
+
+      # WRONG: Arbitrary wait
+      await user.click(button);
+      await sleep(500);
+      expect(result).toBeVisible();
+
+      # WRONG: Fixed timeout
+      await page.waitForTimeout(1000);
+
+
+      # RIGHT: Wait for specific condition
+      await user.click(button);
+      await waitFor(() => {
+        expect(screen.getByText('Success')).toBeInTheDocument();
+      });
+
+
+      # RIGHT: Playwright auto-waiting
+      await page.click('button');
+      await expect(page.locator('.result')).toBeVisible();
+
+
+      # RIGHT: Wait for network idle
+      await Promise.all([
+        page.waitForResponse('/api/submit'),
+        page.click('button'),
+      ]);
+
+
+      # RIGHT: Testing Library findBy (waits automatically)
+      await user.click(button);
+      const result = await screen.findByText('Success');
+      expect(result).toBeInTheDocument();
+
+
+      # Configure appropriate timeout
+      await waitFor(
+        () => expect(element).toBeVisible(),
+        { timeout: 5000 }  // Explicit, reasonable timeout
+      );
+    symptoms:
+      - "Works locally, fails in CI"
+      - Random test failures
+      - Tests pass on retry
+      - Slow test suite from sleep()
+    detection_pattern: 'sleep\(|waitForTimeout\(|setTimeout.*expect'
+
+  - id: test-pollution
+    summary: Tests affecting each other through shared state
+    severity: high
+    situation: |
+      Test A passes alone. Test B passes alone. Run together, one fails.
+      Run in different order, different one fails. Tests are polluting
+      shared state.
+    why: |
+      Tests that modify global state, database records, or module-level
+      variables affect other tests. Jest runs tests in parallel by default,
+      making order unpredictable.
+    solution: |
+      # ISOLATE YOUR TESTS
+
+      # WRONG: Shared mutable state
+      let user;
+      beforeAll(() => {
+        user = createUser();  // Shared across all tests
+      });
+
+      test('A modifies user', () => {
+        user.name = 'Modified';  // Affects other tests
+      });
+
+
+      # RIGHT: Fresh state per test
+      let user;
+      beforeEach(() => {
+        user = createUser();  // Fresh for each test
+      });
+
+
+      # RIGHT: Clean database between tests
+      beforeEach(async () => {
+        await db.transaction(async (tx) => {
+          await tx.deleteFrom('users').execute();
+          await tx.deleteFrom('orders').execute();
+        });
+      });
+
+
+      # RIGHT: Reset mocks
+      afterEach(() => {
+        vi.clearAllMocks();
+        vi.resetModules();
+      });
+
+
+      # RIGHT: Use test containers
+      beforeAll(async () => {
+        container = await new PostgreSqlContainer().start();
+        db = createConnection(container.getConnectionUri());
+      });
+
+      afterAll(async () => {
+        await container.stop();
+      });
+
+
+      # Detect pollution: Run tests in random order
+      // jest.config.js
+      module.exports = {
+        randomize: true,
+      };
+    symptoms:
+      - Tests fail when run together
+      - Different failures in different orders
+      - "Works when I run just this test"
+    detection_pattern: 'beforeAll.*=|let.*\n.*beforeAll'
+
+  - id: testing-library-wrong-queries
+    summary: Using wrong queries leads to brittle tests
+    severity: high
+    situation: |
+      You use getByTestId for everything. Your tests work, but when you
+      refactor the component, all tests break even though the UI is the
+      same. Or you use getByText with exact text that changes with copy
+      updates.
+    why: |
+      Testing Library queries have a priority order based on how users
+      find elements. Using testid when role would work ties tests to
+      implementation. Using exact text ties tests to copy.
+    solution: |
+      # TESTING LIBRARY QUERY PRIORITY
+
+      # 1. getByRole - Accessible name (best)
+      screen.getByRole('button', { name: /submit/i })
+      screen.getByRole('textbox', { name: /email/i })
+      screen.getByRole('heading', { level: 1 })
+
+      # 2. getByLabelText - Form fields
+      screen.getByLabelText(/email address/i)
+
+      # 3. getByPlaceholderText - If no label
+      screen.getByPlaceholderText(/search/i)
+
+      # 4. getByText - Static text
+      screen.getByText(/welcome/i)  // Use regex for flexibility
+
+      # 5. getByTestId - Last resort
+      screen.getByTestId('complex-component')
+
+
+      # WRONG: testid when role works
+      <button data-testid="submit-button">Submit</button>
+      screen.getByTestId('submit-button')
+
+      # RIGHT: Query by role
+      <button>Submit</button>
+      screen.getByRole('button', { name: /submit/i })
+
+
+      # WRONG: Exact text
+      screen.getByText('Welcome to our amazing platform!')
+
+      # RIGHT: Partial match with regex
+      screen.getByText(/welcome/i)
+
+
+      # WRONG: Class names or tag names
+      container.querySelector('.submit-btn')
+      container.querySelector('button')
+
+      # RIGHT: Accessible queries
+      screen.getByRole('button')
+    symptoms:
+      - Tests break on refactor
+      - Tests break on copy changes
+      - Inaccessible UI (if you can't query by role, UI might not be accessible)
+    detection_pattern: 'getByTestId\('
+
+  - id: mocking-what-you-own
+    summary: Mocking internal code instead of external dependencies
+    severity: medium
+    situation: |
+      You mock your own service functions to test a component. Tests pass.
+      You refactor the service. Tests still pass. Ship to production: bug.
+      The mock didn't match the new implementation.
+    why: |
+      Mocks don't update when the real code changes. When you mock internal
+      code, you're testing that your mocks work, not that your code works.
+      The integration is where bugs hide.
+    solution: |
+      # MOCK BOUNDARIES, NOT INTERNALS
+
+      # WRONG: Mocking your own service
+      jest.mock('./userService');
+      userService.getUser.mockResolvedValue({ id: 1, name: 'Test' });
+
+      // If userService.getUser signature changes, mock still "works"
+
+
+      # RIGHT: Use real service, mock external dependency
+      // userService internally uses fetch, mock that
+      const server = setupServer(
+        rest.get('/api/users/:id', (req, res, ctx) => {
+          return res(ctx.json({ id: req.params.id, name: 'Test' }));
+        })
+      );
+
+
+      # RIGHT: Dependency injection
+      function createComponent({ userService }) {
+        // Component uses injected service
+      }
+
+      test('shows user name', () => {
+        const mockService = { getUser: vi.fn().mockResolvedValue({ name: 'Test' }) };
+        render(<Component userService={mockService} />);
+      });
+
+
+      # BOUNDARIES TO MOCK:
+      # - External APIs (use MSW)
+      # - Time (use fake timers)
+      # - Randomness (seed or mock Math.random)
+      # - File system (if needed)
+      # - Environment variables
+
+      # DON'T MOCK:
+      # - Your own functions/services
+      # - Utility functions
+      # - Database (use test database instead)
+    symptoms:
+      - Tests pass, production fails
+      - Refactoring doesn't break tests (when it should)
+      - Mocks need constant updating
+    detection_pattern: 'jest\\.mock\\([\'"]\\.\\.?/'
+
+  - id: snapshot-abuse
+    summary: Using snapshots for everything
+    severity: medium
+    situation: |
+      Every component has a snapshot test. CI fails. You check the diff:
+      a className changed. You update the snapshot without really looking.
+      Repeat 100 times. Snapshots are now meaningless.
+    why: |
+      Snapshots capture everything, including things you don't care about.
+      Large snapshots are impossible to review. They become a "click to
+      update" chore rather than actual tests.
+    solution: |
+      # USE SNAPSHOTS INTENTIONALLY
+
+      # WRONG: Full component snapshot
+      expect(render(<ComplexPage />)).toMatchSnapshot();
+      // 500-line snapshot no one reviews
+
+
+      # RIGHT: Targeted inline snapshot
+      expect(formatDate(date)).toMatchInlineSnapshot(`"Jan 15, 2024"`);
+
+
+      # RIGHT: Snapshot specific parts
+      const { container } = render(<Icon name="check" />);
+      expect(container.querySelector('svg')).toMatchSnapshot();
+
+
+      # BETTER: Explicit assertions
+      render(<UserCard user={user} />);
+      expect(screen.getByText(user.name)).toBeInTheDocument();
+      expect(screen.getByRole('img')).toHaveAttribute('src', user.avatar);
+
+
+      # GOOD SNAPSHOT USE CASES:
+      # - Error messages
+      # - Serialized data structures
+      # - SVG icons
+      # - Generated code output
+
+      # BAD SNAPSHOT USE CASES:
+      # - Full page renders
+      # - Components with dates/IDs
+      # - Anything with random values
+    symptoms:
+      - Snapshots updated without review
+      - Massive snapshot files
+      - "Update snapshot" commits
+    detection_pattern: 'toMatchSnapshot\(\)$'
+
+  - id: missing-error-tests
+    summary: Only testing the happy path
+    severity: medium
+    situation: |
+      All your tests pass. Deploy. User enters invalid email: crash.
+      Network fails: white screen. Edge case: data corruption. You only
+      tested what happens when everything works.
+    why: |
+      Happy path tests are easy. Error handling tests require thinking
+      about what can go wrong. But errors are where users feel the most
+      pain.
+    solution: |
+      # TEST ERROR CASES EXPLICITLY
+
+      describe('checkout', () => {
+        it('completes purchase', async () => {
+          // Happy path
+        });
+
+        it('shows error for declined card', async () => {
+          // Payment failure
+        });
+
+        it('handles network timeout', async () => {
+          server.use(
+            rest.post('/api/checkout', (req, res, ctx) => {
+              return res.networkError('Connection refused');
+            })
+          );
+          // Verify error UI
+        });
+
+        it('prevents double submission', async () => {
+          // Rapidly clicking submit
+        });
+
+        it('validates required fields', async () => {
+          // Empty form submission
+        });
+
+        it('handles session expiry', async () => {
+          // Auth error during checkout
+        });
+      });
+
+
+      # ERROR TEST CHECKLIST:
+      # - Network failures
+      # - API error responses (400, 401, 403, 404, 500)
+      # - Timeout
+      # - Invalid input
+      # - Empty/null data
+      # - Concurrent modifications
+      # - Authentication errors
+    symptoms:
+      - Crashes on edge cases
+      - Poor error messages
+      - White screens on failure
+    detection_pattern: null
+
+  - id: not-testing-loading-states
+    summary: Missing tests for loading and transitional states
+    severity: low
+    situation: |
+      Tests check initial and final states. But users experience loading
+      spinners, disabled buttons, skeleton screens. Those states have bugs
+      too: infinite spinners, buttons that re-enable too early.
+    why: |
+      UI is a state machine. Loading states are real states that users
+      experience. If you only test the endpoints, the journey between
+      them can be broken.
+    solution: |
+      # TEST LOADING STATES
+
+      it('shows loading state during fetch', async () => {
+        render(<UserList />);
+
+        // Loading state
+        expect(screen.getByTestId('skeleton')).toBeInTheDocument();
+        expect(screen.queryByRole('list')).not.toBeInTheDocument();
+
+        // Wait for load
+        await waitFor(() => {
+          expect(screen.queryByTestId('skeleton')).not.toBeInTheDocument();
+        });
+
+        // Loaded state
+        expect(screen.getByRole('list')).toBeInTheDocument();
+      });
+
+
+      it('disables submit during request', async () => {
+        const user = userEvent.setup();
+        render(<Form />);
+
+        const button = screen.getByRole('button');
+        await user.click(button);
+
+        // Button should be disabled
+        expect(button).toBeDisabled();
+
+        // Wait for completion
+        await waitFor(() => {
+          expect(button).not.toBeDisabled();
+        });
+      });
+
+
+      it('shows optimistic update then confirms', async () => {
+        render(<LikeButton />);
+
+        await user.click(screen.getByRole('button'));
+
+        // Optimistic: count increases immediately
+        expect(screen.getByText('1 like')).toBeInTheDocument();
+
+        // After confirm: still shows 1
+        await waitFor(() => {
+          expect(screen.getByText('1 like')).toBeInTheDocument();
+        });
+      });
+    symptoms:
+      - Infinite loading spinners
+      - Double submissions
+      - Janky UI transitions
+    detection_pattern: null

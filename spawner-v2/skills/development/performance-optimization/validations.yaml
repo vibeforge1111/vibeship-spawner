@@ -1,0 +1,286 @@
+# Validations - Performance Optimization
+# Automated checks for performance anti-patterns
+
+version: 1.0.0
+skill_id: performance-optimization
+
+validations:
+  # Bundle size concerns
+  - id: heavy-import
+    name: Heavy library import
+    severity: warning
+    type: regex
+    pattern:
+      - 'from [\'"]moment[\'"]'
+      - 'from [\'"]lodash[\'"]$'
+      - 'import _ from [\'"]lodash[\'"]'
+      - 'require\\([\'"]moment[\'"]\\)'
+    message: "Heavy library import - consider lighter alternatives"
+    fix_action: "Use date-fns instead of moment, lodash-es with specific imports"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.jsx"
+      - "*.tsx"
+
+  - id: no-lazy-loading
+    name: Large component without lazy loading
+    severity: info
+    type: regex
+    pattern:
+      - 'import.*from [\'"]\\./.*Chart[\'"]'
+      - 'import.*from [\'"]\\./.*Editor[\'"]'
+      - 'import.*from [\'"]\\./.*Modal[\'"]'
+      - 'import.*from [\'"]@monaco-editor'
+    message: "Consider lazy loading heavy components"
+    fix_action: "Use dynamic(() => import('./Component')) or lazy()"
+    applies_to:
+      - "*.jsx"
+      - "*.tsx"
+
+  # React performance
+  - id: inline-object-props
+    name: Inline object/array in JSX props
+    severity: info
+    type: regex
+    pattern:
+      - 'style=\\{\\{'
+      - 'className=\\{\\[.*\\]\\.join'
+    message: "Inline objects/arrays cause re-renders"
+    fix_action: "Move to useMemo or define outside component"
+    applies_to:
+      - "*.jsx"
+      - "*.tsx"
+
+  - id: anonymous-callback-props
+    name: Anonymous function in render
+    severity: info
+    type: regex
+    pattern:
+      - 'onClick=\\{\\(\\)\\s*=>'
+      - 'onChange=\\{\\(e\\)\\s*=>'
+      - 'onSubmit=\\{\\(\\)\\s*=>'
+    message: "Anonymous callbacks may cause re-renders in memoized children"
+    fix_action: "Use useCallback if passed to memoized components"
+    applies_to:
+      - "*.jsx"
+      - "*.tsx"
+
+  # Async/loading issues
+  - id: sync-heavy-operation
+    name: Potentially heavy synchronous operation
+    severity: info
+    type: regex
+    pattern:
+      - '\\.sort\\(.*\\)\\.filter\\('
+      - '\\.filter\\(.*\\)\\.map\\(.*\\)\\.reduce\\('
+      - 'JSON\\.parse\\(.*JSON\\.stringify'
+    message: "Chain of array operations may be expensive"
+    fix_action: "Consider single-pass loop or memoization"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.jsx"
+      - "*.tsx"
+
+  - id: blocking-sync-api
+    name: Blocking synchronous API
+    severity: warning
+    type: regex
+    pattern:
+      - 'readFileSync'
+      - 'writeFileSync'
+      - 'execSync'
+      - 'localStorage\\.getItem.*localStorage\\.getItem'
+    message: "Synchronous API blocks the event loop"
+    fix_action: "Use async versions or move to worker"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  # Database performance
+  - id: no-index-hint
+    name: Query without index consideration
+    severity: info
+    type: regex
+    pattern:
+      - 'findMany\\(\\{[^}]*where:\\s*\\{[^}]*\\}[^}]*\\}\\)'
+      - 'SELECT.*WHERE(?!.*(?:id|_id)\\s*=)'
+    message: "Verify this query uses an index"
+    fix_action: "Check query plan, add index if needed"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.sql"
+
+  - id: missing-limit
+    name: Query without LIMIT
+    severity: warning
+    type: regex
+    pattern:
+      - 'findMany\\(\\{(?![^}]*take:)'
+      - 'SELECT(?!.*LIMIT).*FROM'
+    message: "Query may return unbounded results"
+    fix_action: "Add take/LIMIT to prevent loading too much data"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.sql"
+
+  # Memory leaks
+  - id: missing-cleanup
+    name: Event listener without cleanup
+    severity: warning
+    type: regex
+    pattern:
+      - 'useEffect\\([^]*addEventListener[^]*(?!removeEventListener)'
+    message: "Event listener may not be cleaned up"
+    fix_action: "Return cleanup function from useEffect"
+    applies_to:
+      - "*.jsx"
+      - "*.tsx"
+
+  - id: uncontrolled-interval
+    name: setInterval without cleanup
+    severity: warning
+    type: regex
+    pattern:
+      - 'setInterval\\([^;]*\\);(?!.*clearInterval)'
+    message: "Interval may not be cleared"
+    fix_action: "Store interval ID and clear in cleanup"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.jsx"
+      - "*.tsx"
+
+code_smells:
+  - id: over-memoization
+    name: Excessive memo/useMemo/useCallback
+    description: "More than 5 memo calls in a single component"
+    pattern: null
+    suggestion: "Profile to verify memoization is needed"
+
+  - id: deep-nesting
+    name: Deeply nested async/await
+    description: "More than 3 levels of async nesting"
+    pattern: null
+    suggestion: "Flatten with Promise.all or refactor"
+
+  - id: large-state-object
+    name: Very large state object
+    description: "Single useState with many properties"
+    pattern: null
+    suggestion: "Consider useReducer or split state"
+
+best_practices:
+  performance_checklist:
+    recommendation: |
+      ## Performance Checklist
+
+      ### Before deploying
+
+      - [ ] Run Lighthouse CI
+      - [ ] Check bundle size (< 250KB JS initial)
+      - [ ] Verify Core Web Vitals in staging
+      - [ ] Test on slow 3G
+      - [ ] Check N+1 queries with profiler
+      - [ ] Verify images are optimized
+      - [ ] Check cache headers
+
+      ### Frontend
+
+      - [ ] LCP < 2.5s
+      - [ ] INP < 200ms
+      - [ ] CLS < 0.1
+      - [ ] No layout thrashing
+      - [ ] Lazy load below-fold content
+      - [ ] Use loading/skeleton states
+
+      ### Backend
+
+      - [ ] P95 response time < 500ms
+      - [ ] Database queries < 10 per request
+      - [ ] Redis cache for hot paths
+      - [ ] Pagination for list endpoints
+      - [ ] Compression enabled
+
+  measuring_tools:
+    recommendation: |
+      ## Performance Measurement Tools
+
+      ### Frontend
+
+      # Chrome DevTools
+      - Performance tab: CPU profiling
+      - Network tab: Request waterfall
+      - Memory tab: Heap snapshots
+      - Lighthouse: Audits
+
+      # Web Vitals
+      npm install web-vitals
+
+      # Bundle analysis
+      ANALYZE=true npm run build
+
+
+      ### Backend
+
+      # Node.js
+      node --prof app.js
+      autocannon -c 100 -d 10 http://localhost:3000
+
+      # Python
+      python -m cProfile -s cumtime app.py
+      locust -f loadtest.py
+
+      # Database
+      EXPLAIN ANALYZE SELECT ...
+      SELECT * FROM pg_stat_statements;
+
+
+      ### Continuous Monitoring
+
+      # Real User Monitoring
+      - Vercel Analytics
+      - Google Analytics (Web Vitals)
+      - Datadog RUM
+
+      # Synthetic Monitoring
+      - Lighthouse CI
+      - WebPageTest
+      - SpeedCurve
+
+  optimization_order:
+    recommendation: |
+      ## Optimization Priority Order
+
+      1. **Network** (biggest impact)
+         - Reduce request count
+         - Enable compression
+         - Use CDN
+         - HTTP/2 multiplexing
+
+      2. **Assets** (user-perceived)
+         - Optimize images
+         - Lazy load below fold
+         - Preload critical assets
+         - Font subsetting
+
+      3. **JavaScript** (interactivity)
+         - Code splitting
+         - Tree shaking
+         - Defer non-critical
+         - Remove unused deps
+
+      4. **Rendering** (smoothness)
+         - Virtualize long lists
+         - Avoid layout thrashing
+         - Use CSS transforms
+         - Reduce repaints
+
+      5. **Backend** (API speed)
+         - Database indexes
+         - Query optimization
+         - Caching
+         - Background jobs

@@ -1,0 +1,123 @@
+# Claude Code Hooks Validations
+
+validations:
+  - id: missing-error-message
+    name: Hook Exit Without Message
+    severity: high
+    type: regex
+    pattern: 'exit\s+1\s*["\)]'
+    negative_pattern: 'echo.*exit 1|printf.*exit 1'
+    message: "Hook exits with error but no message. Claude won't know why it was blocked."
+    fix_action: "Add echo message before exit: echo 'BLOCKED: reason' && exit 1"
+    applies_to:
+      - "*.json"
+      - ".claude/settings*.json"
+
+  - id: regex-in-matcher
+    name: Regex Pattern in Matcher
+    severity: high
+    type: regex
+    pattern: 'matcher.*\\\\[dswDSW+*?]|matcher.*\\.\\*|matcher.*\\[.*\\]'
+    message: "Hook matcher uses regex syntax. Matchers use glob patterns, not regex."
+    fix_action: "Use glob patterns: Bash(git*) not Bash(git\\s+.*)"
+    applies_to:
+      - "*.json"
+      - ".claude/settings*.json"
+
+  - id: long-inline-command
+    name: Complex Inline Command
+    severity: medium
+    type: regex
+    pattern: '"command":\s*"[^"]{150,}"'
+    message: "Hook command is very long. Complex logic should be in external scripts."
+    fix_action: "Move complex logic to a script file: ./scripts/hook-name.sh"
+    applies_to:
+      - "*.json"
+      - ".claude/settings*.json"
+
+  - id: chained-commands-no-error
+    name: Chained Commands Without Error Handling
+    severity: medium
+    type: regex
+    pattern: '&&[^|]*&&[^|]*&&'
+    negative_pattern: '\|\|.*exit|\|\|.*echo'
+    message: "Multiple chained commands without error handling. Middle failures are silent."
+    fix_action: "Add || exit 1 or use set -e in script"
+    applies_to:
+      - "*.json"
+      - ".claude/settings*.json"
+      - "*.sh"
+
+  - id: hardcoded-tmp-path
+    name: Hardcoded Temp Path Without Session
+    severity: medium
+    type: regex
+    pattern: '/tmp/[a-zA-Z-]+[^$]'
+    negative_pattern: '\$SESSION_ID|\$\{SESSION_ID\}'
+    message: "Hardcoded /tmp path may conflict across sessions. Consider session-scoped paths."
+    fix_action: "Use session ID: /tmp/marker-$SESSION_ID"
+    applies_to:
+      - "*.json"
+      - ".claude/settings*.json"
+
+  - id: sync-long-command
+    name: Potentially Long-Running Synchronous Command
+    severity: medium
+    type: regex
+    pattern: 'npm run (test|build|e2e|lint)[^&]*["\)]|npm test[^&]*["\)]'
+    negative_pattern: '--bail|--passWithNoTests|timeout'
+    message: "Full test/build may timeout. Consider --bail or async patterns."
+    fix_action: "Add --bail for early exit or run in background"
+    applies_to:
+      - "*.json"
+      - ".claude/settings*.json"
+
+  - id: missing-null-check
+    name: Variable Used Without Null Check
+    severity: low
+    type: regex
+    pattern: '\$TOOL_INPUT[A-Z_]+[^}]'
+    negative_pattern: '-n.*\$TOOL|-z.*\$TOOL|\$\{TOOL_[^:]+:-'
+    message: "Environment variable used without null check. May fail silently if undefined."
+    fix_action: "Add null check: [ -n \"$VAR\" ] && ... or ${VAR:-default}"
+    applies_to:
+      - "*.json"
+      - ".claude/settings*.json"
+      - "*.sh"
+
+  - id: hooks-in-wrong-file
+    name: Hooks in Non-Settings File
+    severity: low
+    type: regex
+    pattern: '"hooks"\s*:\s*\{'
+    message: "Hooks found in file - ensure this is .claude/settings.json or .claude/settings.local.json"
+    fix_action: "Move hooks to .claude/settings.json (shared) or .claude/settings.local.json (personal)"
+    applies_to:
+      - "*.json"
+    excludes:
+      - ".claude/settings.json"
+      - ".claude/settings.local.json"
+      - "**/package.json"
+      - "**/tsconfig.json"
+
+  - id: blocking-all-tools
+    name: Overly Broad Matcher
+    severity: medium
+    type: regex
+    pattern: '"matcher"\s*:\s*"(Write|Edit|Bash)"[^(]'
+    message: "Matcher blocks ALL uses of this tool. Consider more specific patterns."
+    fix_action: "Add path/command pattern: Write(*.env*) or Bash(rm*)"
+    applies_to:
+      - "*.json"
+      - ".claude/settings*.json"
+
+  - id: deprecated-hook-syntax
+    name: Old Hook Configuration Syntax
+    severity: low
+    type: regex
+    pattern: '"preToolUse"|"postToolUse"|"sessionStart"'
+    message: "Hook key should be PascalCase: PreToolUse, PostToolUse, SessionStart"
+    fix_action: "Use PascalCase keys in hooks configuration"
+    applies_to:
+      - "*.json"
+      - ".claude/settings*.json"

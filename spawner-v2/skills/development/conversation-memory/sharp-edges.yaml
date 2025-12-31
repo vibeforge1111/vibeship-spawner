@@ -1,0 +1,177 @@
+# Conversation Memory Sharp Edges
+
+sharp_edges:
+  - id: memory-explosion
+    summary: Memory store grows unbounded, system slows
+    severity: high
+    situation: System slows over time, costs increase
+    why: |
+      Every message stored as memory.
+      No cleanup or consolidation.
+      Retrieval over millions of items.
+    solution: |
+      // Implement memory lifecycle management
+
+      class ManagedMemory {
+          // Limits
+          private readonly SHORT_TERM_MAX = 100;
+          private readonly LONG_TERM_MAX = 10000;
+          private readonly CONSOLIDATION_INTERVAL = 24 * 60 * 60 * 1000;
+
+          async add(memory: Memory): Promise<void> {
+              // Score importance before storing
+              const score = await this.scoreImportance(memory);
+              if (score < 0.3) return;  // Don't store low-importance
+
+              memory.importance = score;
+              await this.shortTerm.add(memory);
+
+              // Check limits
+              await this.enforceShortTermLimit();
+          }
+
+          async enforceShortTermLimit(): Promise<void> {
+              const count = await this.shortTerm.count();
+              if (count > this.SHORT_TERM_MAX) {
+                  // Consolidate: move important to long-term, delete rest
+                  const memories = await this.shortTerm.getAll();
+                  memories.sort((a, b) => b.importance - a.importance);
+
+                  const toKeep = memories.slice(0, this.SHORT_TERM_MAX * 0.7);
+                  const toConsolidate = memories.slice(this.SHORT_TERM_MAX * 0.7);
+
+                  for (const m of toConsolidate) {
+                      if (m.importance > 0.7) {
+                          await this.longTerm.add(m);
+                      }
+                      await this.shortTerm.remove(m.id);
+                  }
+              }
+          }
+
+          async scoreImportance(memory: Memory): Promise<number> {
+              const factors = {
+                  hasUserPreference: /prefer|like|don't like|hate|love/i.test(memory.content) ? 0.3 : 0,
+                  hasDecision: /decided|chose|will do|won't do/i.test(memory.content) ? 0.3 : 0,
+                  hasFactAboutUser: /my|I am|I have|I work/i.test(memory.content) ? 0.2 : 0,
+                  length: memory.content.length > 100 ? 0.1 : 0,
+                  userMessage: memory.role === 'user' ? 0.1 : 0,
+              };
+
+              return Object.values(factors).reduce((a, b) => a + b, 0);
+          }
+      }
+    symptoms:
+      - Slow memory retrieval
+      - High storage costs
+      - Increasing latency over time
+    detection_pattern: 'add|store|save.*memory'
+
+  - id: irrelevant-memory-retrieval
+    summary: Retrieved memories not relevant to current query
+    severity: high
+    situation: Memories included in context but don't help
+    why: |
+      Simple keyword matching.
+      No relevance scoring.
+      Including all retrieved memories.
+    solution: |
+      // Intelligent memory retrieval
+
+      async function retrieveRelevant(
+          query: string,
+          memories: MemoryStore,
+          maxResults: number = 5
+      ): Promise<Memory[]> {
+          // 1. Semantic search
+          const candidates = await memories.semanticSearch(query, maxResults * 3);
+
+          // 2. Score relevance with context
+          const scored = await Promise.all(candidates.map(async (m) => {
+              const relevanceScore = await llm.complete(`
+                  Rate 0-1 how relevant this memory is to the query.
+                  Query: "${query}"
+                  Memory: "${m.content}"
+                  Return just the number.
+              `);
+              return { ...m, relevance: parseFloat(relevanceScore) };
+          }));
+
+          // 3. Filter low relevance
+          const relevant = scored.filter(m => m.relevance > 0.5);
+
+          // 4. Sort and limit
+          return relevant
+              .sort((a, b) => b.relevance - a.relevance)
+              .slice(0, maxResults);
+      }
+    symptoms:
+      - Memories in context seem random
+      - User asks about things already in memory
+      - Confusion from irrelevant context
+    detection_pattern: 'search|retrieve|query.*memory'
+
+  - id: memory-privacy-leak
+    summary: Memories from one user accessible to another
+    severity: critical
+    situation: User sees information from another user's sessions
+    why: |
+      No user isolation in memory store.
+      Shared memory namespace.
+      Cross-user retrieval.
+    solution: |
+      // Strict user isolation in memory
+
+      class IsolatedMemory {
+          private getKey(userId: string, memoryId: string): string {
+              // Namespace all keys by user
+              return `user:${userId}:memory:${memoryId}`;
+          }
+
+          async add(userId: string, memory: Memory): Promise<void> {
+              // Validate userId is authenticated
+              if (!isValidUserId(userId)) {
+                  throw new Error('Invalid user ID');
+              }
+
+              const key = this.getKey(userId, memory.id);
+              memory.userId = userId;  // Tag with user
+              await this.store.set(key, memory);
+          }
+
+          async search(userId: string, query: string): Promise<Memory[]> {
+              // CRITICAL: Filter by user in query
+              return await this.store.search({
+                  query,
+                  filter: { userId: userId },  // Mandatory filter
+                  limit: 10
+              });
+          }
+
+          async delete(userId: string, memoryId: string): Promise<void> {
+              const memory = await this.get(userId, memoryId);
+              // Verify ownership before delete
+              if (memory.userId !== userId) {
+                  throw new Error('Access denied');
+              }
+              await this.store.delete(this.getKey(userId, memoryId));
+          }
+
+          // User data export (GDPR compliance)
+          async exportUserData(userId: string): Promise<Memory[]> {
+              return await this.store.getAll({ userId });
+          }
+
+          // User data deletion (GDPR compliance)
+          async deleteUserData(userId: string): Promise<void> {
+              const memories = await this.exportUserData(userId);
+              for (const m of memories) {
+                  await this.store.delete(this.getKey(userId, m.id));
+              }
+          }
+      }
+    symptoms:
+      - User sees other user's information
+      - Privacy complaints
+      - Compliance violations
+    detection_pattern: 'user|userId|owner'

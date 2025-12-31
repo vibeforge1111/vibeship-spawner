@@ -1,0 +1,306 @@
+# Validations - Security & OWASP
+# Automated checks for security vulnerabilities
+
+version: 1.0.0
+skill_id: security-owasp
+
+validations:
+  # Injection vulnerabilities
+  - id: sql-concatenation
+    name: SQL string concatenation
+    severity: critical
+    type: regex
+    pattern:
+      - 'query\\s*\\(\\s*[`\'"].*\\$\\{'
+      - 'query\\s*\\(\\s*[`\'"].*\\+\\s*'
+      - 'WHERE.*=.*[\'"]\\s*\\+\\s*'
+      - 'exec\\s*\\(.*\\+.*\\)'
+    message: "Potential SQL injection - use parameterized queries"
+    fix_action: "Use prepared statements or ORM with parameter binding"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: command-injection
+    name: Command injection risk
+    severity: critical
+    type: regex
+    pattern:
+      - 'exec\\s*\\(.*\\$\\{'
+      - 'execSync\\s*\\(.*\\$\\{'
+      - 'spawn\\s*\\([^,]+\\+|spawn\\s*\\([^,]+\\$\\{'
+      - 'eval\\s*\\('
+    message: "Potential command injection - avoid user input in commands"
+    fix_action: "Use execFile with array args, or validate/escape input strictly"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  # Authentication issues
+  - id: hardcoded-secret
+    name: Hardcoded secret or API key
+    severity: critical
+    type: regex
+    pattern:
+      - 'api[_-]?key\\s*[=:]\\s*[\'"][a-zA-Z0-9]{20,}'
+      - 'secret\\s*[=:]\\s*[\'"][a-zA-Z0-9]{20,}'
+      - 'password\\s*[=:]\\s*[\'"][^\'"]{8,}'
+      - 'sk_live_[a-zA-Z0-9]+'
+      - 'ghp_[a-zA-Z0-9]+'
+      - 'AKIA[A-Z0-9]{16}'
+    message: "Hardcoded secret detected"
+    fix_action: "Use environment variables or secrets manager"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.jsx"
+      - "*.tsx"
+      - "*.py"
+
+  - id: jwt-no-algorithm
+    name: JWT verify without algorithm check
+    severity: high
+    type: regex
+    pattern:
+      - 'jwt\\.verify\\s*\\([^,]+,\\s*[^,]+\\s*\\)(?!.*algorithms)'
+      - 'verify\\s*\\([^)]*\\)(?!.*algorithm)'
+    message: "JWT verification should specify allowed algorithms"
+    fix_action: "Add algorithms option: { algorithms: ['HS256'] }"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: weak-password-hash
+    name: Weak password hashing
+    severity: high
+    type: regex
+    pattern:
+      - 'createHash\\s*\\([\'"]md5[\'"]\\)'
+      - 'createHash\\s*\\([\'"]sha1[\'"]\\)'
+      - 'hashSync\\s*\\([^,]+,\\s*[0-5]\\s*\\)'
+    message: "Use strong password hashing (Argon2 or bcrypt with high rounds)"
+    fix_action: "Use Argon2id or bcrypt with cost factor >= 10"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  # XSS vulnerabilities
+  - id: dangerous-html
+    name: Dangerous HTML insertion
+    severity: high
+    type: regex
+    pattern:
+      - 'dangerouslySetInnerHTML.*\\{\\s*__html:(?!.*sanitize|.*DOMPurify)'
+      - '\\.innerHTML\\s*='
+      - 'document\\.write\\s*\\('
+    message: "Direct HTML insertion can cause XSS"
+    fix_action: "Use DOMPurify.sanitize() or avoid innerHTML"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.jsx"
+      - "*.tsx"
+
+  # CSRF issues
+  - id: missing-csrf
+    name: State-changing endpoint without CSRF protection
+    severity: medium
+    type: regex
+    pattern:
+      - 'app\\.(post|put|patch|delete)\\s*\\([^)]+(?!csrf|token)'
+    message: "Consider CSRF protection for state-changing endpoints"
+    fix_action: "Use SameSite cookies or CSRF tokens"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  # Cookie security
+  - id: insecure-cookie
+    name: Cookie without security flags
+    severity: medium
+    type: regex
+    pattern:
+      - 'cookie\\s*\\([^)]+(?!httpOnly|secure|sameSite)'
+      - 'setCookie\\s*\\([^)]+(?!httpOnly)'
+    message: "Cookies should have security flags"
+    fix_action: "Add httpOnly, secure, and sameSite flags"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  # Path traversal
+  - id: path-traversal
+    name: User input in file path
+    severity: high
+    type: regex
+    pattern:
+      - 'readFile.*req\\.(params|query|body)'
+      - 'readFileSync.*req\\.'
+      - 'path\\.join.*req\\.'
+      - 'sendFile.*req\\.(params|query)'
+    message: "User input in file paths can lead to path traversal"
+    fix_action: "Use path.basename() and verify resolved path is in allowed directory"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  # Mass assignment
+  - id: mass-assignment
+    name: Spreading request body into database
+    severity: high
+    type: regex
+    pattern:
+      - '\\.create\\s*\\(\\s*\\{[^}]*\\.\\.\\.req\\.body'
+      - '\\.update\\s*\\(\\s*\\{[^}]*\\.\\.\\.req\\.body'
+      - 'data:\\s*req\\.body(?!\\[)'
+    message: "Mass assignment vulnerability - explicitly pick allowed fields"
+    fix_action: "Destructure only allowed fields or use validation schema"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  # Timing attacks
+  - id: timing-attack
+    name: Non-constant-time secret comparison
+    severity: medium
+    type: regex
+    pattern:
+      - '(password|secret|token|key|hash)\\s*===\\s*(password|secret|token|key|hash|req\\.|input|user)'
+    message: "Use timing-safe comparison for secrets"
+    fix_action: "Use crypto.timingSafeEqual() or library comparison functions"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+code_smells:
+  - id: no-rate-limiting
+    name: No rate limiting on sensitive endpoints
+    description: "Login/register without rate limiting"
+    pattern: null
+    suggestion: "Add rate limiting to prevent brute force"
+
+  - id: verbose-errors
+    name: Verbose error messages to client
+    description: "Stack traces or internal details in error responses"
+    pattern: null
+    suggestion: "Log details, return generic messages to client"
+
+  - id: no-input-validation
+    name: Missing input validation
+    description: "Endpoints without schema validation"
+    pattern: null
+    suggestion: "Use Zod or similar to validate all input"
+
+best_practices:
+  security_checklist:
+    recommendation: |
+      ## Security Checklist
+
+      ### Authentication
+      - [ ] Passwords hashed with Argon2 or bcrypt (cost >= 10)
+      - [ ] Rate limiting on login attempts
+      - [ ] Account lockout after failures
+      - [ ] Secure session management
+      - [ ] HTTPS only cookies
+
+      ### Authorization
+      - [ ] Every endpoint checks permissions
+      - [ ] Resource-level access control (IDOR prevention)
+      - [ ] Role-based access control
+      - [ ] Principle of least privilege
+
+      ### Input Validation
+      - [ ] All input validated with schema
+      - [ ] Parameterized queries (SQL injection)
+      - [ ] Output encoding (XSS)
+      - [ ] File upload validation
+
+      ### Headers & Cookies
+      - [ ] Security headers set (CSP, HSTS, etc.)
+      - [ ] Cookies: httpOnly, secure, sameSite
+      - [ ] CORS properly configured
+      - [ ] CSRF protection
+
+      ### Secrets
+      - [ ] No hardcoded secrets
+      - [ ] Environment variables for config
+      - [ ] Secrets manager for production
+      - [ ] Secrets not in logs
+
+  owasp_quick_reference:
+    recommendation: |
+      ## OWASP Top 10 Quick Reference
+
+      A01 Broken Access Control
+      → Check permissions on every request
+      → Verify resource ownership
+
+      A02 Cryptographic Failures
+      → Use TLS 1.2+
+      → Strong password hashing
+      → Encrypt sensitive data at rest
+
+      A03 Injection
+      → Parameterized queries
+      → Input validation
+      → Avoid eval/exec
+
+      A04 Insecure Design
+      → Threat modeling
+      → Secure defaults
+      → Defense in depth
+
+      A05 Security Misconfiguration
+      → Secure headers
+      → Remove defaults
+      → Update dependencies
+
+      A06 Vulnerable Components
+      → npm audit
+      → Dependabot/Renovate
+      → Regular updates
+
+      A07 Authentication Failures
+      → Strong passwords
+      → MFA
+      → Session management
+
+      A08 Integrity Failures
+      → Verify signatures
+      → SRI for CDN resources
+      → Signed artifacts
+
+      A09 Logging Failures
+      → Log security events
+      → Don't log secrets
+      → Monitor for attacks
+
+      A10 SSRF
+      → Validate URLs
+      → Block internal IPs
+      → Allowlist domains
+
+  secure_defaults:
+    recommendation: |
+      ## Secure Default Configuration
+
+      // next.config.js with security headers
+      const securityHeaders = [
+        { key: 'X-DNS-Prefetch-Control', value: 'on' },
+        { key: 'X-XSS-Protection', value: '1; mode=block' },
+        { key: 'X-Frame-Options', value: 'DENY' },
+        { key: 'X-Content-Type-Options', value: 'nosniff' },
+        { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+        {
+          key: 'Strict-Transport-Security',
+          value: 'max-age=31536000; includeSubDomains'
+        },
+        {
+          key: 'Content-Security-Policy',
+          value: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';"
+        },
+        {
+          key: 'Permissions-Policy',
+          value: 'camera=(), microphone=(), geolocation=()'
+        },
+      ];

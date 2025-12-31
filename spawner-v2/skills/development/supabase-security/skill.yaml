@@ -1,0 +1,188 @@
+id: supabase-security
+name: Supabase Security
+version: 1.0.0
+category: development
+layer: 2
+
+description: |
+  Deep expertise in securing Supabase applications. Covers Row Level Security 
+  (RLS) patterns, auth token validation, storage security, multi-tenant isolation.
+
+triggers:
+  - supabase security
+  - rls policy
+  - row level security
+  - service role key
+  - multi-tenant rls
+
+owns:
+  - supabase-rls
+  - supabase-policies
+  - supabase-auth-security
+  - supabase-storage-security
+
+pairs_with:
+  - supabase-backend
+  - nextjs-supabase-auth
+  - security-owasp
+
+identity: |
+  You are a Supabase security expert. RLS is mandatory on every table.
+  Service role key is nuclear - server only. Trust only auth.uid().
+
+patterns:
+  - name: RLS Policy Types
+    description: All four policy types
+    when: Setting up table security
+    example: |
+      -- SELECT policy
+      create policy "Users see own" on profiles for select
+        using (auth.uid() = user_id);
+
+      -- INSERT policy
+      create policy "Users create own" on profiles for insert
+        with check (auth.uid() = user_id);
+
+      -- UPDATE policy (needs both)
+      create policy "Users update own" on profiles for update
+        using (auth.uid() = user_id)
+        with check (auth.uid() = user_id);
+
+      -- DELETE policy
+      create policy "Users delete own" on profiles for delete
+        using (auth.uid() = user_id);
+
+  - name: Role-Based Access Control
+    description: RBAC using JWT claims
+    when: Different permissions per role
+    example: |
+      create or replace function is_admin()
+      returns boolean as $$
+        select coalesce(
+          (auth.jwt() -> 'app_metadata' ->> 'role') = 'admin',
+          false
+        );
+      $$ language sql security definer;
+
+      create policy "Admin access" on admin_data for all
+        using (is_admin());
+
+  - name: Multi-Tenant RLS
+    description: Isolate data between orgs
+    when: SaaS with multiple organizations
+    example: |
+      create or replace function user_org_ids()
+      returns setof uuid as $$
+        select org_id from org_members
+        where user_id = auth.uid()
+      $$ language sql security definer stable;
+
+      create policy "Org access" on projects for select
+        using (org_id in (select user_org_ids()));
+
+      -- CRITICAL: Index for performance
+      create index idx_org_members_user on org_members(user_id);
+
+  - name: Storage Security
+    description: Secure file uploads
+    when: Private file storage
+    example: |
+      -- Private bucket
+      insert into storage.buckets (id, name, public)
+      values ('user-files', 'user-files', false);
+
+      -- User folder policy: user-files/{user_id}/file.ext
+      create policy "Own files" on storage.objects for select
+        using (
+          bucket_id = 'user-files' and
+          auth.uid()::text = (storage.foldername(name))[1]
+        );
+
+  - name: Service Role vs Anon Key
+    description: When to use each
+    when: Choosing auth method
+    example: |
+      // ANON KEY - safe for client, subject to RLS
+      const supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+      );
+
+      // SERVICE ROLE - BYPASSES RLS, server only\!
+      const supabaseAdmin = createClient(
+        process.env.SUPABASE_URL,
+        process.env.SUPABASE_SERVICE_ROLE_KEY  // NO NEXT_PUBLIC_\!
+      );
+
+  - name: Edge Function Auth
+    description: Verify tokens in Edge Functions
+    when: Serverless functions
+    example: |
+      const authHeader = req.headers.get("Authorization");
+      const supabase = createClient(url, anonKey, {
+        global: { headers: { Authorization: authHeader } }
+      });
+      const { data: { user } } = await supabase.auth.getUser();
+      if (\!user) return new Response("Unauthorized", { status: 401 });
+
+  - name: Preventing IDOR
+    description: Insecure Direct Object Reference
+    when: APIs taking IDs from client
+    example: |
+      -- Without RLS, client can query any user:
+      -- .from("profiles").eq("id", anyUserId)
+
+      -- With RLS policy, safe:
+      create policy "Own profile" on profiles for select
+        using (auth.uid() = id);
+
+  - name: Preventing Privilege Escalation  
+    description: Stop role self-elevation
+    when: User profiles with roles
+    example: |
+      create policy "Update own profile" on users for update
+        using (auth.uid() = id)
+        with check (
+          role = (select role from users where id = auth.uid())
+        );
+      -- Role must stay unchanged
+
+anti_patterns:
+  - name: RLS Disabled
+    description: Tables without RLS
+    why: Anyone can read/write all data
+    instead: Enable RLS on every table
+
+  - name: Service Role in Client
+    description: Service key in frontend
+    why: Full database access exposed
+    instead: Server only, no NEXT_PUBLIC_
+
+  - name: Trusting Client ID
+    description: Client-provided user_id
+    why: Users can impersonate others
+    instead: Always use auth.uid()
+
+  - name: Complex Policy Logic
+    description: Business logic in policies
+    why: Kills performance
+    instead: Use security definer functions
+
+  - name: Missing Policy Indexes
+    description: RLS on non-indexed columns
+    why: Full table scan
+    instead: Index policy columns
+
+handoffs:
+  - trigger: auth flow|login
+    to: nextjs-supabase-auth
+  - trigger: database schema
+    to: supabase-backend
+  - trigger: performance
+    to: postgres-wizard
+
+tags:
+  - supabase
+  - security
+  - rls
+  - postgres

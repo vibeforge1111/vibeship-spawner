@@ -1,0 +1,227 @@
+id: rag-implementation
+name: RAG Implementation
+version: 1.0.0
+layer: 2
+description: Retrieval-Augmented Generation patterns including chunking, embeddings, vector stores, and retrieval optimization
+
+owns:
+  - document-chunking
+  - embedding-models
+  - vector-stores
+  - retrieval-strategies
+  - hybrid-search
+  - reranking
+
+pairs_with:
+  - context-window-management
+  - conversation-memory
+  - prompt-caching
+  - data-pipeline
+
+ecosystem:
+  primary_tools:
+    - name: LanceDB
+      description: Lightweight embedded vector database
+      url: https://lancedb.com
+    - name: Pinecone
+      description: Managed vector database
+      url: https://pinecone.io
+    - name: Chroma
+      description: Open source embedding database
+      url: https://trychroma.com
+    - name: OpenAI Embeddings
+      description: text-embedding-3 models
+      url: https://platform.openai.com/docs/guides/embeddings
+
+prerequisites:
+  knowledge:
+    - Vector embeddings basics
+    - Similarity search concepts
+    - Document processing
+  skills_recommended:
+    - context-window-management
+    - data-pipeline
+
+limits:
+  does_not_cover:
+    - Full-text search engines
+    - Document OCR/parsing
+    - Knowledge graph construction
+  boundaries:
+    - Focus is RAG-specific patterns
+    - Covers chunking to retrieval
+
+tags:
+  - rag
+  - retrieval
+  - embeddings
+  - vector
+  - search
+  - llm
+
+triggers:
+  - rag
+  - retrieval augmented
+  - vector search
+  - embeddings
+  - semantic search
+  - document qa
+
+identity: |
+  You're a RAG specialist who has built systems serving millions of queries over
+  terabytes of documents. You've seen the naive "chunk and embed" approach fail,
+  and developed sophisticated chunking, retrieval, and reranking strategies.
+
+  You understand that RAG is not just vector search—it's about getting the right
+  information to the LLM at the right time. You know when RAG helps and when
+  it's unnecessary overhead.
+
+  Your core principles:
+  1. Chunking is critical—bad chunks mean bad retrieval
+  2. Hybrid search wins—combine dense and sparse retrieval
+  3. Rerank for quality—top-k isn't top-relevance
+  4. Evaluate continuously—retrieval quality degrades silently
+  5. Consider the alternative—sometimes caching beats RAG
+
+patterns:
+  - name: Semantic Chunking
+    description: Chunk by meaning, not arbitrary size
+    when: Processing documents for RAG
+    example: |
+      class SemanticChunker {
+          async chunk(document: string): Promise<Chunk[]> {
+              // Split into sentences
+              const sentences = splitSentences(document);
+
+              // Group by semantic similarity
+              const chunks: Chunk[] = [];
+              let currentChunk: string[] = [];
+              let currentEmbedding: number[] | null = null;
+
+              for (const sentence of sentences) {
+                  const embedding = await embed(sentence);
+
+                  if (!currentEmbedding) {
+                      currentChunk.push(sentence);
+                      currentEmbedding = embedding;
+                      continue;
+                  }
+
+                  const similarity = cosineSimilarity(currentEmbedding, embedding);
+
+                  if (similarity > 0.8 && currentChunk.length < 10) {
+                      // Similar enough, add to current chunk
+                      currentChunk.push(sentence);
+                      currentEmbedding = averageEmbeddings([currentEmbedding, embedding]);
+                  } else {
+                      // Start new chunk
+                      chunks.push({ text: currentChunk.join(' '), embedding: currentEmbedding });
+                      currentChunk = [sentence];
+                      currentEmbedding = embedding;
+                  }
+              }
+
+              if (currentChunk.length > 0) {
+                  chunks.push({ text: currentChunk.join(' '), embedding: currentEmbedding! });
+              }
+
+              return chunks;
+          }
+      }
+
+  - name: Hybrid Search
+    description: Combine dense (vector) and sparse (keyword) search
+    when: Need both semantic and exact match capability
+    example: |
+      class HybridRetriever {
+          async retrieve(query: string, k: number = 10): Promise<Document[]> {
+              // Dense retrieval (semantic)
+              const queryEmbedding = await embed(query);
+              const denseResults = await vectorStore.search(queryEmbedding, k * 2);
+
+              // Sparse retrieval (BM25/keyword)
+              const sparseResults = await bm25Search(query, k * 2);
+
+              // Reciprocal Rank Fusion
+              const scores = new Map<string, number>();
+
+              denseResults.forEach((doc, idx) => {
+                  const score = 1 / (60 + idx);  // RRF constant = 60
+                  scores.set(doc.id, (scores.get(doc.id) || 0) + score);
+              });
+
+              sparseResults.forEach((doc, idx) => {
+                  const score = 1 / (60 + idx);
+                  scores.set(doc.id, (scores.get(doc.id) || 0) + score);
+              });
+
+              // Sort by combined score
+              const ranked = [...scores.entries()]
+                  .sort((a, b) => b[1] - a[1])
+                  .slice(0, k);
+
+              return ranked.map(([id]) => getDocument(id));
+          }
+      }
+
+  - name: Contextual Reranking
+    description: Rerank retrieved docs with LLM for relevance
+    when: Top-k retrieval not accurate enough
+    example: |
+      async function rerankWithLLM(
+          query: string,
+          candidates: Document[],
+          topK: number = 5
+      ): Promise<Document[]> {
+          // Use smaller model for reranking (cost efficient)
+          const prompt = `Rate these documents' relevance to the query.
+          Query: "${query}"
+
+          Documents:
+          ${candidates.map((d, i) => `[${i}] ${d.text.slice(0, 500)}`).join('\n\n')}
+
+          Return JSON: { "rankings": [{"index": 0, "score": 0.9}, ...] }
+          Score 0-1 where 1 is highly relevant.`;
+
+          const response = await llm.complete(prompt, { model: 'gpt-3.5-turbo' });
+          const rankings = JSON.parse(response).rankings;
+
+          return rankings
+              .sort((a, b) => b.score - a.score)
+              .slice(0, topK)
+              .map(r => candidates[r.index]);
+      }
+
+anti_patterns:
+  - name: Fixed-Size Chunking
+    description: Splitting documents at arbitrary character/token counts
+    why: Breaks sentences, loses context, poor retrieval
+    instead: Use semantic or recursive chunking that respects boundaries.
+
+  - name: No Overlap
+    description: Non-overlapping chunks losing context at boundaries
+    why: Important context at chunk edges lost
+    instead: Use 10-20% overlap between chunks.
+
+  - name: Single Retrieval Strategy
+    description: Only using vector search
+    why: Misses exact matches, proper nouns, codes
+    instead: Hybrid search combining dense and sparse retrieval.
+
+  - name: No Evaluation
+    description: Not measuring retrieval quality
+    why: Retrieval degradation is silent, affects all downstream
+    instead: Regular evaluation with ground truth, track MRR/recall.
+
+handoffs:
+  - trigger: context window
+    to: context-window-management
+    context: Need context optimization
+
+  - trigger: memory or persistence
+    to: conversation-memory
+    context: Need memory storage
+
+  - trigger: caching
+    to: prompt-caching
+    context: Need caching strategies

@@ -1,0 +1,196 @@
+version: 1.0.0
+skill_id: supabase-security
+
+sharp_edges:
+  - id: rls-disabled-table
+    summary: Table with RLS disabled exposes all data
+    severity: critical
+    situation: |
+      You create a table and forget to enable RLS. Or you disable it
+      for testing and forget to re-enable. Anyone with the anon key
+      can now read and write all data in that table.
+    why: |
+      By default, tables are accessible to anyone. RLS is opt-in.
+      The anon key is public (in your frontend bundle). Without RLS,
+      that key grants full access to the table.
+    solution: |
+      -- Enable RLS on EVERY table
+      alter table users enable row level security;
+      alter table posts enable row level security;
+      alter table comments enable row level security;
+
+      -- Even for public data, enable RLS with permissive policy
+      alter table public_posts enable row level security;
+      create policy "Anyone can read" on public_posts
+        for select using (true);
+    symptoms:
+      - Data visible to unauthenticated users
+      - Users can see other users data
+      - Data modified without authorization
+
+  - id: service-role-exposed
+    summary: Service role key in client-side code
+    severity: critical
+    situation: |
+      You need to bypass RLS for an admin feature. You use the service
+      role key. You accidentally put it in an environment variable with
+      NEXT_PUBLIC_ prefix, or import it in client code.
+    why: |
+      Service role key bypasses ALL security. Anyone can extract it from
+      your frontend bundle. They now have full database access - read all
+      data, delete everything, impersonate any user.
+    solution: |
+      // WRONG - exposed to client
+      const supabase = createClient(url, process.env.NEXT_PUBLIC_SERVICE_KEY);
+
+      // RIGHT - server only
+      // In server action or API route:
+      const supabaseAdmin = createClient(
+        process.env.SUPABASE_URL,
+        process.env.SUPABASE_SERVICE_ROLE_KEY  // No NEXT_PUBLIC_
+      );
+
+      // Check your .env files:
+      // .env.local should have:
+      // SUPABASE_SERVICE_ROLE_KEY=...  (no NEXT_PUBLIC_)
+    symptoms:
+      - Service key visible in browser devtools
+      - Unauthorized data access
+      - Data deletion or corruption
+
+  - id: policy-missing-auth-check
+    summary: RLS policy without auth.uid() check
+    severity: critical
+    situation: |
+      You write a policy that checks a column value but forgets to verify
+      the user owns the row. Users can manipulate the query to access
+      other users data.
+    why: |
+      RLS policies must anchor to auth.uid(). If you only check
+      "status = published", any user can see any published row,
+      even private ones with status published.
+    solution: |
+      -- WRONG: No ownership check
+      create policy "See published" on posts for select
+        using (status = 'published');  -- Anyone sees all published\!
+
+      -- RIGHT: Include ownership
+      create policy "See own or published" on posts for select
+        using (
+          auth.uid() = author_id OR status = 'published'
+        );
+    symptoms:
+      - Users see data they should not
+      - Private data leaks
+
+  - id: insert-without-user-id
+    summary: INSERT policy allows any user_id value
+    severity: high
+    situation: |
+      Your INSERT policy uses with check (true) or forgets to verify
+      user_id matches auth.uid(). Users can insert records as other users.
+    why: |
+      INSERT policies need with check, not using. If you do not validate
+      user_id, users can set any value and impersonate others.
+    solution: |
+      -- WRONG: No user_id validation
+      create policy "Insert posts" on posts for insert
+        with check (true);  -- Anyone can set any user_id\!
+
+      -- RIGHT: Force user_id to match
+      create policy "Insert own posts" on posts for insert
+        with check (auth.uid() = user_id);
+
+      -- Also validate other fields
+      create policy "Insert safe" on posts for insert
+        with check (
+          auth.uid() = user_id AND
+          status in ('draft', 'published')
+        );
+    symptoms:
+      - Records created with wrong user_id
+      - Impersonation attacks
+
+  - id: update-missing-with-check
+    summary: UPDATE policy without with check allows privilege escalation
+    severity: high
+    situation: |
+      Your UPDATE policy only has using() but no with check(). Users can
+      modify their rows to values they should not have - like setting
+      role to admin.
+    why: |
+      using() controls which rows are visible. with check() controls what
+      values are allowed. Without with check, any value can be written.
+    solution: |
+      -- WRONG: No value validation
+      create policy "Update own" on users for update
+        using (auth.uid() = id);  -- Can set role = 'admin'\!
+
+      -- RIGHT: Validate new values
+      create policy "Update own safe" on users for update
+        using (auth.uid() = id)
+        with check (
+          auth.uid() = id AND
+          role = (select role from users where id = auth.uid())
+        );
+    symptoms:
+      - Users elevate their own privileges
+      - Protected fields modified
+
+  - id: storage-public-bucket
+    summary: Storage bucket set to public unintentionally
+    severity: high
+    situation: |
+      You create a bucket for user uploads and set public = true to make
+      URLs work. Now anyone can list and download all files without auth.
+    why: |
+      Public buckets expose all files via predictable URLs. Even without
+      listing, files can be accessed if the path is guessed or leaked.
+    solution: |
+      -- Create PRIVATE bucket
+      insert into storage.buckets (id, name, public)
+      values ('uploads', 'uploads', false);  -- public = false\!
+
+      -- Add RLS policy for access
+      create policy "Users access own files" on storage.objects
+        for select using (
+          bucket_id = 'uploads' and
+          auth.uid()::text = (storage.foldername(name))[1]
+        );
+
+      -- For downloads, use signed URLs from server
+    symptoms:
+      - Files accessible without login
+      - Private files exposed publicly
+
+  - id: policy-performance
+    summary: Complex RLS policy causes slow queries
+    severity: medium
+    situation: |
+      Your policy does a subquery or function call. Every query now takes
+      seconds instead of milliseconds. The table grows and it gets worse.
+    why: |
+      RLS policies run on every row. Complex logic means complex execution
+      on every query. No index can help if the policy itself is slow.
+    solution: |
+      -- WRONG: Subquery in policy
+      create policy "Team access" on docs for select
+        using (
+          team_id in (select team_id from team_members where user_id = auth.uid())
+        );  -- Runs subquery for EVERY row\!
+
+      -- RIGHT: Use security definer function
+      create or replace function user_team_ids()
+      returns setof uuid as 96384
+        select team_id from team_members where user_id = auth.uid()
+      96384 language sql security definer stable;
+
+      -- Cache result per query
+      create policy "Team access" on docs for select
+        using (team_id in (select user_team_ids()));
+
+      -- Add index
+      create index idx_team_members_user on team_members(user_id);
+    symptoms:
+      - Queries take seconds
+      - Performance degrades with data growth

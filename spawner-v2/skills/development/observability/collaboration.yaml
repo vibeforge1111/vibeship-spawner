@@ -1,0 +1,419 @@
+# Collaboration - Observability
+# How this skill works with other skills
+
+version: 1.0.0
+skill_id: observability
+
+prerequisites:
+  required: []
+
+  recommended:
+    - skill: backend
+      reason: "Server-side logging context"
+      what_to_know:
+        - "Express/Fastify middleware patterns"
+        - "Error handling flow"
+        - "Request lifecycle"
+
+    - skill: kubernetes
+      reason: "Container logging and metrics"
+      what_to_know:
+        - "Log aggregation patterns"
+        - "Prometheus scraping"
+        - "Liveness/readiness probes"
+
+  knowledge:
+    - "JSON structured logging"
+    - "Prometheus metric types"
+    - "Distributed tracing concepts"
+
+delegation_triggers:
+  - trigger: "user needs performance profiling"
+    delegate_to: performance-optimization
+    context: "Performance investigation"
+
+  - trigger: "user needs kubernetes monitoring"
+    delegate_to: kubernetes
+    context: "K8s-specific observability"
+
+  - trigger: "user needs database slow query logging"
+    delegate_to: postgres-wizard
+    context: "Database monitoring"
+
+  - trigger: "user needs CI/CD pipeline monitoring"
+    delegate_to: cicd-pipelines
+    context: "Pipeline observability"
+
+receives_context_from:
+  - skill: backend
+    receives:
+      - "Framework being used"
+      - "Error handling patterns"
+      - "API route structure"
+
+  - skill: kubernetes
+    receives:
+      - "Deployment environment"
+      - "Service mesh config"
+      - "Log aggregation setup"
+
+  - skill: microservices
+    receives:
+      - "Service topology"
+      - "Inter-service communication"
+      - "Failure modes to monitor"
+
+provides_context_to:
+  - skill: backend
+    provides:
+      - "Logging middleware setup"
+      - "Error tracking integration"
+      - "Request ID propagation"
+
+  - skill: devops
+    provides:
+      - "Alerting rules"
+      - "Dashboard requirements"
+      - "SLI/SLO definitions"
+
+  - skill: security-owasp
+    provides:
+      - "Audit logging patterns"
+      - "Security event monitoring"
+      - "Anomaly detection setup"
+
+escalation_paths:
+  - situation: "Need custom Grafana dashboards"
+    escalate_to: devops
+    context: "Dashboard creation"
+
+  - situation: "Database query performance"
+    escalate_to: postgres-wizard
+    context: "Query monitoring setup"
+
+  - situation: "Kubernetes log aggregation"
+    escalate_to: kubernetes
+    context: "Container logging"
+
+workflow_integration:
+  typical_sequence:
+    1:
+      step: "Add structured logging"
+      skills: [observability]
+      output: "Logger configured with redaction"
+
+    2:
+      step: "Add request ID middleware"
+      skills: [observability, backend]
+      output: "Request correlation enabled"
+
+    3:
+      step: "Set up metrics collection"
+      skills: [observability]
+      output: "Prometheus metrics endpoint"
+
+    4:
+      step: "Configure distributed tracing"
+      skills: [observability]
+      output: "OpenTelemetry instrumentation"
+
+    5:
+      step: "Set up error tracking"
+      skills: [observability]
+      output: "Sentry integration"
+
+    6:
+      step: "Define alerts"
+      skills: [observability, devops]
+      output: "Alerting rules for key SLIs"
+
+  decision_points:
+    - question: "Which logging library?"
+      guidance: |
+        Pino when:
+        - Need performance
+        - JSON logging
+        - Most Node.js apps
+
+        Winston when:
+        - Need transport flexibility
+        - Legacy codebase using it
+        - Complex log routing
+
+        Console when:
+        - Serverless (short-lived)
+        - Development only
+
+    - question: "Self-hosted or SaaS observability?"
+      guidance: |
+        Self-hosted (Prometheus, Jaeger, ELK):
+        - Data sovereignty requirements
+        - High volume, cost-sensitive
+        - Team has DevOps capacity
+
+        SaaS (Datadog, New Relic, Sentry):
+        - Faster setup
+        - Less maintenance
+        - Integrated features
+        - Budget available
+
+    - question: "Sample rate for tracing?"
+      guidance: |
+        100% sampling when:
+        - Development/staging
+        - Low traffic
+        - Debugging specific issues
+
+        10% sampling when:
+        - High traffic production
+        - Cost-sensitive
+        - General monitoring
+
+        Head-based vs tail-based:
+        - Head: Decide at request start (simpler)
+        - Tail: Decide after request (captures errors)
+
+collaboration_patterns:
+  with_nextjs:
+    when: "Next.js application observability"
+    approach: |
+      Next.js Observability:
+
+      ## Logging in API routes
+
+      // lib/logger.ts
+      import pino from 'pino';
+
+      export const logger = pino({
+        level: process.env.LOG_LEVEL || 'info',
+      });
+
+      // app/api/users/route.ts
+      import { logger } from '@/lib/logger';
+      import { headers } from 'next/headers';
+
+      export async function GET() {
+        const headersList = headers();
+        const requestId = headersList.get('x-request-id') || crypto.randomUUID();
+
+        const log = logger.child({ request_id: requestId });
+        log.info('Fetching users');
+
+        // ...
+      }
+
+
+      ## Client-side error tracking
+
+      // app/error.tsx
+      'use client';
+
+      import * as Sentry from '@sentry/nextjs';
+      import { useEffect } from 'react';
+
+      export default function Error({ error, reset }) {
+        useEffect(() => {
+          Sentry.captureException(error);
+        }, [error]);
+
+        return (
+          <div>
+            <h2>Something went wrong</h2>
+            <button onClick={reset}>Try again</button>
+          </div>
+        );
+      }
+
+
+      ## Middleware for request IDs
+
+      // middleware.ts
+      import { NextResponse } from 'next/server';
+
+      export function middleware(request) {
+        const requestId = request.headers.get('x-request-id') || crypto.randomUUID();
+
+        const response = NextResponse.next();
+        response.headers.set('x-request-id', requestId);
+
+        return response;
+      }
+
+  with_express:
+    when: "Express application observability"
+    approach: |
+      Express Observability:
+
+      ## Full middleware stack
+
+      import express from 'express';
+      import pino from 'pino';
+      import pinoHttp from 'pino-http';
+      import { Registry, collectDefaultMetrics } from 'prom-client';
+      import * as Sentry from '@sentry/node';
+
+      const app = express();
+      const logger = pino();
+      const register = new Registry();
+
+      // Sentry first (captures all errors)
+      Sentry.init({ dsn: process.env.SENTRY_DSN });
+      app.use(Sentry.Handlers.requestHandler());
+
+      // Request logging
+      app.use(pinoHttp({
+        logger,
+        genReqId: (req) => req.headers['x-request-id'] || crypto.randomUUID(),
+      }));
+
+      // Metrics middleware
+      collectDefaultMetrics({ register });
+      app.use(metricsMiddleware);
+
+      // Routes
+      app.use('/api', routes);
+
+      // Sentry error handler
+      app.use(Sentry.Handlers.errorHandler());
+
+      // Custom error handler
+      app.use((err, req, res, next) => {
+        req.log.error({ err }, 'Request failed');
+        res.status(err.status || 500).json({
+          error: 'internal_error',
+          request_id: req.id,
+        });
+      });
+
+  with_microservices:
+    when: "Distributed system observability"
+    approach: |
+      Microservices Observability:
+
+      ## Trace context propagation
+
+      import { context, propagation } from '@opentelemetry/api';
+
+      // When calling another service
+      async function callService(path: string) {
+        const headers: Record<string, string> = {};
+        propagation.inject(context.active(), headers);
+
+        return fetch(`${SERVICE_URL}${path}`, { headers });
+      }
+
+
+      ## Correlation across services
+
+      // Every log includes:
+      {
+        "trace_id": "abc123",      // Same across all services
+        "span_id": "def456",       // Unique per operation
+        "parent_span_id": "ghi789", // Parent operation
+        "service": "user-service",
+        "request_id": "xyz789"     // Original request ID
+      }
+
+
+      ## Cross-service error tracking
+
+      // When error comes from downstream
+      try {
+        const result = await callPaymentService(order);
+      } catch (error) {
+        logger.error({
+          err: error,
+          downstream_service: 'payment',
+          downstream_request_id: error.requestId,
+        }, 'Downstream service failed');
+
+        Sentry.captureException(error, {
+          tags: {
+            downstream_service: 'payment',
+          },
+        });
+      }
+
+platform_integration:
+  datadog:
+    setup: |
+      # Datadog Integration
+
+      npm install dd-trace
+
+      // Must be first import
+      import 'dd-trace/init';
+
+      // Auto-instruments most libraries
+      // Logs, traces, metrics unified
+    considerations:
+      - "Unified platform"
+      - "Higher cost"
+      - "Less control"
+
+  grafana_stack:
+    setup: |
+      # Grafana Stack (Loki, Tempo, Prometheus)
+
+      ## Loki for logs
+      - Ship with Promtail or Fluent Bit
+      - Query with LogQL
+
+      ## Tempo for traces
+      - OTLP exporter to Tempo
+      - Correlate with logs via trace ID
+
+      ## Prometheus for metrics
+      - Scrape /metrics endpoint
+      - Grafana dashboards
+    considerations:
+      - "Open source"
+      - "Self-managed"
+      - "Full control"
+
+  sentry:
+    setup: |
+      # Sentry Setup
+
+      npm install @sentry/node @sentry/profiling-node
+
+      import * as Sentry from '@sentry/node';
+      import { ProfilingIntegration } from '@sentry/profiling-node';
+
+      Sentry.init({
+        dsn: process.env.SENTRY_DSN,
+        integrations: [new ProfilingIntegration()],
+        tracesSampleRate: 0.1,
+        profilesSampleRate: 0.1,
+      });
+    considerations:
+      - "Error-focused"
+      - "Great for debugging"
+      - "Performance monitoring included"
+
+ecosystem:
+  logging:
+    - name: "pino"
+      use_when: "Fast JSON logging"
+    - name: "winston"
+      use_when: "Flexible transports"
+    - name: "bunyan"
+      use_when: "Legacy projects"
+
+  metrics:
+    - name: "prom-client"
+      use_when: "Prometheus metrics"
+    - name: "hot-shots"
+      use_when: "StatsD/Datadog"
+
+  tracing:
+    - name: "@opentelemetry/sdk-node"
+      use_when: "Standard tracing"
+    - name: "dd-trace"
+      use_when: "Datadog APM"
+
+  error_tracking:
+    - name: "@sentry/node"
+      use_when: "Error tracking + performance"
+    - name: "rollbar"
+      use_when: "Alternative to Sentry"

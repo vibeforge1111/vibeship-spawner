@@ -1,0 +1,132 @@
+# Unreal Engine LLM Integration Sharp Edges
+
+sharp_edges:
+  - id: gamethread-blocking
+    summary: HTTP requests or JSON parsing blocking the game thread
+    severity: critical
+    situation: Game hitches or freezes when NPC dialogue triggers
+    why: |
+      Unreal is strict about game thread blocking. Any stall over 33ms causes
+      visible hitching. Synchronous HTTP blocks for 100-3000ms.
+    solution: |
+      # WRONG: Synchronous request
+      FString Response = FHttpModule::Get().BlockingRequest(URL);
+
+      # RIGHT: Async with delegate
+      TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+      Request->OnProcessRequestComplete().BindUObject(
+          this, &UMyClass::OnRequestComplete);
+      Request->ProcessRequest();
+
+      void OnRequestComplete(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bSuccess)
+      {
+          // Handle on game thread via AsyncTask
+          AsyncTask(ENamedThreads::GameThread, [this, Response]()
+          {
+              ProcessLLMResponse(Response->GetContentAsString());
+          });
+      }
+    symptoms:
+      - Frame time spikes in profiler
+      - Visible game hitching
+      - Console certification failure
+    detection_pattern: 'BlockingRequest|WaitFor|GetContentAsString.*return'
+
+  - id: blueprint-json-hell
+    summary: Complex JSON parsing done entirely in Blueprint
+    severity: high
+    situation: Massive Blueprint spaghetti for parsing LLM responses
+    why: |
+      Blueprint JSON nodes are verbose. Error handling is difficult.
+      Nested structures become unmaintainable. Any API change breaks everything.
+    solution: |
+      // Create C++ wrapper that exposes clean struct
+      USTRUCT(BlueprintType)
+      struct FNPCDialogueResponse
+      {
+          UPROPERTY(BlueprintReadOnly)
+          FString Speech;
+
+          UPROPERTY(BlueprintReadOnly)
+          ENPCAction Action;
+
+          UPROPERTY(BlueprintReadOnly)
+          float Emotion;
+      };
+
+      // Parse JSON in C++, return struct
+      FNPCDialogueResponse ULLMParser::ParseResponse(const FString& JsonString)
+      {
+          TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
+          // ... parsing logic
+          return Response;
+      }
+
+      // Blueprint just uses the clean struct
+    symptoms:
+      - Massive Blueprint graphs
+      - JSON parse errors at runtime
+      - Hard to modify response format
+    detection_pattern: 'JsonObject|GetField|TryGetField'
+
+  - id: console-offline-failure
+    summary: Game crashes or breaks when console is offline
+    severity: high
+    situation: Cloud API fails, game has no fallback
+    why: |
+      Consoles may be offline. Cloud APIs fail. Certification requires graceful
+      handling. Players in rural areas have poor connectivity.
+    solution: |
+      # Always implement fallback
+      void UDialogueSystem::GetResponse(const FString& Input)
+      {
+          if (IsNetworkAvailable())
+          {
+              SendLLMRequest(Input);
+          }
+          else
+          {
+              // Use cached/scripted responses
+              FString Fallback = GetFallbackResponse(Input);
+              OnResponseReceived.Broadcast(Fallback);
+          }
+      }
+
+      // Cache responses for common inputs
+      // Pre-generate key dialogues at development time
+    symptoms:
+      - Crash when offline
+      - Infinite loading on poor connection
+      - Failed console certification
+    detection_pattern: 'PLATFORM_XBOX|PLATFORM_PS5|IsNetworkAvailable'
+
+  - id: metahuman-lip-sync-mismatch
+    summary: LLM response doesn't match MetaHuman lip sync
+    severity: medium
+    situation: MetaHuman mouths words that don't match dialogue text
+    why: |
+      LLM generates text, but audio/lip sync needs to match.
+      TTS latency adds to total response time.
+      Streaming text + audio is complex.
+    solution: |
+      # Option 1: Generate audio first, then play
+      async void ProcessDialogue(FString Text)
+      {
+          // Generate audio from text
+          FAudioData Audio = await TTSService->Generate(Text);
+
+          // Play audio with lip sync
+          MetaHuman->PlayAudioWithLipSync(Audio);
+
+          // Show text in sync with audio
+          SubtitleWidget->ShowText(Text);
+      }
+
+      # Option 2: Pre-generate common dialogues
+      # Build time: Generate audio for scripted responses
+      # Runtime: Only use LLM for unexpected inputs
+    symptoms:
+      - Lip sync doesn't match audio
+      - Long delay before speech starts
+      - Audio/text timing mismatch
+    detection_pattern: 'MetaHuman|LipSync|TTS'

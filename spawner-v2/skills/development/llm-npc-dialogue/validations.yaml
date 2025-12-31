@@ -1,0 +1,165 @@
+# LLM NPC Dialogue Validations
+# Automated checks to catch common LLM NPC dialogue mistakes
+
+validations:
+  - id: npc-no-guardrails
+    name: Missing Anti-Jailbreak Guardrails
+    severity: critical
+    type: regex
+    pattern: 'system.*prompt|systemPrompt|role.*system'
+    negative_pattern: 'never.*ai|not.*ai|language.*model|chatgpt|break.*character|stay.*character'
+    message: "System prompt found without explicit anti-jailbreak rules. NPCs may break character."
+    fix_action: "Add explicit rules: 'You are NOT an AI. Never mention ChatGPT, LLMs, or break character.'"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.py"
+
+  - id: npc-sync-blocking
+    name: Synchronous LLM Calls
+    severity: critical
+    type: regex
+    pattern: 'await\\s+(?:this\\.)?(?:llm|model|openai|anthropic)\\.(?:complete|generate|chat)\\s*\\([^)]*\\)\\s*(?:;|$)'
+    message: "Blocking LLM call may freeze game. Use streaming with loading indicators."
+    fix_action: "Use streaming API with visual feedback during generation"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: npc-no-timeout
+    name: LLM Call Without Timeout
+    severity: high
+    type: regex
+    pattern: 'await\\s+(?:this\\.)?(?:llm|model|api)\\.(?:complete|generate|chat)'
+    negative_pattern: 'Promise\\.race|timeout|AbortController|signal.*abort'
+    message: "LLM call without timeout. Game may hang if API is slow or unresponsive."
+    fix_action: "Wrap in Promise.race with timeout, or use AbortController"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: npc-no-fallback
+    name: No Fallback for LLM Failure
+    severity: high
+    type: regex
+    pattern: 'await\\s+.*(?:llm|complete|generate)'
+    negative_pattern: 'catch|fallback|default.*response|backup'
+    message: "LLM call without fallback handling. What happens when it fails?"
+    fix_action: "Add try/catch with fallback scripted responses"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.py"
+
+  - id: npc-hardcoded-api-key
+    name: Hardcoded API Key
+    severity: critical
+    type: regex
+    pattern: 'api[_-]?key\\s*[=:]\\s*["\'][a-zA-Z0-9_-]{20,}["\']|sk-[a-zA-Z0-9]{20,}'
+    message: "Hardcoded API key detected. This will be exposed in builds."
+    fix_action: "Use environment variables or secure key storage"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.py"
+      - "*.cs"
+      - "*.gd"
+
+  - id: npc-unlimited-history
+    name: Unbounded Conversation History
+    severity: high
+    type: regex
+    pattern: 'history\\.push|messages\\.push|conversation\\.add'
+    negative_pattern: 'maxLength|slice|splice|limit|truncate|summary|compress'
+    message: "Conversation history grows unbounded. Will exceed context window."
+    fix_action: "Implement sliding window or summarization for history management"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.py"
+
+  - id: npc-no-response-validation
+    name: Unvalidated LLM Response
+    severity: high
+    type: regex
+    pattern: 'response\\s*=\\s*await\\s+.*complete|const\\s+response\\s*=\\s*await'
+    negative_pattern: 'validate|check|filter|sanitize|verify|isInCharacter|breakingPattern'
+    message: "LLM response used directly without validation. NPC may break character."
+    fix_action: "Validate responses for out-of-character markers before display"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: npc-cloud-only
+    name: Cloud API Without Local Fallback
+    severity: warning
+    type: regex
+    pattern: 'openai|anthropic|gpt-4|claude|api\\.(?:openai|anthropic)'
+    negative_pattern: 'local|gguf|llama\\.cpp|ollama|lmstudio|offline'
+    message: "Using cloud API only. Consider local LLM fallback for reliability and cost."
+    fix_action: "Add local LLM option for offline play and cost management"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.py"
+
+  - id: npc-instant-response
+    name: Instant NPC Response
+    severity: warning
+    type: regex
+    pattern: 'showDialogue\\s*\\(\\s*response|displayText\\s*\\(\\s*response|setText\\s*\\(\\s*response'
+    negative_pattern: 'delay|timeout|typewriter|thinking|wait|setTimeout'
+    message: "Response displayed instantly. Add natural timing for immersion."
+    fix_action: "Add thinking delay and typewriter effect for natural pacing"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: npc-no-memory
+    name: Stateless NPC Dialogue
+    severity: warning
+    type: regex
+    pattern: 'function\\s+(?:get|handle)(?:Response|Dialogue)|async\\s+(?:get|handle)(?:Response|Dialogue)'
+    negative_pattern: 'memory|history|context|previous|remember|recall|session'
+    message: "NPC dialogue function has no memory access. NPCs will forget conversations."
+    fix_action: "Pass conversation history or memory object to dialogue function"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.py"
+
+  - id: npc-large-model-mobile
+    name: Large Model on Mobile Platform
+    severity: warning
+    type: regex
+    pattern: '(?:7[bB]|8[bB]|13[bB]|14[bB]|70[bB]).*(?:mobile|android|ios)|(?:mobile|android|ios).*(?:7[bB]|8[bB]|13[bB])'
+    message: "Large model (7B+) on mobile platform. Will cause performance issues."
+    fix_action: "Use 3B or smaller models for mobile. Consider cloud API with caching."
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.py"
+      - "*.cs"
+
+  - id: npc-magic-token-limit
+    name: Magic Number Token Limit
+    severity: info
+    type: regex
+    pattern: 'maxTokens\\s*[=:]\\s*\\d{3,4}|max_tokens\\s*[=:]\\s*\\d{3,4}|n_ctx\\s*[=:]\\s*\\d{4}'
+    message: "Consider defining token limits as named constants for clarity."
+    fix_action: "Use named constants: const MAX_CONTEXT_TOKENS = 4096"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.py"
+
+  - id: npc-string-concat-prompt
+    name: String Concatenation for Prompts
+    severity: info
+    type: regex
+    pattern: 'prompt\\s*\\+=|\\+\\s*prompt|prompt\\s*\\+\\s*["\']'
+    message: "Building prompts with string concatenation. Use template literals for readability."
+    fix_action: "Use template literals or a prompt builder for complex prompts"
+    applies_to:
+      - "*.ts"
+      - "*.js"

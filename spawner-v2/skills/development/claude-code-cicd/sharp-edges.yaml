@@ -1,0 +1,387 @@
+# Claude Code CI/CD Sharp Edges
+
+sharp_edges:
+  - id: headless-output-format
+    summary: Wrong output format causes parsing failures
+    severity: high
+    situation: CI script can't parse Claude's response
+    why: |
+      Default output is text, not structured.
+      JSON output requires --output-format json.
+      Stream JSON is different from regular JSON.
+    solution: |
+      // Output formats for CI/CD
+
+      // TEXT OUTPUT (default)
+      claude -p "Explain this code" src/main.ts
+      # Returns: Human-readable text, may include markdown
+
+      // JSON OUTPUT
+      claude -p "Return JSON with issues" --output-format json
+      # Returns: {"result": "...", "usage": {...}}
+      # Parse with: jq .result
+
+      // STREAM JSON (for real-time processing)
+      claude -p "Long analysis" --output-format stream-json
+      # Returns: Multiple JSON lines (JSONL format)
+      # Each line: {"type": "...", "content": "..."}
+
+      // PARSING IN BASH
+      # JSON:
+      result=$(claude -p "..." --output-format json)
+      issues=$(echo $result | jq -r '.result')
+
+      # Stream JSON:
+      claude -p "..." --output-format stream-json | while read line; do
+        type=$(echo $line | jq -r '.type')
+        if [ "$type" = "result" ]; then
+          content=$(echo $line | jq -r '.content')
+          echo $content
+        fi
+      done
+
+      // COMMON MISTAKE: Expecting JSON from text mode
+      # WRONG
+      result=$(claude -p "Return JSON: {status: ok}")
+      echo $result | jq .status  # Fails - result is text, not JSON
+
+      # RIGHT
+      result=$(claude -p "Return JSON: {status: ok}" --output-format json)
+      echo $result | jq -r '.result' | jq .status
+
+      // NODE.JS PARSING
+      import { execSync } from 'child_process';
+
+      const output = execSync(
+        'claude -p "..." --output-format json'
+      ).toString();
+
+      const parsed = JSON.parse(output);
+      const result = parsed.result;
+    symptoms:
+      - "jq: parse error"
+      - Unexpected token in JSON
+      - Empty or truncated output
+    detection_pattern: 'jq.*claude -p|--output-format text.*jq'
+
+  - id: ci-timeout-issues
+    summary: Claude times out in CI, job fails
+    severity: high
+    situation: Long-running Claude commands exceed CI timeout
+    why: |
+      Complex analysis can take minutes.
+      CI jobs have default timeouts.
+      No streaming means no visibility during execution.
+    solution: |
+      // Handle timeouts in CI
+
+      // GITHUB ACTIONS - Set timeout
+      - name: Claude Review
+        timeout-minutes: 10  # Increase from default 6
+        run: |
+          claude -p "Review code" --max-tokens 2000
+
+      // GITLAB CI - Set timeout
+      claude-review:
+        timeout: 15 minutes
+        script:
+          - claude -p "Review code"
+
+      // LIMIT OUTPUT LENGTH
+      claude -p "Brief review, max 500 words" \
+        --max-tokens 1000
+
+      // USE SMALLER MODEL FOR SPEED
+      # Haiku is faster than Sonnet
+      claude -p "Quick triage" --model claude-haiku-3-5
+
+      // SPLIT LARGE TASKS
+      # Instead of reviewing all files at once
+      for file in $(git diff --name-only); do
+        claude -p "Review $file briefly" --max-tokens 500
+      done
+
+      // BACKGROUND WITH TIMEOUT
+      timeout 300 claude -p "Long analysis" > result.txt &
+      pid=$!
+
+      # Poll for completion
+      while kill -0 $pid 2>/dev/null; do
+        echo "Still running..."
+        sleep 10
+      done
+
+      // STREAMING FOR VISIBILITY
+      # Stream shows progress during execution
+      claude -p "Analysis" --output-format stream-json | \
+        while read line; do
+          echo "Progress: $(echo $line | jq -r .type)"
+        done
+    symptoms:
+      - Job killed after timeout
+      - No output before failure
+      - Works locally, fails in CI
+    detection_pattern: 'timeout-minutes.*[0-2]|SIGTERM|killed'
+
+  - id: environment-variable-exposure
+    summary: API keys or prompts appear in logs
+    severity: critical
+    situation: Secrets visible in CI logs
+    why: |
+      CI logs are often accessible to team.
+      echo/debug statements expose values.
+      Error messages may include sensitive data.
+    solution: |
+      // Secure secret handling in CI
+
+      // GITHUB ACTIONS - Use secrets
+      - name: Review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # Key is in env, not in command line
+          claude -p "Review code"
+
+      // MASK VALUES
+      - name: Setup
+        run: |
+          echo "::add-mask::${{ secrets.ANTHROPIC_API_KEY }}"
+
+      // DON'T ECHO PROMPTS WITH SENSITIVE DATA
+      # WRONG
+      echo "Running: claude -p '$PROMPT_WITH_DATA'"
+      claude -p "$PROMPT_WITH_DATA"
+
+      # RIGHT
+      echo "Running Claude review..."
+      claude -p "$PROMPT_WITH_DATA" 2>/dev/null
+
+      // USE PROMPT FILES INSTEAD
+      # Store prompt in file, not variable
+      cat > prompt.txt << 'EOF'
+      Review this code for security issues
+      EOF
+      cat prompt.txt | claude -p -
+
+      // GITLAB CI - Use masked variables
+      variables:
+        ANTHROPIC_API_KEY:
+          value: $ANTHROPIC_API_KEY
+          masked: true
+
+      // CLEAN UP AFTER
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f prompt.txt analysis.json
+          unset ANTHROPIC_API_KEY
+
+      // CHECK FOR LEAKED SECRETS IN OUTPUT
+      - name: Validate output
+        run: |
+          if grep -q "sk-ant-" result.txt; then
+            echo "ERROR: API key in output!"
+            exit 1
+          fi
+    symptoms:
+      - API key visible in logs
+      - Security scan alerts
+      - Unauthorized API usage
+    detection_pattern: 'echo.*API_KEY|echo.*\$\{.*KEY|--api-key.*\$'
+
+  - id: allowed-tools-bypass
+    summary: Claude uses tools you didn't intend to allow
+    severity: high
+    situation: Claude executes unexpected commands in CI
+    why: |
+      Default allows many tools.
+      --allowedTools requires exact matching.
+      Wildcard patterns may over-permit.
+    solution: |
+      // Properly restrict tools in CI
+
+      // DENY BY DEFAULT - Explicit allow list
+      claude -p "Fix bugs" \
+        --allowedTools "Read,Edit,Write"
+        # Only file operations, no Bash
+
+      // ALLOW SPECIFIC COMMANDS
+      claude -p "Run tests and fix" \
+        --allowedTools "Read,Edit,Bash(npm test),Bash(npm run lint)"
+        # Can only run npm test and lint
+
+      // PATTERNS FOR BASH
+      --allowedTools "Bash(npm *)"      # Any npm command
+      --allowedTools "Bash(git status)" # Only git status
+      --allowedTools "Bash(ls *)"       # Only ls commands
+
+      // DANGEROUS - DON'T DO THIS
+      --allowedTools "Bash"             # All bash commands!
+      --allowedTools "Bash(*)"          # Same as above
+      --allowedTools "Bash(rm *)"       # Can delete anything!
+
+      // RECOMMENDED CI PROFILES
+      # Review only (no changes):
+      --allowedTools "Read,Grep,Glob"
+
+      # Fix issues (controlled changes):
+      --allowedTools "Read,Edit,Bash(npm run lint:fix)"
+
+      # Full implementation (careful!):
+      --allowedTools "Read,Write,Edit,Bash(npm test),Bash(npm run build)"
+
+      // VERIFY RESTRICTIONS
+      # Test your restrictions locally first
+      claude -p "Delete all files" \
+        --allowedTools "Read,Edit"
+      # Should refuse to use rm
+
+      // AUDIT TOOL USAGE
+      # Log which tools were used
+      claude -p "..." --output-format stream-json | \
+        jq 'select(.type == "tool_use") | .name' | \
+        sort | uniq
+    symptoms:
+      - Unexpected file changes
+      - Commands run that shouldn't
+      - Security violations
+    detection_pattern: '--allowedTools.*Bash[^(]|--allowedTools.*\\*'
+
+  - id: rate-limit-handling
+    summary: CI fails due to API rate limits
+    severity: medium
+    situation: Multiple concurrent jobs hit rate limits
+    why: |
+      CI runs many jobs in parallel.
+      Each job makes API calls.
+      Rate limits are per-organization.
+    solution: |
+      // Handle rate limits in CI
+
+      // RETRY WITH BACKOFF
+      max_retries=3
+      retry_delay=60
+
+      for i in $(seq 1 $max_retries); do
+        if claude -p "Review" --output-format json > result.json 2>&1; then
+          break
+        fi
+
+        if grep -q "rate_limit" result.json; then
+          echo "Rate limited, waiting ${retry_delay}s..."
+          sleep $retry_delay
+          retry_delay=$((retry_delay * 2))
+        else
+          echo "Failed for non-rate-limit reason"
+          exit 1
+        fi
+      done
+
+      // LIMIT CONCURRENCY
+      # GitHub Actions
+      jobs:
+        review:
+          concurrency:
+            group: claude-api
+            cancel-in-progress: false
+
+      # GitLab CI
+      claude-review:
+        resource_group: claude-api
+
+      // QUEUE LARGE BATCHES
+      # Instead of parallel, use sequential
+      - name: Review files sequentially
+        run: |
+          for file in src/*.ts; do
+            claude -p "Review $file" >> reviews.md
+            sleep 2  # Rate limit buffer
+          done
+
+      // USE CACHING
+      # Don't re-review unchanged files
+      - uses: actions/cache@v4
+        with:
+          path: .claude-review-cache
+          key: claude-review-${{ hashFiles('src/**') }}
+
+      - name: Review
+        run: |
+          if [ ! -f .claude-review-cache/result.md ]; then
+            claude -p "Review" > .claude-review-cache/result.md
+          fi
+
+      // MONITOR USAGE
+      # Track costs and rate limit hits
+      claude -p "..." --output-format json | \
+        jq '{tokens: .usage, timestamp: now}' >> usage.log
+    symptoms:
+      - 429 Too Many Requests
+      - Random job failures
+      - Works sometimes, fails others
+    detection_pattern: 'rate_limit|429|too.many.requests'
+
+  - id: context-window-overflow
+    summary: Large PRs exceed Claude's context window
+    severity: medium
+    situation: Analysis fails or truncates on large changes
+    why: |
+      Context window has limits.
+      Large diffs exceed capacity.
+      No clear error for overflow.
+    solution: |
+      // Handle large contexts in CI
+
+      // CHECK DIFF SIZE FIRST
+      diff_lines=$(git diff --stat | tail -1 | grep -oE '[0-9]+' | head -1)
+
+      if [ "$diff_lines" -gt 1000 ]; then
+        echo "Large diff ($diff_lines lines) - splitting review"
+
+        # Review file by file
+        for file in $(git diff --name-only); do
+          echo "## Reviewing $file" >> review.md
+          claude -p "Review only this file: $file" >> review.md
+        done
+      else
+        # Normal review
+        claude -p "Review all changes" > review.md
+      fi
+
+      // SUMMARIZE THEN DETAIL
+      # First pass: summary
+      summary=$(claude -p "Summarize these changes in 100 words" \
+        --max-tokens 200)
+
+      # Second pass: focused reviews
+      for critical_file in $(identify-critical-files); do
+        claude -p "Deep review of $critical_file" >> reviews.md
+      done
+
+      // FILTER NOISE
+      # Skip generated files, tests, etc.
+      git diff --name-only | \
+        grep -v 'package-lock.json\|\.generated\.\|\.test\.' | \
+        xargs claude -p "Review these files"
+
+      // CHUNK LARGE FILES
+      split_file() {
+        local file=$1
+        local chunk_size=200  # lines per chunk
+
+        split -l $chunk_size $file /tmp/chunk_
+
+        for chunk in /tmp/chunk_*; do
+          claude -p "Review this code chunk from $file" $chunk
+        done
+      }
+
+      // SET EXPLICIT LIMITS
+      claude -p "Brief review (max 500 words)" \
+        --max-tokens 1000 \
+        $(git diff --name-only | head -10)  # First 10 files only
+    symptoms:
+      - Incomplete reviews
+      - Model errors about length
+      - Truncated output
+    detection_pattern: 'max.*context|too.long|truncat'

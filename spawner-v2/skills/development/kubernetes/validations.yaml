@@ -1,0 +1,303 @@
+# Validations - Kubernetes
+# Automated checks for K8s manifest issues
+
+version: 1.0.0
+skill_id: kubernetes
+
+validations:
+  # Security
+  - id: running-as-root
+    name: Container running as root
+    severity: warning
+    type: regex
+    pattern:
+      - 'runAsNonRoot:\\s*false'
+      - 'containers:[\\s\\S]*?(?!securityContext)[\\s\\S]*?image:'
+    message: "Containers should not run as root"
+    fix_action: "Add securityContext.runAsNonRoot: true"
+    applies_to:
+      - "*.yaml"
+      - "*.yml"
+
+  - id: privileged-container
+    name: Privileged container
+    severity: error
+    type: regex
+    pattern:
+      - 'privileged:\\s*true'
+    message: "Privileged containers have full host access - avoid in production"
+    fix_action: "Remove privileged: true or use specific capabilities"
+    applies_to:
+      - "*.yaml"
+      - "*.yml"
+
+  - id: host-network
+    name: Using host network
+    severity: warning
+    type: regex
+    pattern:
+      - 'hostNetwork:\\s*true'
+    message: "Host network bypasses network isolation"
+    fix_action: "Use ClusterIP service instead unless absolutely necessary"
+    applies_to:
+      - "*.yaml"
+      - "*.yml"
+
+  - id: host-pid
+    name: Using host PID namespace
+    severity: error
+    type: regex
+    pattern:
+      - 'hostPID:\\s*true'
+    message: "Host PID allows seeing host processes - security risk"
+    fix_action: "Remove hostPID: true"
+    applies_to:
+      - "*.yaml"
+      - "*.yml"
+
+  # Best practices
+  - id: no-resource-limits
+    name: Missing resource limits
+    severity: warning
+    type: regex
+    pattern:
+      - 'containers:[\\s\\S]*?(?!resources:)[\\s\\S]*?image:'
+    message: "Containers should have resource requests and limits"
+    fix_action: "Add resources.requests and resources.limits"
+    applies_to:
+      - "*.yaml"
+      - "*.yml"
+
+  - id: latest-tag
+    name: Using :latest image tag
+    severity: warning
+    type: regex
+    pattern:
+      - 'image:\\s*[^:]+:latest'
+      - 'image:\\s*[^:\\s]+\\s*$'
+    message: "Use specific image tags for reproducibility"
+    fix_action: "Use version tag like :v1.2.3 or SHA digest"
+    applies_to:
+      - "*.yaml"
+      - "*.yml"
+
+  - id: no-liveness-probe
+    name: Missing liveness probe
+    severity: warning
+    type: regex
+    pattern:
+      - 'containers:[\\s\\S]*?(?!livenessProbe:)[\\s\\S]*?image:'
+    message: "Containers should have liveness probes"
+    fix_action: "Add livenessProbe with httpGet, tcpSocket, or exec"
+    applies_to:
+      - "*.yaml"
+      - "*.yml"
+
+  - id: no-readiness-probe
+    name: Missing readiness probe
+    severity: warning
+    type: regex
+    pattern:
+      - 'containers:[\\s\\S]*?(?!readinessProbe:)[\\s\\S]*?image:'
+    message: "Containers should have readiness probes for traffic management"
+    fix_action: "Add readinessProbe to control when pod receives traffic"
+    applies_to:
+      - "*.yaml"
+      - "*.yml"
+
+  - id: image-pull-policy
+    name: ImagePullPolicy not set with latest tag
+    severity: info
+    type: regex
+    pattern:
+      - 'image:[^\\n]*:latest(?![\\s\\S]*imagePullPolicy:\\s*Always)'
+    message: "With :latest tag, set imagePullPolicy: Always"
+    fix_action: "Add imagePullPolicy: Always or use specific tag"
+    applies_to:
+      - "*.yaml"
+      - "*.yml"
+
+  # Deployment patterns
+  - id: replicas-one
+    name: Only one replica for production
+    severity: info
+    type: regex
+    pattern:
+      - 'replicas:\\s*1\\s*$'
+    message: "Single replica means no high availability"
+    fix_action: "Use at least 2-3 replicas for production workloads"
+    applies_to:
+      - "*.yaml"
+      - "*.yml"
+
+  - id: no-pdb
+    name: Deployment without PodDisruptionBudget
+    severity: info
+    type: regex
+    pattern:
+      - 'kind:\\s*Deployment(?![\\s\\S]*PodDisruptionBudget)'
+    message: "Consider adding PodDisruptionBudget for controlled disruptions"
+    fix_action: "Create PodDisruptionBudget with minAvailable or maxUnavailable"
+    applies_to:
+      - "*.yaml"
+      - "*.yml"
+
+  # Secrets
+  - id: secret-in-env
+    name: Secret value hardcoded in manifest
+    severity: error
+    type: regex
+    pattern:
+      - 'value:\\s*["\']?(sk_|pk_|api_|secret_|password)'
+      - 'password:\\s*["\']?[^\\s]+'
+    message: "Secrets should not be hardcoded in manifests"
+    fix_action: "Use Secret resource and secretKeyRef"
+    applies_to:
+      - "*.yaml"
+      - "*.yml"
+
+  # Networking
+  - id: service-type-loadbalancer
+    name: Using LoadBalancer without annotation
+    severity: info
+    type: regex
+    pattern:
+      - 'type:\\s*LoadBalancer(?![\\s\\S]*annotations:)'
+    message: "LoadBalancer creates cloud resources - use Ingress for HTTP"
+    fix_action: "Consider Ingress for HTTP traffic, or add appropriate annotations"
+    applies_to:
+      - "*.yaml"
+      - "*.yml"
+
+  - id: no-network-policy
+    name: No NetworkPolicy in namespace
+    severity: info
+    type: regex
+    pattern:
+      - 'kind:\\s*Namespace(?![\\s\\S]*NetworkPolicy)'
+    message: "Consider adding NetworkPolicy for network isolation"
+    fix_action: "Create default-deny NetworkPolicy"
+    applies_to:
+      - "*.yaml"
+      - "*.yml"
+
+code_smells:
+  - id: yaml-anchors-overuse
+    name: Excessive YAML anchors and aliases
+    description: "Too many &anchor and *alias making manifest hard to read"
+    pattern: null
+    suggestion: "Consider using Helm or Kustomize for DRY manifests"
+
+  - id: hardcoded-namespace
+    name: Hardcoded namespace in manifests
+    description: "Namespace hardcoded instead of using -n flag or context"
+    pattern: 'namespace:\\s*production'
+    suggestion: "Remove namespace from manifest, use kubectl -n or Kustomize"
+
+  - id: too-many-containers
+    name: Pod with many containers
+    description: "Pod has 4+ containers, might be doing too much"
+    pattern: null
+    suggestion: "Split into separate deployments unless truly sidecar pattern"
+
+  - id: catch-all-labels
+    name: Using generic labels like 'app: web'
+    description: "Labels too generic to be useful for selection"
+    pattern: 'app:\\s*(web|app|service|api)\\s*$'
+    suggestion: "Use descriptive labels: app: user-service, component: api"
+
+best_practices:
+  deployment_checklist:
+    recommendation: |
+      Production Deployment Checklist:
+
+      [ ] Resource limits set
+      [ ] Liveness probe configured
+      [ ] Readiness probe configured
+      [ ] Runs as non-root user
+      [ ] Using specific image tag
+      [ ] At least 2 replicas
+      [ ] PodDisruptionBudget defined
+      [ ] Labels for identification
+      [ ] Secrets from Secret resource
+      [ ] Network policy defined
+
+  labeling:
+    recommendation: |
+      Standard Labels:
+
+      metadata:
+        labels:
+          # Required
+          app.kubernetes.io/name: user-service
+          app.kubernetes.io/instance: user-service-prod
+          app.kubernetes.io/version: "1.2.3"
+
+          # Recommended
+          app.kubernetes.io/component: api
+          app.kubernetes.io/part-of: ecommerce
+          app.kubernetes.io/managed-by: helm
+
+          # Custom
+          team: platform
+          environment: production
+          cost-center: engineering
+
+  namespace_structure:
+    recommendation: |
+      Namespace Organization:
+
+      # By environment
+      - production
+      - staging
+      - development
+
+      # By team (if multi-tenant)
+      - team-payments
+      - team-users
+      - team-platform
+
+      # System namespaces
+      - kube-system (K8s components)
+      - ingress-nginx (ingress controller)
+      - monitoring (Prometheus, Grafana)
+      - cert-manager (TLS certificates)
+
+      # Each namespace should have:
+      - ResourceQuota
+      - LimitRange
+      - NetworkPolicy (default deny)
+      - RBAC roles
+
+  health_endpoints:
+    recommendation: |
+      Health Check Endpoints:
+
+      # /health - Liveness (is process alive?)
+      # Returns 200 if process is running
+      # Don't check dependencies here
+      app.get('/health', (req, res) => {
+        res.status(200).json({ status: 'alive' });
+      });
+
+      # /ready - Readiness (can handle traffic?)
+      # Checks all dependencies
+      app.get('/ready', async (req, res) => {
+        const checks = {
+          database: await checkDb(),
+          redis: await checkRedis(),
+          external_api: await checkExternalApi()
+        };
+
+        const healthy = Object.values(checks).every(Boolean);
+        res.status(healthy ? 200 : 503).json({
+          status: healthy ? 'ready' : 'not_ready',
+          checks
+        });
+      });
+
+      # /startup - Startup (is app initialized?)
+      # For slow-starting apps
+      app.get('/startup', (req, res) => {
+        res.status(appInitialized ? 200 : 503).send();
+      });

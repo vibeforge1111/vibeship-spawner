@@ -1,0 +1,312 @@
+# Validations - CI/CD Pipelines
+# Automated checks for workflow issues
+
+version: 1.0.0
+skill_id: cicd-pipelines
+
+validations:
+  # Security
+  - id: secrets-in-echo
+    name: Possible secret exposure in echo/print
+    severity: error
+    type: regex
+    pattern:
+      - 'echo.*\$\{\{\s*secrets\.'
+      - 'print.*\$\{\{\s*secrets\.'
+      - 'console\.log.*secrets\.'
+    message: "Never echo secrets - they'll appear in logs"
+    fix_action: "Pass secrets as environment variables instead"
+    applies_to:
+      - "*.yml"
+      - "*.yaml"
+
+  - id: pull-request-target
+    name: Using pull_request_target event
+    severity: warning
+    type: regex
+    pattern:
+      - 'on:\s*\n\s*pull_request_target'
+      - 'on:\s*\[?pull_request_target'
+    message: "pull_request_target can expose secrets to fork PRs"
+    fix_action: "Use pull_request instead, or audit checkout carefully"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+
+  - id: mutable-action-version
+    name: Action pinned to mutable tag only
+    severity: info
+    type: regex
+    pattern:
+      - 'uses:\s*[^@]+@v\d+\s*$'
+      - 'uses:\s*[^@]+@main\s*$'
+      - 'uses:\s*[^@]+@master\s*$'
+    message: "Pin actions to full version or SHA for reproducibility"
+    fix_action: "Use actions/checkout@v4.1.1 or @sha"
+    applies_to:
+      - "*.yml"
+      - "*.yaml"
+
+  - id: workflow-dispatch-no-inputs
+    name: workflow_dispatch without inputs
+    severity: info
+    type: regex
+    pattern:
+      - 'workflow_dispatch:\s*$'
+    message: "Consider adding inputs for manual workflow runs"
+    fix_action: "Add inputs for environment, version, etc."
+    applies_to:
+      - ".github/workflows/*.yml"
+
+  # Best practices
+  - id: no-timeout
+    name: Job without timeout
+    severity: warning
+    type: regex
+    pattern:
+      - 'jobs:\s*\n\s*\w+:\s*\n(?!.*timeout-minutes)'
+    message: "Jobs without timeout can run for 6 hours"
+    fix_action: "Add timeout-minutes to each job"
+    applies_to:
+      - "*.yml"
+      - "*.yaml"
+
+  - id: no-concurrency
+    name: Deploy workflow without concurrency control
+    severity: warning
+    type: regex
+    pattern:
+      - 'deploy(?!.*concurrency)'
+    message: "Deploy workflows should have concurrency control"
+    fix_action: "Add concurrency group to prevent race conditions"
+    applies_to:
+      - ".github/workflows/*.yml"
+
+  - id: hardcoded-runner
+    name: Using ubuntu-latest
+    severity: info
+    type: regex
+    pattern:
+      - 'runs-on:\s*ubuntu-latest'
+    message: "ubuntu-latest can change - consider pinning"
+    fix_action: "Use ubuntu-22.04 for reproducibility"
+    applies_to:
+      - "*.yml"
+      - "*.yaml"
+
+  - id: no-caching
+    name: npm/pip install without caching
+    severity: info
+    type: regex
+    pattern:
+      - 'npm ci(?!.*cache)'
+      - 'npm install(?!.*cache)'
+      - 'pip install(?!.*cache)'
+    message: "Consider caching dependencies for faster builds"
+    fix_action: "Use setup-node/setup-python with cache option"
+    applies_to:
+      - "*.yml"
+      - "*.yaml"
+
+  # GitHub Actions specific
+  - id: deprecated-set-output
+    name: Using deprecated set-output command
+    severity: warning
+    type: regex
+    pattern:
+      - '::set-output name='
+    message: "set-output is deprecated"
+    fix_action: "Use $GITHUB_OUTPUT instead"
+    applies_to:
+      - "*.yml"
+      - "*.yaml"
+
+  - id: deprecated-set-env
+    name: Using deprecated set-env command
+    severity: error
+    type: regex
+    pattern:
+      - '::set-env name='
+    message: "set-env is deprecated and disabled for security"
+    fix_action: "Use $GITHUB_ENV instead"
+    applies_to:
+      - "*.yml"
+      - "*.yaml"
+
+  - id: add-path-deprecated
+    name: Using deprecated add-path command
+    severity: warning
+    type: regex
+    pattern:
+      - '::add-path::'
+    message: "add-path is deprecated"
+    fix_action: "Use $GITHUB_PATH instead"
+    applies_to:
+      - "*.yml"
+      - "*.yaml"
+
+  # GitLab CI specific
+  - id: gitlab-no-rules
+    name: GitLab job without rules
+    severity: info
+    type: regex
+    pattern:
+      - '^\w+:\s*\n\s+stage:(?!.*rules:)(?!.*only:)(?!.*except:)'
+    message: "Consider adding rules to control when job runs"
+    fix_action: "Add rules clause to control job execution"
+    applies_to:
+      - ".gitlab-ci.yml"
+
+code_smells:
+  - id: too-many-jobs
+    name: Workflow with excessive jobs
+    description: "Workflow has 10+ jobs, might be too complex"
+    pattern: null
+    suggestion: "Split into multiple workflows or use reusable workflows"
+
+  - id: duplicate-setup
+    name: Same setup steps in multiple jobs
+    description: "Multiple jobs with identical checkout and setup steps"
+    pattern: null
+    suggestion: "Create composite action or reusable workflow"
+
+  - id: long-script
+    name: Inline script over 20 lines
+    description: "Long inline script that should be a separate file"
+    pattern: null
+    suggestion: "Extract to a shell script file"
+
+  - id: no-fail-fast
+    name: Matrix without fail-fast consideration
+    description: "Matrix strategy without explicit fail-fast setting"
+    pattern: 'matrix:(?!.*fail-fast)'
+    suggestion: "Set fail-fast: false if you want all matrix jobs to complete"
+
+best_practices:
+  workflow_structure:
+    recommendation: |
+      GitHub Actions Workflow Structure:
+
+      name: CI  # Clear, descriptive name
+
+      on:
+        push:
+          branches: [main]
+          paths-ignore:
+            - '**.md'
+            - 'docs/**'
+        pull_request:
+          branches: [main]
+
+      concurrency:
+        group: ${{ github.workflow }}-${{ github.ref }}
+        cancel-in-progress: true
+
+      env:
+        NODE_VERSION: '20'
+
+      jobs:
+        lint:
+          name: Lint
+          runs-on: ubuntu-22.04
+          timeout-minutes: 10
+          steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                node-version: ${{ env.NODE_VERSION }}
+                cache: 'npm'
+            - run: npm ci
+            - run: npm run lint
+
+  security_checklist:
+    recommendation: |
+      CI/CD Security Checklist:
+
+      [ ] Actions pinned to SHA or full version
+      [ ] No secrets echoed or logged
+      [ ] pull_request used instead of pull_request_target
+      [ ] GITHUB_TOKEN has minimal permissions
+      [ ] Third-party actions audited
+      [ ] Branch protection enabled
+      [ ] Environment protection rules set
+      [ ] Secrets rotated regularly
+      [ ] OIDC used instead of long-lived credentials
+
+  caching_strategy:
+    recommendation: |
+      Caching Best Practices:
+
+      # 1. Use built-in cache options
+      - uses: actions/setup-node@v4
+        with:
+          cache: 'npm'  # Automatic!
+
+      # 2. Multi-layer caching for complex deps
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            node_modules
+            ~/.cache/Cypress
+          key: |
+            deps-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            deps-${{ runner.os }}-
+
+      # 3. Cache Docker layers
+      - uses: docker/build-push-action@v5
+        with:
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 4. Separate caches per workflow
+      # Prevents cache pollution between workflows
+
+  deployment_workflow:
+    recommendation: |
+      Safe Deployment Workflow:
+
+      name: Deploy
+
+      on:
+        push:
+          branches: [main]
+
+      concurrency:
+        group: deploy-production
+        cancel-in-progress: false  # Don't cancel deploys
+
+      jobs:
+        test:
+          # Run tests first
+
+        build:
+          needs: test
+          outputs:
+            image: ${{ steps.build.outputs.image }}
+          steps:
+            - id: build
+              # Build and push image
+
+        deploy-staging:
+          needs: build
+          environment: staging
+          steps:
+            - # Deploy to staging
+            - # Run smoke tests
+
+        deploy-production:
+          needs: deploy-staging
+          environment:
+            name: production
+            url: https://myapp.com
+          steps:
+            - # Deploy to production
+            - # Verify deployment
+
+        rollback:
+          if: failure()
+          needs: deploy-production
+          steps:
+            - # Rollback on failure

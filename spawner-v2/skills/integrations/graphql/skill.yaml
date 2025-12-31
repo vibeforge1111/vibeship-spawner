@@ -1,0 +1,722 @@
+# GraphQL Skill
+# Type-safe API layer with flexible queries
+
+id: graphql
+name: GraphQL
+version: 1.0.0
+category: integrations
+layer: 2
+
+description: |
+  GraphQL gives clients exactly the data they need - no more, no less. One
+  endpoint, typed schema, introspection. But the flexibility that makes it
+  powerful also makes it dangerous. Without proper controls, clients can
+  craft queries that bring down your server.
+
+  This skill covers schema design, resolvers, DataLoader for N+1 prevention,
+  federation for microservices, and client integration with Apollo/urql.
+  Key insight: GraphQL is a contract. The schema is the API documentation.
+  Design it carefully.
+
+  2025 lesson: GraphQL isn't always the answer. For simple CRUD, REST is
+  simpler. For high-performance public APIs, REST with caching wins. Use
+  GraphQL when you have complex data relationships and diverse client needs.
+
+principles:
+  - "Schema-first design - the schema is the contract"
+  - "Prevent N+1 queries with DataLoader"
+  - "Limit query depth and complexity"
+  - "Use fragments for reusable selections"
+  - "Mutations should be specific, not generic update operations"
+  - "Errors are data - use union types for expected failures"
+  - "Nullability is meaningful - design it intentionally"
+
+owns:
+  - graphql-schema-design
+  - graphql-resolvers
+  - graphql-federation
+  - graphql-subscriptions
+  - graphql-dataloader
+  - graphql-codegen
+  - apollo-server
+  - apollo-client
+  - urql
+
+does_not_own:
+  - database-queries -> postgres-wizard
+  - authentication -> authentication-oauth
+  - rest-api-design -> backend
+  - websocket-infrastructure -> backend
+
+triggers:
+  - "graphql"
+  - "graphql schema"
+  - "graphql resolver"
+  - "apollo server"
+  - "apollo client"
+  - "graphql federation"
+  - "dataloader"
+  - "graphql codegen"
+  - "graphql query"
+  - "graphql mutation"
+
+pairs_with:
+  - backend              # Server implementation
+  - postgres-wizard      # Database layer
+  - nextjs-app-router    # Client integration
+  - react-patterns       # Client state
+
+requires: []
+
+stack:
+  server:
+    - name: "@apollo/server"
+      version: "^4.x"
+      when: "Apollo Server v4"
+      note: "Most popular GraphQL server"
+    - name: graphql-yoga
+      when: "Lightweight alternative"
+      note: "Good for serverless"
+    - name: mercurius
+      when: "Fastify integration"
+      note: "Fast, uses JIT"
+
+  client:
+    - name: "@apollo/client"
+      version: "^3.x"
+      when: "Full-featured client"
+      note: "Caching, state management"
+    - name: urql
+      when: "Lightweight alternative"
+      note: "Smaller, simpler"
+    - name: graphql-request
+      when: "Simple requests"
+      note: "Minimal, no caching"
+
+  tools:
+    - name: graphql-codegen
+      when: "Type generation"
+      note: "Essential for TypeScript"
+    - name: dataloader
+      when: "N+1 prevention"
+      note: "Batches and caches"
+
+expertise_level: world-class
+
+identity: |
+  You're a developer who has built GraphQL APIs at scale. You've seen the
+  N+1 query problem bring down production servers. You've watched clients
+  craft deeply nested queries that took minutes to resolve. You know that
+  GraphQL's power is also its danger.
+
+  Your hard-won lessons: The team that didn't use DataLoader had unusable
+  APIs. The team that allowed unlimited query depth got DDoS'd by their
+  own clients. The team that made everything nullable couldn't distinguish
+  errors from empty data. You've learned from all of them.
+
+  You advocate for schema-first design, proper authorization at the resolver
+  level, and client-side caching. You know when GraphQL is the right choice
+  and when REST is simpler.
+
+patterns:
+  - name: Schema Design
+    description: Type-safe schema with proper nullability
+    when: Designing any GraphQL API
+    example: |
+      # SCHEMA DESIGN:
+
+      """
+      The schema is your API contract. Design nullability
+      intentionally - non-null fields must always resolve.
+      """
+
+      type Query {
+        # Non-null - will always return user or throw
+        user(id: ID!): User!
+
+        # Nullable - returns null if not found
+        userByEmail(email: String!): User
+
+        # Non-null list with non-null items
+        users(limit: Int = 10, offset: Int = 0): [User!]!
+
+        # Search with pagination
+        searchUsers(
+          query: String!
+          first: Int
+          after: String
+        ): UserConnection!
+      }
+
+      type Mutation {
+        # Input types for complex mutations
+        createUser(input: CreateUserInput!): CreateUserPayload!
+        updateUser(id: ID!, input: UpdateUserInput!): UpdateUserPayload!
+        deleteUser(id: ID!): DeleteUserPayload!
+      }
+
+      type Subscription {
+        userCreated: User!
+        messageReceived(roomId: ID!): Message!
+      }
+
+      # Input types
+      input CreateUserInput {
+        email: String!
+        name: String!
+        role: Role = USER
+      }
+
+      input UpdateUserInput {
+        email: String
+        name: String
+        role: Role
+      }
+
+      # Payload types (for errors as data)
+      type CreateUserPayload {
+        user: User
+        errors: [Error!]!
+      }
+
+      union UpdateUserPayload = UpdateUserSuccess | NotFoundError | ValidationError
+
+      type UpdateUserSuccess {
+        user: User!
+      }
+
+      # Enums
+      enum Role {
+        USER
+        ADMIN
+        MODERATOR
+      }
+
+      # Types with relationships
+      type User {
+        id: ID!
+        email: String!
+        name: String!
+        role: Role!
+        posts(limit: Int = 10): [Post!]!
+        createdAt: DateTime!
+      }
+
+      type Post {
+        id: ID!
+        title: String!
+        content: String!
+        author: User!
+        comments: [Comment!]!
+        published: Boolean!
+      }
+
+      # Pagination (Relay-style)
+      type UserConnection {
+        edges: [UserEdge!]!
+        pageInfo: PageInfo!
+        totalCount: Int!
+      }
+
+      type UserEdge {
+        node: User!
+        cursor: String!
+      }
+
+      type PageInfo {
+        hasNextPage: Boolean!
+        hasPreviousPage: Boolean!
+        startCursor: String
+        endCursor: String
+      }
+
+  - name: DataLoader for N+1 Prevention
+    description: Batch and cache database queries
+    when: Resolving relationships
+    example: |
+      # DATALOADER:
+
+      """
+      Without DataLoader, fetching 10 posts with authors
+      makes 11 queries (1 for posts + 10 for each author).
+      DataLoader batches into 2 queries.
+      """
+
+      import DataLoader from 'dataloader';
+
+      // Create loaders per request
+      function createLoaders(db) {
+        return {
+          userLoader: new DataLoader(async (ids) => {
+            // Single query for all users
+            const users = await db.user.findMany({
+              where: { id: { in: ids } }
+            });
+
+            // Return in same order as ids
+            const userMap = new Map(users.map(u => [u.id, u]));
+            return ids.map(id => userMap.get(id) || null);
+          }),
+
+          postsByAuthorLoader: new DataLoader(async (authorIds) => {
+            const posts = await db.post.findMany({
+              where: { authorId: { in: authorIds } }
+            });
+
+            // Group by author
+            const postsByAuthor = new Map();
+            posts.forEach(post => {
+              const existing = postsByAuthor.get(post.authorId) || [];
+              postsByAuthor.set(post.authorId, [...existing, post]);
+            });
+
+            return authorIds.map(id => postsByAuthor.get(id) || []);
+          })
+        };
+      }
+
+      // Attach to context
+      const server = new ApolloServer({
+        typeDefs,
+        resolvers,
+      });
+
+      app.use('/graphql', expressMiddleware(server, {
+        context: async ({ req }) => ({
+          db,
+          loaders: createLoaders(db),
+          user: req.user
+        })
+      }));
+
+      // Use in resolvers
+      const resolvers = {
+        Post: {
+          author: (post, _, { loaders }) => {
+            return loaders.userLoader.load(post.authorId);
+          }
+        },
+        User: {
+          posts: (user, _, { loaders }) => {
+            return loaders.postsByAuthorLoader.load(user.id);
+          }
+        }
+      };
+
+  - name: Apollo Client Caching
+    description: Normalized cache with type policies
+    when: Client-side data management
+    example: |
+      # APOLLO CLIENT CACHING:
+
+      """
+      Apollo Client normalizes responses into a flat cache.
+      Configure type policies for custom cache behavior.
+      """
+
+      import { ApolloClient, InMemoryCache } from '@apollo/client';
+
+      const cache = new InMemoryCache({
+        typePolicies: {
+          Query: {
+            fields: {
+              // Paginated field
+              users: {
+                keyArgs: ['query'],  // Cache separately per query
+                merge(existing = { edges: [] }, incoming, { args }) {
+                  // Append for infinite scroll
+                  if (args?.after) {
+                    return {
+                      ...incoming,
+                      edges: [...existing.edges, ...incoming.edges]
+                    };
+                  }
+                  return incoming;
+                }
+              }
+            }
+          },
+          User: {
+            keyFields: ['id'],  // How to identify users
+            fields: {
+              fullName: {
+                read(_, { readField }) {
+                  // Computed field
+                  return `${readField('firstName')} ${readField('lastName')}`;
+                }
+              }
+            }
+          }
+        }
+      });
+
+      const client = new ApolloClient({
+        uri: '/graphql',
+        cache,
+        defaultOptions: {
+          watchQuery: {
+            fetchPolicy: 'cache-and-network'
+          }
+        }
+      });
+
+      // Queries with hooks
+      import { useQuery, useMutation } from '@apollo/client';
+
+      const GET_USER = gql`
+        query GetUser($id: ID!) {
+          user(id: $id) {
+            id
+            name
+            email
+          }
+        }
+      `;
+
+      function UserProfile({ userId }) {
+        const { data, loading, error } = useQuery(GET_USER, {
+          variables: { id: userId }
+        });
+
+        if (loading) return <Spinner />;
+        if (error) return <Error message={error.message} />;
+
+        return <div>{data.user.name}</div>;
+      }
+
+      // Mutations with cache updates
+      const CREATE_USER = gql`
+        mutation CreateUser($input: CreateUserInput!) {
+          createUser(input: $input) {
+            user {
+              id
+              name
+              email
+            }
+            errors {
+              field
+              message
+            }
+          }
+        }
+      `;
+
+      function CreateUserForm() {
+        const [createUser, { loading }] = useMutation(CREATE_USER, {
+          update(cache, { data: { createUser } }) {
+            // Update cache after mutation
+            if (createUser.user) {
+              cache.modify({
+                fields: {
+                  users(existing = []) {
+                    const newRef = cache.writeFragment({
+                      data: createUser.user,
+                      fragment: gql`
+                        fragment NewUser on User {
+                          id
+                          name
+                          email
+                        }
+                      `
+                    });
+                    return [...existing, newRef];
+                  }
+                }
+              });
+            }
+          }
+        });
+      }
+
+  - name: Code Generation
+    description: Type-safe operations from schema
+    when: TypeScript projects
+    example: |
+      # GRAPHQL CODEGEN:
+
+      """
+      Generate TypeScript types from your schema and operations.
+      No more manually typing query responses.
+      """
+
+      # Install
+      npm install -D @graphql-codegen/cli
+      npm install -D @graphql-codegen/typescript
+      npm install -D @graphql-codegen/typescript-operations
+      npm install -D @graphql-codegen/typescript-react-apollo
+
+      # codegen.ts
+      import type { CodegenConfig } from '@graphql-codegen/cli';
+
+      const config: CodegenConfig = {
+        schema: 'http://localhost:4000/graphql',
+        documents: ['src/**/*.graphql', 'src/**/*.tsx'],
+        generates: {
+          './src/generated/graphql.ts': {
+            plugins: [
+              'typescript',
+              'typescript-operations',
+              'typescript-react-apollo'
+            ],
+            config: {
+              withHooks: true,
+              withComponent: false
+            }
+          }
+        }
+      };
+
+      export default config;
+
+      # Run generation
+      npx graphql-codegen
+
+      # Usage - fully typed!
+      import { useGetUserQuery, useCreateUserMutation } from './generated/graphql';
+
+      function UserProfile({ userId }: { userId: string }) {
+        const { data, loading } = useGetUserQuery({
+          variables: { id: userId }  // Type-checked!
+        });
+
+        // data.user is fully typed
+        return <div>{data?.user?.name}</div>;
+      }
+
+  - name: Error Handling with Unions
+    description: Expected errors as data, not exceptions
+    when: Operations that can fail in expected ways
+    example: |
+      # ERRORS AS DATA:
+
+      """
+      Use union types for expected failure cases.
+      GraphQL errors are for unexpected failures.
+      """
+
+      # Schema
+      type Mutation {
+        login(email: String!, password: String!): LoginResult!
+      }
+
+      union LoginResult = LoginSuccess | InvalidCredentials | AccountLocked
+
+      type LoginSuccess {
+        user: User!
+        token: String!
+      }
+
+      type InvalidCredentials {
+        message: String!
+      }
+
+      type AccountLocked {
+        message: String!
+        unlockAt: DateTime
+      }
+
+      # Resolver
+      const resolvers = {
+        Mutation: {
+          login: async (_, { email, password }, { db }) => {
+            const user = await db.user.findByEmail(email);
+
+            if (!user || !await verifyPassword(password, user.hash)) {
+              return {
+                __typename: 'InvalidCredentials',
+                message: 'Invalid email or password'
+              };
+            }
+
+            if (user.lockedUntil && user.lockedUntil > new Date()) {
+              return {
+                __typename: 'AccountLocked',
+                message: 'Account temporarily locked',
+                unlockAt: user.lockedUntil
+              };
+            }
+
+            return {
+              __typename: 'LoginSuccess',
+              user,
+              token: generateToken(user)
+            };
+          }
+        },
+
+        LoginResult: {
+          __resolveType(obj) {
+            return obj.__typename;
+          }
+        }
+      };
+
+      # Client query
+      const LOGIN = gql`
+        mutation Login($email: String!, $password: String!) {
+          login(email: $email, password: $password) {
+            ... on LoginSuccess {
+              user { id name }
+              token
+            }
+            ... on InvalidCredentials {
+              message
+            }
+            ... on AccountLocked {
+              message
+              unlockAt
+            }
+          }
+        }
+      `;
+
+      // Handle all cases
+      const result = data.login;
+      switch (result.__typename) {
+        case 'LoginSuccess':
+          setToken(result.token);
+          redirect('/dashboard');
+          break;
+        case 'InvalidCredentials':
+          setError(result.message);
+          break;
+        case 'AccountLocked':
+          setError(`${result.message}. Try again at ${result.unlockAt}`);
+          break;
+      }
+
+anti_patterns:
+  - name: No DataLoader
+    description: Fetching related data without batching
+    why: |
+      Each resolver runs independently. Fetching a user for each post
+      in a list makes N separate database queries. With 100 posts,
+      that's 100 queries instead of 1.
+    instead: |
+      // WRONG: N+1 queries
+      Post: {
+        author: async (post, _, { db }) => {
+          return db.user.findUnique({ where: { id: post.authorId } });
+        }
+      }
+
+      // RIGHT: Batched with DataLoader
+      Post: {
+        author: (post, _, { loaders }) => {
+          return loaders.userLoader.load(post.authorId);
+        }
+      }
+
+  - name: No Query Depth Limiting
+    description: Allowing infinitely nested queries
+    why: |
+      Clients can craft queries like user.posts.author.posts.author...
+      going 20 levels deep. Each level multiplies the work. A malicious
+      or buggy client can bring down your server.
+    instead: |
+      import depthLimit from 'graphql-depth-limit';
+      import { createComplexityLimitRule } from 'graphql-validation-complexity';
+
+      const server = new ApolloServer({
+        typeDefs,
+        resolvers,
+        validationRules: [
+          depthLimit(10),  // Max 10 levels deep
+          createComplexityLimitRule(1000)  // Max complexity score
+        ]
+      });
+
+  - name: Authorization in Schema
+    description: Using directives for all authorization
+    why: |
+      Schema directives are visible to all clients via introspection.
+      Complex authorization logic doesn't fit in directives. Business
+      rules change faster than schema.
+    instead: |
+      // WRONG: Only directive-based
+      type Mutation {
+        deleteUser(id: ID!): User @auth(requires: ADMIN)
+      }
+
+      // RIGHT: Resolver-level authorization
+      Mutation: {
+        deleteUser: async (_, { id }, { user, db }) => {
+          // Check authorization
+          if (!user) throw new AuthenticationError('Not logged in');
+          if (user.role !== 'ADMIN' && user.id !== id) {
+            throw new ForbiddenError('Not authorized');
+          }
+
+          return db.user.delete({ where: { id } });
+        }
+      }
+
+  - name: Giant Mutations
+    description: Single mutation for all updates
+    why: |
+      A generic updateUser(id, data: JSON) mutation has no type safety,
+      no validation, no clear intent. Clients can send anything.
+    instead: |
+      // WRONG: Generic mutation
+      type Mutation {
+        updateUser(id: ID!, data: JSON!): User
+      }
+
+      // RIGHT: Specific mutations
+      type Mutation {
+        updateUserProfile(id: ID!, input: UpdateProfileInput!): UpdateProfilePayload!
+        updateUserEmail(id: ID!, email: String!): UpdateEmailPayload!
+        updateUserPassword(id: ID!, input: UpdatePasswordInput!): UpdatePasswordPayload!
+        promoteToAdmin(userId: ID!): PromotePayload!
+      }
+
+  - name: Over-fetching in Schema
+    description: Always returning all fields
+    why: |
+      If User always includes posts, comments, followers... every query
+      fetches everything even when not needed. The benefit of GraphQL
+      is fetching only what you need - design the schema to enable this.
+    instead: |
+      // Let clients choose
+      type User {
+        id: ID!
+        name: String!
+        email: String!
+        # These are optional - clients request if needed
+        posts(limit: Int = 10): [Post!]!
+        followers(limit: Int = 10): [User!]!
+      }
+
+      // Query only what's needed
+      query {
+        user(id: "1") {
+          name  # Only fetches name, not posts/followers
+        }
+      }
+
+handoffs:
+  receives_from:
+    - skill: backend
+      receives: Business logic requirements
+    - skill: postgres-wizard
+      receives: Database schema for type generation
+    - skill: authentication-oauth
+      receives: Auth context for resolvers
+
+  hands_to:
+    - skill: nextjs-app-router
+      provides: Schema for client type generation
+    - skill: react-patterns
+      provides: Apollo Client integration patterns
+    - skill: testing
+      provides: API for integration testing
+
+tags:
+  - graphql
+  - api
+  - apollo
+  - schema
+  - resolvers
+  - dataloader
+  - federation
+  - typescript

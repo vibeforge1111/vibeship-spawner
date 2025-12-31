@@ -1,0 +1,119 @@
+# Agent Communication Validations
+
+validations:
+  - id: untyped-message
+    name: Untyped Message Passing
+    severity: medium
+    type: regex
+    pattern: 'send\s*\([^)]*\{[^}]*\}|emit\s*\([^)]*\{[^}]*\}'
+    negative_pattern: 'Schema|schema|z\.|zod|type:'
+    message: "Sending untyped message. Use schema validation for type safety."
+    fix_action: "Define message schema with Zod and validate before sending"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: no-message-id
+    name: Message Without Unique ID
+    severity: medium
+    type: regex
+    pattern: '(?:send|emit|publish)\s*\(\s*\{(?![^}]*(?:id|messageId|eventId))'
+    message: "Message without unique identifier. Debugging and deduplication will fail."
+    fix_action: "Add messageId: crypto.randomUUID() to all messages"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: no-correlation-id
+    name: Missing Correlation ID for Request-Response
+    severity: medium
+    type: regex
+    pattern: 'request|response|reply'
+    negative_pattern: 'correlationId|correlation_id|requestId|request_id'
+    message: "Request-response pattern without correlation ID."
+    fix_action: "Include correlationId to match responses to requests"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: fire-and-forget-critical
+    name: Critical Message Without Acknowledgment
+    severity: high
+    type: regex
+    pattern: '(?:send|emit)\s*\([^)]*(?:critical|important|required)'
+    negative_pattern: 'ack|acknowledge|confirm|waitFor'
+    message: "Critical message sent without acknowledgment mechanism."
+    fix_action: "Use reliable messaging with acknowledgments for critical messages"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: no-message-timeout
+    name: Waiting for Message Without Timeout
+    severity: high
+    type: regex
+    pattern: 'await\s+(?:waitFor|receive|getMessage)'
+    negative_pattern: 'timeout|Promise\.race|AbortController'
+    message: "Waiting for message without timeout. Could hang indefinitely."
+    fix_action: "Add timeout: Promise.race([waitFor(), timeout(5000)])"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: event-handler-no-error-handling
+    name: Event Handler Without Error Handling
+    severity: high
+    type: regex
+    pattern: '\.on\s*\([^)]+,\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{'
+    negative_pattern: 'try|catch|\.catch|error'
+    message: "Event handler without error handling. Errors will propagate."
+    fix_action: "Wrap handler in try-catch to prevent cascade failures"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: no-message-logging
+    name: Message Passing Without Logging
+    severity: medium
+    type: regex
+    pattern: '(?:send|emit|publish|receive)\s*\('
+    negative_pattern: 'log|trace|record|audit'
+    message: "Message passing without logging. Debugging will be difficult."
+    fix_action: "Log all messages with timestamps for debugging"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: circular-event-risk
+    name: Event Handler Emitting Same Event Type
+    severity: critical
+    type: regex
+    pattern: '\.on\s*\(["\'](\w+)["\'][^}]+emit\s*\(["\'](\1)["\']'
+    message: "Event handler emits same event type it listens to. Risk of infinite loop."
+    fix_action: "Break the cycle or add deduplication/rate limiting"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: blocking-in-event-handler
+    name: Blocking Operation in Event Handler
+    severity: medium
+    type: regex
+    pattern: '\.on\s*\([^)]+,\s*\([^)]*\)\s*=>\s*\{[^}]*(?:sleep|setTimeout.*await|while)'
+    message: "Blocking operation in event handler. May slow down event processing."
+    fix_action: "Use non-blocking patterns or spawn separate task"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: no-rate-limiting-events
+    name: Event Publishing Without Rate Limiting
+    severity: medium
+    type: regex
+    pattern: 'while.*emit|for.*emit|map.*emit'
+    negative_pattern: 'rateLimit|throttle|debounce|limit'
+    message: "Publishing events in loop without rate limiting."
+    fix_action: "Add rate limiting to prevent broadcast storms"
+    applies_to:
+      - "*.ts"
+      - "*.js"

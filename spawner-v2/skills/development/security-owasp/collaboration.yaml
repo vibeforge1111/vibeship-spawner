@@ -1,0 +1,415 @@
+# Collaboration - Security & OWASP
+# How this skill works with other skills
+
+version: 1.0.0
+skill_id: security-owasp
+
+prerequisites:
+  required: []
+
+  recommended:
+    - skill: backend
+      reason: "Server-side security implementation"
+      what_to_know:
+        - "Request/response handling"
+        - "Middleware patterns"
+        - "Error handling"
+
+    - skill: authentication-oauth
+      reason: "Auth implementation details"
+      what_to_know:
+        - "OAuth 2.0 flows"
+        - "JWT handling"
+        - "Session management"
+
+  knowledge:
+    - "HTTP protocol"
+    - "Web application basics"
+    - "Common attack vectors"
+
+delegation_triggers:
+  - trigger: "user needs OAuth setup"
+    delegate_to: authentication-oauth
+    context: "OAuth 2.0/OIDC implementation"
+
+  - trigger: "user needs database security"
+    delegate_to: postgres-wizard
+    context: "Row-level security, encryption"
+
+  - trigger: "user needs Kubernetes secrets"
+    delegate_to: kubernetes
+    context: "Secrets management, RBAC"
+
+  - trigger: "user needs CI/CD security"
+    delegate_to: cicd-pipelines
+    context: "Supply chain, secret scanning"
+
+receives_context_from:
+  - skill: backend
+    receives:
+      - "API endpoints to secure"
+      - "Authentication requirements"
+      - "Data sensitivity levels"
+
+  - skill: react-patterns
+    receives:
+      - "Frontend security concerns"
+      - "XSS risk areas"
+      - "Form handling"
+
+  - skill: devops
+    receives:
+      - "Infrastructure security needs"
+      - "Secret management approach"
+      - "Network security requirements"
+
+provides_context_to:
+  - skill: backend
+    provides:
+      - "Security middleware patterns"
+      - "Input validation schemas"
+      - "Authorization patterns"
+
+  - skill: cicd-pipelines
+    provides:
+      - "Security scanning requirements"
+      - "Secret handling best practices"
+      - "Dependency audit process"
+
+  - skill: testing-strategies
+    provides:
+      - "Security test patterns"
+      - "Penetration testing scope"
+      - "Vulnerability categories"
+
+escalation_paths:
+  - situation: "Complex OAuth/OIDC setup"
+    escalate_to: authentication-oauth
+    context: "OAuth implementation details"
+
+  - situation: "Database-level security"
+    escalate_to: postgres-wizard
+    context: "RLS, encryption, audit logs"
+
+  - situation: "Infrastructure security"
+    escalate_to: kubernetes
+    context: "Network policies, secrets"
+
+workflow_integration:
+  typical_sequence:
+    1:
+      step: "Threat modeling"
+      skills: [security-owasp]
+      output: "Security requirements, attack surface"
+
+    2:
+      step: "Secure design"
+      skills: [security-owasp, backend]
+      output: "Security architecture decisions"
+
+    3:
+      step: "Input validation"
+      skills: [security-owasp]
+      output: "Validation schemas, sanitization"
+
+    4:
+      step: "Auth implementation"
+      skills: [authentication-oauth, security-owasp]
+      output: "Secure authentication"
+
+    5:
+      step: "Authorization checks"
+      skills: [security-owasp]
+      output: "Access control middleware"
+
+    6:
+      step: "Security headers"
+      skills: [security-owasp]
+      output: "CSP, HSTS, etc."
+
+    7:
+      step: "Security testing"
+      skills: [testing-strategies, security-owasp]
+      output: "Security tests, pen testing"
+
+  decision_points:
+    - question: "Session vs JWT?"
+      guidance: |
+        Sessions when:
+        - Server-side state OK
+        - Need immediate invalidation
+        - Simpler security model
+
+        JWT when:
+        - Stateless required
+        - Microservices
+        - Need claims in token
+
+    - question: "Password or passwordless?"
+      guidance: |
+        Password when:
+        - Users expect it
+        - No MFA requirement
+        - Simple setup needed
+
+        Passwordless when:
+        - Better UX desired
+        - Security priority
+        - Magic links/WebAuthn
+
+    - question: "API key or OAuth?"
+      guidance: |
+        API key when:
+        - Server-to-server
+        - Simple integration
+        - No user context
+
+        OAuth when:
+        - User authorization
+        - Third-party apps
+        - Scoped permissions
+
+collaboration_patterns:
+  with_backend:
+    when: "Securing API endpoints"
+    approach: |
+      Backend Security Integration:
+
+      ## Middleware stack
+
+      import helmet from 'helmet';
+      import rateLimit from 'express-rate-limit';
+
+      // Security headers
+      app.use(helmet());
+
+      // Rate limiting
+      app.use('/api/', rateLimit({
+        windowMs: 15 * 60 * 1000,
+        max: 100,
+      }));
+
+      // Body parsing limits
+      app.use(express.json({ limit: '10kb' }));
+
+
+      ## Input validation middleware
+
+      import { z } from 'zod';
+
+      function validate(schema: z.ZodSchema) {
+        return (req, res, next) => {
+          const result = schema.safeParse(req.body);
+          if (!result.success) {
+            return res.status(400).json({
+              error: 'Validation failed',
+              details: result.error.issues,
+            });
+          }
+          req.validated = result.data;
+          next();
+        };
+      }
+
+
+      ## Authorization middleware
+
+      function requirePermission(permission: string) {
+        return (req, res, next) => {
+          if (!req.user?.permissions.includes(permission)) {
+            return res.status(403).json({ error: 'Forbidden' });
+          }
+          next();
+        };
+      }
+
+  with_nextjs:
+    when: "Securing Next.js applications"
+    approach: |
+      Next.js Security:
+
+      ## next.config.js headers
+
+      module.exports = {
+        async headers() {
+          return [
+            {
+              source: '/:path*',
+              headers: [
+                { key: 'X-Frame-Options', value: 'DENY' },
+                { key: 'X-Content-Type-Options', value: 'nosniff' },
+                { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+                { key: 'Permissions-Policy', value: 'camera=(), microphone=()' },
+              ],
+            },
+          ];
+        },
+      };
+
+
+      ## API route protection
+
+      // middleware.ts
+      import { NextResponse } from 'next/server';
+      import { verifyToken } from './lib/auth';
+
+      export async function middleware(request) {
+        if (request.nextUrl.pathname.startsWith('/api/protected')) {
+          const token = request.cookies.get('session');
+
+          if (!token) {
+            return NextResponse.json(
+              { error: 'Unauthorized' },
+              { status: 401 }
+            );
+          }
+
+          try {
+            await verifyToken(token.value);
+          } catch {
+            return NextResponse.json(
+              { error: 'Invalid token' },
+              { status: 401 }
+            );
+          }
+        }
+
+        return NextResponse.next();
+      }
+
+  with_database:
+    when: "Database security"
+    approach: |
+      Database Security:
+
+      ## Row-Level Security (PostgreSQL)
+
+      -- Enable RLS
+      ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
+
+      -- Policy: Users see only their documents
+      CREATE POLICY user_documents ON documents
+        FOR ALL
+        USING (user_id = current_setting('app.current_user_id')::uuid);
+
+      -- Set user context
+      SET app.current_user_id = 'user-uuid-here';
+
+
+      ## Parameterized queries
+
+      // Always use parameters
+      const user = await prisma.user.findFirst({
+        where: { email },
+      });
+
+      // For raw queries
+      const result = await prisma.$queryRaw`
+        SELECT * FROM users WHERE email = ${email}
+      `;
+
+
+      ## Encryption at rest
+
+      // Encrypt sensitive fields
+      import { encrypt, decrypt } from './crypto';
+
+      const user = await prisma.user.create({
+        data: {
+          email,
+          ssn: encrypt(ssn),  // Encrypted
+        },
+      });
+
+platform_integration:
+  security_scanning:
+    setup: |
+      # Security Scanning Tools
+
+      ## npm audit (Node.js)
+      npm audit
+      npm audit fix
+
+      ## Snyk
+      npx snyk test
+      npx snyk monitor
+
+      ## GitHub Dependabot
+      # .github/dependabot.yml
+      version: 2
+      updates:
+        - package-ecosystem: npm
+          directory: "/"
+          schedule:
+            interval: daily
+          open-pull-requests-limit: 10
+
+      ## SAST with semgrep
+      semgrep scan --config auto
+    considerations:
+      - "Run in CI/CD pipeline"
+      - "Block on critical vulnerabilities"
+      - "Regular dependency updates"
+
+  secret_scanning:
+    setup: |
+      # Secret Scanning
+
+      ## Gitleaks
+      gitleaks detect --source .
+
+      ## truffleHog
+      trufflehog git file://. --only-verified
+
+      ## GitHub secret scanning
+      # Enabled by default for public repos
+      # Enable for private repos in settings
+
+      ## Pre-commit hook
+      # .pre-commit-config.yaml
+      repos:
+        - repo: https://github.com/gitleaks/gitleaks
+          rev: v8.18.0
+          hooks:
+            - id: gitleaks
+    considerations:
+      - "Scan before every commit"
+      - "Alert on detected secrets"
+      - "Rotate any exposed secrets"
+
+ecosystem:
+  primary_tools:
+    - "Helmet.js (security headers)"
+    - "express-rate-limit"
+    - "csurf (CSRF)"
+    - "Zod (validation)"
+    - "DOMPurify (XSS)"
+
+  security_scanning:
+    - name: "npm audit"
+      use_when: "Node.js dependency scanning"
+    - name: "Snyk"
+      use_when: "Comprehensive vulnerability scanning"
+    - name: "Gitleaks"
+      use_when: "Secret detection"
+    - name: "OWASP ZAP"
+      use_when: "Dynamic application security testing"
+
+  authentication:
+    - name: "NextAuth.js"
+      use_when: "Next.js authentication"
+    - name: "Passport.js"
+      use_when: "Express authentication"
+    - name: "jose"
+      use_when: "JWT handling"
+    - name: "@node-rs/argon2"
+      use_when: "Password hashing"
+
+  alternatives:
+    - name: "bcrypt"
+      use_when: "Password hashing (slightly slower than Argon2)"
+      avoid_when: "Can use Argon2"
+
+    - name: "express-validator"
+      use_when: "Express input validation"
+      avoid_when: "Already using Zod"

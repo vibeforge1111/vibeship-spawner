@@ -1,0 +1,246 @@
+# Validations - State Management
+# Automated checks for state management issues
+
+version: 1.0.0
+skill_id: state-management
+
+validations:
+  # Stale closures
+  - id: stale-closure-risk
+    name: Potential stale closure in interval/timeout
+    severity: warning
+    type: regex
+    pattern:
+      - 'setInterval\\([^)]*set[A-Z]\\w*\\([^)]*[a-z]+\\s*[+\\-]'
+      - 'setTimeout\\([^)]*set[A-Z]\\w*\\([^)]*[a-z]+\\s*[+\\-]'
+    message: "State variable in interval/timeout may be stale"
+    fix_action: "Use functional update: setState(prev => prev + 1)"
+    applies_to:
+      - "*.jsx"
+      - "*.tsx"
+
+  # Mutation issues
+  - id: array-mutation
+    name: Direct array mutation
+    severity: warning
+    type: regex
+    pattern:
+      - '\\.push\\([^)]+\\);\\s*set[A-Z]'
+      - '\\.pop\\(\\);\\s*set[A-Z]'
+      - '\\.splice\\([^)]+\\);\\s*set[A-Z]'
+      - '\\.sort\\(\\);\\s*set[A-Z]'
+    message: "Mutating array then setting state won't trigger update"
+    fix_action: "Create new array: setState([...arr, newItem])"
+    applies_to:
+      - "*.jsx"
+      - "*.tsx"
+
+  - id: object-mutation
+    name: Direct object mutation
+    severity: warning
+    type: regex
+    pattern:
+      - 'state\\.[a-z]+\\s*=\\s*[^;]+;\\s*set[A-Z]'
+      - '\\w+\\.[a-z]+\\s*=\\s*[^;]+;\\s*setState'
+    message: "Mutating object then setting state won't trigger update"
+    fix_action: "Create new object: setState({ ...obj, key: value })"
+    applies_to:
+      - "*.jsx"
+      - "*.tsx"
+
+  # Context issues
+  - id: inline-context-value
+    name: Inline object in Context Provider
+    severity: info
+    type: regex
+    pattern:
+      - 'Provider\\s+value=\\{\\{'
+    message: "Inline object creates new reference every render"
+    fix_action: "Memoize value with useMemo"
+    applies_to:
+      - "*.jsx"
+      - "*.tsx"
+
+  # Zustand issues
+  - id: zustand-no-selector
+    name: Zustand without selector
+    severity: info
+    type: regex
+    pattern:
+      - 'use\\w+Store\\(\\)(?!\\s*\\()'
+    message: "Selecting entire store causes unnecessary re-renders"
+    fix_action: "Use selector: useStore(s => s.specificValue)"
+    applies_to:
+      - "*.jsx"
+      - "*.tsx"
+
+  # React Query issues
+  - id: query-key-object
+    name: Object in query key without stability
+    severity: info
+    type: regex
+    pattern:
+      - 'queryKey:\\s*\\[[^\\]]*\\{[^}]*\\}[^\\]]*\\]'
+    message: "Object in query key should have stable reference"
+    fix_action: "Use query key factory or ensure stable object"
+    applies_to:
+      - "*.jsx"
+      - "*.tsx"
+
+  # Redux duplication
+  - id: query-to-redux
+    name: Copying React Query data to Redux
+    severity: info
+    type: regex
+    pattern:
+      - 'useQuery.*useEffect.*dispatch'
+      - 'data\\s*&&\\s*dispatch'
+    message: "Avoid duplicating server state in Redux"
+    fix_action: "Use React Query as single source for server state"
+    applies_to:
+      - "*.jsx"
+      - "*.tsx"
+
+code_smells:
+  - id: too-much-global-state
+    name: Excessive global state
+    description: "More than 10 values in global store"
+    pattern: null
+    suggestion: "Consider splitting stores or using local state"
+
+  - id: prop-drilling-deep
+    name: Props passed through many levels
+    description: "Same prop passed through 3+ components"
+    pattern: null
+    suggestion: "Consider context or composition"
+
+  - id: form-in-global-state
+    name: Form state in global store
+    description: "Form values managed in Redux/Zustand"
+    pattern: null
+    suggestion: "Use react-hook-form or local useState"
+
+best_practices:
+  state_decision_tree:
+    recommendation: |
+      ## Which State Solution?
+
+      ### 1. Start with local state
+      - Form inputs → useState or react-hook-form
+      - UI state (modals, dropdowns) → useState
+      - Component-specific data → useState
+
+      ### 2. Server state → React Query
+      - API responses
+      - Cached data
+      - Anything that needs sync with backend
+
+      ### 3. URL state → nuqs or similar
+      - Filters, pagination
+      - Shareable view state
+      - Deep linking requirements
+
+      ### 4. Global client state → Zustand/Jotai
+      - Theme preferences
+      - User session (after auth)
+      - Cross-component UI state
+
+      ### 5. Complex client state → Redux Toolkit
+      - Many interconnected reducers
+      - Complex business logic
+      - Time-travel debugging needs
+
+  zustand_patterns:
+    recommendation: |
+      ## Zustand Best Practices
+
+      // 1. Type your store
+      interface Store {
+        count: number;
+        increment: () => void;
+      }
+
+      const useStore = create<Store>((set) => ({
+        count: 0,
+        increment: () => set((s) => ({ count: s.count + 1 })),
+      }));
+
+
+      // 2. Use selectors
+      const count = useStore((s) => s.count);
+      const { count, increment } = useStore(
+        (s) => ({ count: s.count, increment: s.increment }),
+        shallow
+      );
+
+
+      // 3. Create selector hooks
+      export const useCount = () => useStore((s) => s.count);
+      export const useIncrement = () => useStore((s) => s.increment);
+
+
+      // 4. Persist what matters
+      const useStore = create(
+        persist(
+          (set) => ({ ... }),
+          { name: 'app-store' }
+        )
+      );
+
+
+      // 5. Use Immer for complex updates
+      const useStore = create(immer((set) => ({
+        nested: { deep: { value: 1 } },
+        update: () => set((s) => {
+          s.nested.deep.value = 2;  // Direct mutation OK
+        }),
+      })));
+
+  react_query_patterns:
+    recommendation: |
+      ## React Query Best Practices
+
+      // 1. Query key factories
+      const userKeys = {
+        all: ['users'] as const,
+        lists: () => [...userKeys.all, 'list'] as const,
+        list: (filters) => [...userKeys.lists(), filters] as const,
+        detail: (id) => [...userKeys.all, 'detail', id] as const,
+      };
+
+
+      // 2. Custom hooks for queries
+      function useUser(id: string) {
+        return useQuery({
+          queryKey: userKeys.detail(id),
+          queryFn: () => api.getUser(id),
+          staleTime: 5 * 60 * 1000,
+        });
+      }
+
+
+      // 3. Optimistic updates
+      const mutation = useMutation({
+        mutationFn: updateUser,
+        onMutate: async (newUser) => {
+          await queryClient.cancelQueries(userKeys.detail(newUser.id));
+          const previous = queryClient.getQueryData(userKeys.detail(newUser.id));
+          queryClient.setQueryData(userKeys.detail(newUser.id), newUser);
+          return { previous };
+        },
+        onError: (err, newUser, context) => {
+          queryClient.setQueryData(
+            userKeys.detail(newUser.id),
+            context.previous
+          );
+        },
+      });
+
+
+      // 4. Prefetching
+      const prefetchUser = (id: string) => {
+        queryClient.prefetchQuery({
+          queryKey: userKeys.detail(id),
+          queryFn: () => api.getUser(id),
+        });
+      };

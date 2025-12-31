@@ -1,0 +1,406 @@
+# Collaboration - Docker
+# How this skill works with other skills
+
+version: 1.0.0
+skill_id: docker
+
+prerequisites:
+  required: []
+
+  recommended:
+    - skill: backend
+      reason: "Containerizing applications"
+      what_to_know:
+        - "Application dependencies"
+        - "Environment variables"
+        - "Port requirements"
+
+    - skill: devops
+      reason: "CI/CD pipeline integration"
+      what_to_know:
+        - "Build automation"
+        - "Registry configuration"
+        - "Deployment targets"
+
+  knowledge:
+    - "Linux command line basics"
+    - "Application runtime requirements"
+    - "Networking fundamentals"
+    - "File system concepts"
+
+delegation_triggers:
+  - trigger: "user needs container orchestration"
+    delegate_to: kubernetes
+    context: "Deploy containerized app to cluster"
+
+  - trigger: "user needs CI/CD pipeline"
+    delegate_to: devops
+    context: "Build and push images in pipeline"
+
+  - trigger: "user needs cloud deployment"
+    delegate_to: aws-services
+    context: "ECS/Fargate or ECR configuration"
+
+  - trigger: "user needs database container"
+    delegate_to: postgres-wizard
+    context: "Database container configuration"
+
+receives_context_from:
+  - skill: backend
+    receives:
+      - "Application to containerize"
+      - "Dependencies and requirements"
+      - "Environment configuration"
+      - "Port mappings needed"
+
+  - skill: frontend
+    receives:
+      - "Static assets to package"
+      - "Build process requirements"
+      - "Nginx/server configuration"
+
+  - skill: devops
+    receives:
+      - "CI/CD requirements"
+      - "Registry configuration"
+      - "Security requirements"
+
+provides_context_to:
+  - skill: kubernetes
+    provides:
+      - "Container images ready for deployment"
+      - "Health check endpoints"
+      - "Resource requirements (CPU/memory)"
+      - "Environment variable requirements"
+
+  - skill: devops
+    provides:
+      - "Dockerfile for CI/CD pipelines"
+      - "Multi-arch build configuration"
+      - "Image tagging strategy"
+
+  - skill: aws-services
+    provides:
+      - "ECR-compatible images"
+      - "ECS task definitions"
+      - "Fargate compatibility"
+
+escalation_paths:
+  - situation: "Need to deploy to Kubernetes cluster"
+    escalate_to: kubernetes
+    context: "Container orchestration, scaling, networking"
+
+  - situation: "Need to set up CI/CD for images"
+    escalate_to: devops
+    context: "Automated build, test, push pipelines"
+
+  - situation: "Security hardening beyond basics"
+    escalate_to: security
+    context: "Image scanning, vulnerability management"
+
+workflow_integration:
+  typical_sequence:
+    1:
+      step: "Analyze application"
+      skills: [backend]
+      output: "Dependencies, ports, env vars"
+
+    2:
+      step: "Create Dockerfile"
+      skills: [docker]
+      output: "Multi-stage Dockerfile with security"
+
+    3:
+      step: "Create docker-compose"
+      skills: [docker]
+      output: "Development environment"
+
+    4:
+      step: "Test locally"
+      skills: [docker]
+      output: "Working container"
+
+    5:
+      step: "Set up CI/CD"
+      skills: [docker, devops]
+      output: "Automated build pipeline"
+
+    6:
+      step: "Deploy"
+      skills: [kubernetes]
+      output: "Production deployment"
+
+  decision_points:
+    - question: "Alpine or Debian slim?"
+      guidance: |
+        Use Alpine when:
+        - Size is critical
+        - No glibc dependencies
+        - Simple applications
+
+        Use Debian slim when:
+        - Need glibc (most Python packages)
+        - Need specific Debian packages
+        - Compatibility is priority
+
+    - question: "Docker Compose or Kubernetes?"
+      guidance: |
+        Docker Compose when:
+        - Local development
+        - Single-node deployment
+        - Simple applications
+
+        Kubernetes when:
+        - Production at scale
+        - Need auto-scaling
+        - Multi-node clusters
+
+    - question: "Build locally or in CI?"
+      guidance: |
+        Build locally when:
+        - Development iteration
+        - Testing Dockerfile changes
+
+        Build in CI when:
+        - Production images
+        - Need reproducibility
+        - Multi-architecture builds
+
+collaboration_patterns:
+  with_nodejs:
+    when: "Containerizing Node.js apps"
+    approach: |
+      Node.js Docker patterns:
+
+      # Multi-stage for Node.js
+      FROM node:20-alpine AS builder
+      WORKDIR /app
+
+      # Dependencies first (cache layer)
+      COPY package*.json ./
+      RUN npm ci
+
+      # Build
+      COPY . .
+      RUN npm run build
+
+      # Production stage
+      FROM node:20-alpine
+      WORKDIR /app
+
+      # Non-root user
+      RUN addgroup -S app && adduser -S app -G app
+
+      # Production deps only
+      COPY package*.json ./
+      RUN npm ci --only=production && npm cache clean --force
+
+      # Copy built app
+      COPY --from=builder --chown=app:app /app/dist ./dist
+
+      USER app
+      EXPOSE 3000
+
+      HEALTHCHECK --interval=30s --timeout=3s \
+        CMD wget -q --spider http://localhost:3000/health || exit 1
+
+      CMD ["node", "dist/index.js"]
+
+
+      # .dockerignore for Node.js
+      node_modules
+      npm-debug.log
+      .git
+      .env*
+      coverage
+      tests
+      *.md
+
+  with_python:
+    when: "Containerizing Python apps"
+    approach: |
+      Python Docker patterns:
+
+      # Multi-stage for Python
+      FROM python:3.12-slim AS builder
+      WORKDIR /app
+
+      # Install build tools for compiled deps
+      RUN apt-get update && apt-get install -y --no-install-recommends \
+          build-essential \
+          && rm -rf /var/lib/apt/lists/*
+
+      # Install dependencies
+      COPY requirements.txt .
+      RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
+
+      # Production stage
+      FROM python:3.12-slim
+      WORKDIR /app
+
+      # Non-root user
+      RUN useradd -m -s /bin/bash app
+
+      # Install wheels (no compiler needed)
+      COPY --from=builder /wheels /wheels
+      RUN pip install --no-cache-dir /wheels/*
+
+      COPY --chown=app:app . .
+
+      USER app
+      EXPOSE 8000
+
+      CMD ["gunicorn", "-b", "0.0.0.0:8000", "app:app"]
+
+  with_go:
+    when: "Containerizing Go apps"
+    approach: |
+      Go Docker patterns (smallest possible):
+
+      # Build stage
+      FROM golang:1.22-alpine AS builder
+      WORKDIR /app
+
+      # Download deps first (cache layer)
+      COPY go.mod go.sum ./
+      RUN go mod download
+
+      # Build static binary
+      COPY . .
+      RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o main .
+
+      # Scratch = empty image (~5-10MB total)
+      FROM scratch
+
+      # Copy binary
+      COPY --from=builder /app/main /main
+
+      # Copy CA certs for HTTPS
+      COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+      EXPOSE 8080
+      ENTRYPOINT ["/main"]
+
+platform_integration:
+  docker_compose:
+    setup: |
+      # docker-compose.yml for development
+      version: '3.8'
+
+      services:
+        app:
+          build:
+            context: .
+            dockerfile: Dockerfile.dev
+          ports:
+            - "3000:3000"
+          volumes:
+            - .:/app
+            - /app/node_modules
+          environment:
+            - NODE_ENV=development
+            - DATABASE_URL=postgresql://postgres:postgres@db:5432/app
+          depends_on:
+            db:
+              condition: service_healthy
+
+        db:
+          image: postgres:16-alpine
+          environment:
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: postgres
+            POSTGRES_DB: app
+          volumes:
+            - postgres_data:/var/lib/postgresql/data
+          ports:
+            - "5432:5432"
+          healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U postgres"]
+            interval: 5s
+            timeout: 5s
+            retries: 5
+
+      volumes:
+        postgres_data:
+    considerations:
+      - "Use depends_on with service_healthy"
+      - "Mount code as volume for hot reload"
+      - "Preserve node_modules in container"
+      - "Use healthchecks for database readiness"
+
+  buildx:
+    setup: |
+      # Multi-architecture builds
+
+      # Create builder
+      docker buildx create --name multiarch --use
+
+      # Build for multiple platforms
+      docker buildx build \
+        --platform linux/amd64,linux/arm64 \
+        -t myimage:latest \
+        --push .
+
+      # Inspect manifest
+      docker buildx imagetools inspect myimage:latest
+    considerations:
+      - "ARM64 for AWS Graviton, Apple Silicon"
+      - "Use --push to push multi-arch manifest"
+      - "Test on both architectures"
+
+  registries:
+    setup: |
+      # Docker Hub
+      docker login
+      docker tag myimage:latest username/myimage:latest
+      docker push username/myimage:latest
+
+      # GitHub Container Registry
+      echo $GITHUB_TOKEN | docker login ghcr.io -u USERNAME --password-stdin
+      docker tag myimage:latest ghcr.io/username/myimage:latest
+      docker push ghcr.io/username/myimage:latest
+
+      # AWS ECR
+      aws ecr get-login-password | docker login --username AWS --password-stdin 123456.dkr.ecr.us-east-1.amazonaws.com
+      docker tag myimage:latest 123456.dkr.ecr.us-east-1.amazonaws.com/myimage:latest
+      docker push 123456.dkr.ecr.us-east-1.amazonaws.com/myimage:latest
+    considerations:
+      - "Use specific tags, not just :latest"
+      - "Implement image scanning"
+      - "Set up retention policies"
+
+ecosystem:
+  primary_tools:
+    - "Docker Desktop / Docker Engine"
+    - "Docker Compose V2"
+    - "Docker BuildKit"
+    - "Buildx for multi-arch"
+
+  analysis:
+    - name: dive
+      use_when: "Analyze image layers, find wasted space"
+    - name: hadolint
+      use_when: "Lint Dockerfiles for best practices"
+    - name: trivy
+      use_when: "Scan images for vulnerabilities"
+    - name: docker scout
+      use_when: "Image analysis and recommendations"
+
+  alternatives:
+    - name: Podman
+      use_when: "Rootless containers, no daemon"
+      avoid_when: "Need Docker-specific features"
+
+    - name: containerd
+      use_when: "Kubernetes runtime"
+      avoid_when: "Need Docker CLI experience"
+
+    - name: nerdctl
+      use_when: "containerd with Docker-like CLI"
+      avoid_when: "Team expects Docker exactly"
+
+  deprecated:
+    - "Docker Compose V1 (use V2)"
+    - "docker-machine (use Docker Desktop)"
+    - "--link flag (use networks)"
+    - "legacy builder (use BuildKit)"

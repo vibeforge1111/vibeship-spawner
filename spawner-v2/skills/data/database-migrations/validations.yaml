@@ -1,0 +1,279 @@
+# Validations - Database Migrations
+# Automated checks for dangerous migration patterns
+
+version: 1.0.0
+skill_id: database-migrations
+
+validations:
+  # Dangerous ALTER statements
+  - id: not-null-without-default
+    name: NOT NULL without DEFAULT on existing table
+    severity: critical
+    type: regex
+    pattern:
+      - 'ADD\s+COLUMN.*NOT\s+NULL(?!.*DEFAULT)'
+      - 'ALTER\s+COLUMN.*SET\s+NOT\s+NULL'
+    message: "Adding NOT NULL without DEFAULT locks table for rewrite"
+    fix_action: "Add DEFAULT clause or use multi-step migration"
+    applies_to:
+      - "*.sql"
+
+  - id: column-rename
+    name: Column rename detected
+    severity: warning
+    type: regex
+    pattern:
+      - 'RENAME\s+COLUMN'
+      - 'RENAME\s+TO'
+    message: "Column rename breaks backwards compatibility"
+    fix_action: "Use expand-contract pattern instead"
+    applies_to:
+      - "*.sql"
+
+  - id: column-drop
+    name: Column drop without backup plan
+    severity: warning
+    type: regex
+    pattern:
+      - 'DROP\s+COLUMN'
+    message: "Dropping column is irreversible - ensure data is backed up"
+    fix_action: "Verify data migrated, add to down migration"
+    applies_to:
+      - "*.sql"
+
+  - id: table-drop
+    name: Table drop detected
+    severity: critical
+    type: regex
+    pattern:
+      - 'DROP\s+TABLE'
+    message: "Dropping table is irreversible - ensure data is backed up"
+    fix_action: "Archive data first, verify no remaining dependencies"
+    applies_to:
+      - "*.sql"
+
+  # Index issues
+  - id: index-not-concurrent
+    name: CREATE INDEX without CONCURRENTLY
+    severity: warning
+    type: regex
+    pattern:
+      - 'CREATE\s+INDEX(?!\s+CONCURRENTLY)'
+      - 'CREATE\s+UNIQUE\s+INDEX(?!\s+CONCURRENTLY)'
+    message: "Non-concurrent index creation blocks writes"
+    fix_action: "Use CREATE INDEX CONCURRENTLY"
+    applies_to:
+      - "*.sql"
+
+  - id: drop-index-not-concurrent
+    name: DROP INDEX without CONCURRENTLY
+    severity: info
+    type: regex
+    pattern:
+      - 'DROP\s+INDEX(?!\s+CONCURRENTLY)'
+    message: "Non-concurrent index drop may block queries"
+    fix_action: "Use DROP INDEX CONCURRENTLY for large tables"
+    applies_to:
+      - "*.sql"
+
+  # Data modification
+  - id: unbounded-update
+    name: UPDATE without WHERE or LIMIT
+    severity: warning
+    type: regex
+    pattern:
+      - 'UPDATE\s+\w+\s+SET(?!.*WHERE)(?!.*LIMIT)'
+    message: "Unbounded UPDATE may lock table for extended period"
+    fix_action: "Add WHERE clause or batch with LIMIT"
+    applies_to:
+      - "*.sql"
+
+  - id: unbounded-delete
+    name: DELETE without WHERE or LIMIT
+    severity: warning
+    type: regex
+    pattern:
+      - 'DELETE\s+FROM\s+\w+(?!.*WHERE)(?!.*LIMIT)'
+    message: "Unbounded DELETE may lock table for extended period"
+    fix_action: "Add WHERE clause or batch with LIMIT"
+    applies_to:
+      - "*.sql"
+
+  # Type changes
+  - id: type-change
+    name: Column type change detected
+    severity: warning
+    type: regex
+    pattern:
+      - 'ALTER\s+COLUMN.*TYPE'
+      - 'ALTER\s+COLUMN.*SET\s+DATA\s+TYPE'
+    message: "Type change may require table rewrite"
+    fix_action: "Test on production-size data, plan for downtime"
+    applies_to:
+      - "*.sql"
+
+  - id: enum-creation
+    name: ENUM type creation
+    severity: info
+    type: regex
+    pattern:
+      - 'CREATE\s+TYPE.*ENUM'
+    message: "ENUMs are hard to modify later"
+    fix_action: "Consider using VARCHAR with CHECK constraint instead"
+    applies_to:
+      - "*.sql"
+
+  # ORM-specific
+  - id: prisma-db-push
+    name: Prisma db push in production
+    severity: critical
+    type: regex
+    pattern:
+      - 'prisma\s+db\s+push'
+      - 'npx\s+prisma\s+db\s+push'
+    message: "db push bypasses migration system - use migrate deploy"
+    fix_action: "Use prisma migrate deploy for production"
+    applies_to:
+      - "*.sh"
+      - "*.yml"
+      - "*.yaml"
+      - "Dockerfile"
+
+  - id: drizzle-push
+    name: Drizzle push in production
+    severity: critical
+    type: regex
+    pattern:
+      - 'drizzle-kit\s+push'
+      - 'npx\s+drizzle-kit\s+push'
+    message: "drizzle push bypasses migration system"
+    fix_action: "Use drizzle-kit generate + migrate for production"
+    applies_to:
+      - "*.sh"
+      - "*.yml"
+      - "*.yaml"
+      - "Dockerfile"
+
+code_smells:
+  - id: no-down-migration
+    name: Migration without rollback
+    description: "Up migration exists but no down/revert migration"
+    pattern: null
+    suggestion: "Write down migration for every up migration"
+
+  - id: data-in-schema-migration
+    name: Data migration mixed with schema
+    description: "INSERT/UPDATE in same file as ALTER TABLE"
+    pattern: null
+    suggestion: "Separate schema and data migrations"
+
+  - id: no-transaction
+    name: Multi-statement migration without transaction
+    description: "Multiple statements that should be atomic"
+    pattern: null
+    suggestion: "Wrap related changes in BEGIN/COMMIT"
+
+best_practices:
+  migration_checklist:
+    recommendation: |
+      ## Migration Checklist
+
+      Before writing:
+      - [ ] Is this backwards compatible with running code?
+      - [ ] Can this be split into smaller migrations?
+      - [ ] Do I have a rollback plan?
+
+      Before deploying:
+      - [ ] Tested on production-like data size
+      - [ ] Measured lock duration
+      - [ ] Have monitoring dashboards ready
+      - [ ] Communicated to team
+
+      After deploying:
+      - [ ] Verified migration completed
+      - [ ] Checked application logs
+      - [ ] Monitored query performance
+      - [ ] Cleaned up temporary columns/triggers
+
+  down_migration:
+    recommendation: |
+      ## Writing Down Migrations
+
+      // Every up migration needs a down
+
+      // up: add column
+      ALTER TABLE users ADD COLUMN phone VARCHAR(50);
+
+      // down: remove column
+      ALTER TABLE users DROP COLUMN phone;
+
+
+      // up: add NOT NULL
+      ALTER TABLE users ALTER COLUMN status SET NOT NULL;
+
+      // down: remove NOT NULL
+      ALTER TABLE users ALTER COLUMN status DROP NOT NULL;
+
+
+      // For irreversible changes, document:
+      -- DOWN: This migration cannot be reversed.
+      -- Data was archived to users_backup_20240115.
+      -- To restore: COPY users FROM users_backup_20240115;
+
+  testing_migrations:
+    recommendation: |
+      ## Testing Migrations
+
+      1. Get production data dump (anonymized)
+      pg_dump -d prod_db --schema-only > schema.sql
+      pg_dump -d prod_db --data-only --table=users | head -1000000 > users_sample.sql
+
+      2. Restore to test database
+      psql test_db < schema.sql
+      psql test_db < users_sample.sql
+
+      3. Run migration
+      time npm run db:migrate
+
+      4. Verify
+      - Check migration time
+      - Check locks during migration
+      - Check query performance after
+      - Verify data integrity
+
+      5. Test rollback
+      npm run db:migrate:down
+      - Verify data restored
+      - Check application still works
+
+  ci_integration:
+    recommendation: |
+      ## CI/CD for Migrations
+
+      # .github/workflows/migrate.yml
+      jobs:
+        migrate:
+          runs-on: ubuntu-latest
+          steps:
+            - uses: actions/checkout@v4
+
+            - name: Check migration status
+              run: npm run db:migrate:status
+
+            - name: Dry run migration
+              run: npm run db:migrate:dry
+
+            - name: Run migration
+              run: npm run db:migrate:deploy
+              env:
+                DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+            - name: Verify migration
+              run: npm run db:migrate:status
+
+            - name: Run smoke tests
+              run: npm run test:smoke
+
+
+      # Run migrations BEFORE deploying new code
+      # New code must work with both old and new schema

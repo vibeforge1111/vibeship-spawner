@@ -1,0 +1,310 @@
+# Validations - Observability
+# Automated checks for logging, metrics, and tracing issues
+
+version: 1.0.0
+skill_id: observability
+
+validations:
+  # Logging issues
+  - id: console-log-production
+    name: Console.log in production code
+    severity: warning
+    type: regex
+    pattern:
+      - 'console\.(log|debug|info|warn|error)\('
+    message: "Use structured logger instead of console"
+    fix_action: "Replace with pino/winston logger"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+    exclude:
+      - "*.test.*"
+      - "*.spec.*"
+
+  - id: log-without-context
+    name: Log without request context
+    severity: info
+    type: regex
+    pattern:
+      - 'logger\.(info|error|warn)\([^{]*\)$'
+      - 'log\.(info|error|warn)\([^{]*\)$'
+    message: "Include context object in log calls"
+    fix_action: "Add context: logger.info({ request_id }, 'message')"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: logging-password
+    name: Logging sensitive data
+    severity: critical
+    type: regex
+    pattern:
+      - 'log.*password'
+      - 'log.*token'
+      - 'log.*secret'
+      - 'log.*apiKey'
+      - 'log.*req\.body'
+      - 'console\.log.*password'
+    message: "Never log sensitive data"
+    fix_action: "Use redaction or log specific safe fields only"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: error-without-stack
+    name: Logging error without stack
+    severity: info
+    type: regex
+    pattern:
+      - 'logger\.error\([^)]*error\.message[^)]*\)(?!.*stack)'
+      - 'log\.error\([^)]*err\.message[^)]*\)(?!.*stack)'
+    message: "Include stack trace when logging errors"
+    fix_action: "Log the full error object or include stack"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  # Metrics issues
+  - id: high-cardinality-label
+    name: High cardinality metric label
+    severity: warning
+    type: regex
+    pattern:
+      - 'labels:.*user_id'
+      - 'labels:.*userId'
+      - 'labels:.*email'
+      - 'labels:.*request_id'
+      - 'labels:.*requestId'
+      - 'labelNames.*user_id'
+      - 'labelNames.*userId'
+    message: "Avoid high-cardinality labels in metrics"
+    fix_action: "Use logs for user_id, metrics for aggregates only"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: metric-without-labels
+    name: Counter/Histogram without useful labels
+    severity: info
+    type: regex
+    pattern:
+      - 'new Counter\(\{[^}]*labelNames:\s*\[\s*\]'
+      - 'new Histogram\(\{[^}]*labelNames:\s*\[\s*\]'
+    message: "Add labels like method, path, status for filtering"
+    fix_action: "Add low-cardinality labels for useful breakdowns"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: unbounded-path-label
+    name: Using raw path as metric label
+    severity: warning
+    type: regex
+    pattern:
+      - 'req\.url|req\.originalUrl|req\.path(?!.*route)'
+    message: "Use route pattern, not actual URL path"
+    fix_action: "Use req.route?.path which gives /users/:id not /users/123"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  # Tracing issues
+  - id: fetch-without-trace
+    name: HTTP call without trace propagation
+    severity: info
+    type: regex
+    pattern:
+      - 'fetch\([^)]+\)(?!.*traceparent|.*propagat)'
+      - 'axios\.[^(]+\([^)]+\)(?!.*traceparent|.*propagat)'
+    message: "Propagate trace context to downstream services"
+    fix_action: "Use OpenTelemetry instrumentation or manual propagation"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: span-not-ended
+    name: Span created but not ended
+    severity: warning
+    type: regex
+    pattern:
+      - 'startSpan\([^)]+\)(?!.*\.end\(\))'
+      - 'tracer\.startSpan(?!.*finally.*end)'
+    message: "Always end spans, preferably in finally block"
+    fix_action: "Use startActiveSpan with callback or end in finally"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  # Error tracking issues
+  - id: sentry-without-context
+    name: Sentry capture without context
+    severity: info
+    type: regex
+    pattern:
+      - 'Sentry\.captureException\(\w+\)$'
+      - 'Sentry\.captureMessage\([^,]+\)$'
+    message: "Add context to Sentry captures"
+    fix_action: "Add tags, extra, or user context"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: catch-no-report
+    name: Catch block without error reporting
+    severity: info
+    type: regex
+    pattern:
+      - 'catch\s*\([^)]+\)\s*\{[^}]*\}(?!.*Sentry|.*logger|.*log)'
+    message: "Caught errors should be logged or reported"
+    fix_action: "Add logger.error or Sentry.captureException"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+code_smells:
+  - id: missing-request-id
+    name: No request ID middleware
+    description: "API without request ID generation"
+    pattern: null
+    suggestion: "Add middleware to generate/propagate request IDs"
+
+  - id: no-health-endpoint
+    name: Missing health check endpoint
+    description: "Service without /health or /ready endpoint"
+    pattern: null
+    suggestion: "Add health endpoint for load balancer probes"
+
+  - id: no-metrics-endpoint
+    name: Missing metrics endpoint
+    description: "Service without /metrics for Prometheus"
+    pattern: null
+    suggestion: "Expose /metrics endpoint for monitoring"
+
+best_practices:
+  logging_setup:
+    recommendation: |
+      ## Production Logging Setup
+
+      import pino from 'pino';
+
+      const logger = pino({
+        level: process.env.LOG_LEVEL || 'info',
+
+        // Redact sensitive fields
+        redact: {
+          paths: [
+            'password',
+            '*.password',
+            'token',
+            '*.token',
+            'authorization',
+            'req.headers.authorization',
+            'req.headers.cookie',
+          ],
+          censor: '[REDACTED]',
+        },
+
+        // Production formatting
+        formatters: {
+          level: (label) => ({ level: label }),
+        },
+
+        // Add service info
+        base: {
+          service: process.env.SERVICE_NAME,
+          version: process.env.GIT_SHA,
+        },
+      });
+
+      export default logger;
+
+  metrics_setup:
+    recommendation: |
+      ## Prometheus Metrics Setup
+
+      import { Registry, Counter, Histogram, collectDefaultMetrics } from 'prom-client';
+
+      const register = new Registry();
+
+      // Collect Node.js metrics
+      collectDefaultMetrics({ register });
+
+      // HTTP metrics
+      export const httpRequestsTotal = new Counter({
+        name: 'http_requests_total',
+        help: 'Total HTTP requests',
+        labelNames: ['method', 'path', 'status'],
+        registers: [register],
+      });
+
+      export const httpRequestDuration = new Histogram({
+        name: 'http_request_duration_seconds',
+        help: 'HTTP request duration',
+        labelNames: ['method', 'path', 'status'],
+        buckets: [0.01, 0.05, 0.1, 0.5, 1, 5],
+        registers: [register],
+      });
+
+      // Middleware
+      export function metricsMiddleware(req, res, next) {
+        const start = Date.now();
+
+        res.on('finish', () => {
+          const duration = (Date.now() - start) / 1000;
+          const path = req.route?.path || 'unknown';
+
+          httpRequestsTotal.inc({
+            method: req.method,
+            path,
+            status: res.statusCode,
+          });
+
+          httpRequestDuration.observe(
+            { method: req.method, path, status: res.statusCode },
+            duration
+          );
+        });
+
+        next();
+      }
+
+      // Endpoint
+      app.get('/metrics', async (req, res) => {
+        res.set('Content-Type', register.contentType);
+        res.end(await register.metrics());
+      });
+
+  tracing_setup:
+    recommendation: |
+      ## OpenTelemetry Setup
+
+      // instrumentation.ts - Load FIRST
+      import { NodeSDK } from '@opentelemetry/sdk-node';
+      import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+      import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
+      import { Resource } from '@opentelemetry/resources';
+      import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
+
+      const sdk = new NodeSDK({
+        resource: new Resource({
+          [ATTR_SERVICE_NAME]: process.env.SERVICE_NAME,
+          [ATTR_SERVICE_VERSION]: process.env.GIT_SHA,
+        }),
+        traceExporter: new OTLPTraceExporter({
+          url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+        }),
+        instrumentations: [
+          getNodeAutoInstrumentations({
+            '@opentelemetry/instrumentation-http': {
+              ignoreIncomingPaths: ['/health', '/metrics'],
+            },
+          }),
+        ],
+      });
+
+      sdk.start();
+
+      // Graceful shutdown
+      process.on('SIGTERM', () => {
+        sdk.shutdown().then(() => process.exit(0));
+      });

@@ -1,0 +1,462 @@
+# Agent Evaluation Sharp Edges
+
+sharp_edges:
+  - id: benchmark-production-gap
+    summary: Agent scores well on benchmarks but fails in production
+    severity: high
+    situation: High benchmark scores don't predict real-world performance
+    why: |
+      Benchmarks have known answer patterns.
+      Production has long-tail edge cases.
+      User inputs are messier than test data.
+    solution: |
+      // Bridge benchmark and production evaluation
+
+      class ProductionReadinessEvaluator {
+          async evaluateForProduction(
+              agent: Agent,
+              benchmarkResults: BenchmarkResults,
+              productionSamples: ProductionSample[]
+          ): Promise<ProductionReadinessReport> {
+              const gaps: ProductionGap[] = [];
+
+              // 1. Test on real production samples (anonymized)
+              const productionAccuracy = await this.testOnProductionSamples(
+                  agent,
+                  productionSamples
+              );
+
+              if (productionAccuracy < benchmarkResults.accuracy * 0.8) {
+                  gaps.push({
+                      type: 'accuracy_gap',
+                      benchmark: benchmarkResults.accuracy,
+                      production: productionAccuracy,
+                      impact: 'critical',
+                      recommendation: 'Benchmark not representative of production'
+                  });
+              }
+
+              // 2. Test on adversarial variants of benchmark
+              const adversarialResults = await this.testAdversarialVariants(
+                  agent,
+                  benchmarkResults.testCases
+              );
+
+              if (adversarialResults.passRate < 0.7) {
+                  gaps.push({
+                      type: 'robustness_gap',
+                      originalPassRate: benchmarkResults.passRate,
+                      adversarialPassRate: adversarialResults.passRate,
+                      impact: 'high',
+                      recommendation: 'Agent not robust to input variations'
+                  });
+              }
+
+              // 3. Test edge cases from production logs
+              const edgeCaseResults = await this.testProductionEdgeCases(
+                  agent,
+                  productionSamples
+              );
+
+              if (edgeCaseResults.failureRate > 0.2) {
+                  gaps.push({
+                      type: 'edge_case_failures',
+                      categories: edgeCaseResults.failureCategories,
+                      impact: 'high',
+                      recommendation: 'Add edge cases to training/testing'
+                  });
+              }
+
+              // 4. Latency under production load
+              const loadResults = await this.testUnderLoad(agent, {
+                  concurrentRequests: 50,
+                  duration: 60000
+              });
+
+              if (loadResults.p95Latency > 5000) {
+                  gaps.push({
+                      type: 'latency_degradation',
+                      idleLatency: benchmarkResults.meanLatency,
+                      loadLatency: loadResults.p95Latency,
+                      impact: 'medium',
+                      recommendation: 'Optimize for concurrent load'
+                  });
+              }
+
+              return {
+                  ready: gaps.filter(g => g.impact === 'critical').length === 0,
+                  gaps,
+                  recommendations: this.prioritizeRemediation(gaps),
+                  confidenceScore: this.calculateConfidence(gaps, benchmarkResults)
+              };
+          }
+
+          private async testAdversarialVariants(
+              agent: Agent,
+              testCases: TestCase[]
+          ): Promise<AdversarialResults> {
+              const variants: TestCase[] = [];
+
+              for (const test of testCases) {
+                  // Generate variants
+                  variants.push(
+                      this.addTypos(test),
+                      this.rephrase(test),
+                      this.addNoise(test),
+                      this.changeFormat(test)
+                  );
+              }
+
+              const results = await Promise.all(
+                  variants.map(v => this.runTest(agent, v))
+              );
+
+              return {
+                  passRate: results.filter(r => r.passed).length / results.length,
+                  variantResults: results
+              };
+          }
+      }
+    symptoms:
+      - High benchmark scores, low user satisfaction
+      - Production errors not seen in testing
+      - Performance degrades under real load
+    detection_pattern: 'benchmark|score|accuracy|performance'
+
+  - id: flaky-agent-tests
+    summary: Same test passes sometimes, fails other times
+    severity: high
+    situation: Test suite is unreliable, CI is broken or ignored
+    why: |
+      LLM outputs are stochastic.
+      Tests expect deterministic behavior.
+      No retry or statistical handling.
+    solution: |
+      // Handle flaky tests in LLM agent evaluation
+
+      class FlakyTestHandler {
+          private readonly minRuns = 5;
+          private readonly passThreshold = 0.8;  // 80% pass rate required
+          private readonly flakinessThreshold = 0.2;  // Allow 20% flakiness
+
+          async runWithFlakinessHandling(
+              agent: Agent,
+              test: TestCase
+          ): Promise<FlakyTestResult> {
+              const results: boolean[] = [];
+
+              for (let i = 0; i < this.minRuns; i++) {
+                  try {
+                      const result = await this.runTest(agent, test);
+                      results.push(result.passed);
+                  } catch (error) {
+                      results.push(false);
+                  }
+              }
+
+              const passRate = results.filter(r => r).length / results.length;
+              const flakiness = this.calculateFlakiness(results);
+
+              return {
+                  testId: test.id,
+                  passed: passRate >= this.passThreshold,
+                  passRate,
+                  flakiness,
+                  isFlaky: flakiness > this.flakinessThreshold,
+                  confidence: this.calculateConfidence(passRate, this.minRuns),
+                  recommendation: this.getRecommendation(passRate, flakiness)
+              };
+          }
+
+          private calculateFlakiness(results: boolean[]): number {
+              // Flakiness = probability of getting different result on rerun
+              const transitions = results.slice(1).filter((r, i) => r !== results[i]).length;
+              return transitions / (results.length - 1);
+          }
+
+          private getRecommendation(passRate: number, flakiness: number): string {
+              if (passRate >= 0.95 && flakiness < 0.1) {
+                  return 'Stable test - include in CI';
+              } else if (passRate >= 0.8 && flakiness < 0.2) {
+                  return 'Slightly flaky - run multiple times in CI';
+              } else if (passRate >= 0.5) {
+                  return 'Flaky test - investigate and improve test or agent';
+              } else {
+                  return 'Failing test - fix agent or update test expectations';
+              }
+          }
+
+          // Aggregate flaky test handling for CI
+          async runTestSuiteForCI(
+              agent: Agent,
+              testSuite: TestCase[]
+          ): Promise<CITestResult> {
+              const results: FlakyTestResult[] = [];
+
+              for (const test of testSuite) {
+                  results.push(await this.runWithFlakinessHandling(agent, test));
+              }
+
+              const overallPassRate = results.filter(r => r.passed).length / results.length;
+              const flakyTests = results.filter(r => r.isFlaky);
+
+              return {
+                  passed: overallPassRate >= 0.9,  // 90% of tests must pass
+                  overallPassRate,
+                  totalTests: testSuite.length,
+                  passedTests: results.filter(r => r.passed).length,
+                  flakyTests: flakyTests.map(t => t.testId),
+                  failedTests: results.filter(r => !r.passed).map(t => t.testId),
+                  recommendation: overallPassRate < 0.9
+                      ? `${Math.ceil(testSuite.length * 0.9 - results.filter(r => r.passed).length)} more tests must pass`
+                      : 'OK to merge'
+              };
+          }
+      }
+    symptoms:
+      - CI randomly fails
+      - Tests pass locally, fail in CI
+      - Re-running fixes test failures
+    detection_pattern: 'test|assert|expect|should'
+
+  - id: eval-metric-gaming
+    summary: Agent optimized for metric, not actual task
+    severity: medium
+    situation: Agent scores well on metric but quality is poor
+    why: |
+      Metrics are proxies for quality.
+      Agents can game specific metrics.
+      Overfitting to evaluation criteria.
+    solution: |
+      // Multi-dimensional evaluation to prevent gaming
+
+      class MultiDimensionalEvaluator {
+          async evaluate(
+              agent: Agent,
+              testCases: TestCase[]
+          ): Promise<MultiDimensionalReport> {
+              const dimensions: EvaluationDimension[] = [
+                  {
+                      name: 'correctness',
+                      weight: 0.3,
+                      evaluator: this.evaluateCorrectness.bind(this)
+                  },
+                  {
+                      name: 'helpfulness',
+                      weight: 0.2,
+                      evaluator: this.evaluateHelpfulness.bind(this)
+                  },
+                  {
+                      name: 'safety',
+                      weight: 0.25,
+                      evaluator: this.evaluateSafety.bind(this)
+                  },
+                  {
+                      name: 'efficiency',
+                      weight: 0.15,
+                      evaluator: this.evaluateEfficiency.bind(this)
+                  },
+                  {
+                      name: 'user_preference',
+                      weight: 0.1,
+                      evaluator: this.evaluateUserPreference.bind(this)
+                  }
+              ];
+
+              const results: DimensionResult[] = [];
+
+              for (const dimension of dimensions) {
+                  const score = await dimension.evaluator(agent, testCases);
+                  results.push({
+                      dimension: dimension.name,
+                      score,
+                      weight: dimension.weight,
+                      weightedScore: score * dimension.weight
+                  });
+              }
+
+              // Detect gaming: high in one dimension, low in others
+              const gaming = this.detectGaming(results);
+
+              return {
+                  dimensions: results,
+                  overallScore: results.reduce((sum, r) => sum + r.weightedScore, 0),
+                  gamingDetected: gaming.detected,
+                  gamingDetails: gaming.details,
+                  recommendation: this.generateRecommendation(results, gaming)
+              };
+          }
+
+          private detectGaming(results: DimensionResult[]): GamingDetection {
+              const scores = results.map(r => r.score);
+              const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
+              const variance = scores.reduce((sum, s) => sum + Math.pow(s - mean, 2), 0) / scores.length;
+
+              // High variance suggests gaming one metric
+              if (variance > 0.15) {
+                  const highScorer = results.find(r => r.score > mean + 0.2);
+                  const lowScorers = results.filter(r => r.score < mean - 0.1);
+
+                  return {
+                      detected: true,
+                      details: `High ${highScorer?.dimension} (${highScorer?.score.toFixed(2)}) but low ${lowScorers.map(l => l.dimension).join(', ')}`
+                  };
+              }
+
+              return { detected: false };
+          }
+
+          // Human evaluation for dimensions that can be gamed
+          private async evaluateUserPreference(
+              agent: Agent,
+              testCases: TestCase[]
+          ): Promise<number> {
+              // Sample for human evaluation
+              const sample = this.sampleForHumanEval(testCases, 20);
+
+              // In real implementation, this would involve actual human raters
+              // Here we simulate with a separate LLM acting as evaluator
+              const evaluatorLLM = new EvaluatorLLM();
+
+              const ratings: number[] = [];
+              for (const test of sample) {
+                  const output = await agent.process(test.input);
+                  const rating = await evaluatorLLM.rateQuality(test, output);
+                  ratings.push(rating);
+              }
+
+              return ratings.reduce((a, b) => a + b, 0) / ratings.length;
+          }
+      }
+    symptoms:
+      - Metric scores high but users complain
+      - Agent behavior feels "off" despite good scores
+      - Gaming becomes obvious when metric changed
+    detection_pattern: 'metric|score|benchmark|eval'
+
+  - id: evaluation-data-leakage
+    summary: Test data accidentally used in training or prompts
+    severity: critical
+    situation: Agent has seen test examples, artificially inflating scores
+    why: |
+      Test data in fine-tuning dataset.
+      Examples in system prompt.
+      RAG retrieves test documents.
+    solution: |
+      // Prevent data leakage in agent evaluation
+
+      class LeakageDetector {
+          async detectLeakage(
+              agent: Agent,
+              testSuite: TestCase[],
+              trainingData: TrainingExample[],
+              systemPrompt: string
+          ): Promise<LeakageReport> {
+              const leaks: Leak[] = [];
+
+              // 1. Check for exact matches in training data
+              for (const test of testSuite) {
+                  const exactMatch = trainingData.find(
+                      t => this.similarity(t.input, test.input) > 0.95
+                  );
+
+                  if (exactMatch) {
+                      leaks.push({
+                          type: 'training_data',
+                          testId: test.id,
+                          matchedExample: exactMatch.id,
+                          similarity: this.similarity(exactMatch.input, test.input)
+                      });
+                  }
+              }
+
+              // 2. Check system prompt for test examples
+              for (const test of testSuite) {
+                  if (systemPrompt.includes(test.input.slice(0, 50))) {
+                      leaks.push({
+                          type: 'system_prompt',
+                          testId: test.id,
+                          location: 'system_prompt'
+                      });
+                  }
+              }
+
+              // 3. Memorization test: check if agent reproduces exact answers
+              const memorizationTests = await this.testMemorization(agent, testSuite);
+              leaks.push(...memorizationTests);
+
+              // 4. Check if RAG retrieves test documents
+              if (agent.hasRAG) {
+                  const ragLeaks = await this.checkRAGLeakage(agent, testSuite);
+                  leaks.push(...ragLeaks);
+              }
+
+              return {
+                  hasLeakage: leaks.length > 0,
+                  leaks,
+                  affectedTests: [...new Set(leaks.map(l => l.testId))],
+                  recommendation: leaks.length > 0
+                      ? 'CRITICAL: Remove leaked tests and create new ones'
+                      : 'No leakage detected'
+              };
+          }
+
+          private async testMemorization(
+              agent: Agent,
+              testCases: TestCase[]
+          ): Promise<Leak[]> {
+              const leaks: Leak[] = [];
+
+              for (const test of testCases.slice(0, 20)) {
+                  // Give partial input, see if agent completes exactly
+                  const partialInput = test.input.slice(0, test.input.length / 2);
+                  const completion = await agent.process(
+                      `Complete this: ${partialInput}`
+                  );
+
+                  // Check if completion matches rest of input
+                  const expectedCompletion = test.input.slice(test.input.length / 2);
+                  if (this.similarity(completion.text, expectedCompletion) > 0.8) {
+                      leaks.push({
+                          type: 'memorization',
+                          testId: test.id,
+                          evidence: 'Agent completed partial input with exact match'
+                      });
+                  }
+              }
+
+              return leaks;
+          }
+
+          private async checkRAGLeakage(
+              agent: Agent,
+              testCases: TestCase[]
+          ): Promise<Leak[]> {
+              const leaks: Leak[] = [];
+
+              for (const test of testCases.slice(0, 10)) {
+                  // Check what RAG retrieves for test input
+                  const retrieved = await agent.ragSystem.retrieve(test.input);
+
+                  for (const doc of retrieved) {
+                      // Check if retrieved doc contains test answer
+                      if (test.expectedOutput &&
+                          this.similarity(doc.content, test.expectedOutput) > 0.7) {
+                          leaks.push({
+                              type: 'rag_retrieval',
+                              testId: test.id,
+                              documentId: doc.id,
+                              evidence: 'RAG retrieves document containing expected answer'
+                          });
+                      }
+                  }
+              }
+
+              return leaks;
+          }
+      }
+    symptoms:
+      - Perfect scores on specific tests
+      - Score drops on new test versions
+      - Agent "knows" answers it shouldn't
+    detection_pattern: 'train|test|eval|dataset|fine.?tune'

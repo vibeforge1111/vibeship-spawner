@@ -1,0 +1,155 @@
+# Sharp Edges - File Uploads
+version: 1.0.0
+skill_id: file-uploads
+
+sharp_edges:
+  - id: trusting-file-type
+    summary: Trusting client-provided file type
+    severity: critical
+    situation: |
+      User uploads malware.exe renamed to image.jpg. You check
+      extension, looks fine. Store it. Serve it. Another user
+      downloads and executes it.
+    why: |
+      File extensions and Content-Type headers can be faked.
+      Attackers rename executables to bypass filters.
+    solution: |
+      # CHECK MAGIC BYTES
+
+      import { fileTypeFromBuffer } from "file-type";
+
+      async function validateImage(buffer: Buffer) {
+        const type = await fileTypeFromBuffer(buffer);
+        
+        const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+        
+        if (!type || !allowedTypes.includes(type.mime)) {
+          throw new Error("Invalid file type");
+        }
+        
+        return type;
+      }
+
+      // For streams
+      import { fileTypeFromStream } from "file-type";
+      const type = await fileTypeFromStream(readableStream);
+    symptoms:
+      - Malware uploaded as images
+      - Wrong content-type served
+    detection_pattern: null
+
+  - id: no-size-limit
+    summary: No upload size restrictions
+    severity: high
+    situation: |
+      No file size limit. Attacker uploads 10GB file. Server runs
+      out of memory or disk. Denial of service. Or massive
+      storage bill.
+    why: |
+      Without limits, attackers can exhaust resources. Even
+      legitimate users might accidentally upload huge files.
+    solution: |
+      # SET SIZE LIMITS
+
+      // Formidable
+      const form = formidable({
+        maxFileSize: 10 * 1024 * 1024, // 10MB
+      });
+
+      // Multer
+      const upload = multer({
+        limits: { fileSize: 10 * 1024 * 1024 },
+      });
+
+      // Client-side early check
+      if (file.size > 10 * 1024 * 1024) {
+        alert("File too large (max 10MB)");
+        return;
+      }
+
+      // Presigned URL with size limit
+      const command = new PutObjectCommand({
+        Bucket: BUCKET,
+        Key: key,
+        ContentLength: expectedSize, // Enforce size
+      });
+    symptoms:
+      - Server crashes on large uploads
+      - Massive storage bills
+      - Memory exhaustion
+    detection_pattern: null
+
+  - id: path-traversal
+    summary: User-controlled filename allows path traversal
+    severity: critical
+    situation: |
+      User uploads file named "../../../etc/passwd". You use
+      filename directly. File saved outside upload directory.
+      System files overwritten.
+    why: |
+      User input should never be used directly in file paths.
+      Path traversal sequences can escape intended directories.
+    solution: |
+      # SANITIZE FILENAMES
+
+      import path from "path";
+      import crypto from "crypto";
+
+      function safeFilename(userFilename: string): string {
+        // Extract just the base name
+        const base = path.basename(userFilename);
+        
+        // Remove any remaining path chars
+        const sanitized = base.replace(/[^a-zA-Z0-9.-]/g, "_");
+        
+        // Or better: generate new name entirely
+        const ext = path.extname(userFilename).toLowerCase();
+        const allowed = [".jpg", ".png", ".pdf"];
+        
+        if (!allowed.includes(ext)) {
+          throw new Error("Invalid extension");
+        }
+        
+        return crypto.randomUUID() + ext;
+      }
+
+      // Never do this
+      const path = "uploads/" + req.body.filename; // DANGER!
+
+      // Do this
+      const path = "uploads/" + safeFilename(req.body.filename);
+    symptoms:
+      - Files outside upload directory
+      - System file access
+    detection_pattern: null
+
+  - id: presigned-url-exposure
+    summary: Presigned URL shared or cached incorrectly
+    severity: medium
+    situation: |
+      Presigned URL for private file returned in API response.
+      Response cached by CDN. Anyone with cached URL can access
+      private file for hours.
+    why: |
+      Presigned URLs grant temporary access. If cached or shared,
+      access extends beyond intended scope.
+    solution: |
+      # CONTROL PRESIGNED URL DISTRIBUTION
+
+      // Short expiry for sensitive files
+      const url = await getSignedUrl(s3, command, {
+        expiresIn: 300, // 5 minutes
+      });
+
+      // No-cache headers for presigned URL responses
+      return Response.json({ url }, {
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+        },
+      });
+
+      // Or use CloudFront signed URLs for more control
+    symptoms:
+      - Private files accessible via cached URLs
+      - Access after expiry
+    detection_pattern: null

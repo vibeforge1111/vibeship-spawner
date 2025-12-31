@@ -1,0 +1,649 @@
+# Kubernetes Skill
+# Container orchestration for production workloads
+
+id: kubernetes
+name: Kubernetes & Container Orchestration
+version: 1.0.0
+category: development
+layer: 2
+
+description: |
+  Kubernetes is the operating system for the cloud. It schedules containers,
+  handles networking, manages storage, and keeps your apps running. But K8s
+  has a steep learning curve - abstractions on abstractions on abstractions.
+
+  This skill covers the core concepts (Pods, Deployments, Services), production
+  patterns (health checks, resource limits, HPA), and the gotchas that catch
+  everyone (namespace confusion, service discovery, secret management).
+
+  2025 reality: You probably don't need to run your own cluster. Use managed
+  K8s (EKS, GKE, AKS) unless you have a very good reason not to. Focus on
+  writing good manifests, not managing etcd.
+
+principles:
+  - "Declarative over imperative - use manifests, not kubectl run"
+  - "Everything is a resource - learn the API model"
+  - "Labels and selectors are the glue"
+  - "Health checks are mandatory, not optional"
+  - "Resource limits prevent noisy neighbors"
+  - "Namespaces for isolation, not security"
+  - "Secrets are base64, not encrypted"
+
+owns:
+  - kubernetes-manifests
+  - deployments
+  - services
+  - pods
+  - configmaps
+  - secrets
+  - ingress
+  - horizontal-pod-autoscaling
+  - kubernetes-networking
+  - helm-charts
+  - kustomize
+
+does_not_own:
+  - container-images -> docker
+  - ci-cd-pipelines -> devops
+  - cloud-infrastructure -> aws-services
+  - service-mesh -> microservices-patterns
+  - gitops -> devops
+
+triggers:
+  - "kubernetes"
+  - "k8s"
+  - "kubectl"
+  - "deployment manifest"
+  - "helm chart"
+  - "kustomize"
+  - "pod"
+  - "service yaml"
+  - "ingress"
+  - "horizontal pod autoscaler"
+  - "hpa"
+
+pairs_with:
+  - docker              # Container images
+  - devops              # CI/CD pipelines
+  - aws-services        # EKS
+  - backend             # App deployment
+  - postgres-wizard     # StatefulSets
+
+requires:
+  - docker              # Must understand containers first
+
+stack:
+  core:
+    - name: kubectl
+      version: "^1.29"
+      when: "CLI for cluster interaction"
+      note: "Match cluster version"
+    - name: helm
+      version: "^3.x"
+      when: "Package management"
+      note: "Charts for complex apps"
+    - name: kustomize
+      version: "^5.x"
+      when: "Manifest customization"
+      note: "Built into kubectl"
+
+  managed:
+    - name: EKS
+      when: "AWS"
+      note: "Use eksctl for setup"
+    - name: GKE
+      when: "GCP"
+      note: "Best managed K8s"
+    - name: AKS
+      when: "Azure"
+      note: "Good for Windows containers"
+
+  tools:
+    - name: k9s
+      when: "Terminal UI for clusters"
+      note: "Much better than kubectl"
+    - name: lens
+      when: "Desktop IDE for K8s"
+      note: "Visual cluster management"
+    - name: stern
+      when: "Multi-pod log tailing"
+      note: "Essential for debugging"
+
+expertise_level: world-class
+
+identity: |
+  You're a platform engineer who's deployed hundreds of services to Kubernetes.
+  You've seen clusters crash at 2 AM because someone forgot resource limits. You've
+  debugged "CrashLoopBackOff" for hours to find a typo in an environment variable.
+  You've rescued teams from YAML hell with proper templating.
+
+  Your lessons: The team that didn't set health checks had "working" pods that were
+  actually dead. The team that didn't set resource limits had one pod eat all the
+  memory and take down the node. The team that put secrets in ConfigMaps got their
+  database credentials leaked. You've learned from all of them.
+
+  You advocate for GitOps, proper resource management, and actually understanding
+  what you're deploying instead of copying YAML from Stack Overflow.
+
+patterns:
+  - name: Basic Deployment
+    description: Production-ready deployment with all required fields
+    when: Deploying any application
+    example: |
+      # PRODUCTION DEPLOYMENT:
+
+      """
+      Every production deployment needs:
+      1. Resource limits
+      2. Health checks
+      3. Security context
+      4. Labels for selection
+      """
+
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: my-app
+        namespace: production
+        labels:
+          app: my-app
+          version: v1.0.0
+      spec:
+        replicas: 3
+        selector:
+          matchLabels:
+            app: my-app
+        template:
+          metadata:
+            labels:
+              app: my-app
+              version: v1.0.0
+          spec:
+            # Security: Don't run as root
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 1000
+              fsGroup: 1000
+
+            containers:
+              - name: my-app
+                image: myregistry/my-app:v1.0.0
+                imagePullPolicy: IfNotPresent
+
+                ports:
+                  - containerPort: 3000
+                    name: http
+
+                # Resource limits (REQUIRED)
+                resources:
+                  requests:
+                    cpu: 100m
+                    memory: 128Mi
+                  limits:
+                    cpu: 500m
+                    memory: 512Mi
+
+                # Startup probe (for slow-starting apps)
+                startupProbe:
+                  httpGet:
+                    path: /health
+                    port: http
+                  failureThreshold: 30
+                  periodSeconds: 10
+
+                # Liveness probe (is the container alive?)
+                livenessProbe:
+                  httpGet:
+                    path: /health
+                    port: http
+                  initialDelaySeconds: 0
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+
+                # Readiness probe (can it receive traffic?)
+                readinessProbe:
+                  httpGet:
+                    path: /ready
+                    port: http
+                  initialDelaySeconds: 5
+                  periodSeconds: 5
+                  timeoutSeconds: 3
+                  failureThreshold: 3
+
+                # Environment from ConfigMap and Secret
+                envFrom:
+                  - configMapRef:
+                      name: my-app-config
+                  - secretRef:
+                      name: my-app-secrets
+
+                # Container security
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  readOnlyRootFilesystem: true
+                  capabilities:
+                    drop:
+                      - ALL
+
+  - name: Service and Ingress
+    description: Expose application to network
+    when: Making app accessible
+    example: |
+      # SERVICE (internal load balancer):
+
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: my-app
+        namespace: production
+      spec:
+        type: ClusterIP
+        selector:
+          app: my-app
+        ports:
+          - port: 80
+            targetPort: http
+            protocol: TCP
+            name: http
+
+
+      ---
+      # INGRESS (external access):
+
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: my-app
+        namespace: production
+        annotations:
+          # For nginx ingress controller
+          nginx.ingress.kubernetes.io/rewrite-target: /
+          # For cert-manager TLS
+          cert-manager.io/cluster-issuer: letsencrypt-prod
+      spec:
+        ingressClassName: nginx
+        tls:
+          - hosts:
+              - myapp.example.com
+            secretName: myapp-tls
+        rules:
+          - host: myapp.example.com
+            http:
+              paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: my-app
+                      port:
+                        number: 80
+
+  - name: ConfigMaps and Secrets
+    description: External configuration
+    when: App needs configuration
+    example: |
+      # CONFIGMAP (non-sensitive config):
+
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: my-app-config
+        namespace: production
+      data:
+        NODE_ENV: production
+        LOG_LEVEL: info
+        API_URL: https://api.example.com
+
+
+      ---
+      # SECRET (sensitive data):
+
+      """
+      IMPORTANT: Secrets are base64 encoded, NOT encrypted!
+      Anyone with cluster access can decode them.
+      Use external secrets managers for real security.
+      """
+
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: my-app-secrets
+        namespace: production
+      type: Opaque
+      stringData:  # Will be base64 encoded automatically
+        DATABASE_URL: postgresql://user:pass@db:5432/app
+        API_KEY: sk_live_xxxxx
+
+
+      ---
+      # Using secrets securely in pods:
+
+      env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: my-app-secrets
+              key: DATABASE_URL
+
+      # Or mount as file (more secure than env vars):
+      volumes:
+        - name: secrets
+          secret:
+            secretName: my-app-secrets
+      volumeMounts:
+        - name: secrets
+          mountPath: /etc/secrets
+          readOnly: true
+
+  - name: Horizontal Pod Autoscaler
+    description: Auto-scale based on metrics
+    when: Need to handle variable load
+    example: |
+      # HPA (autoscaling):
+
+      """
+      Scale based on CPU, memory, or custom metrics.
+      Requires metrics-server in cluster.
+      """
+
+      apiVersion: autoscaling/v2
+      kind: HorizontalPodAutoscaler
+      metadata:
+        name: my-app-hpa
+        namespace: production
+      spec:
+        scaleTargetRef:
+          apiVersion: apps/v1
+          kind: Deployment
+          name: my-app
+        minReplicas: 2
+        maxReplicas: 10
+        metrics:
+          - type: Resource
+            resource:
+              name: cpu
+              target:
+                type: Utilization
+                averageUtilization: 70
+          - type: Resource
+            resource:
+              name: memory
+              target:
+                type: Utilization
+                averageUtilization: 80
+        behavior:
+          scaleDown:
+            stabilizationWindowSeconds: 300  # Wait 5 min before scale down
+            policies:
+              - type: Percent
+                value: 10
+                periodSeconds: 60
+          scaleUp:
+            stabilizationWindowSeconds: 0  # Scale up immediately
+            policies:
+              - type: Percent
+                value: 100
+                periodSeconds: 15
+
+
+      # Also set PodDisruptionBudget:
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: my-app-pdb
+        namespace: production
+      spec:
+        minAvailable: 1  # Or use maxUnavailable
+        selector:
+          matchLabels:
+            app: my-app
+
+  - name: Helm Chart Structure
+    description: Package K8s manifests
+    when: Reusable deployment
+    example: |
+      # HELM CHART:
+
+      """
+      Helm packages Kubernetes manifests with templating.
+      Great for reusable deployments across environments.
+      """
+
+      # Chart structure:
+      my-app/
+      ├── Chart.yaml
+      ├── values.yaml
+      ├── values-staging.yaml
+      ├── values-production.yaml
+      └── templates/
+          ├── _helpers.tpl
+          ├── deployment.yaml
+          ├── service.yaml
+          ├── ingress.yaml
+          ├── configmap.yaml
+          ├── secret.yaml
+          └── hpa.yaml
+
+
+      # Chart.yaml
+      apiVersion: v2
+      name: my-app
+      description: My Application Helm Chart
+      version: 1.0.0
+      appVersion: "1.0.0"
+
+
+      # values.yaml (defaults)
+      replicaCount: 2
+
+      image:
+        repository: myregistry/my-app
+        tag: latest
+        pullPolicy: IfNotPresent
+
+      service:
+        type: ClusterIP
+        port: 80
+
+      ingress:
+        enabled: true
+        host: myapp.example.com
+
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+
+
+      # templates/deployment.yaml
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: {{ include "my-app.fullname" . }}
+        labels:
+          {{- include "my-app.labels" . | nindent 4 }}
+      spec:
+        replicas: {{ .Values.replicaCount }}
+        selector:
+          matchLabels:
+            {{- include "my-app.selectorLabels" . | nindent 6 }}
+        template:
+          spec:
+            containers:
+              - name: {{ .Chart.Name }}
+                image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+                resources:
+                  {{- toYaml .Values.resources | nindent 12 }}
+
+
+      # Install with:
+      helm install my-app ./my-app -f values-production.yaml
+
+  - name: Kustomize Overlays
+    description: Environment-specific customization
+    when: Different configs per environment
+    example: |
+      # KUSTOMIZE:
+
+      """
+      Kustomize patches base manifests for different environments.
+      Built into kubectl: kubectl apply -k overlays/production
+      """
+
+      # Directory structure:
+      my-app/
+      ├── base/
+      │   ├── kustomization.yaml
+      │   ├── deployment.yaml
+      │   ├── service.yaml
+      │   └── configmap.yaml
+      └── overlays/
+          ├── staging/
+          │   ├── kustomization.yaml
+          │   └── patch-replicas.yaml
+          └── production/
+              ├── kustomization.yaml
+              ├── patch-replicas.yaml
+              └── patch-resources.yaml
+
+
+      # base/kustomization.yaml
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+
+      resources:
+        - deployment.yaml
+        - service.yaml
+        - configmap.yaml
+
+
+      # overlays/production/kustomization.yaml
+      apiVersion: kustomize.config.k8s.io/v1beta1
+      kind: Kustomization
+
+      namespace: production
+
+      resources:
+        - ../../base
+
+      patches:
+        - path: patch-replicas.yaml
+        - path: patch-resources.yaml
+
+      configMapGenerator:
+        - name: my-app-config
+          behavior: merge
+          literals:
+            - NODE_ENV=production
+
+      images:
+        - name: myregistry/my-app
+          newTag: v1.2.3
+
+
+      # overlays/production/patch-replicas.yaml
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: my-app
+      spec:
+        replicas: 5
+
+
+      # Apply:
+      kubectl apply -k overlays/production
+
+anti_patterns:
+  - name: No Resource Limits
+    description: Pods without CPU/memory limits
+    why: |
+      Without limits, one pod can consume all node resources and affect
+      other pods. In multi-tenant clusters, this is a nightmare. Your
+      pod might also get OOMKilled unpredictably.
+    instead: |
+      # Always set both requests and limits
+      resources:
+        requests:      # Scheduler uses for placement
+          cpu: 100m
+          memory: 128Mi
+        limits:        # Enforced at runtime
+          cpu: 500m
+          memory: 512Mi
+
+  - name: No Health Checks
+    description: Pods without liveness/readiness probes
+    why: |
+      Without probes, Kubernetes can't tell if your app is healthy.
+      Dead apps keep receiving traffic. Rolling updates can cause
+      downtime. You lose the main benefit of orchestration.
+    instead: |
+      # Three types of probes:
+      startupProbe:    # For slow-starting apps
+      livenessProbe:   # Is the process alive?
+      readinessProbe:  # Can it handle traffic?
+
+  - name: Using :latest Tag
+    description: Deploying with :latest image tag
+    why: |
+      :latest is a moving target. Deployments become non-reproducible.
+      Rollbacks don't work. You can't tell what's running. ImagePullPolicy
+      defaults might not pull the new version.
+    instead: |
+      # Use specific tags
+      image: myregistry/my-app:v1.2.3
+
+      # Or use SHA
+      image: myregistry/my-app@sha256:abc123...
+
+  - name: Secrets in ConfigMaps
+    description: Putting sensitive data in ConfigMaps
+    why: |
+      ConfigMaps are not encrypted and often logged/displayed. Secrets
+      at least get base64 encoding and can have RBAC restrictions.
+    instead: |
+      # Use Secrets for sensitive data
+      # Better: Use external secrets manager
+      # Best: Use sealed-secrets or external-secrets operator
+
+  - name: kubectl apply from Laptop
+    description: Deploying manually from local machine
+    why: |
+      No audit trail, no review process, no reproducibility. "It worked
+      on my laptop" becomes "it worked when I deployed it." Drift
+      between what's in Git and what's running.
+    instead: |
+      # Use GitOps
+      - Store manifests in Git
+      - Use ArgoCD or Flux
+      - CI/CD deploys, not humans
+
+handoffs:
+  receives_from:
+    - skill: docker
+      receives: Container images to deploy
+    - skill: backend
+      receives: Application deployment requirements
+    - skill: devops
+      receives: CI/CD pipeline integration
+
+  hands_to:
+    - skill: devops
+      provides: GitOps workflows, monitoring setup
+    - skill: aws-services
+      provides: EKS configuration, IAM roles
+    - skill: microservices-patterns
+      provides: Service mesh requirements
+
+tags:
+  - kubernetes
+  - k8s
+  - containers
+  - orchestration
+  - devops
+  - cloud-native
+  - helm
+  - kustomize

@@ -1,0 +1,250 @@
+# RAG Implementation Sharp Edges
+
+sharp_edges:
+  - id: chunking-destroys-context
+    summary: Poor chunking ruins retrieval quality
+    severity: critical
+    situation: Retrieved chunks don't have enough context to be useful
+    why: |
+      Fixed-size chunking splits mid-sentence.
+      No overlap loses boundary context.
+      Ignoring document structure.
+    solution: |
+      // Use recursive character text splitter with overlap
+
+      class RecursiveChunker {
+          private separators = ['\n\n', '\n', '. ', ' ', ''];
+          private chunkSize = 1000;
+          private overlap = 200;
+
+          chunk(text: string): Chunk[] {
+              return this.splitRecursively(text, this.separators);
+          }
+
+          private splitRecursively(text: string, separators: string[]): Chunk[] {
+              if (text.length <= this.chunkSize) {
+                  return [{ text }];
+              }
+
+              const [sep, ...remaining] = separators;
+              if (!sep) {
+                  // Last resort: hard split
+                  return this.hardSplit(text);
+              }
+
+              const splits = text.split(sep);
+              const chunks: Chunk[] = [];
+              let current = '';
+
+              for (const split of splits) {
+                  if ((current + sep + split).length > this.chunkSize) {
+                      if (current) {
+                          chunks.push({ text: current });
+                      }
+                      // Start with overlap from previous
+                      current = this.getOverlap(chunks[chunks.length - 1]?.text) + split;
+                  } else {
+                      current += (current ? sep : '') + split;
+                  }
+              }
+
+              if (current) {
+                  chunks.push({ text: current });
+              }
+
+              return chunks;
+          }
+
+          private getOverlap(text?: string): string {
+              if (!text) return '';
+              return text.slice(-this.overlap);
+          }
+      }
+    symptoms:
+      - Retrieved text is incomplete
+      - Missing context for answers
+      - Cut-off sentences in chunks
+    detection_pattern: 'chunk|split|segment'
+
+  - id: embedding-model-mismatch
+    summary: Query and document embeddings from different models
+    severity: critical
+    situation: Retrieval returns irrelevant results
+    why: |
+      Different embedding models have different vector spaces.
+      Upgraded model but didn't re-embed documents.
+      Using different models for query vs document.
+    solution: |
+      // Ensure consistent embedding model usage
+
+      class EmbeddingManager {
+          private modelVersion = 'text-embedding-3-small';
+
+          async embed(text: string): Promise<EmbeddingResult> {
+              const embedding = await openai.embeddings.create({
+                  model: this.modelVersion,
+                  input: text
+              });
+
+              return {
+                  vector: embedding.data[0].embedding,
+                  model: this.modelVersion,
+                  timestamp: Date.now()
+              };
+          }
+
+          async validateIndex(index: VectorIndex): Promise<boolean> {
+              const sampleDoc = await index.getSample();
+              if (sampleDoc.model !== this.modelVersion) {
+                  console.error(`Index model mismatch:
+                      Index: ${sampleDoc.model}
+                      Current: ${this.modelVersion}
+                      Action: Re-embed all documents`);
+                  return false;
+              }
+              return true;
+          }
+
+          // When upgrading models, re-embed everything
+          async migrateIndex(
+              oldIndex: VectorIndex,
+              newIndex: VectorIndex
+          ): Promise<void> {
+              const documents = await oldIndex.getAllDocuments();
+              for (const doc of documents) {
+                  const newEmbedding = await this.embed(doc.text);
+                  await newIndex.upsert(doc.id, newEmbedding.vector, doc.metadata);
+              }
+          }
+      }
+    symptoms:
+      - Irrelevant retrieval results
+      - Semantic search not working
+      - Old documents not found
+    detection_pattern: 'embed|embedding|model'
+
+  - id: rag-latency-spike
+    summary: RAG adds significant latency to responses
+    severity: high
+    situation: User-facing latency unacceptable
+    why: |
+      Embedding query takes time.
+      Vector search has latency.
+      Multiple retrieved docs increase LLM processing.
+    solution: |
+      // Optimize RAG latency
+
+      class OptimizedRAG {
+          // 1. Cache frequent query embeddings
+          private queryCache = new LRUCache<string, number[]>({ max: 1000 });
+
+          async embedQuery(query: string): Promise<number[]> {
+              const cached = this.queryCache.get(query);
+              if (cached) return cached;
+
+              const embedding = await this.embed(query);
+              this.queryCache.set(query, embedding);
+              return embedding;
+          }
+
+          // 2. Use approximate nearest neighbors
+          async search(query: string): Promise<Document[]> {
+              // Configure for speed vs accuracy tradeoff
+              const results = await vectorStore.search(query, {
+                  nprobe: 10,      // Reduce for speed
+                  efSearch: 100,   // Reduce for speed
+              });
+              return results;
+          }
+
+          // 3. Limit retrieved context
+          async retrieve(query: string): Promise<string> {
+              const docs = await this.search(query);
+              // Only use top 3-5 documents
+              const relevant = docs.slice(0, 3);
+              // Truncate each to key content
+              return relevant.map(d => d.text.slice(0, 1000)).join('\n\n');
+          }
+
+          // 4. Stream response while retrieving
+          async queryWithStreaming(query: string): AsyncGenerator<string> {
+              // Start retrieval
+              const retrievalPromise = this.retrieve(query);
+
+              // Stream "thinking" indicator
+              yield "Searching knowledge base...";
+
+              const context = await retrievalPromise;
+              // Now stream LLM response
+              yield* this.llm.stream(query, context);
+          }
+      }
+    symptoms:
+      - Slow response times
+      - User complaints about waiting
+      - Timeouts in production
+    detection_pattern: 'search|retrieve|query'
+
+  - id: stale-embeddings
+    summary: Documents updated but embeddings not refreshed
+    severity: medium
+    situation: Retrieval returns outdated information
+    why: |
+      Document content changed.
+      Embeddings not re-generated.
+      No sync between docs and vectors.
+    solution: |
+      // Maintain sync between documents and embeddings
+
+      class SyncedVectorStore {
+          async upsertDocument(doc: Document): Promise<void> {
+              const hash = computeHash(doc.content);
+              const existing = await this.getMetadata(doc.id);
+
+              if (existing?.contentHash === hash) {
+                  return; // Content unchanged, skip
+              }
+
+              // Re-embed on content change
+              const embedding = await this.embed(doc.content);
+              await this.vectorStore.upsert(doc.id, {
+                  vector: embedding,
+                  metadata: {
+                      ...doc.metadata,
+                      contentHash: hash,
+                      embeddedAt: new Date().toISOString()
+                  }
+              });
+          }
+
+          async syncFromSource(source: DocumentSource): Promise<SyncResult> {
+              const sourceHashes = await source.getContentHashes();
+              const storedHashes = await this.getAllContentHashes();
+
+              const toAdd: string[] = [];
+              const toUpdate: string[] = [];
+              const toDelete: string[] = [];
+
+              for (const [id, hash] of sourceHashes) {
+                  if (!storedHashes.has(id)) {
+                      toAdd.push(id);
+                  } else if (storedHashes.get(id) !== hash) {
+                      toUpdate.push(id);
+                  }
+              }
+
+              for (const id of storedHashes.keys()) {
+                  if (!sourceHashes.has(id)) {
+                      toDelete.push(id);
+                  }
+              }
+
+              // Process changes...
+              return { added: toAdd.length, updated: toUpdate.length, deleted: toDelete.length };
+          }
+      }
+    symptoms:
+      - Outdated information in responses
+      - Recently updated docs not found
+      - Inconsistent answers over time
+    detection_pattern: 'update|sync|refresh'

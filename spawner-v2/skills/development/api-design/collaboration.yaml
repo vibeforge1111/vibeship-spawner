@@ -1,0 +1,386 @@
+# Collaboration - API Design
+# How this skill works with other skills
+
+version: 1.0.0
+skill_id: api-design
+
+prerequisites:
+  required: []
+
+  recommended:
+    - skill: backend
+      reason: "Server-side implementation"
+      what_to_know:
+        - "Express/Fastify/Next.js routes"
+        - "Middleware patterns"
+        - "Request/response handling"
+
+    - skill: security-owasp
+      reason: "API security"
+      what_to_know:
+        - "Input validation"
+        - "Authentication"
+        - "Rate limiting"
+
+  knowledge:
+    - "HTTP protocol"
+    - "REST principles"
+    - "JSON format"
+
+delegation_triggers:
+  - trigger: "user needs GraphQL"
+    delegate_to: graphql-schema
+    context: "GraphQL API design"
+
+  - trigger: "user needs authentication"
+    delegate_to: authentication-oauth
+    context: "API authentication"
+
+  - trigger: "user needs caching"
+    delegate_to: redis-specialist
+    context: "API response caching"
+
+  - trigger: "user needs database design"
+    delegate_to: postgres-wizard
+    context: "Data model for API"
+
+receives_context_from:
+  - skill: backend
+    receives:
+      - "Framework being used"
+      - "Existing route structure"
+      - "Middleware stack"
+
+  - skill: react-patterns
+    receives:
+      - "Frontend data needs"
+      - "Expected response format"
+      - "Real-time requirements"
+
+  - skill: postgres-wizard
+    receives:
+      - "Data model"
+      - "Relationships"
+      - "Query patterns"
+
+provides_context_to:
+  - skill: backend
+    provides:
+      - "Route design"
+      - "Response format"
+      - "Error handling patterns"
+
+  - skill: testing-strategies
+    provides:
+      - "API test patterns"
+      - "Expected status codes"
+      - "Validation rules"
+
+  - skill: security-owasp
+    provides:
+      - "Endpoints to secure"
+      - "Rate limiting requirements"
+      - "Input validation needs"
+
+escalation_paths:
+  - situation: "GraphQL required"
+    escalate_to: graphql-schema
+    context: "GraphQL vs REST decision"
+
+  - situation: "Complex authentication"
+    escalate_to: authentication-oauth
+    context: "OAuth/JWT implementation"
+
+  - situation: "Database optimization"
+    escalate_to: postgres-wizard
+    context: "Query optimization for API"
+
+workflow_integration:
+  typical_sequence:
+    1:
+      step: "Define resources and operations"
+      skills: [api-design]
+      output: "Resource naming, endpoints"
+
+    2:
+      step: "Design request/response format"
+      skills: [api-design]
+      output: "Schemas, validation rules"
+
+    3:
+      step: "Plan error handling"
+      skills: [api-design]
+      output: "Error codes, formats"
+
+    4:
+      step: "Add pagination and filtering"
+      skills: [api-design]
+      output: "Query parameters design"
+
+    5:
+      step: "Document with OpenAPI"
+      skills: [api-design]
+      output: "OpenAPI specification"
+
+    6:
+      step: "Implement endpoints"
+      skills: [backend]
+      output: "Working API"
+
+  decision_points:
+    - question: "REST or GraphQL?"
+      guidance: |
+        REST when:
+        - Simple CRUD operations
+        - Caching important
+        - Many different clients
+        - Team familiar with REST
+
+        GraphQL when:
+        - Complex relationships
+        - Mobile apps (minimize requests)
+        - Rapidly evolving frontend
+        - Need field selection
+
+    - question: "Version in URL or header?"
+      guidance: |
+        URL versioning (/v1/):
+        - Most common
+        - Easy to test
+        - Clear separation
+        - Cacheable
+
+        Header versioning:
+        - Cleaner URLs
+        - Single endpoint
+        - Harder to test
+
+    - question: "Cursor or offset pagination?"
+      guidance: |
+        Cursor when:
+        - Real-time data
+        - Large datasets
+        - Consistency during paging
+
+        Offset when:
+        - Need "jump to page"
+        - Small datasets
+        - Simple implementation
+
+collaboration_patterns:
+  with_nextjs:
+    when: "API routes in Next.js"
+    approach: |
+      Next.js API Design:
+
+      ## Route structure
+
+      app/
+        api/
+          v1/
+            users/
+              route.ts          # GET, POST /users
+              [id]/
+                route.ts        # GET, PUT, DELETE /users/:id
+                orders/
+                  route.ts      # GET /users/:id/orders
+
+
+      ## Response helpers
+
+      // lib/api-response.ts
+      export function success<T>(data: T, status = 200) {
+        return Response.json({ data }, { status });
+      }
+
+      export function created<T>(data: T, location: string) {
+        return Response.json(
+          { data },
+          {
+            status: 201,
+            headers: { Location: location },
+          }
+        );
+      }
+
+      export function error(code: string, message: string, status = 400) {
+        return Response.json(
+          { error: code, message },
+          { status }
+        );
+      }
+
+
+      ## Route handler
+
+      // app/api/v1/users/route.ts
+      import { success, created, error } from '@/lib/api-response';
+      import { userSchema } from '@/lib/schemas';
+
+      export async function GET(request: Request) {
+        const { searchParams } = new URL(request.url);
+        const limit = Number(searchParams.get('limit')) || 20;
+        const cursor = searchParams.get('cursor');
+
+        const users = await getUsers({ limit, cursor });
+        return success(users);
+      }
+
+      export async function POST(request: Request) {
+        const body = await request.json();
+
+        const parsed = userSchema.safeParse(body);
+        if (!parsed.success) {
+          return error('validation_error', 'Invalid input', 400);
+        }
+
+        const user = await createUser(parsed.data);
+        return created(user, `/api/v1/users/${user.id}`);
+      }
+
+  with_express:
+    when: "Express API design"
+    approach: |
+      Express API Design:
+
+      ## Router structure
+
+      // routes/v1/users.ts
+      import { Router } from 'express';
+      import { validate } from '@/middleware/validate';
+      import { userSchema } from '@/schemas';
+
+      const router = Router();
+
+      router.get('/', async (req, res) => {
+        const users = await getUsers(req.query);
+        res.json({ data: users });
+      });
+
+      router.post('/', validate(userSchema), async (req, res) => {
+        const user = await createUser(req.validated);
+        res.status(201)
+           .location(`/api/v1/users/${user.id}`)
+           .json({ data: user });
+      });
+
+      router.get('/:id', async (req, res) => {
+        const user = await getUser(req.params.id);
+        if (!user) {
+          throw new NotFoundError('User');
+        }
+        res.json({ data: user });
+      });
+
+      export default router;
+
+
+      ## Mount with versioning
+
+      // app.ts
+      import v1Routes from './routes/v1';
+      import v2Routes from './routes/v2';
+
+      app.use('/api/v1', v1Routes);
+      app.use('/api/v2', v2Routes);
+
+  with_openapi:
+    when: "Documenting API with OpenAPI"
+    approach: |
+      OpenAPI Documentation:
+
+      ## Generate from code
+
+      // Using zod-to-openapi
+      import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
+      import { z } from 'zod';
+
+      extendZodWithOpenApi(z);
+
+      const UserSchema = z.object({
+        id: z.string().uuid().openapi({ example: '123e4567-e89b' }),
+        email: z.string().email(),
+        name: z.string(),
+        created_at: z.string().datetime(),
+      }).openapi('User');
+
+
+      // Generate OpenAPI spec
+      import { OpenAPIGenerator } from '@asteasolutions/zod-to-openapi';
+
+      const generator = new OpenAPIGenerator(registry);
+      const spec = generator.generateDocument({
+        info: { title: 'My API', version: '1.0.0' },
+        servers: [{ url: 'https://api.example.com/v1' }],
+      });
+
+
+      ## Serve documentation
+
+      import swaggerUi from 'swagger-ui-express';
+      app.use('/docs', swaggerUi.serve, swaggerUi.setup(spec));
+
+platform_integration:
+  postman:
+    setup: |
+      # Postman Integration
+
+      1. Export OpenAPI spec
+      2. Import to Postman
+      3. Generate collection
+      4. Add environment variables
+
+      // Generate from code
+      npm run generate:openapi > openapi.json
+    considerations:
+      - "Keep spec in sync"
+      - "Use environment variables"
+      - "Add test scripts"
+
+  swagger_ui:
+    setup: |
+      # Swagger UI
+
+      npm install swagger-ui-express
+
+      import swaggerUi from 'swagger-ui-express';
+      import spec from './openapi.json';
+
+      app.use('/docs', swaggerUi.serve);
+      app.get('/docs', swaggerUi.setup(spec));
+    considerations:
+      - "Auto-generate from code"
+      - "Add authentication"
+      - "Version separately"
+
+ecosystem:
+  documentation:
+    - name: "@asteasolutions/zod-to-openapi"
+      use_when: "Generate OpenAPI from Zod schemas"
+    - name: "swagger-ui-express"
+      use_when: "Serve interactive docs"
+    - name: "redoc"
+      use_when: "Alternative doc UI"
+
+  validation:
+    - name: "zod"
+      use_when: "Runtime validation with types"
+    - name: "express-validator"
+      use_when: "Express-specific validation"
+    - name: "joi"
+      use_when: "Legacy projects"
+
+  rate_limiting:
+    - name: "express-rate-limit"
+      use_when: "Simple rate limiting"
+    - name: "@upstash/ratelimit"
+      use_when: "Distributed rate limiting"
+
+  alternatives:
+    - name: "tRPC"
+      use_when: "Full-stack TypeScript"
+      avoid_when: "Need public API"
+
+    - name: "Hono"
+      use_when: "Edge-first API"
+      avoid_when: "Established Express ecosystem"

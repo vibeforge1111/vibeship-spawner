@@ -1,0 +1,130 @@
+# Claude Code CI/CD Validations
+
+validations:
+  - id: exposed-api-key
+    name: API Key in Plain Text
+    severity: critical
+    type: regex
+    pattern: 'sk-ant-[a-zA-Z0-9-_]{20,}|ANTHROPIC_API_KEY\s*[=:]\s*["\x27][^$]'
+    message: "API key appears in plain text. Use secrets or environment variables."
+    fix_action: "Use ${{ secrets.ANTHROPIC_API_KEY }} or masked variables"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+      - ".gitlab-ci.yml"
+      - "*.sh"
+
+  - id: echo-secret
+    name: Echoing Secret Value
+    severity: critical
+    type: regex
+    pattern: 'echo.*\$.*API_KEY|echo.*\$.*SECRET|printf.*\$.*KEY'
+    message: "Echoing secret values exposes them in logs."
+    fix_action: "Remove echo statements that print secrets"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+      - ".gitlab-ci.yml"
+      - "*.sh"
+
+  - id: unrestricted-bash
+    name: Unrestricted Bash in allowedTools
+    severity: high
+    type: regex
+    pattern: '--allowedTools.*["'\'']Bash["'\'']|--allowedTools.*Bash[^(]'
+    message: "Unrestricted Bash access in CI. Specify allowed commands."
+    fix_action: "Use --allowedTools \"Bash(npm test),Bash(npm run lint)\""
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+      - ".gitlab-ci.yml"
+      - "*.sh"
+
+  - id: missing-timeout
+    name: Claude Command Without Timeout
+    severity: medium
+    type: regex
+    pattern: 'claude\s+-p\s+'
+    negative_pattern: 'timeout-minutes|timeout:|--max-tokens'
+    message: "Claude command without timeout or token limit may hang CI."
+    fix_action: "Add timeout-minutes to step or --max-tokens to command"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+      - ".gitlab-ci.yml"
+
+  - id: no-output-format
+    name: Missing Output Format for Parsing
+    severity: medium
+    type: regex
+    pattern: 'claude.*-p.*\|\s*jq'
+    negative_pattern: '--output-format\s+(json|stream-json)'
+    message: "Using jq but Claude output may not be JSON."
+    fix_action: "Add --output-format json for JSON output"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+      - ".gitlab-ci.yml"
+      - "*.sh"
+
+  - id: no-concurrency-limit
+    name: Parallel Jobs Without Concurrency Limit
+    severity: medium
+    type: regex
+    pattern: 'jobs:\s*\n\s+\w+:'
+    negative_pattern: 'concurrency:|resource_group:'
+    message: "Multiple Claude jobs may hit rate limits without concurrency control."
+    fix_action: "Add concurrency group to limit parallel API calls"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+      - ".gitlab-ci.yml"
+
+  - id: auto-merge-enabled
+    name: Auto-Merge Based on AI Review
+    severity: high
+    type: regex
+    pattern: 'auto.*merge|merge.*auto'
+    message: "Auto-merging based on AI review is risky. Require human approval."
+    fix_action: "Use AI for review suggestions, require human merge approval"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+      - ".gitlab-ci.yml"
+
+  - id: every-commit-trigger
+    name: Claude Triggered on Every Commit
+    severity: medium
+    type: regex
+    pattern: 'on:\s*\n\s+push:\s*$'
+    negative_pattern: 'paths:|branches:|pull_request'
+    message: "Claude runs on every push. Consider PR-only or path filtering."
+    fix_action: "Add paths filter or use pull_request trigger"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+
+  - id: large-model-for-triage
+    name: Large Model for Simple Tasks
+    severity: low
+    type: regex
+    pattern: 'claude.*-p.*(label|triage|categorize).*--model.*(opus|sonnet)'
+    message: "Using large model for simple triage. Consider claude-haiku for cost savings."
+    fix_action: "Use --model claude-haiku-3-5 for simple tasks"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+      - ".gitlab-ci.yml"
+      - "*.sh"
+
+  - id: no-error-handling
+    name: Claude Command Without Error Handling
+    severity: low
+    type: regex
+    pattern: 'claude\s+-p.*\n\s*-\s*name:'
+    negative_pattern: '\|\||if.*then|2>&1|set\s+-e'
+    message: "Claude command without error handling. Failures may go unnoticed."
+    fix_action: "Add error handling: || echo 'Review failed' or if condition"
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"

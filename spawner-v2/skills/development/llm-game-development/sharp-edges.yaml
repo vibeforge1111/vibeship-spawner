@@ -1,0 +1,383 @@
+# LLM Game Development Sharp Edges
+
+sharp_edges:
+  - id: hallucinated-api
+    summary: LLM generates code using APIs that don't exist
+    severity: critical
+    situation: Code looks correct but errors on non-existent methods
+    why: |
+      LLMs are trained on old documentation and mix engine versions.
+      They confidently generate Unity 2019 code for Unity 2023.
+      Godot 3 vs 4 APIs are frequently confused.
+      Made-up helper methods appear from nowhere.
+    solution: |
+      # Always verify APIs exist before using generated code
+
+      # 1. Check documentation
+      # Before running, search official docs for method names
+
+      # 2. Use IDE autocomplete
+      # Type the method - does it autocomplete?
+
+      # 3. Specify version in prompts
+      prompt = f"""
+      Generate for Unity 2023.2 (NOT older versions).
+      Use only current API - avoid deprecated methods.
+
+      Available APIs I want you to use:
+      - {list relevant APIs you know exist}
+
+      Implement: {task}
+      """
+
+      # 4. Ask for verification
+      prompt = f"""
+      For each method call in your code, confirm:
+      1. The class it belongs to
+      2. The namespace/package
+      3. Whether it's a built-in or custom method
+      """
+
+      # 5. Explicit bans for common hallucinations
+      prompt = """
+      Do NOT use these (they don't exist):
+      - GameObject.GetComponents<>() without parameter
+      - Input.GetMousePosition() (use Input.mousePosition)
+      - Instantiate() with 4 parameters
+      """
+    symptoms:
+      - "Method not found" errors
+      - "Namespace not found" errors
+      - Code looks correct but doesn't compile
+    detection_pattern: 'GetComponent|Instantiate|AddForce|Input\.'
+
+  - id: silent-logic-bugs
+    summary: Generated code compiles but has subtle logic errors
+    severity: critical
+    situation: Game works until edge case reveals AI introduced bug
+    why: |
+      LLMs optimize for looking correct, not being correct.
+      They miss edge cases that experienced devs catch.
+      Variable names can be swapped, conditions inverted.
+      Off-by-one errors are common.
+    solution: |
+      # Defensive testing for AI-generated code
+
+      // 1. Test edge cases explicitly
+      void TestHealthSystem() {
+          // Normal case
+          player.TakeDamage(10);
+          Assert(player.HP == 90);
+
+          // Edge: Exact death
+          player.HP = 1;
+          player.TakeDamage(1);
+          Assert(player.IsDead);
+
+          // Edge: Overkill
+          player.HP = 10;
+          player.TakeDamage(100);
+          Assert(player.HP == 0);  // Not negative!
+
+          // Edge: Zero damage
+          player.HP = 50;
+          player.TakeDamage(0);
+          Assert(player.HP == 50);
+
+          // Edge: Negative damage (heal attempt via damage?)
+          player.TakeDamage(-10);
+          // What SHOULD happen? Verify your assumption.
+      }
+
+      // 2. Code review checklist for AI code
+      // [ ] Variable names match their use
+      // [ ] Conditions are correct direction (< vs >)
+      // [ ] Loop bounds are correct (< vs <=)
+      // [ ] Null checks exist where needed
+      // [ ] Events are unsubscribed
+      // [ ] Resources are disposed/freed
+
+      // 3. Add assertions in code
+      void TakeDamage(int amount) {
+          Debug.Assert(amount >= 0, "Damage cannot be negative");
+          // ...
+      }
+    symptoms:
+      - Edge cases cause crashes
+      - Numbers slightly off
+      - Conditions trigger at wrong times
+    detection_pattern: 'if\s*\(|for\s*\(|while\s*\('
+
+  - id: context-window-exceeded
+    summary: Project grows beyond what LLM can hold in context
+    severity: high
+    situation: AI gives inconsistent responses, forgets earlier code
+    why: |
+      Token limits mean LLM can't see whole codebase.
+      As project grows, context becomes incomplete.
+      AI makes suggestions that conflict with unseen code.
+    solution: |
+      # Context management strategies
+
+      class ContextManager:
+          MAX_TOKENS = 100000  # Adjust per model
+
+          def build_context(self, task, codebase):
+              # 1. Always include: current file being edited
+              context = [self.current_file]
+
+              # 2. Include: directly related files
+              related = self.find_related_files(task)
+              context.extend(related[:5])  # Limit
+
+              # 3. Include: file structure summary
+              context.append(self.summarize_structure())
+
+              # 4. Include: interface definitions
+              interfaces = self.extract_interfaces(related)
+              context.extend(interfaces)
+
+              # 5. Token check
+              if self.count_tokens(context) > MAX_TOKENS:
+                  context = self.prioritize_and_trim(context)
+
+              return context
+
+          def summarize_structure(self):
+              return f"""
+              Project Structure:
+              {self.file_tree}
+
+              Key classes:
+              - Player: HP, position, TakeDamage(), Move()
+              - Enemy: HP, target, Attack(), Chase()
+              - GameManager: singleton, game state, Score
+              """
+
+      # For very large projects, use RAG (retrieval)
+      # Index your codebase, retrieve relevant chunks per query
+    symptoms:
+      - AI forgets earlier context
+      - Suggestions conflict with existing code
+      - Responses become generic
+    detection_pattern: 'context|token|window|memory'
+
+  - id: dependency-version-mismatch
+    summary: Generated code uses wrong package/library versions
+    severity: high
+    situation: Package.json/requirements have version conflicts
+    why: |
+      LLMs mix packages from different eras.
+      They suggest latest AND legacy syntax together.
+      Version-specific APIs get confused.
+    solution: |
+      # Specify versions explicitly in prompts
+
+      prompt = f"""
+      My project uses:
+      - Unity 2023.2.10f1
+      - TextMeshPro 3.0.6
+      - Cinemachine 2.9.7
+
+      Generate code compatible with these EXACT versions.
+      If unsure about an API, ask rather than guess.
+
+      Implement: {task}
+      """
+
+      # For package.json projects
+      prompt = f"""
+      My package.json:
+      ```json
+      {package_json_content}
+      ```
+
+      Use ONLY packages already in my dependencies.
+      Do NOT suggest adding new packages unless asked.
+      Match the syntax for these specific versions.
+      """
+
+      # Post-generation check
+      def verify_imports(generated_code, valid_packages):
+          imports = extract_imports(generated_code)
+          for imp in imports:
+              if imp not in valid_packages:
+                  raise Warning(f"Unknown import: {imp}")
+    symptoms:
+      - Type errors from wrong package version
+      - "Cannot resolve module" errors
+      - Deprecated API warnings
+    detection_pattern: 'import|using|require|from'
+
+  - id: architecture-drift
+    summary: Each AI session creates inconsistent architecture
+    severity: high
+    situation: Codebase becomes Frankenstein of different patterns
+    why: |
+      LLMs don't maintain architectural consistency across sessions.
+      Each prompt solved independently.
+      Different patterns for similar problems.
+    solution: |
+      # Maintain architecture document for AI context
+
+      const ARCHITECTURE_DOC = """
+      ## Project Architecture Guide
+
+      ### Patterns We Use
+      - State machines for game states (ScriptableObject-based)
+      - Events for communication (C# events, not SendMessage)
+      - Dependency injection via Inspector, no singletons except GameManager
+      - Component-based player abilities
+
+      ### Patterns We NEVER Use
+      - FindObjectOfType (too slow)
+      - SendMessage (stringly typed)
+      - Multiple inheritance (prefer composition)
+      - Static state (except GameManager.Instance)
+
+      ### Naming Conventions
+      - Managers: {Thing}Manager (e.g., AudioManager)
+      - Components: {Thing}Controller (e.g., PlayerController)
+      - Data: {Thing}Data or {Thing}SO
+
+      ### File Organization
+      - Scripts/Core/: Manager classes
+      - Scripts/Player/: Player-related
+      - Scripts/Enemies/: Enemy-related
+      - Scripts/UI/: All UI code
+      """
+
+      # Include in every prompt
+      prompt = f"""
+      {ARCHITECTURE_DOC}
+
+      Following the patterns above, implement: {task}
+      """
+    symptoms:
+      - Multiple patterns for same problem
+      - Inconsistent naming
+      - Team confusion about "right way"
+    detection_pattern: 'Manager|Controller|Service|Singleton'
+
+  - id: test-coverage-illusion
+    summary: AI-generated tests pass but don't actually test behavior
+    severity: medium
+    situation: 100% coverage but bugs still slip through
+    why: |
+      LLMs generate tests that match implementation, not requirements.
+      Tests verify what code DOES, not what it SHOULD do.
+      Mocks are configured to pass, not to simulate reality.
+    solution: |
+      # Write test cases BEFORE implementation
+
+      // 1. Define expected behaviors first
+      behaviors = """
+      Health System should:
+      - Start at max health
+      - Decrease when damaged
+      - Not go below zero
+      - Trigger death event at zero
+      - Have invincibility after damage
+      - Regenerate when out of combat
+      """
+
+      // 2. Generate test cases from behaviors
+      prompt = f"""
+      Write test cases for these behaviors:
+      {behaviors}
+
+      Each test should:
+      - Have descriptive name matching the behavior
+      - Test ONE thing
+      - Include edge cases
+      - Use AAA pattern (Arrange, Act, Assert)
+      """
+
+      // 3. THEN generate implementation
+      // Tests exist before code = harder to cheat
+
+      // 4. Review tests manually
+      // Check: Does this test actually verify the behavior?
+      // Not just: Does this test pass?
+
+      [Test]
+      public void DamageShouldNotReduceHealthBelowZero() {
+          // Arrange
+          player.HP = 10;
+
+          // Act
+          player.TakeDamage(100);
+
+          // Assert
+          Assert.AreEqual(0, player.HP);  // NOT -90
+          Assert.IsTrue(player.IsDead);
+      }
+    symptoms:
+      - Tests pass but bugs exist
+      - Tests break with minor refactors
+      - Coverage high but confidence low
+    detection_pattern: 'Test|test_|_test|Should|Assert'
+
+  - id: security-blind-spots
+    summary: AI generates code with security vulnerabilities
+    severity: medium
+    situation: Multiplayer game gets exploited via AI-generated netcode
+    why: |
+      LLMs prioritize functionality over security.
+      They generate client-trusting code.
+      Input validation often missing.
+      Auth patterns frequently wrong.
+    solution: |
+      # Security review prompt for game code
+
+      security_prompt = """
+      Review this code for security issues:
+
+      Common game security issues to check:
+      1. Client trust: Does server validate client input?
+      2. Injection: Are strings sanitized before use?
+      3. Rate limiting: Can actions be spammed?
+      4. Auth: Are privileged actions protected?
+      5. Cheating: Can clients manipulate game state?
+
+      Code:
+      ```
+      {code}
+      ```
+
+      For each issue found:
+      - Describe the vulnerability
+      - Show exploit scenario
+      - Provide fix
+      """
+
+      # Always add server-side validation
+      // Client can send anything - validate everything
+      void ServerOnPlayerMove(Vector3 newPosition) {
+          // 1. Sanity check
+          if (!IsValidPosition(newPosition)) {
+              KickPlayer("Invalid position");
+              return;
+          }
+
+          // 2. Speed check
+          float distance = Vector3.Distance(player.Position, newPosition);
+          float maxDistance = player.Speed * Time.deltaTime * 1.5f;
+          if (distance > maxDistance) {
+              LogSuspicious(player, "Speed hack suspected");
+              return;
+          }
+
+          // 3. Wall clip check
+          if (!CanMoveTo(player.Position, newPosition)) {
+              return;  // Don't acknowledge, don't kick (might be lag)
+          }
+
+          // 4. Apply
+          player.Position = newPosition;
+      }
+    symptoms:
+      - Players exploiting game
+      - Hacks spreading in community
+      - Server crashes from bad input
+    detection_pattern: 'RPC|ClientRpc|ServerRpc|[Command]|[ClientCallback]'

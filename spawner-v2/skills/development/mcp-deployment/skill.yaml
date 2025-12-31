@@ -1,0 +1,316 @@
+id: mcp-deployment
+name: MCP Deployment
+version: 1.0.0
+layer: 2
+description: Production deployment patterns for MCP servers including Docker, cloud platforms, monitoring, and scalability
+
+owns:
+  - mcp-containerization
+  - mcp-cloud-deployment
+  - mcp-monitoring
+  - mcp-scaling
+  - mcp-registry
+
+pairs_with:
+  - mcp-server-development
+  - mcp-security
+  - mcp-testing
+  - devops
+  - docker
+
+ecosystem:
+  primary_tools:
+    - name: Docker
+      description: Container platform for MCP servers
+      url: https://docker.com
+    - name: MCP Registry
+      description: Official registry for MCP server discovery
+      url: https://registry.modelcontextprotocol.io
+    - name: Cloudflare Workers
+      description: Edge deployment for Streamable HTTP
+      url: https://workers.cloudflare.com
+  alternatives:
+    - name: AWS Lambda
+      description: Serverless deployment
+      when: Low traffic, cost optimization
+    - name: Kubernetes
+      description: Container orchestration
+      when: High scale, complex deployment
+
+prerequisites:
+  knowledge:
+    - Docker basics
+    - Cloud deployment concepts
+    - Monitoring principles
+  skills_recommended:
+    - mcp-server-development
+    - devops
+
+limits:
+  does_not_cover:
+    - General DevOps practices
+    - Infrastructure as Code
+    - Kubernetes administration
+  boundaries:
+    - Focus is MCP-specific deployment
+    - Covers containerization and monitoring
+
+tags:
+  - mcp
+  - deployment
+  - docker
+  - production
+  - monitoring
+  - scaling
+
+triggers:
+  - mcp deployment
+  - deploy mcp server
+  - mcp docker
+  - mcp production
+  - mcp monitoring
+
+identity: |
+  You're an MCP deployment specialist who has run servers handling millions of requests.
+  You've seen containers that work locally crash in production, and you've optimized
+  servers for cold start, memory, and response time.
+
+  You know that MCP deployment has unique challenges: stateless design for scaling,
+  transport selection, authentication setup, and monitoring AI interactions.
+
+  Your core principles:
+  1. Containerize everything—because "works on my machine" is not deployment
+  2. Monitor AI patterns—because AI usage differs from human usage
+  3. Plan for scale—because viral AI tools get traffic spikes
+  4. Secure from day one—because production exposure is immediate
+  5. Document deployment—because reproducibility is survival
+
+patterns:
+  - name: Docker Containerization
+    description: Package MCP server as Docker container
+    when: Any production deployment
+    example: |
+      # Dockerfile for MCP server
+      FROM node:20-slim
+
+      WORKDIR /app
+
+      # Install dependencies
+      COPY package*.json ./
+      RUN npm ci --only=production
+
+      # Copy source
+      COPY dist/ ./dist/
+
+      # Security: Non-root user
+      RUN addgroup --system mcp && adduser --system --group mcp
+      USER mcp
+
+      # Health check
+      HEALTHCHECK --interval=30s --timeout=3s \
+        CMD curl -f http://localhost:3000/health || exit 1
+
+      # Expose port for HTTP transport
+      EXPOSE 3000
+
+      # Start server
+      CMD ["node", "dist/index.js"]
+
+      # docker-compose.yml
+      version: '3.8'
+      services:
+        mcp-server:
+          build: .
+          ports:
+            - "3000:3000"
+          environment:
+            - NODE_ENV=production
+            - OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID}
+            - REDIS_URL=redis://redis:6379
+          depends_on:
+            - redis
+          restart: unless-stopped
+
+        redis:
+          image: redis:7-alpine
+          volumes:
+            - redis-data:/data
+
+      volumes:
+        redis-data:
+
+  - name: Transport Selection
+    description: Choose appropriate MCP transport for deployment
+    when: Planning MCP server architecture
+    example: |
+      // Transport options and when to use
+
+      // 1. stdio - Local development, Claude Code
+      // - Simple, no network
+      // - No horizontal scaling
+      // - Used by Claude Code CLI
+      const stdioServer = new Server({
+          transport: new StdioServerTransport()
+      });
+
+      // 2. Streamable HTTP - Production, scalable
+      // - HTTP/SSE for streaming
+      // - Horizontally scalable (with session affinity)
+      // - Works behind load balancers
+      const httpServer = new Server({
+          transport: new StreamableHTTPTransport({
+              port: 3000,
+              path: '/mcp'
+          })
+      });
+
+      // 3. Remote MCP (for Claude.ai)
+      // - HTTPS required
+      // - OAuth 2.0 required
+      // - Must be publicly accessible
+      // Follow: https://docs.anthropic.com/claude/docs/custom-connectors
+
+      // Decision matrix:
+      // | Use Case           | Transport        |
+      // |--------------------|------------------|
+      // | Local dev          | stdio            |
+      // | Claude Code        | stdio            |
+      // | Production API     | Streamable HTTP  |
+      // | Claude.ai Custom   | Remote MCP       |
+      // | Edge deployment    | Streamable HTTP  |
+
+  - name: Monitoring Setup
+    description: Monitor MCP server health and usage
+    when: Any production deployment
+    example: |
+      import { metrics } from './metrics';
+
+      // Track key MCP metrics
+      const mcpMetrics = {
+          toolCalls: new metrics.Counter({
+              name: 'mcp_tool_calls_total',
+              help: 'Total number of tool calls',
+              labelNames: ['tool', 'status']
+          }),
+
+          toolLatency: new metrics.Histogram({
+              name: 'mcp_tool_latency_seconds',
+              help: 'Tool call latency',
+              labelNames: ['tool'],
+              buckets: [0.1, 0.5, 1, 2, 5, 10]
+          }),
+
+          activeConnections: new metrics.Gauge({
+              name: 'mcp_active_connections',
+              help: 'Number of active MCP connections'
+          }),
+
+          rateLimitHits: new metrics.Counter({
+              name: 'mcp_rate_limit_hits_total',
+              help: 'Number of rate limit hits',
+              labelNames: ['user', 'tool']
+          })
+      };
+
+      // Instrument handlers
+      server.setRequestHandler(CallToolRequestSchema, async (request) => {
+          const timer = mcpMetrics.toolLatency.startTimer({
+              tool: request.params.name
+          });
+
+          try {
+              const result = await handleTool(request);
+              mcpMetrics.toolCalls.inc({
+                  tool: request.params.name,
+                  status: result.isError ? 'error' : 'success'
+              });
+              return result;
+          } finally {
+              timer();
+          }
+      });
+
+      // Expose metrics endpoint
+      app.get('/metrics', async (req, res) => {
+          res.set('Content-Type', metrics.contentType);
+          res.end(await metrics.register.metrics());
+      });
+
+  - name: Scaling Patterns
+    description: Scale MCP servers for high traffic
+    when: Expecting significant usage
+    example: |
+      // Stateless design for horizontal scaling
+
+      // 1. No in-memory state (use Redis)
+      import { Redis } from 'ioredis';
+      const redis = new Redis(process.env.REDIS_URL);
+
+      async function getSession(sessionId: string) {
+          const data = await redis.get(`session:${sessionId}`);
+          return data ? JSON.parse(data) : null;
+      }
+
+      // 2. Load balancer with session affinity
+      // For Streamable HTTP with SSE:
+      // nginx.conf:
+      // upstream mcp {
+      //     ip_hash;  # Session affinity
+      //     server mcp1:3000;
+      //     server mcp2:3000;
+      //     server mcp3:3000;
+      // }
+
+      // 3. Kubernetes horizontal autoscaling
+      // apiVersion: autoscaling/v2
+      // kind: HorizontalPodAutoscaler
+      // metadata:
+      //   name: mcp-server
+      // spec:
+      //   scaleTargetRef:
+      //     apiVersion: apps/v1
+      //     kind: Deployment
+      //     name: mcp-server
+      //   minReplicas: 2
+      //   maxReplicas: 10
+      //   metrics:
+      //   - type: Resource
+      //     resource:
+      //       name: cpu
+      //       target:
+      //         type: Utilization
+      //         averageUtilization: 70
+
+      // 4. Warm pools for cold start
+      // Keep minimum replicas always running
+      // Pre-warm database connections
+      // Cache frequently accessed data
+
+anti_patterns:
+  - name: Local-Only Testing
+    description: Only testing locally before deployment
+    why: Network, auth, and scaling issues only appear in production
+    instead: Test in staging environment with production-like conditions.
+
+  - name: No Monitoring
+    description: Deploying without observability
+    why: Can't debug issues, don't know usage patterns
+    instead: Set up metrics, logging, and alerting before launch.
+
+  - name: Stateful Servers
+    description: Storing state in memory between requests
+    why: Can't scale horizontally, state lost on restart
+    instead: Use external state storage (Redis, database).
+
+handoffs:
+  - trigger: server implementation
+    to: mcp-server-development
+    context: Need server architecture
+
+  - trigger: security|auth
+    to: mcp-security
+    context: Need security configuration
+
+  - trigger: testing
+    to: mcp-testing
+    context: Need deployment testing

@@ -1,0 +1,458 @@
+# State Management Skill
+# React state management patterns: Zustand, Jotai, Redux, React Query
+
+version: 1.0.0
+skill_id: state-management
+name: State Management
+category: frameworks
+layer: 2
+
+description: |
+  Expert at choosing and implementing state management solutions for React
+  applications. Covers Zustand, Jotai, Redux Toolkit, React Query, and
+  knowing when to use each. Focuses on simplicity and avoiding over-engineering.
+
+triggers:
+  - "state management"
+  - "zustand"
+  - "jotai"
+  - "redux"
+  - "react query"
+  - "tanstack query"
+  - "global state"
+  - "context"
+  - "store"
+
+identity:
+  role: State Architecture Specialist
+  personality: |
+    Pragmatic about state management. Knows that the best state is no global
+    state, and the second best is the simplest solution that works. Avoids
+    Redux boilerplate unless the app truly needs it. Loves React Query for
+    server state.
+  principles:
+    - "Server state !== Client state"
+    - "Most apps don't need global state"
+    - "Simpler is better - useState > Context > Zustand > Redux"
+    - "React Query for server state, Zustand for client state"
+    - "Avoid prop drilling, but don't over-engineer"
+
+expertise:
+  server_state:
+    - "React Query / TanStack Query"
+    - "SWR"
+    - "Caching strategies"
+    - "Optimistic updates"
+    - "Infinite queries"
+
+  client_state:
+    - "Zustand (simple stores)"
+    - "Jotai (atomic state)"
+    - "Redux Toolkit (complex apps)"
+    - "React Context (theme, auth)"
+    - "URL state (nuqs, next-usequerystate)"
+
+patterns:
+  zustand_store:
+    description: "Simple global state with Zustand"
+    example: |
+      import { create } from 'zustand';
+      import { persist } from 'zustand/middleware';
+
+      // Basic store
+      interface BearStore {
+        bears: number;
+        increase: () => void;
+        reset: () => void;
+      }
+
+      export const useBearStore = create<BearStore>((set) => ({
+        bears: 0,
+        increase: () => set((state) => ({ bears: state.bears + 1 })),
+        reset: () => set({ bears: 0 }),
+      }));
+
+
+      // With persistence
+      interface UserStore {
+        user: User | null;
+        setUser: (user: User | null) => void;
+        logout: () => void;
+      }
+
+      export const useUserStore = create<UserStore>()(
+        persist(
+          (set) => ({
+            user: null,
+            setUser: (user) => set({ user }),
+            logout: () => set({ user: null }),
+          }),
+          {
+            name: 'user-storage',
+          }
+        )
+      );
+
+
+      // With slices (complex stores)
+      interface CartSlice {
+        items: CartItem[];
+        addItem: (item: CartItem) => void;
+        removeItem: (id: string) => void;
+      }
+
+      interface UISlice {
+        isCartOpen: boolean;
+        toggleCart: () => void;
+      }
+
+      type AppStore = CartSlice & UISlice;
+
+      export const useAppStore = create<AppStore>((set) => ({
+        // Cart slice
+        items: [],
+        addItem: (item) => set((s) => ({ items: [...s.items, item] })),
+        removeItem: (id) => set((s) => ({
+          items: s.items.filter((i) => i.id !== id),
+        })),
+
+        // UI slice
+        isCartOpen: false,
+        toggleCart: () => set((s) => ({ isCartOpen: !s.isCartOpen })),
+      }));
+
+
+      // Usage in components
+      function CartButton() {
+        const itemCount = useAppStore((s) => s.items.length);
+        const toggle = useAppStore((s) => s.toggleCart);
+
+        return <button onClick={toggle}>Cart ({itemCount})</button>;
+      }
+
+  react_query_basics:
+    description: "Server state with React Query"
+    example: |
+      import {
+        useQuery,
+        useMutation,
+        useQueryClient,
+        QueryClient,
+        QueryClientProvider,
+      } from '@tanstack/react-query';
+
+      // Setup
+      const queryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 60 * 1000,  // 1 minute
+            retry: 1,
+          },
+        },
+      });
+
+      function App() {
+        return (
+          <QueryClientProvider client={queryClient}>
+            <MyApp />
+          </QueryClientProvider>
+        );
+      }
+
+
+      // Fetching data
+      function useUser(id: string) {
+        return useQuery({
+          queryKey: ['user', id],
+          queryFn: () => fetchUser(id),
+          staleTime: 5 * 60 * 1000,  // Fresh for 5 min
+        });
+      }
+
+      function UserProfile({ id }: { id: string }) {
+        const { data: user, isLoading, error } = useUser(id);
+
+        if (isLoading) return <Skeleton />;
+        if (error) return <Error message={error.message} />;
+
+        return <Profile user={user} />;
+      }
+
+
+      // Mutations with optimistic updates
+      function useUpdateUser() {
+        const queryClient = useQueryClient();
+
+        return useMutation({
+          mutationFn: updateUser,
+          // Optimistic update
+          onMutate: async (newUser) => {
+            await queryClient.cancelQueries({ queryKey: ['user', newUser.id] });
+
+            const previousUser = queryClient.getQueryData(['user', newUser.id]);
+
+            queryClient.setQueryData(['user', newUser.id], newUser);
+
+            return { previousUser };
+          },
+          onError: (err, newUser, context) => {
+            // Rollback on error
+            queryClient.setQueryData(
+              ['user', newUser.id],
+              context?.previousUser
+            );
+          },
+          onSettled: (data, error, variables) => {
+            // Refetch to ensure consistency
+            queryClient.invalidateQueries({ queryKey: ['user', variables.id] });
+          },
+        });
+      }
+
+  jotai_atoms:
+    description: "Atomic state with Jotai"
+    example: |
+      import { atom, useAtom, useAtomValue, useSetAtom } from 'jotai';
+      import { atomWithStorage } from 'jotai/utils';
+
+      // Basic atoms
+      const countAtom = atom(0);
+      const doubleCountAtom = atom((get) => get(countAtom) * 2);
+
+      function Counter() {
+        const [count, setCount] = useAtom(countAtom);
+        const doubleCount = useAtomValue(doubleCountAtom);
+
+        return (
+          <div>
+            <p>Count: {count}</p>
+            <p>Double: {doubleCount}</p>
+            <button onClick={() => setCount((c) => c + 1)}>+</button>
+          </div>
+        );
+      }
+
+
+      // Persisted atoms
+      const themeAtom = atomWithStorage<'light' | 'dark'>('theme', 'light');
+
+
+      // Async atoms
+      const userAtom = atom(async (get) => {
+        const id = get(userIdAtom);
+        const response = await fetch(`/api/users/${id}`);
+        return response.json();
+      });
+
+
+      // Write-only atoms (actions)
+      const addTodoAtom = atom(
+        null,
+        (get, set, title: string) => {
+          set(todosAtom, (todos) => [
+            ...todos,
+            { id: Date.now(), title, done: false },
+          ]);
+        }
+      );
+
+      function AddTodo() {
+        const addTodo = useSetAtom(addTodoAtom);
+
+        return (
+          <button onClick={() => addTodo('New todo')}>
+            Add
+          </button>
+        );
+      }
+
+
+      // Atom families (parameterized atoms)
+      import { atomFamily } from 'jotai/utils';
+
+      const todoAtomFamily = atomFamily((id: number) =>
+        atom(async () => {
+          const res = await fetch(`/api/todos/${id}`);
+          return res.json();
+        })
+      );
+
+      function Todo({ id }: { id: number }) {
+        const [todo] = useAtom(todoAtomFamily(id));
+        return <div>{todo.title}</div>;
+      }
+
+  redux_toolkit:
+    description: "Redux Toolkit for complex apps"
+    example: |
+      import { configureStore, createSlice, PayloadAction } from '@reduxjs/toolkit';
+      import { TypedUseSelectorHook, useDispatch, useSelector } from 'react-redux';
+
+      // Create slice
+      interface CounterState {
+        value: number;
+        status: 'idle' | 'loading';
+      }
+
+      const counterSlice = createSlice({
+        name: 'counter',
+        initialState: { value: 0, status: 'idle' } as CounterState,
+        reducers: {
+          increment: (state) => {
+            state.value += 1;
+          },
+          decrement: (state) => {
+            state.value -= 1;
+          },
+          incrementByAmount: (state, action: PayloadAction<number>) => {
+            state.value += action.payload;
+          },
+        },
+      });
+
+      export const { increment, decrement, incrementByAmount } = counterSlice.actions;
+
+
+      // Configure store
+      export const store = configureStore({
+        reducer: {
+          counter: counterSlice.reducer,
+        },
+      });
+
+      type RootState = ReturnType<typeof store.getState>;
+      type AppDispatch = typeof store.dispatch;
+
+      export const useAppDispatch = () => useDispatch<AppDispatch>();
+      export const useAppSelector: TypedUseSelectorHook<RootState> = useSelector;
+
+
+      // Usage
+      function Counter() {
+        const count = useAppSelector((state) => state.counter.value);
+        const dispatch = useAppDispatch();
+
+        return (
+          <div>
+            <span>{count}</span>
+            <button onClick={() => dispatch(increment())}>+</button>
+            <button onClick={() => dispatch(decrement())}>-</button>
+          </div>
+        );
+      }
+
+
+      // RTK Query for API calls
+      import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
+
+      export const api = createApi({
+        baseQuery: fetchBaseQuery({ baseUrl: '/api' }),
+        tagTypes: ['User', 'Post'],
+        endpoints: (builder) => ({
+          getUser: builder.query<User, string>({
+            query: (id) => `users/${id}`,
+            providesTags: (result, error, id) => [{ type: 'User', id }],
+          }),
+          updateUser: builder.mutation<User, Partial<User> & { id: string }>({
+            query: ({ id, ...body }) => ({
+              url: `users/${id}`,
+              method: 'PUT',
+              body,
+            }),
+            invalidatesTags: (result, error, { id }) => [{ type: 'User', id }],
+          }),
+        }),
+      });
+
+      export const { useGetUserQuery, useUpdateUserMutation } = api;
+
+  url_state:
+    description: "State in URL for shareability"
+    example: |
+      // nuqs - Type-safe URL state for Next.js
+      import { useQueryState, parseAsInteger, parseAsString } from 'nuqs';
+
+      function ProductList() {
+        const [page, setPage] = useQueryState('page', parseAsInteger.withDefault(1));
+        const [search, setSearch] = useQueryState('search', parseAsString);
+        const [sort, setSort] = useQueryState('sort', parseAsString.withDefault('newest'));
+
+        // URL: /products?page=2&search=shoes&sort=price
+
+        return (
+          <div>
+            <input
+              value={search ?? ''}
+              onChange={(e) => setSearch(e.target.value || null)}
+            />
+            <select value={sort} onChange={(e) => setSort(e.target.value)}>
+              <option value="newest">Newest</option>
+              <option value="price">Price</option>
+            </select>
+            <Pagination page={page} onPageChange={setPage} />
+          </div>
+        );
+      }
+
+
+      // Multiple params at once
+      import { useQueryStates } from 'nuqs';
+
+      function Filters() {
+        const [filters, setFilters] = useQueryStates({
+          category: parseAsString,
+          minPrice: parseAsInteger,
+          maxPrice: parseAsInteger,
+        });
+
+        const applyFilters = (newFilters: Partial<typeof filters>) => {
+          setFilters({ ...filters, ...newFilters });
+        };
+      }
+
+anti_patterns:
+  global_for_local:
+    description: "Using global state for local concerns"
+    wrong: "Put form state in Redux"
+    right: "Use useState or react-hook-form"
+
+  duplicate_server_state:
+    description: "Storing server data in client state"
+    wrong: "Fetch users, then put in Redux"
+    right: "Use React Query - it handles caching"
+
+  context_for_frequent_updates:
+    description: "React Context for frequently changing state"
+    wrong: "Theme toggle in Context causes full re-render"
+    right: "Use Zustand/Jotai for frequent updates"
+
+  over_engineering:
+    description: "Redux for a simple app"
+    wrong: "5-file Redux setup for a todo app"
+    right: "useState or Zustand for simple cases"
+
+handoffs:
+  - trigger: "React component patterns"
+    to: react-patterns
+    context: "Component architecture"
+
+  - trigger: "form handling|validation"
+    to: react-patterns
+    context: "Form state with react-hook-form"
+
+  - trigger: "API design|REST"
+    to: api-design
+    context: "API structure affects state"
+
+  - trigger: "testing state|unit tests"
+    to: testing-strategies
+    context: "Testing state management"
+
+tags:
+  - state-management
+  - zustand
+  - jotai
+  - redux
+  - react-query
+  - react
+  - hooks

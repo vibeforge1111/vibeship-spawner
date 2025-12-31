@@ -1,0 +1,210 @@
+# Game AI Behavior Trees Sharp Edges
+
+sharp_edges:
+  - id: tick-performance
+    summary: Complex behavior tree causing frame rate drops with many NPCs
+    severity: critical
+    situation: 50+ NPCs each running behavior trees, game slows to crawl
+    why: |
+      Each BT tick can involve many node evaluations. 100 NPCs × 60 ticks/sec
+      × 50 nodes = 300,000 node evaluations per second.
+    solution: |
+      # Solutions for BT performance:
+
+      # 1. Staggered ticking (don't tick all NPCs same frame)
+      func tick_all_npcs():
+          current_tick_group = (current_tick_group + 1) % NUM_GROUPS
+          for npc in tick_groups[current_tick_group]:
+              npc.behavior_tree.tick()
+
+      # 2. LOD for AI (simpler behavior for distant NPCs)
+      func get_tree_for_distance(distance):
+          if distance > 100: return simple_tree
+          if distance > 50: return medium_tree
+          return full_tree
+
+      # 3. Event-driven instead of polling
+      # Don't check "is player nearby?" every tick
+      # Subscribe to proximity events instead
+
+      # 4. Cache condition results
+      class CachedCondition:
+          cache_duration = 0.5  # seconds
+          last_result = null
+          last_check_time = 0
+
+          evaluate():
+              if time() - last_check_time < cache_duration:
+                  return last_result
+              last_result = actual_evaluate()
+              last_check_time = time()
+              return last_result
+    symptoms:
+      - Frame rate drops with many NPCs
+      - Profiler shows AI taking most of frame
+      - NPCs feel sluggish/unresponsive
+    detection_pattern: 'tick|Tick|update.*tree|tree.*update'
+
+  - id: llm-latency-blocking
+    summary: Behavior tree blocks waiting for LLM response
+    severity: critical
+    situation: NPC freezes for 1-3 seconds when LLM node activates
+    why: |
+      LLM responses take 100-3000ms. If BT waits synchronously,
+      NPC is frozen. Other behaviors can't run.
+    solution: |
+      # WRONG: Synchronous LLM call
+      class LLMDecisionNode:
+          tick():
+              response = llm.complete_sync(prompt)  # Blocks!
+              return parse_decision(response)
+
+      # RIGHT: Async with RUNNING state
+      class LLMDecisionNode:
+          pending_request = null
+
+          tick():
+              if pending_request == null:
+                  # Start async request
+                  pending_request = llm.complete_async(prompt)
+                  return RUNNING  # Tree continues other branches
+
+              if pending_request.is_complete():
+                  result = parse_decision(pending_request.result)
+                  pending_request = null
+                  blackboard.llm_decision = result
+                  return SUCCESS
+              else:
+                  return RUNNING  # Still waiting
+
+      # Alternative: LLM runs on timer, not in tree
+      # Tree just reads cached decision from blackboard
+    symptoms:
+      - NPC freezes during decision
+      - Visible pause before action
+      - Other NPCs also affected
+    detection_pattern: 'llm.*sync|await.*llm|complete.*block'
+
+  - id: blackboard-pollution
+    summary: Blackboard becomes dumping ground with hundreds of keys
+    severity: high
+    situation: Nobody knows what's in the blackboard, keys conflict
+    why: |
+      Without discipline, every node adds keys. Keys never removed.
+      Name collisions cause bugs. Debugging becomes impossible.
+    solution: |
+      # Structure your blackboard:
+
+      class StructuredBlackboard:
+          # Core perception
+          @section("perception")
+          target: Entity = null
+          threats: Array<Entity> = []
+          last_seen_player: Vector3 = null
+
+          # Combat state
+          @section("combat")
+          in_combat: bool = false
+          current_weapon: Weapon = null
+          ammo_count: int = 0
+
+          # Navigation
+          @section("navigation")
+          destination: Vector3 = null
+          path: Path = null
+          is_stuck: bool = false
+
+          # LLM decisions (separate section)
+          @section("llm")
+          last_decision: string = null
+          decision_timestamp: float = 0
+          decision_context: string = null
+
+      # Use typed access, not string keys
+      blackboard.combat.in_combat = true  # Good
+      blackboard.set("in_combat", true)   # Bad - no type safety
+    symptoms:
+      - Blackboard has 100+ keys
+      - Key name typos cause bugs
+      - Same data stored under multiple keys
+    detection_pattern: 'blackboard\\.set|SetValue.*string'
+
+  - id: infinite-subtree-loop
+    summary: Subtree calls itself, causing infinite loop
+    severity: high
+    situation: Game hangs, stack overflow in behavior tree
+    why: |
+      Subtrees can reference other subtrees. Without guards,
+      circular references cause infinite recursion.
+    solution: |
+      # Prevention strategies:
+
+      # 1. Static analysis at load time
+      func validate_tree(tree):
+          visited = set()
+          return check_for_cycles(tree.root, visited)
+
+      func check_for_cycles(node, visited):
+          if node.id in visited:
+              raise "Cycle detected: " + node.id
+          visited.add(node.id)
+          for child in node.children:
+              check_for_cycles(child, visited.copy())
+
+      # 2. Runtime depth limit
+      class BTExecutor:
+          MAX_DEPTH = 20
+
+          tick(node, depth=0):
+              if depth > MAX_DEPTH:
+                  log_error("BT depth exceeded, possible cycle")
+                  return FAILURE
+              # ... normal tick logic
+
+      # 3. Use references, not embedding
+      # Subtrees should be references, not copies
+    symptoms:
+      - Stack overflow crash
+      - Game hangs on NPC tick
+      - Memory grows unbounded
+    detection_pattern: 'SubTree|RunTree|call_tree'
+
+  - id: state-corruption
+    summary: NPC gets stuck in invalid state after interrupted action
+    severity: medium
+    situation: NPC interrupted mid-action, never recovers
+    why: |
+      Actions interrupted by higher-priority behaviors may not clean up.
+      State set in tick() not reset in abort(). NPC stuck "mid-attack".
+    solution: |
+      # Always implement cleanup
+
+      class AttackAction extends BTAction:
+          on_enter():
+              npc.is_attacking = true
+              npc.play_animation("attack_start")
+
+          tick():
+              if attack_complete():
+                  return SUCCESS
+              return RUNNING
+
+          on_exit(result):
+              # ALWAYS clean up, whether SUCCESS or FAILURE
+              npc.is_attacking = false
+              npc.stop_animation()
+
+          on_abort():
+              # Called when higher priority interrupts
+              on_exit(FAILURE)
+              npc.play_animation("attack_cancel")
+
+      # Test interruption scenarios
+      # - Interrupt attack with damage reaction
+      # - Interrupt navigation with dialogue
+      # - Interrupt dialogue with combat
+    symptoms:
+      - NPC stuck in animation
+      - Flags never reset
+      - Behavior stops working after interrupt
+    detection_pattern: 'on_exit|on_abort|cleanup|reset'

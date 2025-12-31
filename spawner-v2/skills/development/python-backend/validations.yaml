@@ -1,0 +1,284 @@
+# Validations - Python Backend
+# Automated checks for Python/Django/FastAPI issues
+
+version: 1.0.0
+skill_id: python-backend
+
+validations:
+  # Security
+  - id: hardcoded-secret
+    name: Hardcoded secret in code
+    severity: error
+    type: regex
+    pattern:
+      - '(password|api_key|secret|token)\s*=\s*["\'][^"\']{8,}'
+      - 'SECRET_KEY\s*=\s*["\'][^"\']+["\']'
+    message: "Secrets should be in environment variables, not code"
+    fix_action: "Use os.getenv() or pydantic-settings"
+    applies_to:
+      - "*.py"
+
+  - id: sql-injection
+    name: Possible SQL injection
+    severity: error
+    type: regex
+    pattern:
+      - 'execute\s*\(\s*f["\']'
+      - 'execute\s*\([^)]*%\s*\('
+      - 'raw\s*\(\s*f["\']'
+    message: "Use parameterized queries to prevent SQL injection"
+    fix_action: "Use query parameters: execute(sql, (param,))"
+    applies_to:
+      - "*.py"
+
+  - id: debug-enabled
+    name: Debug mode enabled
+    severity: warning
+    type: regex
+    pattern:
+      - 'DEBUG\s*=\s*True'
+      - 'debug\s*=\s*True'
+    message: "Debug mode should be disabled in production"
+    fix_action: "Use environment variable: DEBUG = os.getenv('DEBUG', 'false').lower() == 'true'"
+    applies_to:
+      - "*.py"
+      - "settings.py"
+
+  # Async issues
+  - id: blocking-in-async
+    name: Blocking call in async function
+    severity: warning
+    type: regex
+    pattern:
+      - 'async def.*\n.*requests\.'
+      - 'async def.*\n.*time\.sleep'
+      - 'async def.*\n.*\.objects\.(get|filter|all|create)'
+    message: "Blocking calls in async functions block the event loop"
+    fix_action: "Use async alternatives: httpx, asyncio.sleep, sync_to_async"
+    applies_to:
+      - "*.py"
+
+  # Django specific
+  - id: django-n-plus-one
+    name: Potential N+1 query
+    severity: info
+    type: regex
+    pattern:
+      - 'for.*in.*\.all\(\)|for.*in.*objects\.'
+    message: "Loop over queryset may cause N+1 queries"
+    fix_action: "Use select_related() or prefetch_related()"
+    applies_to:
+      - "*.py"
+
+  - id: missing-migration
+    name: Model change without migration
+    severity: info
+    type: regex
+    pattern:
+      - 'class\s+\w+\(models\.Model\)'
+    message: "Remember to create migrations after model changes"
+    fix_action: "Run: python manage.py makemigrations"
+    applies_to:
+      - "models.py"
+
+  # Type hints
+  - id: no-return-type
+    name: Function without return type hint
+    severity: info
+    type: regex
+    pattern:
+      - 'def \w+\([^)]*\)\s*:'
+    message: "Functions should have return type hints"
+    fix_action: "Add return type: def func() -> ReturnType:"
+    applies_to:
+      - "*.py"
+
+  # Best practices
+  - id: mutable-default
+    name: Mutable default argument
+    severity: warning
+    type: regex
+    pattern:
+      - 'def\s+\w+\([^)]*=\s*\[\]'
+      - 'def\s+\w+\([^)]*=\s*\{\}'
+    message: "Mutable defaults are shared across calls"
+    fix_action: "Use None and create inside function: if arg is None: arg = []"
+    applies_to:
+      - "*.py"
+
+  - id: bare-except
+    name: Bare except clause
+    severity: warning
+    type: regex
+    pattern:
+      - 'except\s*:'
+    message: "Bare except catches all exceptions including SystemExit"
+    fix_action: "Use specific exceptions: except ValueError: or except Exception:"
+    applies_to:
+      - "*.py"
+
+  - id: print-debug
+    name: Print statement (use logging)
+    severity: info
+    type: regex
+    pattern:
+      - '\bprint\s*\('
+    message: "Use logging instead of print for production code"
+    fix_action: "Use logger.info() or logger.debug()"
+    applies_to:
+      - "*.py"
+
+  # FastAPI specific
+  - id: missing-response-model
+    name: FastAPI endpoint without response_model
+    severity: info
+    type: regex
+    pattern:
+      - '@app\.(get|post|put|delete)\s*\([^)]*\)\s*\n\s*async def'
+    message: "Consider adding response_model for OpenAPI documentation"
+    fix_action: "Add response_model=YourSchema to the decorator"
+    applies_to:
+      - "*.py"
+
+  # Pydantic
+  - id: pydantic-v1-syntax
+    name: Pydantic v1 syntax (deprecated)
+    severity: info
+    type: regex
+    pattern:
+      - 'class Config:'
+      - '@validator\s*\('
+      - '\.dict\s*\('
+    message: "Consider updating to Pydantic v2 syntax"
+    fix_action: "Use model_config, @field_validator, .model_dump()"
+    applies_to:
+      - "*.py"
+
+code_smells:
+  - id: god-function
+    name: Function over 50 lines
+    description: "Very long function that probably does too much"
+    pattern: null
+    suggestion: "Break into smaller, focused functions"
+
+  - id: deep-nesting
+    name: Deeply nested code
+    description: "3+ levels of indentation"
+    pattern: null
+    suggestion: "Use early returns, extract functions"
+
+  - id: magic-numbers
+    name: Magic numbers in code
+    description: "Numbers without clear meaning"
+    pattern: 'if.*[^0-9][0-9]{2,}[^0-9]'
+    suggestion: "Use named constants"
+
+  - id: global-import
+    name: Import * (star import)
+    description: "from module import *"
+    pattern: 'from .* import \*'
+    suggestion: "Import specific names"
+
+best_practices:
+  project_structure:
+    recommendation: |
+      FastAPI Project Structure:
+
+      app/
+      ├── main.py              # FastAPI app
+      ├── config.py            # pydantic-settings
+      ├── database.py          # DB connection
+      ├── dependencies.py      # Shared deps
+      ├── models/              # SQLAlchemy models
+      ├── schemas/             # Pydantic schemas
+      ├── routers/             # API endpoints
+      ├── services/            # Business logic
+      ├── utils/               # Helpers
+      └── tests/
+
+  type_hints:
+    recommendation: |
+      Type Hint Best Practices:
+
+      from typing import Optional, List
+      from datetime import datetime
+
+      # Function signatures
+      def get_user(user_id: int) -> User | None:
+          ...
+
+      # Collections
+      def get_users(limit: int = 100) -> list[User]:
+          ...
+
+      # Optional values
+      def update_user(name: str | None = None) -> User:
+          ...
+
+      # FastAPI with Pydantic
+      @app.get("/users", response_model=list[UserResponse])
+      async def list_users() -> list[UserResponse]:
+          ...
+
+  async_patterns:
+    recommendation: |
+      Async Best Practices:
+
+      # Use async context managers
+      async with httpx.AsyncClient() as client:
+          response = await client.get(url)
+
+      # Gather concurrent operations
+      results = await asyncio.gather(
+          fetch_users(),
+          fetch_posts(),
+          fetch_comments(),
+      )
+
+      # Use async generators
+      async def stream_data():
+          async for chunk in response.aiter_bytes():
+              yield chunk
+
+      # Proper cleanup
+      @asynccontextmanager
+      async def lifespan(app: FastAPI):
+          # Startup
+          await database.connect()
+          yield
+          # Shutdown
+          await database.disconnect()
+
+  testing:
+    recommendation: |
+      pytest Patterns:
+
+      # Use fixtures
+      @pytest.fixture
+      async def client():
+          async with AsyncClient(app=app) as client:
+              yield client
+
+      # Use factories
+      @pytest.fixture
+      def user_factory():
+          def create(**kwargs):
+              return User(
+                  email=kwargs.get('email', 'test@test.com'),
+                  **kwargs
+              )
+          return create
+
+      # Parametrize tests
+      @pytest.mark.parametrize("email,valid", [
+          ("test@test.com", True),
+          ("invalid", False),
+      ])
+      def test_email_validation(email, valid):
+          ...
+
+      # Test async code
+      @pytest.mark.asyncio
+      async def test_async_endpoint(client):
+          response = await client.get("/users")
+          assert response.status_code == 200

@@ -1,0 +1,309 @@
+id: mcp-security
+name: MCP Security
+version: 1.0.0
+layer: 2
+description: Security patterns for MCP servers including OAuth 2.0, rate limiting, input validation, and audit logging
+
+owns:
+  - mcp-authentication
+  - mcp-authorization
+  - mcp-rate-limiting
+  - mcp-input-validation
+  - mcp-audit-logging
+  - mcp-secrets-management
+
+pairs_with:
+  - mcp-server-development
+  - mcp-testing
+  - mcp-deployment
+  - security
+  - authentication-oauth
+
+ecosystem:
+  primary_tools:
+    - name: OAuth 2.0
+      description: Standard authentication for MCP servers
+      url: https://oauth.net/2/
+    - name: rate-limiter-flexible
+      description: Flexible rate limiting for Node.js
+      url: https://github.com/animir/node-rate-limiter-flexible
+    - name: Zod
+      description: TypeScript-first schema validation
+      url: https://zod.dev
+
+prerequisites:
+  knowledge:
+    - OAuth 2.0 basics
+    - Input validation concepts
+    - Rate limiting principles
+  skills_recommended:
+    - mcp-server-development
+    - security
+
+limits:
+  does_not_cover:
+    - Network security (TLS/firewall)
+    - Infrastructure security
+    - General application security
+  boundaries:
+    - Focus is MCP-specific security
+    - Covers auth, rate limits, validation
+
+tags:
+  - mcp
+  - security
+  - oauth
+  - authentication
+  - rate-limiting
+  - validation
+
+triggers:
+  - mcp security
+  - mcp authentication
+  - mcp oauth
+  - mcp rate limit
+  - secure mcp server
+
+identity: |
+  You're an MCP security specialist who has audited dozens of MCP servers and found
+  critical vulnerabilities in 43% of them. You've seen hardcoded API keys, missing
+  rate limits, and prompt injection vulnerabilities that could drain accounts.
+
+  You know that MCP servers operate in a unique threat model: AI clients send
+  unexpected inputs, users may not understand what they're authorizing, and
+  a single vulnerability can be exploited at scale.
+
+  Your core principles:
+  1. OAuth for identity—because IP allowlisting is not security
+  2. Rate limit everything—because AI can make 10,000 requests in seconds
+  3. Validate all inputs—because AI sends unexpected data
+  4. Log for audit—because you need to know what happened
+  5. Consent is explicit—because users authorize AI actions
+  6. Fail secure—because partial failures create vulnerabilities
+
+history: |
+  MCP security evolution:
+
+  2024 Nov: MCP launches with minimal security guidance.
+  2024 Dec: First security analyses find common vulnerabilities.
+  2025 Jun: MCP spec adds OAuth, improves security best practices.
+  2025 Oct: 43% of MCP servers found with critical vulnerabilities.
+  2025 Dec: Enhanced security requirements for MCP Registry listing.
+
+patterns:
+  - name: OAuth 2.0 Implementation
+    description: Implement OAuth 2.0 for user authentication
+    when: Server needs to identify users or access user resources
+    example: |
+      import { OAuthProvider } from '@mcp/oauth';
+
+      const oauth = new OAuthProvider({
+          clientId: process.env.OAUTH_CLIENT_ID,
+          clientSecret: process.env.OAUTH_CLIENT_SECRET,
+          authorizationUrl: 'https://auth.example.com/authorize',
+          tokenUrl: 'https://auth.example.com/token',
+          scopes: ['read', 'write']
+      });
+
+      server.setRequestHandler(CallToolRequestSchema, async (request, context) => {
+          // Verify OAuth token
+          const user = await oauth.verifyToken(context.authToken);
+          if (!user) {
+              return {
+                  content: [{
+                      type: "text",
+                      text: "Authentication required. Please connect your account."
+                  }],
+                  isError: true
+              };
+          }
+
+          // Check authorization for specific tool
+          if (!user.scopes.includes(requiredScope(request.params.name))) {
+              return {
+                  content: [{
+                      type: "text",
+                      text: `Permission denied. Required scope: ${requiredScope(request.params.name)}`
+                  }],
+                  isError: true
+              };
+          }
+
+          // Proceed with authenticated request
+          return handleTool(request, user);
+      });
+
+  - name: Rate Limiting
+    description: Implement per-user and global rate limits
+    when: Any production MCP server
+    example: |
+      import { RateLimiterRedis } from 'rate-limiter-flexible';
+      import Redis from 'ioredis';
+
+      const redis = new Redis(process.env.REDIS_URL);
+
+      // Per-user rate limiter
+      const userLimiter = new RateLimiterRedis({
+          storeClient: redis,
+          keyPrefix: 'mcp_user_',
+          points: 100,        // 100 requests
+          duration: 60,       // per 60 seconds
+          blockDuration: 60,  // block for 60 seconds if exceeded
+      });
+
+      // Per-tool rate limiter (expensive operations)
+      const expensiveLimiter = new RateLimiterRedis({
+          storeClient: redis,
+          keyPrefix: 'mcp_expensive_',
+          points: 10,
+          duration: 60,
+      });
+
+      async function checkRateLimit(userId: string, toolName: string) {
+          try {
+              await userLimiter.consume(userId);
+
+              if (isExpensiveTool(toolName)) {
+                  await expensiveLimiter.consume(`${userId}_${toolName}`);
+              }
+
+              return { allowed: true };
+          } catch (error) {
+              return {
+                  allowed: false,
+                  retryAfter: Math.ceil(error.msBeforeNext / 1000),
+                  message: `Rate limit exceeded. Retry in ${Math.ceil(error.msBeforeNext / 1000)} seconds.`
+              };
+          }
+      }
+
+  - name: Input Validation
+    description: Strict validation of all tool inputs
+    when: Any tool that accepts parameters
+    example: |
+      import { z } from 'zod';
+
+      // Define strict schemas per tool
+      const schemas = {
+          search_files: z.object({
+              query: z.string()
+                  .min(1, "Query required")
+                  .max(200, "Query too long")
+                  .refine(s => !s.includes('..'), "Path traversal not allowed"),
+              path: z.string()
+                  .startsWith('/', "Must be absolute path")
+                  .refine(s => !s.includes('..'), "Path traversal not allowed")
+                  .optional(),
+              limit: z.number().int().min(1).max(100).default(10)
+          }),
+
+          execute_command: z.object({
+              command: z.string()
+                  .max(1000)
+                  // Whitelist allowed commands
+                  .refine(cmd => ALLOWED_COMMANDS.some(ac =>
+                      cmd.startsWith(ac)
+                  ), "Command not allowed"),
+              timeout: z.number().int().min(1000).max(30000).default(5000)
+          })
+      };
+
+      function validateInput(toolName: string, args: unknown) {
+          const schema = schemas[toolName];
+          if (!schema) {
+              throw new Error(`Unknown tool: ${toolName}`);
+          }
+
+          const result = schema.safeParse(args);
+          if (!result.success) {
+              throw new ValidationError(result.error.message);
+          }
+
+          return result.data;
+      }
+
+  - name: Audit Logging
+    description: Log all tool calls for security audit
+    when: Any production MCP server
+    example: |
+      interface AuditLog {
+          timestamp: string;
+          requestId: string;
+          userId: string;
+          tool: string;
+          arguments: Record<string, unknown>;
+          result: 'success' | 'error' | 'denied';
+          duration: number;
+          metadata: Record<string, unknown>;
+      }
+
+      class AuditLogger {
+          async log(entry: AuditLog) {
+              // Sanitize sensitive data before logging
+              const sanitized = this.sanitize(entry);
+
+              // Log to multiple destinations
+              await Promise.all([
+                  this.logToDatabase(sanitized),
+                  this.logToCloudWatch(sanitized),
+              ]);
+
+              // Alert on suspicious patterns
+              if (this.isSuspicious(entry)) {
+                  await this.alert(entry);
+              }
+          }
+
+          private sanitize(entry: AuditLog): AuditLog {
+              // Remove sensitive fields
+              const sanitizedArgs = { ...entry.arguments };
+              for (const key of SENSITIVE_FIELDS) {
+                  if (sanitizedArgs[key]) {
+                      sanitizedArgs[key] = '[REDACTED]';
+                  }
+              }
+              return { ...entry, arguments: sanitizedArgs };
+          }
+
+          private isSuspicious(entry: AuditLog): boolean {
+              return (
+                  entry.result === 'denied' ||
+                  entry.arguments.toString().includes('..') ||
+                  this.rateTooHigh(entry.userId)
+              );
+          }
+      }
+
+anti_patterns:
+  - name: IP Allowlisting Only
+    description: Relying on IP allowlisting for security
+    why: Claude's IPs can be shared, doesn't identify users
+    instead: Use OAuth 2.0 for authentication.
+
+  - name: No Rate Limiting
+    description: Allowing unlimited requests
+    why: AI can make thousands of requests, draining resources or money
+    instead: Implement per-user and per-tool rate limits.
+
+  - name: Trusting AI Input
+    description: Using AI-provided input without validation
+    why: AI can be manipulated, sends unexpected data
+    instead: Validate everything with strict schemas.
+
+  - name: Silent Denials
+    description: Silently failing on auth/permission issues
+    why: AI continues with wrong assumptions
+    instead: Return clear error with required action.
+
+handoffs:
+  - trigger: mcp server implementation
+    to: mcp-server-development
+    context: Need server architecture
+
+  - trigger: testing security
+    to: mcp-testing
+    context: Need security testing
+
+  - trigger: production deployment
+    to: mcp-deployment
+    context: Need secure deployment

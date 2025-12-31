@@ -1,0 +1,469 @@
+# Sharp Edges - API Design
+# The gotchas that make APIs hard to use and maintain
+
+version: 1.0.0
+skill_id: api-design
+
+sharp_edges:
+  - id: breaking-changes
+    summary: Breaking changes without versioning
+    severity: critical
+    situation: |
+      You rename a field from "userName" to "username". Deploy. Every client
+      breaks. Mobile apps in app stores can't update. Customers are furious.
+      You didn't think it was a breaking change.
+    why: |
+      Clients depend on exact field names, types, and structures. Any change
+      to the response contract can break clients. Even "improvements" like
+      better field names are breaking changes.
+    solution: |
+      # NEVER BREAK THE CONTRACT
+
+      ## What's breaking?
+      - Removing fields
+      - Renaming fields
+      - Changing field types
+      - Changing required/optional
+      - Removing endpoints
+      - Changing status codes
+      - Changing error format
+
+      ## What's NOT breaking?
+      - Adding new fields
+      - Adding new endpoints
+      - Adding new optional parameters
+      - Making required fields optional
+
+
+      ## Use versioning for breaking changes
+
+      // v1 response
+      {
+        "userName": "john_doe",
+        "createdAt": "2024-01-15"
+      }
+
+      // v2 response (new version, v1 still works)
+      {
+        "username": "john_doe",
+        "user_name": "john_doe",  // Alias for transition
+        "created_at": "2024-01-15T10:30:00Z"  // ISO format
+      }
+
+
+      ## Deprecation process
+
+      1. Announce deprecation (6+ months notice)
+      2. Add deprecation headers
+      3. Log usage of deprecated endpoints
+      4. Notify heavy users directly
+      5. Sunset after migration period
+
+      // Deprecation headers
+      res.setHeader('Deprecation', 'true');
+      res.setHeader('Sunset', 'Sat, 01 Jul 2025 00:00:00 GMT');
+      res.setHeader('Link', '</api/v2/users>; rel="successor-version"');
+    symptoms:
+      - Client apps breaking after deploy
+      - "It worked yesterday"
+      - Angry SDK users
+    detection_pattern: null
+
+  - id: n-plus-one-api
+    summary: API design causing N+1 requests
+    severity: high
+    situation: |
+      Client fetches /users, gets 50 users. Each user has orders. Client
+      fetches /users/1/orders, /users/2/orders... 50 more requests. Page
+      takes 10 seconds to load. Your API forced this pattern.
+    why: |
+      APIs that only return IDs or minimal data force clients to make many
+      requests. Either include related data or provide batch endpoints.
+      Think about common client needs, not just database structure.
+    solution: |
+      # DESIGN FOR CLIENT NEEDS
+
+      // WRONG: Forces N+1 on client
+      GET /users
+      [
+        { "id": 1, "name": "John" },
+        { "id": 2, "name": "Jane" }
+      ]
+      // Client must call GET /users/1/orders for each
+
+
+      // RIGHT: Include related data
+      GET /users?include=orders
+      [
+        {
+          "id": 1,
+          "name": "John",
+          "orders": [...]
+        }
+      ]
+
+
+      // RIGHT: Batch endpoint
+      POST /users/orders
+      { "user_ids": [1, 2, 3, 4, 5] }
+
+      {
+        "1": [{ order }],
+        "2": [{ order }]
+      }
+
+
+      // RIGHT: Field selection
+      GET /users?fields=id,name,orders.id,orders.total
+      // Only return requested fields
+
+
+      // Implement with include parameter
+      app.get('/users', async (req, res) => {
+        const includes = req.query.include?.split(',') || [];
+
+        let query = db.select().from(users);
+
+        if (includes.includes('orders')) {
+          query = query.leftJoin(orders, eq(users.id, orders.userId));
+        }
+
+        const data = await query;
+        res.json(formatWithIncludes(data, includes));
+      });
+
+
+      // GraphQL solves this naturally
+      query {
+        users {
+          id
+          name
+          orders {
+            id
+            total
+          }
+        }
+      }
+    symptoms:
+      - Many sequential API calls
+      - Slow page loads
+      - High API request count per page
+    detection_pattern: null
+
+  - id: missing-idempotency
+    summary: Non-idempotent operations causing duplicates
+    severity: high
+    situation: |
+      User clicks "Pay" button. Request times out. They click again.
+      Two payments processed. Or network retry creates duplicate orders.
+      Your API doesn't handle repeated requests safely.
+    why: |
+      Network is unreliable. Clients retry. Without idempotency, the same
+      logical request can execute multiple times with different results.
+      Critical for payments, orders, any important create operations.
+    solution: |
+      # IMPLEMENT IDEMPOTENCY
+
+      ## Idempotency Key header
+      POST /payments
+      Idempotency-Key: user_123_order_456_attempt_1
+      {
+        "amount": 99.99,
+        "order_id": "456"
+      }
+
+      // Server stores: key -> response
+      // If same key comes again, return stored response
+
+
+      // Implementation
+      async function handlePayment(req, res) {
+        const idempotencyKey = req.headers['idempotency-key'];
+
+        if (!idempotencyKey) {
+          return res.status(400).json({
+            error: 'missing_idempotency_key',
+            message: 'Idempotency-Key header required for payments',
+          });
+        }
+
+        // Check if we've seen this key
+        const cached = await redis.get(`idempotency:${idempotencyKey}`);
+        if (cached) {
+          const { status, body } = JSON.parse(cached);
+          res.setHeader('Idempotency-Replayed', 'true');
+          return res.status(status).json(body);
+        }
+
+        // Process payment
+        try {
+          const result = await processPayment(req.body);
+
+          // Store result for future retries
+          await redis.setex(
+            `idempotency:${idempotencyKey}`,
+            86400,  // 24 hours
+            JSON.stringify({ status: 200, body: result })
+          );
+
+          res.json(result);
+        } catch (error) {
+          // Store error too (for client errors)
+          if (error.statusCode >= 400 && error.statusCode < 500) {
+            await redis.setex(
+              `idempotency:${idempotencyKey}`,
+              86400,
+              JSON.stringify({ status: error.statusCode, body: error.body })
+            );
+          }
+          throw error;
+        }
+      }
+
+
+      ## Natural idempotency keys
+      // Use unique business identifiers
+      `user_${userId}_order_${orderId}`
+      `checkout_${cartId}_attempt`
+    symptoms:
+      - Duplicate records on retry
+      - Double charges
+      - Inconsistent state after timeout
+    detection_pattern: null
+
+  - id: poor-error-messages
+    summary: Unhelpful error messages
+    severity: medium
+    situation: |
+      API returns { "error": "Bad Request" }. What's bad? Which field?
+      Developer spends an hour debugging. Error was "email must be string"
+      but the API didn't say that.
+    why: |
+      Developers are your API users. When something goes wrong, they need
+      to know exactly what and how to fix it. Vague errors waste everyone's
+      time and create support burden.
+    solution: |
+      # WRITE HELPFUL ERRORS
+
+      // WRONG: Useless
+      { "error": "Bad Request" }
+      { "error": "Invalid input" }
+      { "error": "Something went wrong" }
+
+
+      // RIGHT: Specific and actionable
+      {
+        "error": "validation_error",
+        "message": "Request validation failed",
+        "details": [
+          {
+            "field": "email",
+            "message": "Must be a valid email address",
+            "received": "not-an-email"
+          },
+          {
+            "field": "age",
+            "message": "Must be at least 18",
+            "received": 16
+          }
+        ],
+        "documentation_url": "https://api.example.com/docs/users#create"
+      }
+
+
+      // Include what you expected
+      {
+        "error": "invalid_type",
+        "message": "Expected array for 'items', received object",
+        "field": "items",
+        "expected": "array",
+        "received": "object"
+      }
+
+
+      // For auth errors, be specific but not too specific
+      // WRONG (security risk):
+      { "error": "User not found" }  // Confirms email doesn't exist
+
+      // RIGHT:
+      { "error": "Invalid credentials" }  // Generic for login
+
+
+      // Implementation with Zod
+      import { ZodError } from 'zod';
+
+      function formatZodError(error: ZodError) {
+        return {
+          error: 'validation_error',
+          message: 'Request validation failed',
+          details: error.issues.map((issue) => ({
+            field: issue.path.join('.'),
+            message: issue.message,
+            code: issue.code,
+          })),
+        };
+      }
+    symptoms:
+      - "What does this error mean?"
+      - Lots of support requests
+      - Developers guessing what's wrong
+    detection_pattern: 'error.*Bad Request|error.*Invalid'
+
+  - id: inconsistent-responses
+    summary: Inconsistent response formats
+    severity: medium
+    situation: |
+      GET /users returns array. GET /users/:id returns object with "data"
+      wrapper. POST /users returns object without wrapper. Every endpoint
+      is different. Client code is full of special cases.
+    why: |
+      Inconsistency forces clients to handle each endpoint differently.
+      It creates bugs, slows development, and makes the API feel broken.
+      Consistency is more important than any single format choice.
+    solution: |
+      # BE CONSISTENT
+
+      ## Pick ONE format, use everywhere
+
+      // Option A: Direct data (simpler)
+      GET /users        → [{ user }, { user }]
+      GET /users/:id    → { user }
+      POST /users       → { user }
+
+      // Option B: Wrapped (more extensible)
+      GET /users        → { data: [{ user }], pagination: {} }
+      GET /users/:id    → { data: { user } }
+      POST /users       → { data: { user } }
+
+
+      ## Consistent error format
+      // Always same structure
+      {
+        "error": "error_code",
+        "message": "Human readable",
+        "details": {}  // Optional additional info
+      }
+
+
+      ## Consistent field names
+      created_at, not createdAt in some places
+      user_id, not userId in some places
+
+
+      ## Consistent pagination
+      // Always same structure for lists
+      {
+        "data": [...],
+        "pagination": {
+          "next_cursor": "abc",
+          "has_more": true
+        }
+      }
+
+
+      // Create response helpers
+      function successResponse(data, meta = {}) {
+        return { data, ...meta };
+      }
+
+      function listResponse(data, pagination) {
+        return { data, pagination };
+      }
+
+      function errorResponse(code, message, details = null) {
+        return { error: code, message, details };
+      }
+
+      // Use everywhere
+      app.get('/users', async (req, res) => {
+        const { data, pagination } = await getUsers(req.query);
+        res.json(listResponse(data, pagination));
+      });
+
+      app.get('/users/:id', async (req, res) => {
+        const user = await getUser(req.params.id);
+        res.json(successResponse(user));
+      });
+    symptoms:
+      - Client code full of if/else for format
+      - "Why is this endpoint different?"
+      - Wrapper in some responses, not others
+    detection_pattern: null
+
+  - id: leaking-internals
+    summary: Exposing internal implementation details
+    severity: medium
+    situation: |
+      Error returns Prisma error with query details. IDs are sequential
+      integers revealing user count. Field names match database columns
+      exactly. Internal service names in errors.
+    why: |
+      Internal details are security risks and coupling. Attackers learn your
+      stack. Sequential IDs allow enumeration. Database column names lock
+      you to current schema. Internal errors confuse clients.
+    solution: |
+      # HIDE IMPLEMENTATION
+
+      ## Use UUIDs, not sequential IDs
+      // WRONG
+      /users/1
+      /users/2
+      /users/3  // Attacker knows there are at least 3 users
+
+      // RIGHT
+      /users/550e8400-e29b-41d4-a716-446655440000
+
+
+      ## Abstract field names
+      // Database: user_account.created_timestamp
+      // API: createdAt
+      // Can change database without changing API
+
+
+      ## Sanitize errors
+      // WRONG: Raw database error
+      {
+        "error": "PrismaClientKnownRequestError",
+        "message": "Unique constraint failed on the fields: (`email`)",
+        "meta": { "target": ["email"] }
+      }
+
+      // RIGHT: Abstracted error
+      {
+        "error": "conflict",
+        "message": "A user with this email already exists"
+      }
+
+
+      ## Don't expose stack traces
+      app.use((err, req, res, next) => {
+        // Log full error internally
+        console.error(err);
+
+        // Return sanitized error
+        if (err instanceof AppError) {
+          return res.status(err.status).json({
+            error: err.code,
+            message: err.message,
+          });
+        }
+
+        // Never return raw errors
+        res.status(500).json({
+          error: 'internal_error',
+          message: 'An unexpected error occurred',
+        });
+      });
+
+
+      ## Hide internal service names
+      // WRONG
+      { "error": "StripeWebhookServiceError" }
+
+      // RIGHT
+      { "error": "payment_processing_error" }
+    symptoms:
+      - Stack traces in responses
+      - Database column names visible
+      - Sequential IDs in URLs
+    detection_pattern: 'PrismaClient|SequelizeError|MongoError'

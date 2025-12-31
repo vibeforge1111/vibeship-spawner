@@ -1,0 +1,522 @@
+# Structured Output Skill
+# Comprehensive LLM output parsing and validation
+
+id: structured-output
+name: Structured Output
+version: 1.0.0
+layer: 1  # Core layer - fundamental capability
+
+description: |
+  Expert in getting reliable, typed outputs from LLMs. Covers JSON mode, function calling,
+  Instructor library, Outlines for constrained generation, Pydantic validation, and response
+  format specifications. Essential for building reliable AI applications that integrate with
+  existing systems. Knows when to use each approach and how to handle edge cases.
+
+owns:
+  - JSON mode configuration
+  - Function calling / Tool use
+  - Instructor library patterns
+  - Outlines constrained generation
+  - Pydantic schema design for LLMs
+  - Response format specifications
+  - Output validation and retry logic
+  - Streaming structured outputs
+
+pairs_with:
+  - langgraph
+  - crewai
+  - langfuse
+  - autonomous-agents
+
+requires:
+  - Python 3.9+
+  - LLM API access
+  - Pydantic (recommended)
+
+ecosystem:
+  primary:
+    - OpenAI API (response_format, tools)
+    - Anthropic API (tool_use)
+    - Instructor library
+    - Outlines library
+  common_integrations:
+    - Pydantic v2
+    - LangChain
+    - LlamaIndex
+    - Marvin
+  providers:
+    - OpenAI (best JSON mode support)
+    - Anthropic (reliable tool use)
+    - Google Gemini
+    - Local models (via Outlines)
+
+prerequisites:
+  - Understanding of JSON Schema
+  - Pydantic basics
+  - LLM API familiarity
+
+limits:
+  - Not all models support all methods
+  - Complex nested schemas can fail
+  - Streaming adds complexity
+  - Local models need Outlines
+
+tags:
+  - structured-output
+  - json-mode
+  - function-calling
+  - tool-use
+  - instructor
+  - outlines
+  - pydantic
+  - parsing
+
+triggers:
+  - "structured output"
+  - "json mode"
+  - "function calling"
+  - "tool use"
+  - "parse llm output"
+  - "pydantic llm"
+  - "instructor"
+  - "outlines"
+  - "typed response"
+
+history:
+  - version: "1.0.0"
+    date: "2025-01"
+    changes: "Initial skill covering structured output patterns"
+
+contrarian_insights:
+  - claim: "JSON mode is all you need"
+    counter: "Function calling provides better schema enforcement and tool semantics"
+    evidence: "JSON mode can still produce malformed JSON; function calling has stricter validation"
+  - claim: "Just regex parse the output"
+    counter: "Native structured output is more reliable and handles edge cases"
+    evidence: "Regex fails on nested structures, escaping, and partial outputs"
+  - claim: "Complex schemas work fine"
+    counter: "Simpler schemas with post-processing are more reliable"
+    evidence: "Nested optional fields and unions have high failure rates"
+
+identity:
+  role: Structured Output Architect
+  personality: |
+    You are an expert in extracting reliable, typed data from LLMs. You think in terms
+    of schemas, validation, and failure modes. You know that LLMs are probabilistic and
+    design systems that handle errors gracefully. You choose the right approach based on
+    the model, use case, and reliability requirements.
+  expertise:
+    - JSON Schema design for LLMs
+    - Provider-specific APIs
+    - Instructor patterns
+    - Outlines constrained generation
+    - Retry and validation strategies
+
+patterns:
+  - name: OpenAI JSON Mode
+    description: Native JSON output from OpenAI models
+    when_to_use: Simple JSON structures with GPT-4/GPT-4o
+    implementation: |
+      from openai import OpenAI
+      from pydantic import BaseModel
+      import json
+
+      client = OpenAI()
+
+      class UserInfo(BaseModel):
+          name: str
+          age: int
+          email: str
+
+      # Method 1: JSON mode (requires "json" in prompt)
+      response = client.chat.completions.create(
+          model="gpt-4o",
+          response_format={"type": "json_object"},
+          messages=[
+              {"role": "system", "content": "Extract user info. Respond in JSON."},
+              {"role": "user", "content": "John Doe is 30, email john@example.com"}
+          ]
+      )
+      data = json.loads(response.choices[0].message.content)
+
+      # Method 2: Structured Outputs (with schema - RECOMMENDED)
+      response = client.chat.completions.create(
+          model="gpt-4o-2024-08-06",  # Must use compatible model
+          response_format={
+              "type": "json_schema",
+              "json_schema": {
+                  "name": "user_info",
+                  "strict": True,
+                  "schema": UserInfo.model_json_schema()
+              }
+          },
+          messages=[
+              {"role": "user", "content": "John Doe is 30, email john@example.com"}
+          ]
+      )
+      # Guaranteed to match schema
+      user = UserInfo.model_validate_json(response.choices[0].message.content)
+
+  - name: OpenAI Function Calling
+    description: Use tools/functions for structured extraction
+    when_to_use: When you need tool semantics or complex schemas
+    implementation: |
+      from openai import OpenAI
+      from pydantic import BaseModel, Field
+      import json
+
+      client = OpenAI()
+
+      class ExtractedData(BaseModel):
+          """Data extracted from text."""
+          entities: list[str] = Field(description="Named entities found")
+          sentiment: str = Field(description="Overall sentiment: positive, negative, neutral")
+          summary: str = Field(description="One sentence summary")
+
+      # Define as a tool
+      tools = [
+          {
+              "type": "function",
+              "function": {
+                  "name": "extract_data",
+                  "description": "Extract structured data from text",
+                  "parameters": ExtractedData.model_json_schema()
+              }
+          }
+      ]
+
+      response = client.chat.completions.create(
+          model="gpt-4o",
+          messages=[
+              {"role": "user", "content": "Apple announced record profits. Tim Cook was excited."}
+          ],
+          tools=tools,
+          tool_choice={"type": "function", "function": {"name": "extract_data"}}
+      )
+
+      # Parse the function call
+      tool_call = response.choices[0].message.tool_calls[0]
+      data = ExtractedData.model_validate_json(tool_call.function.arguments)
+      print(data.entities)  # ["Apple", "Tim Cook"]
+
+  - name: Anthropic Tool Use
+    description: Structured output via Claude's tool use
+    when_to_use: When using Claude models
+    implementation: |
+      import anthropic
+      from pydantic import BaseModel, Field
+
+      client = anthropic.Anthropic()
+
+      class Analysis(BaseModel):
+          """Analysis result."""
+          key_points: list[str] = Field(description="Main points from the text")
+          action_items: list[str] = Field(description="Suggested actions")
+          priority: str = Field(description="high, medium, or low")
+
+      # Define tool from Pydantic model
+      tools = [
+          {
+              "name": "provide_analysis",
+              "description": "Provide structured analysis of the input",
+              "input_schema": Analysis.model_json_schema()
+          }
+      ]
+
+      response = client.messages.create(
+          model="claude-sonnet-4-20250514",
+          max_tokens=1024,
+          tools=tools,
+          tool_choice={"type": "tool", "name": "provide_analysis"},
+          messages=[
+              {"role": "user", "content": "Review this meeting: We discussed Q4 goals..."}
+          ]
+      )
+
+      # Extract tool use block
+      for block in response.content:
+          if block.type == "tool_use":
+              analysis = Analysis.model_validate(block.input)
+              print(analysis.key_points)
+
+  - name: Instructor Library
+    description: Pydantic-first structured extraction
+    when_to_use: Production applications needing validation and retries
+    implementation: |
+      import instructor
+      from openai import OpenAI
+      from pydantic import BaseModel, Field, field_validator
+      from typing import Optional
+
+      # Patch the client
+      client = instructor.from_openai(OpenAI())
+
+      class User(BaseModel):
+          name: str
+          age: int = Field(ge=0, le=150)  # Validation!
+          email: str
+
+          @field_validator("email")
+          @classmethod
+          def validate_email(cls, v):
+              if "@" not in v:
+                  raise ValueError("Invalid email")
+              return v
+
+      # Simple extraction with automatic retries
+      user = client.chat.completions.create(
+          model="gpt-4o",
+          response_model=User,
+          messages=[
+              {"role": "user", "content": "John Doe, 30 years, john@example.com"}
+          ]
+      )
+      print(user.name)  # "John Doe"
+
+      # With validation retries
+      user = client.chat.completions.create(
+          model="gpt-4o",
+          response_model=User,
+          max_retries=3,  # Retry on validation failure
+          messages=[
+              {"role": "user", "content": "Extract: Jane, age 25, jane.doe@company.org"}
+          ]
+      )
+
+      # Streaming partial objects
+      from instructor import Partial
+
+      for partial_user in client.chat.completions.create(
+          model="gpt-4o",
+          response_model=Partial[User],
+          stream=True,
+          messages=[{"role": "user", "content": "..."}]
+      ):
+          print(partial_user)  # Partial object updates as tokens arrive
+
+      # Works with Anthropic too
+      import anthropic
+      client = instructor.from_anthropic(anthropic.Anthropic())
+
+  - name: Outlines Constrained Generation
+    description: Token-level constraints for local models
+    when_to_use: Local models or when you need guaranteed format
+    implementation: |
+      import outlines
+      from pydantic import BaseModel
+      from enum import Enum
+
+      class Sentiment(str, Enum):
+          positive = "positive"
+          negative = "negative"
+          neutral = "neutral"
+
+      class Review(BaseModel):
+          sentiment: Sentiment
+          score: int  # 1-5
+          summary: str
+
+      # Load model
+      model = outlines.models.transformers("mistralai/Mistral-7B-Instruct-v0.2")
+
+      # Create structured generator
+      generator = outlines.generate.json(model, Review)
+
+      # Generate - GUARANTEED to match schema
+      review = generator("Review: This product is amazing! Best purchase ever.")
+      print(review.sentiment)  # Sentiment.positive
+
+      # Regex constraint for specific formats
+      phone_generator = outlines.generate.regex(
+          model,
+          r"\(\d{3}\) \d{3}-\d{4}"
+      )
+      phone = phone_generator("What's your phone number? Mine is")
+      # Output: "(555) 123-4567" - guaranteed format
+
+      # Choice constraint
+      choice_generator = outlines.generate.choice(
+          model,
+          ["yes", "no", "maybe"]
+      )
+      answer = choice_generator("Should I buy this? ")  # Only outputs yes/no/maybe
+
+  - name: Streaming Structured Output
+    description: Stream partial structured data
+    when_to_use: Long outputs where you want progressive updates
+    implementation: |
+      import instructor
+      from openai import OpenAI
+      from pydantic import BaseModel
+      from typing import Optional
+
+      client = instructor.from_openai(OpenAI())
+
+      class Article(BaseModel):
+          title: str
+          sections: list[str]
+          conclusion: Optional[str] = None
+
+      # Stream with partial updates
+      for partial in client.chat.completions.create(
+          model="gpt-4o",
+          response_model=instructor.Partial[Article],
+          stream=True,
+          messages=[
+              {"role": "user", "content": "Write an article about AI safety"}
+          ]
+      ):
+          # partial.title available first
+          # partial.sections grows as tokens arrive
+          print(f"Title: {partial.title}")
+          print(f"Sections so far: {len(partial.sections or [])}")
+
+      # OpenAI native streaming with response_format
+      from openai import OpenAI
+      import json
+
+      client = OpenAI()
+      stream = client.chat.completions.create(
+          model="gpt-4o",
+          response_format={"type": "json_object"},
+          stream=True,
+          messages=[...]
+      )
+
+      full_response = ""
+      for chunk in stream:
+          if chunk.choices[0].delta.content:
+              full_response += chunk.choices[0].delta.content
+              # Parse partial JSON as it arrives
+              try:
+                  partial = json.loads(full_response)
+                  print(partial)
+              except json.JSONDecodeError:
+                  pass  # Not complete yet
+
+  - name: Validation and Retry Strategies
+    description: Handle failures gracefully
+    when_to_use: Production systems needing reliability
+    implementation: |
+      import instructor
+      from openai import OpenAI
+      from pydantic import BaseModel, Field, ValidationError
+      from tenacity import retry, stop_after_attempt, retry_if_exception_type
+
+      client = instructor.from_openai(OpenAI())
+
+      class StrictOutput(BaseModel):
+          value: int = Field(ge=0, le=100)
+          category: str = Field(pattern=r"^[A-Z][a-z]+$")  # Capitalized word
+
+      # Method 1: Instructor's built-in retries
+      result = client.chat.completions.create(
+          model="gpt-4o",
+          response_model=StrictOutput,
+          max_retries=3,  # Automatically retries on validation error
+          messages=[...]
+      )
+
+      # Method 2: Custom retry with tenacity
+      @retry(
+          stop=stop_after_attempt(3),
+          retry=retry_if_exception_type(ValidationError)
+      )
+      def extract_with_retry(text: str) -> StrictOutput:
+          return client.chat.completions.create(
+              model="gpt-4o",
+              response_model=StrictOutput,
+              messages=[{"role": "user", "content": text}]
+          )
+
+      # Method 3: Fallback chain
+      def extract_with_fallback(text: str) -> dict:
+          try:
+              # Try strict schema first
+              return client.chat.completions.create(
+                  model="gpt-4o",
+                  response_model=StrictOutput,
+                  messages=[{"role": "user", "content": text}]
+              ).model_dump()
+          except ValidationError:
+              # Fall back to JSON mode
+              response = OpenAI().chat.completions.create(
+                  model="gpt-4o",
+                  response_format={"type": "json_object"},
+                  messages=[
+                      {"role": "system", "content": "Extract data as JSON."},
+                      {"role": "user", "content": text}
+                  ]
+              )
+              return json.loads(response.choices[0].message.content)
+
+      # Method 4: Validation hooks in Instructor
+      def validation_hook(error: ValidationError, attempt: int):
+          print(f"Attempt {attempt} failed: {error}")
+          # Could log to monitoring, adjust prompt, etc.
+
+      result = client.chat.completions.create(
+          model="gpt-4o",
+          response_model=StrictOutput,
+          max_retries=3,
+          validation_context={"on_error": validation_hook},
+          messages=[...]
+      )
+
+anti_patterns:
+  - name: Complex Nested Schemas
+    description: Deeply nested optional fields and unions
+    why_bad: |
+      High failure rate with LLMs.
+      Validation errors hard to debug.
+      Retries compound token costs.
+    what_to_do_instead: |
+      Flatten schemas where possible.
+      Use multiple simpler extractions.
+      Post-process to build complex structures.
+
+  - name: No Validation
+    description: Trusting raw JSON output without validation
+    why_bad: |
+      LLMs can output invalid JSON.
+      Type mismatches crash downstream.
+      Security vulnerabilities.
+    what_to_do_instead: |
+      Always validate with Pydantic.
+      Use try/except with fallbacks.
+      Log validation failures for monitoring.
+
+  - name: Ignoring Model Capabilities
+    description: Using same approach for all models
+    why_bad: |
+      JSON mode support varies.
+      Local models need Outlines.
+      Some models are unreliable.
+    what_to_do_instead: |
+      Check model documentation.
+      Use Outlines for local models.
+      Test reliability before production.
+
+  - name: Huge Prompts in Schema
+    description: Long descriptions in Pydantic fields
+    why_bad: |
+      Wastes tokens.
+      Can confuse the model.
+      Harder to maintain.
+    what_to_do_instead: |
+      Keep field descriptions concise.
+      Use examples in system prompt instead.
+      One sentence per field max.
+
+handoffs:
+  - trigger: "agent|workflow|graph"
+    to: langgraph
+    context: "Need agent that produces structured output"
+
+  - trigger: "multi-agent|crew|team"
+    to: crewai
+    context: "Need structured output from agent teams"
+
+  - trigger: "observability|tracing"
+    to: langfuse
+    context: "Need to monitor structured output quality"

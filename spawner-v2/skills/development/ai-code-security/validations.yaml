@@ -1,0 +1,156 @@
+# AI Code Security Validations
+
+validations:
+  - id: ai-sql-injection
+    name: SQL Injection in AI-Generated Code
+    severity: critical
+    type: regex
+    pattern: '(?:SELECT|INSERT|UPDATE|DELETE|WHERE)[^;]*(?:\+\s*(?:req|params|body|user|input)|\$\{[^}]*(?:req|params|body|user|input))'
+    message: "Potential SQL injection in AI-generated code. User input concatenated in query."
+    fix_action: "Use parameterized queries: db.query('SELECT * FROM users WHERE id = $1', [userId])"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.py"
+
+  - id: ai-xss-innerhtml
+    name: XSS via innerHTML in AI Code
+    severity: high
+    type: regex
+    pattern: '\.innerHTML\s*=\s*(?!.*(?:DOMPurify|sanitize|escape))[^;]+'
+    message: "Unsanitized innerHTML assignment. XSS vulnerability."
+    fix_action: "Use textContent for text, or DOMPurify.sanitize() for HTML"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.tsx"
+      - "*.jsx"
+
+  - id: ai-dangerous-react
+    name: dangerouslySetInnerHTML Without Sanitization
+    severity: high
+    type: regex
+    pattern: 'dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html:\s*(?!.*DOMPurify)[^}]+'
+    message: "dangerouslySetInnerHTML without DOMPurify sanitization."
+    fix_action: "Use DOMPurify.sanitize(): dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content) }}"
+    applies_to:
+      - "*.tsx"
+      - "*.jsx"
+
+  - id: ai-eval-usage
+    name: eval() in AI-Generated Code
+    severity: critical
+    type: regex
+    pattern: '\beval\s*\([^)]+\)|new\s+Function\s*\('
+    message: "eval() or Function() constructor detected. Never execute AI-generated code directly."
+    fix_action: "Use a sandboxed execution environment like vm2 or WebContainers"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.tsx"
+      - "*.jsx"
+
+  - id: ai-hardcoded-secrets
+    name: Hardcoded Secrets in AI Output
+    severity: critical
+    type: regex
+    pattern: '(?:api[_-]?key|secret|password|token)\s*[:=]\s*["\'][A-Za-z0-9+/=_-]{20,}["\']'
+    message: "Potential hardcoded secret in AI-generated code."
+    fix_action: "Use environment variables: process.env.API_KEY"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.py"
+      - "*.yaml"
+      - "*.json"
+
+  - id: ai-command-injection
+    name: Command Injection in AI Code
+    severity: critical
+    type: regex
+    pattern: '(?:exec|spawn|execSync|spawnSync)\s*\([^)]*(?:\+|`\$\{)[^)]*(?:req|params|body|user|input)'
+    message: "Command injection vulnerability. User input in shell command."
+    fix_action: "Use spawn with array arguments, never concatenate user input"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: ai-path-traversal
+    name: Path Traversal in AI Code
+    severity: high
+    type: regex
+    pattern: '(?:readFile|writeFile|unlink|readdir)\s*\([^)]*(?:\+|`\$\{)[^)]*(?:req|params|body|user|input)'
+    message: "Path traversal vulnerability. User input in file path."
+    fix_action: "Use path.resolve() and validate path is within allowed directory"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: ai-insecure-random
+    name: Insecure Random in Security Context
+    severity: medium
+    type: regex
+    pattern: 'Math\.random\s*\(\)[^;]*(?:token|key|secret|password|session|auth)'
+    message: "Math.random() used in security context. Not cryptographically secure."
+    fix_action: "Use crypto.randomBytes() or crypto.randomUUID()"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: ai-no-input-validation
+    name: Missing Input Validation
+    severity: medium
+    type: regex
+    pattern: 'req\.(?:body|params|query)\.[a-zA-Z]+(?!\s*\?\.|\.?(?:validate|parse|safeParse|check))'
+    negative_pattern: 'zod|yup|joi|validator|sanitize'
+    message: "Request input used without apparent validation."
+    fix_action: "Validate input with Zod, Yup, or similar before use"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: ai-excessive-permissions
+    name: Broad File System Access
+    severity: medium
+    type: regex
+    pattern: 'readdir\s*\([''"]\/[''"]|glob\s*\([''"]\/\*\*'
+    message: "Reading from root directory or recursive glob. Potential excessive access."
+    fix_action: "Restrict file operations to specific allowed directories"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: ai-unsafe-deserialization
+    name: Unsafe Deserialization
+    severity: high
+    type: regex
+    pattern: 'JSON\.parse\s*\([^)]*(?:req|body|input|user)'
+    negative_pattern: 'try\s*\{|catch|safeParse|schema\.parse'
+    message: "JSON.parse without error handling or schema validation."
+    fix_action: "Wrap in try-catch and validate against schema"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: ai-cors-wildcard
+    name: CORS Wildcard Origin
+    severity: medium
+    type: regex
+    pattern: 'cors\s*\(\s*\{[^}]*origin:\s*[''"]?\*[''"]?'
+    message: "CORS configured with wildcard origin. May expose API to any domain."
+    fix_action: "Specify allowed origins explicitly: origin: ['https://yourdomain.com']"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: ai-missing-auth-check
+    name: Missing Authentication Check
+    severity: high
+    type: regex
+    pattern: 'app\.(?:get|post|put|delete|patch)\s*\([^,]+,\s*(?:async\s*)?\([^)]*\)\s*=>'
+    negative_pattern: 'auth|authenticate|isAuthenticated|requireAuth|protect|verify'
+    message: "Route handler without apparent authentication middleware."
+    fix_action: "Add authentication middleware: app.get('/api/data', authMiddleware, handler)"
+    applies_to:
+      - "*.ts"
+      - "*.js"

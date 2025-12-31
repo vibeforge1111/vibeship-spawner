@@ -1,0 +1,199 @@
+# Validations - Forms & Validation
+# Automated checks for form issues
+
+version: 1.0.0
+skill_id: forms-validation
+
+validations:
+  - id: form-no-novalidate
+    name: Form without noValidate
+    severity: info
+    type: regex
+    pattern:
+      - "<form(?!.*noValidate)"
+    message: "Add noValidate to prevent browser validation competing with custom"
+    fix_action: "Add noValidate attribute to form"
+    applies_to:
+      - "*.tsx"
+      - "*.jsx"
+
+  - id: input-no-aria-invalid
+    name: Input without aria-invalid
+    severity: info
+    type: regex
+    pattern:
+      - "errors\.[\w]+.*\n.*<input(?!.*aria-invalid)"
+    message: "Add aria-invalid for accessibility"
+    fix_action: "Add aria-invalid={!!errors.fieldName}"
+    applies_to:
+      - "*.tsx"
+      - "*.jsx"
+
+  - id: error-no-role-alert
+    name: Error message without role=alert
+    severity: info
+    type: regex
+    pattern:
+      - "errors\.[\w]+\.message.*<span(?!.*role)"
+    message: "Add role=alert to error messages for screen readers"
+    fix_action: "Add role=\"alert\" to error span"
+    applies_to:
+      - "*.tsx"
+      - "*.jsx"
+
+  - id: submit-no-disabled
+    name: Submit button not disabled during submission
+    severity: warning
+    type: regex
+    pattern:
+      - "isSubmitting.*<button.*type=\"submit\"(?!.*disabled)"
+    message: "Disable submit button during submission"
+    fix_action: "Add disabled={isSubmitting}"
+    applies_to:
+      - "*.tsx"
+      - "*.jsx"
+
+  - id: zod-number-no-coerce
+    name: Zod number without coercion for forms
+    severity: warning
+    type: regex
+    pattern:
+      - "z\.number\(\)(?!.*coerce)"
+      - "z\.object.*formData.*z\.number\(\)"
+    message: "Use z.coerce.number() for form data"
+    fix_action: "Replace z.number() with z.coerce.number()"
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+
+  - id: no-server-validation
+    name: Form without server-side validation
+    severity: warning
+    type: regex
+    pattern:
+      - "export async function.*formData.*(?!.*safeParse|.*parse\()"
+    message: "Always validate form data on server"
+    fix_action: "Add Zod validation with safeParse"
+    applies_to:
+      - "*.ts"
+
+  - id: form-reset-on-error
+    name: Form reset called in error path
+    severity: warning
+    type: regex
+    pattern:
+      - "catch.*\{[^}]*reset\(\)"
+      - "error.*\{[^}]*form\.reset"
+    message: "Do not reset form on error - preserve user input"
+    fix_action: "Remove reset() from error handler"
+    applies_to:
+      - "*.tsx"
+      - "*.jsx"
+
+  - id: alert-for-form-errors
+    name: Using alert for form errors
+    severity: warning
+    type: regex
+    pattern:
+      - "alert\([\"'].*error"
+      - "alert\([\"'].*required"
+      - "alert\([\"'].*invalid"
+    message: "Use inline errors instead of alert()"
+    fix_action: "Show errors next to form fields"
+    applies_to:
+      - "*.tsx"
+      - "*.jsx"
+      - "*.ts"
+      - "*.js"
+
+code_smells:
+  - id: uncontrolled-select
+    name: Uncontrolled select without default
+    description: "Select element without defaultValue or value"
+    pattern: null
+    suggestion: "Add defaultValue to prevent blank state"
+
+  - id: no-error-summary
+    name: Large form without error summary
+    description: "Long forms should have error summary at top"
+    pattern: null
+    suggestion: "Add error summary that links to problem fields"
+
+best_practices:
+  form_structure:
+    recommendation: |
+      ## Accessible Form Structure
+
+      <form onSubmit={handleSubmit} noValidate>
+        {/* Error summary for screen readers */}
+        {Object.keys(errors).length > 0 && (
+          <div role="alert" aria-live="polite">
+            <h2>Please fix the following errors:</h2>
+            <ul>
+              {Object.entries(errors).map(([field, error]) => (
+                <li key={field}>
+                  <a href={"#" + field}>{error.message}</a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div>
+          <label htmlFor="email">Email *</label>
+          <input
+            id="email"
+            type="email"
+            required
+            aria-required="true"
+            aria-invalid={!!errors.email}
+            aria-describedby={errors.email ? "email-error" : "email-hint"}
+            {...register("email")}
+          />
+          <span id="email-hint" className="hint">
+            We will never share your email
+          </span>
+          {errors.email && (
+            <span id="email-error" role="alert" className="error">
+              {errors.email.message}
+            </span>
+          )}
+        </div>
+
+        <button type="submit" disabled={isSubmitting}>
+          {isSubmitting ? "Submitting..." : "Submit"}
+        </button>
+      </form>
+
+  validation_schema:
+    recommendation: |
+      ## Shared Validation Schema
+
+      // lib/schemas/user.ts
+      import { z } from "zod";
+
+      // Base schema
+      export const userSchema = z.object({
+        email: z.string().email("Invalid email"),
+        name: z.string().min(2, "Name too short").max(100),
+        age: z.coerce.number().min(18, "Must be 18+").optional(),
+      });
+
+      // Extend for different forms
+      export const signupSchema = userSchema.extend({
+        password: z
+          .string()
+          .min(8, "Min 8 characters")
+          .regex(/[A-Z]/, "Need uppercase")
+          .regex(/[0-9]/, "Need number"),
+        confirmPassword: z.string(),
+      }).refine(
+        (data) => data.password === data.confirmPassword,
+        { message: "Passwords dont match", path: ["confirmPassword"] }
+      );
+
+      export const profileSchema = userSchema.partial();
+
+      // Types derived from schemas
+      export type UserInput = z.infer<typeof userSchema>;
+      export type SignupInput = z.infer<typeof signupSchema>;

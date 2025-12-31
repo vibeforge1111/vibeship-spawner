@@ -1,0 +1,552 @@
+# Unity LLM Integration Sharp Edges
+# Critical mistakes that cause crashes, build failures, or performance issues
+
+sharp_edges:
+  - id: ios-library-loading-failure
+    summary: LLM fails to load on iOS with "Failed to load library ios" error
+    severity: critical
+    situation: Game works in editor and on Android, crashes on iOS with library loading error
+    why: |
+      iOS requires static library linking and proper code signing. LLMUnity versions before 3.0
+      had issues with iOS deployment. The dynamic library approach that works on other platforms
+      fails on iOS due to App Store restrictions on dynamic code loading.
+    solution: |
+      # SYMPTOMS:
+      # - "Failed to load library ios" in logs
+      # - App freezes at "Warming up the model"
+      # - Works on simulator but not device
+
+      # FIX 1: Update LLMUnity to latest version (3.0+)
+      # In Package Manager, update to latest
+
+      # FIX 2: Verify static library linking
+      # In Xcode project:
+      # - Build Settings > Linking > Other Linker Flags
+      # - Should include "-lllama" or similar
+
+      # FIX 3: Check code signing
+      # In Unity Build Settings for iOS:
+      // Player Settings > iOS > Other Settings
+      // - Signing Team ID must be set
+      // - Automatic Signing should be enabled
+
+      # FIX 4: Use smaller model for iOS
+      // iOS has stricter memory limits
+      public void ConfigureForIOS()
+      {
+          #if UNITY_IOS
+          llm.SetModel("models/qwen-1.5b-q4.gguf"); // Small model
+          llm.numGPULayers = 0; // CPU only
+          llm.contextSize = 1024; // Reduced context
+          #endif
+      }
+    symptoms:
+      - "Failed to load library ios" error
+      - Stuck at "Warming up the model"
+      - Crash on launch with native exception
+      - Works on simulator but not device
+    detection_pattern: 'UNITY_IOS|iOS|iPhone'
+
+  - id: android-architecture-mismatch
+    summary: App crashes on some Android devices with native library error
+    severity: critical
+    situation: Works on some Android phones but crashes on others, especially older or budget phones
+    why: |
+      Android has multiple CPU architectures (arm64-v8a, armeabi-v7a, x86_64, x86). LLMUnity
+      includes libraries for common architectures, but some builds may be missing or incompatible.
+      32-bit devices (older/budget phones) may not have compatible libraries.
+    solution: |
+      # SYMPTOMS:
+      # - UnsatisfiedLinkError in logcat
+      # - Crash immediately after attempting LLM load
+      # - Works on Pixel but crashes on Samsung/Xiaomi
+
+      # FIX 1: Enable all architectures in build settings
+      // Player Settings > Android > Target Architectures
+      // Enable: ARMv7, ARM64
+
+      # FIX 2: Use IL2CPP, not Mono
+      // Player Settings > Android > Scripting Backend
+      // Select: IL2CPP
+
+      # FIX 3: Test on low-end device
+      // Use a device with:
+      // - 2GB RAM
+      // - ARM32 architecture
+      // - Android 8 or older
+
+      # FIX 4: Fallback for unsupported devices
+      public class LLMFallback : MonoBehaviour
+      {
+          public LLM llm;
+          private bool llmAvailable = false;
+
+          IEnumerator Start()
+          {
+              try
+              {
+                  yield return llm.Load();
+                  llmAvailable = true;
+              }
+              catch (System.Exception e)
+              {
+                  Debug.LogWarning($"LLM not available: {e.Message}");
+                  llmAvailable = false;
+                  // Enable scripted dialogue fallback
+              }
+          }
+      }
+    symptoms:
+      - UnsatisfiedLinkError in logcat
+      - Works on some Android devices but not others
+      - Crash on 32-bit devices
+      - Native crash during library loading
+    detection_pattern: 'UNITY_ANDROID|Android|armeabi|arm64'
+
+  - id: main-thread-blocking
+    summary: Game freezes for 1-5 seconds when NPC starts talking
+    severity: critical
+    situation: Frame rate drops to 0 during LLM response generation
+    why: |
+      Unity runs on a single main thread. Any synchronous operation blocks rendering.
+      LLM inference takes 50ms-5000ms depending on model size and response length.
+      Even "fast" local inference at 50ms causes 3 dropped frames at 60 FPS.
+    solution: |
+      # WRONG: Synchronous call
+      void OnPlayerSpeak(string input)
+      {
+          string response = character.Chat(input).Result; // BLOCKS!
+          ShowDialogue(response);
+      }
+
+      # WRONG: Coroutine without proper async
+      IEnumerator GetResponse(string input)
+      {
+          string response = character.Chat(input).Result; // Still blocks!
+          yield return null;
+          ShowDialogue(response);
+      }
+
+      # RIGHT: Proper async/await
+      async void OnPlayerSpeak(string input)
+      {
+          ShowThinkingIndicator();
+          string response = await character.Chat(input);
+          HideThinkingIndicator();
+          ShowDialogue(response);
+      }
+
+      # RIGHT: Coroutine with callback
+      IEnumerator GetResponse(string input)
+      {
+          ShowThinkingIndicator();
+          bool complete = false;
+          string result = "";
+
+          character.Chat(input, (response) => {
+              result = response;
+              complete = true;
+          });
+
+          while (!complete)
+          {
+              yield return null; // Yields control back to Unity
+          }
+
+          HideThinkingIndicator();
+          ShowDialogue(result);
+      }
+
+      # RIGHT: UniTask with timeout
+      async UniTaskVoid GetResponseSafe(string input)
+      {
+          var cts = new CancellationTokenSource();
+          cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+          try
+          {
+              string response = await character.Chat(input)
+                  .AsUniTask()
+                  .AttachExternalCancellation(cts.Token);
+              ShowDialogue(response);
+          }
+          catch (OperationCanceledException)
+          {
+              ShowDialogue("Let me think about that...");
+          }
+      }
+    symptoms:
+      - FPS drops to 0 during dialogue
+      - Input becomes unresponsive
+      - Audio stutters
+      - "Application Not Responding" on mobile
+    detection_pattern: '\\.Result|GetAwaiter\\(\\)\\.GetResult\\(\\)'
+
+  - id: model-not-in-build
+    summary: LLM works in editor but model not found in builds
+    severity: critical
+    situation: "Model loaded successfully" in editor, "File not found" in player build
+    why: |
+      Unity only includes files from specific folders in builds. Assets/ folder content
+      is processed and may not include raw GGUF files. Only StreamingAssets/ content
+      is copied as-is to builds. Absolute paths from editor don't exist in builds.
+    solution: |
+      # WRONG: Model in Assets folder
+      // Assets/Models/llama.gguf
+      // This might not be included in builds!
+
+      # WRONG: Absolute path
+      llm.SetModel("C:/Projects/MyGame/Models/llama.gguf");
+      // Path doesn't exist on player's machine!
+
+      # WRONG: Relative path without StreamingAssets
+      llm.SetModel("Models/llama.gguf");
+      // Unity doesn't know where to find this!
+
+      # RIGHT: Use StreamingAssets
+      // 1. Place model in: Assets/StreamingAssets/Models/llama.gguf
+      // 2. Reference correctly:
+
+      public class ModelLoader : MonoBehaviour
+      {
+          public LLM llm;
+
+          void Start()
+          {
+              string modelPath = Path.Combine(
+                  Application.streamingAssetsPath,
+                  "Models",
+                  "llama-8b-q4.gguf"
+              );
+              llm.SetModel(modelPath);
+          }
+      }
+
+      # For Android (StreamingAssets is in APK):
+      // LLMUnity handles this automatically
+      // Just use the relative path within StreamingAssets
+      llm.SetModel("Models/llama-8b-q4.gguf");
+      // LLMUnity will resolve to correct platform path
+    symptoms:
+      - Works in editor, fails in build
+      - "File not found" or "Model not loaded" errors
+      - Empty responses from LLM
+      - Crash on model load in build
+    detection_pattern: 'SetModel|modelPath|\.gguf'
+
+  - id: mobile-memory-crash
+    summary: App crashes or is killed by OS after loading LLM on mobile
+    severity: critical
+    situation: App loads, shows splash screen, then crashes or goes black when accessing LLM
+    why: |
+      Mobile devices have 2-6GB RAM shared with OS and other apps. A 7B Q4 model needs
+      4-5GB just for weights. iOS and Android will kill apps that use too much memory.
+      The crash often happens without a clear error message.
+    solution: |
+      # Memory requirements for GGUF models:
+      # - 1B Q4_K_M: ~0.7GB
+      # - 3B Q4_K_M: ~2GB
+      # - 7B Q4_K_M: ~4.5GB  <- Too large for most mobile!
+      # - 8B Q4_K_M: ~5GB    <- Way too large!
+
+      # FIX: Use appropriate model sizes
+      public class MobileModelConfig : MonoBehaviour
+      {
+          public LLM llm;
+
+          void ConfigureForDevice()
+          {
+              int memoryMB = SystemInfo.systemMemorySize;
+              Debug.Log($"Device memory: {memoryMB}MB");
+
+              #if UNITY_IOS || UNITY_ANDROID
+              if (memoryMB < 3000)
+              {
+                  // Low-end device: 1B model only
+                  llm.SetModel("models/qwen-0.5b-q4.gguf");
+                  llm.contextSize = 512;
+              }
+              else if (memoryMB < 6000)
+              {
+                  // Mid-range: 1-2B model
+                  llm.SetModel("models/qwen-1.5b-q4.gguf");
+                  llm.contextSize = 1024;
+              }
+              else
+              {
+                  // High-end (6GB+): 3B model max
+                  llm.SetModel("models/phi-3-mini-q4.gguf");
+                  llm.contextSize = 2048;
+              }
+              #endif
+          }
+      }
+
+      # Also reduce context size - each token uses memory
+      # 4096 context = ~32MB additional memory
+    symptoms:
+      - App killed by OS without error
+      - Black screen after splash
+      - "Low memory" warning on device
+      - Crash during model loading
+    detection_pattern: 'UNITY_IOS|UNITY_ANDROID|mobile|contextSize'
+
+  - id: webgl-local-llm-impossible
+    summary: Attempting to run local LLM in WebGL build
+    severity: high
+    situation: Developer expects local LLM to work in browser like it does in desktop build
+    why: |
+      WebGL runs in browser sandbox. Cannot load native libraries (llama.cpp).
+      Cannot access local filesystem. WASM has memory limits (~2GB max).
+      Local LLM inference in browser is technically possible but not with LLMUnity.
+    solution: |
+      # WebGL CANNOT run LLMUnity's local inference
+
+      # OPTION 1: Cloud API fallback
+      public class WebGLFallback : MonoBehaviour
+      {
+          public LLMCharacter localCharacter; // For non-WebGL
+          private string apiKey;
+
+          async void Start()
+          {
+              #if UNITY_WEBGL
+              // Disable local LLM
+              localCharacter.enabled = false;
+              // Use cloud API instead
+              apiKey = await FetchAPIKeyFromServer();
+              #endif
+          }
+
+          public async Task<string> GetResponse(string input)
+          {
+              #if UNITY_WEBGL
+              return await CallCloudAPI(input);
+              #else
+              return await localCharacter.Chat(input);
+              #endif
+          }
+
+          private async Task<string> CallCloudAPI(string input)
+          {
+              // Use UnityWebRequest to call OpenAI/Anthropic API
+              // via your backend (don't expose API key to client!)
+              var request = new UnityWebRequest("https://your-api.com/chat", "POST");
+              // ... implementation
+          }
+      }
+
+      # OPTION 2: Pre-generated responses
+      // Generate common responses at build time
+      // Use embedding similarity to find closest match
+
+      # OPTION 3: WebGPU (experimental, 2025+)
+      // Some models may work with WebGPU inference
+      // Not production-ready yet
+    symptoms:
+      - Build fails with missing native library
+      - Runtime error about unsupported platform
+      - Blank screen in browser
+      - Console errors about WASM
+    detection_pattern: 'UNITY_WEBGL|WebGL'
+
+  - id: model-loading-freeze
+    summary: Editor or game freezes for 10+ seconds while loading model
+    severity: high
+    situation: No loading indicator, game appears frozen during LLM initialization
+    why: |
+      Model loading reads GB of data from disk and initializes GPU memory.
+      This is CPU/IO intensive. Without async loading, everything freezes.
+      Users think the app has crashed and force-close it.
+    solution: |
+      # WRONG: Load in Start without feedback
+      void Start()
+      {
+          llm.Load(); // Freezes for 5-15 seconds!
+          Debug.Log("Ready"); // User already closed the app
+      }
+
+      # RIGHT: Load with progress UI
+      public class LLMLoaderWithProgress : MonoBehaviour
+      {
+          public LLM llm;
+          public Slider progressBar;
+          public TMP_Text statusText;
+          public GameObject loadingScreen;
+          public GameObject gameUI;
+
+          IEnumerator Start()
+          {
+              loadingScreen.SetActive(true);
+              gameUI.SetActive(false);
+
+              statusText.text = "Loading AI...";
+              progressBar.value = 0;
+
+              // Start loading
+              var loadTask = llm.Load();
+
+              // Fake progress (LLMUnity doesn't provide real progress)
+              float fakeProgress = 0;
+              while (!loadTask.IsCompleted)
+              {
+                  fakeProgress = Mathf.Min(fakeProgress + Time.deltaTime * 0.1f, 0.9f);
+                  progressBar.value = fakeProgress;
+                  yield return null;
+              }
+
+              progressBar.value = 1f;
+              statusText.text = "Ready!";
+
+              yield return new WaitForSeconds(0.5f);
+
+              loadingScreen.SetActive(false);
+              gameUI.SetActive(true);
+          }
+      }
+
+      # Alternative: Lazy load on first dialogue
+      public class LazyLLMLoader : MonoBehaviour
+      {
+          public LLM llm;
+          private bool isLoaded = false;
+          private bool isLoading = false;
+
+          public async Task EnsureLoaded()
+          {
+              if (isLoaded) return;
+              if (isLoading)
+              {
+                  while (isLoading) await Task.Yield();
+                  return;
+              }
+
+              isLoading = true;
+              ShowLoadingIndicator();
+              await llm.Load();
+              HideLoadingIndicator();
+              isLoaded = true;
+              isLoading = false;
+          }
+      }
+    symptoms:
+      - Unity Editor freezes on play
+      - Game appears unresponsive at startup
+      - No visual feedback during load
+      - Users report "crashes" that are actually long loads
+    detection_pattern: 'llm\\.Load|Start\\(\\)|Awake\\(\\)'
+
+  - id: multiple-llm-instances
+    summary: Creating multiple LLM instances causes memory issues or conflicts
+    severity: high
+    situation: Separate LLM for each NPC, or multiple LLMs in different scenes
+    why: |
+      Each LLM instance loads its own copy of the model into memory.
+      Two 7B models = 10GB VRAM. GPU runs out of memory and crashes.
+      Even with different models, multiple instances compete for resources.
+    solution: |
+      # WRONG: Separate LLM per NPC
+      public class NPC : MonoBehaviour
+      {
+          public LLM llm; // Each NPC has its own LLM!
+          // 10 NPCs = 10 LLM instances = crash
+      }
+
+      # RIGHT: Shared LLM with multiple characters
+      public class SharedLLMManager : MonoBehaviour
+      {
+          public static SharedLLMManager Instance { get; private set; }
+
+          public LLM sharedLLM; // Single LLM instance
+          public LLMCharacter[] characters; // Multiple character configs
+
+          void Awake()
+          {
+              if (Instance != null)
+              {
+                  Destroy(gameObject);
+                  return;
+              }
+              Instance = this;
+              DontDestroyOnLoad(gameObject);
+          }
+
+          public LLMCharacter GetCharacter(string npcId)
+          {
+              return characters.FirstOrDefault(c => c.name == npcId);
+          }
+      }
+
+      // NPCs reference the shared manager
+      public class NPC : MonoBehaviour
+      {
+          public string characterId;
+
+          public async Task<string> Speak(string input)
+          {
+              var character = SharedLLMManager.Instance.GetCharacter(characterId);
+              return await character.Chat(input);
+          }
+      }
+
+      # For scene transitions:
+      // Don't destroy the LLM manager between scenes
+      // Or carefully unload/reload as needed
+    symptoms:
+      - Out of memory errors
+      - GPU memory exhausted
+      - Performance degrades with more NPCs
+      - Inconsistent behavior between NPCs
+    detection_pattern: 'new LLM|Instantiate.*LLM|multiple.*LLM'
+
+  - id: sentis-llm-incompatibility
+    summary: Trying to use Unity Sentis for LLM inference
+    severity: medium
+    situation: Developer imports LLM ONNX model into Sentis expecting it to work
+    why: |
+      Sentis (Unity's Inference Engine) is designed for vision models, not LLMs.
+      LLM ONNX conversion is complex and often fails. Sentis doesn't support
+      8-bit quantization needed for practical LLM deployment. Use LLMUnity instead.
+    solution: |
+      # Sentis is NOT recommended for LLMs as of 2025
+
+      # WRONG: Trying to use Sentis for dialogue
+      // Import llama-7b.onnx into Sentis
+      // Result: Import errors, missing operators, or terrible performance
+
+      # RIGHT: Use LLMUnity for LLMs, Sentis for other AI
+      public class HybridAI : MonoBehaviour
+      {
+          // Sentis for vision (object detection, image classification)
+          public Model visionModel; // Sentis
+
+          // LLMUnity for dialogue
+          public LLMCharacter dialogueCharacter; // LLMUnity
+
+          public async void OnPlayerInteract(Texture2D screenshot, string playerSpeech)
+          {
+              // Vision processing with Sentis
+              var detected = RunVisionModel(screenshot);
+
+              // Dialogue with LLMUnity
+              string context = $"Player is looking at {detected}. They said: {playerSpeech}";
+              string response = await dialogueCharacter.Chat(context);
+          }
+      }
+
+      # When Sentis makes sense:
+      # - Image classification
+      # - Object detection
+      # - Pose estimation
+      # - Small classification models
+
+      # When LLMUnity makes sense:
+      # - Text generation
+      # - NPC dialogue
+      # - Any LLM task
+    symptoms:
+      - ONNX import errors
+      - Missing operator errors
+      - Model runs but outputs garbage
+      - Extremely slow inference
+    detection_pattern: 'Sentis|ONNX|onnx|Inference.*Engine'

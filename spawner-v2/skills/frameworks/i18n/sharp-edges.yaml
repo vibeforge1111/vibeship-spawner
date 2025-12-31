@@ -1,0 +1,154 @@
+# Sharp Edges - Internationalization
+version: 1.0.0
+skill_id: i18n
+
+sharp_edges:
+  - id: string-concatenation
+    summary: Building sentences from translated parts
+    severity: high
+    situation: |
+      English: "Hello " + name + "!". Works fine. German translation:
+      puts name first. Spanish: different punctuation. Sentence
+      structure varies by language. Concatenation breaks.
+    why: |
+      Languages have different word orders and grammatical rules.
+      What is "Hello {name}!" in English might be "{name}, hello!"
+      in another language.
+    solution: |
+      # USE ICU MESSAGE FORMAT
+
+      // messages/en.json
+      {
+        "greeting": "Hello, {name}!"
+      }
+
+      // messages/de.json
+      {
+        "greeting": "Hallo, {name}!"
+      }
+
+      // Usage
+      t("greeting", { name: "John" })
+
+      // Plurals
+      {
+        "items": "{count, plural, =0 {No items} one {# item} other {# items}}"
+      }
+
+      // Select (gender, etc)
+      {
+        "welcome": "{gender, select, male {Mr.} female {Ms.} other {}} {name}"
+      }
+    symptoms:
+      - Broken sentences in translations
+      - Awkward word order
+      - Incorrect pluralization
+    detection_pattern: null
+
+  - id: text-expansion
+    summary: UI breaks with longer translations
+    severity: medium
+    situation: |
+      English button: "Submit". German: "Einreichen". Russian:
+      something even longer. Button overflows. Layout breaks.
+      Text truncated.
+    why: |
+      Different languages have different text lengths. German is
+      typically 30% longer than English. Some languages much more.
+    solution: |
+      # DESIGN FOR EXPANSION
+
+      // Allow flexible widths
+      <button className="px-4 py-2 whitespace-nowrap">
+        {t("submit")}
+      </button>
+
+      // Or min-width instead of fixed
+      <button className="min-w-[100px] px-4">
+        {t("submit")}
+      </button>
+
+      // Test with pseudo-localization
+      // Expands text: "Submit" -> "[Šüƀɱîţ----]"
+      // Reveals layout issues early
+
+      // Set max-width with ellipsis for extreme cases
+      <span className="max-w-[200px] truncate">
+        {t("longText")}
+      </span>
+    symptoms:
+      - Layout breaks in some languages
+      - Text overflow
+      - Truncated content
+    detection_pattern: null
+
+  - id: hardcoded-dates
+    summary: Dates formatted for one locale
+    severity: medium
+    situation: |
+      Date displayed as "12/05/2024". US user sees December 5.
+      European user sees May 12. Confusion. Wrong appointments.
+      Wrong deadlines.
+    why: |
+      Date formats vary by locale. MM/DD/YYYY vs DD/MM/YYYY vs
+      YYYY-MM-DD. Never assume format.
+    solution: |
+      # USE INTL.DATETIMEFORMAT
+
+      // WRONG
+      const formatted = date.getMonth() + "/" + date.getDate();
+
+      // RIGHT
+      const formatted = new Intl.DateTimeFormat(locale, {
+        dateStyle: "medium",
+      }).format(date);
+
+      // With next-intl
+      const format = useFormatter();
+      format.dateTime(date, { dateStyle: "long" })
+
+      // Relative time
+      format.relativeTime(date) // "2 days ago"
+    symptoms:
+      - Date confusion between locales
+      - Wrong month/day interpretation
+    detection_pattern: null
+
+  - id: rtl-afterthought
+    summary: RTL languages break layout
+    severity: medium
+    situation: |
+      App looks great in English. Launch in Arabic. Everything
+      backwards but not correctly mirrored. Icons pointing wrong
+      way. Padding on wrong side.
+    why: |
+      RTL requires more than just text direction. Layouts need
+      to mirror. Some elements (arrows, progress) should flip.
+      Others (phone numbers) should not.
+    solution: |
+      # DESIGN FOR RTL FROM START
+
+      // Use logical properties
+      // WRONG: margin-left
+      // RIGHT: margin-inline-start
+
+      <div className="ms-4">  {/* margin-start */}
+        <p className="text-start">{t("text")}</p>
+      </div>
+
+      // Tailwind RTL plugin
+      <div className="rtl:space-x-reverse">
+
+      // Auto-flip with dir attribute
+      <html lang={locale} dir={dir}>
+
+      // Icons that should flip
+      <ChevronRight className="rtl:rotate-180" />
+
+      // Icons that should NOT flip
+      <Phone />  {/* No flip needed */}
+    symptoms:
+      - Broken RTL layouts
+      - Icons pointing wrong direction
+      - Spacing issues in RTL
+    detection_pattern: null

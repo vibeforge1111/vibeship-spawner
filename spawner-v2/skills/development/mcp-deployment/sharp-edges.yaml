@@ -1,0 +1,240 @@
+# MCP Deployment Sharp Edges
+
+sharp_edges:
+  - id: cold-start-timeout
+    summary: Server cold start takes too long, client times out
+    severity: high
+    situation: First request after deployment fails or is very slow
+    why: |
+      Container startup + dependency init takes time.
+      Database connection pools not warmed.
+      HTTP transport has connection timeouts.
+    solution: |
+      // Optimize cold start
+
+      // 1. Lazy initialization
+      let dbPool: Pool | null = null;
+
+      async function getDb(): Promise<Pool> {
+          if (!dbPool) {
+              dbPool = await createPool({
+                  connectionString: process.env.DATABASE_URL,
+                  max: 10,
+                  idleTimeoutMillis: 30000
+              });
+          }
+          return dbPool;
+      }
+
+      // 2. Parallel initialization
+      async function warmUp() {
+          await Promise.all([
+              getDb(),
+              initCache(),
+              loadConfig()
+          ]);
+      }
+
+      // 3. Health check with warmup
+      app.get('/health', async (req, res) => {
+          if (!isWarmedUp) {
+              res.status(503).json({ status: 'warming' });
+              return;
+          }
+          res.json({ status: 'healthy' });
+      });
+
+      // 4. Keep minimum replicas (Kubernetes)
+      // minReplicas: 2  # Always have warm instances
+
+      // 5. Use smaller base image
+      // FROM node:20-alpine  # Smaller, faster startup
+    symptoms:
+      - First request fails
+      - Intermittent timeouts after deployment
+      - Health checks failing initially
+    detection_pattern: 'healthcheck|HEALTHCHECK|ready|startup'
+
+  - id: session-affinity-missing
+    summary: Requests fail because they hit different server instances
+    severity: high
+    situation: Streamable HTTP streaming fails mid-stream
+    why: |
+      SSE connections need to stay on same server.
+      Load balancer sends requests to random instances.
+      Session state not shared between instances.
+    solution: |
+      # Configure session affinity in load balancer
+
+      # nginx with ip_hash
+      upstream mcp_servers {
+          ip_hash;  # Or use sticky sessions
+          server mcp1:3000;
+          server mcp2:3000;
+      }
+
+      server {
+          location /mcp {
+              proxy_pass http://mcp_servers;
+              proxy_http_version 1.1;
+              proxy_set_header Upgrade $http_upgrade;
+              proxy_set_header Connection "upgrade";
+
+              # SSE specific
+              proxy_buffering off;
+              proxy_cache off;
+              proxy_read_timeout 24h;
+          }
+      }
+
+      # Kubernetes with session affinity
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: mcp-server
+      spec:
+        sessionAffinity: ClientIP
+        sessionAffinityConfig:
+          clientIP:
+            timeoutSeconds: 3600
+
+      # Application level: Use shared session store
+      import session from 'express-session';
+      import RedisStore from 'connect-redis';
+
+      app.use(session({
+          store: new RedisStore({ client: redis }),
+          // ... options
+      }));
+    symptoms:
+      - SSE streams disconnect unexpectedly
+      - Session not found errors
+      - Inconsistent state between requests
+    detection_pattern: 'session|affinity|sticky|upstream'
+
+  - id: secrets-in-container
+    summary: Secrets baked into container image
+    severity: critical
+    situation: Container image contains hardcoded credentials
+    why: |
+      Secrets in Dockerfile or built image.
+      Anyone with image access has credentials.
+      Secrets in environment at build time.
+    solution: |
+      # DON'T bake secrets into image
+
+      # BAD: Dockerfile with secrets
+      ENV API_KEY=sk-abc123  # WRONG!
+
+      # BAD: Copying .env into image
+      COPY .env ./  # WRONG!
+
+      # GOOD: Runtime environment variables
+      # docker-compose.yml
+      services:
+        mcp-server:
+          image: mcp-server:latest
+          environment:
+            - API_KEY=${API_KEY}  # From host env or .env file
+          secrets:
+            - api_key
+
+      secrets:
+        api_key:
+          external: true
+
+      # GOOD: Cloud secret managers
+      # AWS Secrets Manager
+      import { SecretsManager } from '@aws-sdk/client-secrets-manager';
+
+      async function getSecret(name: string): Promise<string> {
+          const client = new SecretsManager({ region: 'us-east-1' });
+          const response = await client.getSecretValue({
+              SecretId: name
+          });
+          return response.SecretString!;
+      }
+
+      // GOOD: Kubernetes secrets
+      # kubectl create secret generic mcp-secrets \
+      #   --from-literal=api-key=sk-abc123
+
+      # In deployment:
+      env:
+        - name: API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: mcp-secrets
+              key: api-key
+    symptoms:
+      - Secrets visible in image layers
+      - Credentials in container logs
+      - Security audit failures
+    detection_pattern: 'API_KEY|SECRET|PASSWORD|COPY.*\.env'
+
+  - id: no-graceful-shutdown
+    summary: Server drops connections on restart
+    severity: medium
+    situation: Deployment causes request failures
+    why: |
+      Container killed without draining connections.
+      Active SSE streams terminated abruptly.
+      In-flight requests fail.
+    solution: |
+      // Implement graceful shutdown
+
+      let isShuttingDown = false;
+      const activeConnections = new Set<any>();
+
+      // Track connections
+      server.on('connection', (conn) => {
+          activeConnections.add(conn);
+          conn.on('close', () => activeConnections.delete(conn));
+      });
+
+      // Handle shutdown signals
+      const signals = ['SIGTERM', 'SIGINT'];
+      for (const signal of signals) {
+          process.on(signal, async () => {
+              console.log(`Received ${signal}, starting graceful shutdown`);
+              isShuttingDown = true;
+
+              // Stop accepting new connections
+              server.close();
+
+              // Give active requests time to complete
+              const gracePeriod = 30000;
+              const start = Date.now();
+
+              while (activeConnections.size > 0 && Date.now() - start < gracePeriod) {
+                  console.log(`Waiting for ${activeConnections.size} connections...`);
+                  await sleep(1000);
+              }
+
+              // Force close remaining
+              for (const conn of activeConnections) {
+                  conn.destroy();
+              }
+
+              console.log('Shutdown complete');
+              process.exit(0);
+          });
+      }
+
+      // Health check returns 503 during shutdown
+      app.get('/health', (req, res) => {
+          if (isShuttingDown) {
+              res.status(503).json({ status: 'shutting_down' });
+          } else {
+              res.json({ status: 'healthy' });
+          }
+      });
+
+      # Kubernetes: terminationGracePeriodSeconds
+      spec:
+        terminationGracePeriodSeconds: 60
+    symptoms:
+      - Errors during deployments
+      - SSE connections drop on restart
+      - Incomplete request errors
+    detection_pattern: 'SIGTERM|SIGINT|graceful|shutdown'

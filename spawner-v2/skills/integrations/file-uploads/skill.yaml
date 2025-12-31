@@ -1,0 +1,178 @@
+# File Uploads & Storage Skill
+# S3, R2, presigned URLs, multipart uploads
+
+version: 1.0.0
+skill_id: file-uploads
+name: File Uploads & Storage
+category: integration
+layer: 2
+
+description: |
+  Expert at handling file uploads and cloud storage. Covers S3,
+  Cloudflare R2, presigned URLs, multipart uploads, and image
+  optimization. Knows how to handle large files without blocking.
+
+triggers:
+  - "file upload"
+  - "S3"
+  - "R2"
+  - "presigned URL"
+  - "multipart"
+  - "image upload"
+  - "cloud storage"
+
+identity:
+  role: File Upload Specialist
+  personality: |
+    Careful about security and performance. Never trusts file
+    extensions. Knows that large uploads need special handling.
+    Prefers presigned URLs over server proxying.
+  principles:
+    - "Never trust client file type claims"
+    - "Use presigned URLs for direct uploads"
+    - "Stream large files, never buffer"
+    - "Validate on upload, optimize after"
+
+patterns:
+  presigned_upload:
+    description: "Direct upload with presigned URLs"
+    example: |
+      // Server: Generate presigned URL
+      import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+      import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+      const s3 = new S3Client({
+        region: "auto",
+        endpoint: process.env.S3_ENDPOINT,
+        credentials: {
+          accessKeyId: process.env.S3_ACCESS_KEY!,
+          secretAccessKey: process.env.S3_SECRET_KEY!,
+        },
+      });
+
+      export async function getUploadUrl(filename: string, contentType: string) {
+        const key = "uploads/" + crypto.randomUUID() + "-" + filename;
+        
+        const command = new PutObjectCommand({
+          Bucket: process.env.S3_BUCKET,
+          Key: key,
+          ContentType: contentType,
+        });
+
+        const url = await getSignedUrl(s3, command, { expiresIn: 3600 });
+        return { url, key };
+      }
+
+
+      // Client: Upload directly to storage
+      async function uploadFile(file: File) {
+        // Get presigned URL from your API
+        const { url, key } = await fetch("/api/upload", {
+          method: "POST",
+          body: JSON.stringify({
+            filename: file.name,
+            contentType: file.type,
+          }),
+        }).then(r => r.json());
+
+        // Upload directly to S3/R2
+        await fetch(url, {
+          method: "PUT",
+          body: file,
+          headers: { "Content-Type": file.type },
+        });
+
+        return key;
+      }
+
+  server_upload:
+    description: "Server-side upload handling"
+    example: |
+      // Next.js API route with formidable
+      import formidable from "formidable";
+      import { createReadStream } from "fs";
+
+      export const config = { api: { bodyParser: false } };
+
+      export async function POST(req: Request) {
+        const form = formidable({
+          maxFileSize: 10 * 1024 * 1024, // 10MB
+          filter: ({ mimetype }) => {
+            return mimetype?.startsWith("image/") ?? false;
+          },
+        });
+
+        const [fields, files] = await form.parse(req);
+        const file = files.file?.[0];
+
+        if (!file) {
+          return Response.json({ error: "No file" }, { status: 400 });
+        }
+
+        // Upload to S3
+        const stream = createReadStream(file.filepath);
+        await s3.send(new PutObjectCommand({
+          Bucket: BUCKET,
+          Key: "uploads/" + file.newFilename,
+          Body: stream,
+          ContentType: file.mimetype,
+        }));
+
+        return Response.json({ key: file.newFilename });
+      }
+
+  image_optimization:
+    description: "Image processing on upload"
+    example: |
+      import sharp from "sharp";
+
+      async function processImage(buffer: Buffer) {
+        // Resize and convert to WebP
+        const optimized = await sharp(buffer)
+          .resize(1200, 1200, {
+            fit: "inside",
+            withoutEnlargement: true,
+          })
+          .webp({ quality: 80 })
+          .toBuffer();
+
+        // Generate thumbnail
+        const thumbnail = await sharp(buffer)
+          .resize(200, 200, { fit: "cover" })
+          .webp({ quality: 70 })
+          .toBuffer();
+
+        return { optimized, thumbnail };
+      }
+
+anti_patterns:
+  trusting_extension:
+    description: "Trusting file extension for type"
+    wrong: "if (file.name.endsWith('.jpg'))"
+    right: "Check magic bytes or content-type"
+
+  buffering_large:
+    description: "Loading large files into memory"
+    wrong: "const buffer = await file.arrayBuffer()"
+    right: "Stream to storage directly"
+
+  no_size_limit:
+    description: "No file size restrictions"
+    wrong: "Accept any file size"
+    right: "Set maxFileSize, reject large files"
+
+handoffs:
+  - trigger: "image CDN"
+    to: performance-optimization
+    context: "Image delivery optimization"
+  - trigger: "database storage"
+    to: postgres-wizard
+    context: "Storing file metadata"
+
+tags:
+  - file-upload
+  - s3
+  - r2
+  - storage
+  - presigned
+  - images

@@ -1,0 +1,539 @@
+# Multi-Agent Orchestration Sharp Edges
+
+sharp_edges:
+  - id: state-corruption-in-parallel
+    summary: Parallel agents corrupt shared state with race conditions
+    severity: critical
+    situation: Multiple agents updating the same state simultaneously produce inconsistent results
+    why: |
+      Agents run async in parallel.
+      Shared state without locking.
+      "Last write wins" causes data loss.
+    solution: |
+      // Implement safe state management for parallel agents
+
+      import { Mutex } from 'async-mutex';
+
+      interface AgentState {
+          data: Record<string, unknown>;
+          version: number;
+          lastUpdatedBy: string;
+      }
+
+      class SafeStateManager {
+          private state: AgentState = { data: {}, version: 0, lastUpdatedBy: '' };
+          private mutex = new Mutex();
+          private changeLog: StateChange[] = [];
+
+          // Scoped state channels - each agent owns specific keys
+          private readonly ownership: Map<string, string> = new Map();
+
+          registerOwnership(agentId: string, keys: string[]): void {
+              for (const key of keys) {
+                  if (this.ownership.has(key)) {
+                      throw new Error(`Key ${key} already owned by ${this.ownership.get(key)}`);
+                  }
+                  this.ownership.set(key, agentId);
+              }
+          }
+
+          // Safe read - no lock needed for reads
+          read(keys?: string[]): Partial<AgentState['data']> {
+              if (!keys) return { ...this.state.data };
+              const result: Record<string, unknown> = {};
+              for (const key of keys) {
+                  result[key] = this.state.data[key];
+              }
+              return result;
+          }
+
+          // Safe write with ownership check and optimistic locking
+          async write(
+              agentId: string,
+              updates: Record<string, unknown>,
+              expectedVersion?: number
+          ): Promise<{ success: boolean; version: number; conflict?: string }> {
+              const release = await this.mutex.acquire();
+
+              try {
+                  // Check ownership
+                  for (const key of Object.keys(updates)) {
+                      const owner = this.ownership.get(key);
+                      if (owner && owner !== agentId) {
+                          return {
+                              success: false,
+                              version: this.state.version,
+                              conflict: `Key ${key} owned by ${owner}, not ${agentId}`
+                          };
+                      }
+                  }
+
+                  // Optimistic locking check
+                  if (expectedVersion !== undefined && expectedVersion !== this.state.version) {
+                      return {
+                          success: false,
+                          version: this.state.version,
+                          conflict: `Version mismatch: expected ${expectedVersion}, current ${this.state.version}`
+                      };
+                  }
+
+                  // Apply updates
+                  const oldData = { ...this.state.data };
+                  this.state = {
+                      data: { ...this.state.data, ...updates },
+                      version: this.state.version + 1,
+                      lastUpdatedBy: agentId
+                  };
+
+                  // Log change for debugging
+                  this.changeLog.push({
+                      timestamp: Date.now(),
+                      agentId,
+                      oldData,
+                      newData: updates,
+                      version: this.state.version
+                  });
+
+                  return { success: true, version: this.state.version };
+              } finally {
+                  release();
+              }
+          }
+
+          // Append-only writes for parallel safety
+          async append(agentId: string, key: string, value: unknown): Promise<void> {
+              const release = await this.mutex.acquire();
+              try {
+                  const current = this.state.data[key];
+                  if (!Array.isArray(current)) {
+                      this.state.data[key] = [value];
+                  } else {
+                      this.state.data[key] = [...current, value];
+                  }
+                  this.state.version++;
+                  this.state.lastUpdatedBy = agentId;
+              } finally {
+                  release();
+              }
+          }
+      }
+
+      // Usage with parallel agents
+      class SafeParallelExecution {
+          private stateManager = new SafeStateManager();
+
+          async execute(input: string): Promise<Result> {
+              // Register ownership before parallel execution
+              this.stateManager.registerOwnership('security-agent', ['security_findings']);
+              this.stateManager.registerOwnership('performance-agent', ['performance_findings']);
+              this.stateManager.registerOwnership('style-agent', ['style_findings']);
+
+              // Now parallel agents can safely write to their own keys
+              await Promise.all([
+                  this.securityAgent(input),
+                  this.performanceAgent(input),
+                  this.styleAgent(input)
+              ]);
+
+              // Aggregator reads all results safely
+              return this.aggregator(this.stateManager.read());
+          }
+      }
+    symptoms:
+      - Intermittent missing data in results
+      - Results vary between identical runs
+      - Agent outputs overwriting each other
+    detection_pattern: 'Promise\.all|parallel|concurrent|async.*map'
+
+  - id: infinite-agent-loops
+    summary: Agents calling each other create infinite loops
+    severity: critical
+    situation: Agent A calls Agent B which calls Agent A, consuming infinite tokens
+    why: |
+      Cyclic dependencies in agent graph.
+      No termination conditions.
+      LLM decides to "ask for more help".
+    solution: |
+      // Circuit breaker and loop detection for agent calls
+
+      interface CallContext {
+          callStack: string[];
+          totalCalls: number;
+          startTime: number;
+          tokenCount: number;
+      }
+
+      class CircuitBreakerMiddleware {
+          private readonly maxCallDepth = 10;
+          private readonly maxTotalCalls = 50;
+          private readonly maxDurationMs = 60000;
+          private readonly maxTokens = 100000;
+
+          async wrapAgent(
+              agent: Agent,
+              context: CallContext
+          ): Promise<(input: AgentInput) => Promise<AgentOutput>> {
+              return async (input: AgentInput): Promise<AgentOutput> => {
+                  // Check 1: Call depth (prevent deep recursion)
+                  if (context.callStack.length >= this.maxCallDepth) {
+                      throw new CircuitBreakerError(
+                          `Maximum call depth exceeded: ${context.callStack.join(' -> ')}`,
+                          'max_depth'
+                      );
+                  }
+
+                  // Check 2: Loop detection (prevent A -> B -> A)
+                  if (context.callStack.includes(agent.id)) {
+                      throw new CircuitBreakerError(
+                          `Loop detected: ${[...context.callStack, agent.id].join(' -> ')}`,
+                          'loop_detected'
+                      );
+                  }
+
+                  // Check 3: Total calls (prevent runaway orchestration)
+                  if (context.totalCalls >= this.maxTotalCalls) {
+                      throw new CircuitBreakerError(
+                          `Maximum total calls exceeded: ${context.totalCalls}`,
+                          'max_calls'
+                      );
+                  }
+
+                  // Check 4: Time budget
+                  const elapsed = Date.now() - context.startTime;
+                  if (elapsed >= this.maxDurationMs) {
+                      throw new CircuitBreakerError(
+                          `Time budget exceeded: ${elapsed}ms`,
+                          'timeout'
+                      );
+                  }
+
+                  // Check 5: Token budget
+                  if (context.tokenCount >= this.maxTokens) {
+                      throw new CircuitBreakerError(
+                          `Token budget exceeded: ${context.tokenCount}`,
+                          'token_limit'
+                      );
+                  }
+
+                  // Update context for this call
+                  const updatedContext: CallContext = {
+                      callStack: [...context.callStack, agent.id],
+                      totalCalls: context.totalCalls + 1,
+                      startTime: context.startTime,
+                      tokenCount: context.tokenCount
+                  };
+
+                  // Execute with updated context
+                  const result = await agent.execute(input, updatedContext);
+
+                  // Update token count
+                  context.tokenCount += result.tokensUsed || 0;
+
+                  return result;
+              };
+          }
+      }
+
+      // Graceful degradation on circuit break
+      class GracefulDegradation {
+          async executeWithFallback(
+              agent: Agent,
+              input: AgentInput,
+              context: CallContext
+          ): Promise<AgentOutput> {
+              try {
+                  return await this.circuitBreaker.wrapAgent(agent, context)(input);
+              } catch (error) {
+                  if (error instanceof CircuitBreakerError) {
+                      // Return partial results instead of failing completely
+                      return {
+                          success: false,
+                          partial: true,
+                          message: `Agent execution limited: ${error.reason}`,
+                          completedSteps: context.callStack,
+                          recommendation: this.getRecoveryRecommendation(error)
+                      };
+                  }
+                  throw error;
+              }
+          }
+
+          private getRecoveryRecommendation(error: CircuitBreakerError): string {
+              switch (error.reason) {
+                  case 'loop_detected':
+                      return 'Consider using sequential rather than cyclic agent pattern';
+                  case 'max_depth':
+                      return 'Break task into smaller independent subtasks';
+                  case 'max_calls':
+                      return 'Consolidate agent responsibilities to reduce handoffs';
+                  default:
+                      return 'Review agent architecture for optimization opportunities';
+              }
+          }
+      }
+    symptoms:
+      - Requests never complete
+      - Token costs spike unexpectedly
+      - Same agents appearing multiple times in logs
+    detection_pattern: 'callAgent|invokeAgent|delegate|handoff'
+
+  - id: lost-context-in-handoffs
+    summary: Critical context lost when work passes between agents
+    severity: high
+    situation: Agent B doesn't have information Agent A knew, produces wrong results
+    why: |
+      Implicit context assumptions.
+      No formal handoff protocol.
+      State not fully transferred.
+    solution: |
+      // Explicit handoff protocol with context transfer
+
+      interface HandoffContext {
+          // What was the original request?
+          originalRequest: string;
+          originalRequesterId: string;
+
+          // What has been done so far?
+          completedSteps: CompletedStep[];
+
+          // What is being handed off?
+          handoffReason: string;
+          handoffData: Record<string, unknown>;
+
+          // What should the next agent do?
+          expectedAction: string;
+          successCriteria: string;
+
+          // Chain of custody
+          agentChain: AgentHandoff[];
+      }
+
+      interface AgentHandoff {
+          fromAgent: string;
+          toAgent: string;
+          timestamp: number;
+          summary: string;
+          dataSnapshot: Record<string, unknown>;
+      }
+
+      class HandoffProtocol {
+          // Agent must explicitly create handoff context
+          async prepareHandoff(
+              currentAgent: Agent,
+              nextAgentId: string,
+              currentState: AgentState
+          ): Promise<HandoffContext> {
+              // Agent summarizes its work and what's needed next
+              const handoffSummary = await currentAgent.llm.invoke({
+                  messages: [{
+                      role: 'system',
+                      content: `You are preparing to hand off work to another agent.
+Summarize:
+1. What you were asked to do
+2. What you completed
+3. What still needs to be done
+4. Any important context the next agent needs`
+                  }, {
+                      role: 'user',
+                      content: `Current state: ${JSON.stringify(currentState)}
+Handing off to: ${nextAgentId}`
+                  }]
+              });
+
+              return {
+                  originalRequest: currentState.originalRequest,
+                  originalRequesterId: currentState.requesterId,
+                  completedSteps: currentState.completedSteps,
+                  handoffReason: handoffSummary.reason,
+                  handoffData: currentState.relevantData,
+                  expectedAction: handoffSummary.expectedAction,
+                  successCriteria: handoffSummary.successCriteria,
+                  agentChain: [
+                      ...currentState.agentChain,
+                      {
+                          fromAgent: currentAgent.id,
+                          toAgent: nextAgentId,
+                          timestamp: Date.now(),
+                          summary: handoffSummary.summary,
+                          dataSnapshot: this.createSnapshot(currentState)
+                      }
+                  ]
+              };
+          }
+
+          // Receiving agent validates it has everything needed
+          async validateHandoff(
+              receivingAgent: Agent,
+              context: HandoffContext
+          ): Promise<{ valid: boolean; missing: string[] }> {
+              const requiredFields = receivingAgent.getRequiredContext();
+              const missing: string[] = [];
+
+              for (const field of requiredFields) {
+                  if (!(field in context.handoffData)) {
+                      missing.push(field);
+                  }
+              }
+
+              if (missing.length > 0) {
+                  // Try to recover missing context from chain
+                  for (const field of missing) {
+                      const recovered = this.recoverFromChain(field, context.agentChain);
+                      if (recovered) {
+                          context.handoffData[field] = recovered;
+                          missing.splice(missing.indexOf(field), 1);
+                      }
+                  }
+              }
+
+              return { valid: missing.length === 0, missing };
+          }
+
+          // Request missing context from previous agent
+          async requestMissingContext(
+              receivingAgent: Agent,
+              context: HandoffContext,
+              missingFields: string[]
+          ): Promise<HandoffContext> {
+              const lastAgent = context.agentChain[context.agentChain.length - 1];
+
+              // This would trigger a callback to the previous agent
+              const additionalContext = await this.callbackForContext(
+                  lastAgent.fromAgent,
+                  missingFields
+              );
+
+              return {
+                  ...context,
+                  handoffData: { ...context.handoffData, ...additionalContext }
+              };
+          }
+      }
+    symptoms:
+      - Agent asks questions already answered
+      - Results don't align with original request
+      - Repeated work by multiple agents
+    detection_pattern: 'handoff|transfer|delegate|pass.*to'
+
+  - id: cost-explosion-in-multi-agent
+    summary: Multi-agent systems consume tokens exponentially
+    severity: high
+    situation: Simple task consumes 10x expected tokens due to agent overhead
+    why: |
+      Each agent needs full context.
+      Parallel agents duplicate context.
+      Handoffs include full state.
+    solution: |
+      // Token-efficient multi-agent design
+
+      class TokenEfficientOrchestrator {
+          private readonly tokenBudget: TokenBudget;
+          private readonly contextCompressor: ContextCompressor;
+
+          constructor(totalBudget: number) {
+              this.tokenBudget = new TokenBudget(totalBudget);
+          }
+
+          async executeWithBudget(task: Task): Promise<Result> {
+              // Pre-allocate token budget across agents
+              const plan = await this.plan(task);
+              const allocations = this.allocateTokenBudget(plan);
+
+              for (const step of plan.steps) {
+                  const allocation = allocations.get(step.agentId);
+
+                  // Compress context to fit budget
+                  const compressedContext = await this.contextCompressor.compress(
+                      step.context,
+                      allocation.inputBudget
+                  );
+
+                  // Execute with budget enforcement
+                  const result = await this.executeWithLimit(
+                      step.agent,
+                      compressedContext,
+                      allocation.outputBudget
+                  );
+
+                  // Track actual usage
+                  this.tokenBudget.recordUsage(
+                      step.agentId,
+                      result.inputTokens,
+                      result.outputTokens
+                  );
+
+                  // Adjust remaining allocations if over budget
+                  if (this.tokenBudget.isOverBudget()) {
+                      this.rebalanceAllocations(allocations, plan.remainingSteps);
+                  }
+              }
+
+              return this.synthesize(plan);
+          }
+
+          private allocateTokenBudget(plan: ExecutionPlan): Map<string, TokenAllocation> {
+              const allocations = new Map<string, TokenAllocation>();
+              const totalSteps = plan.steps.length;
+              const budgetPerStep = this.tokenBudget.remaining / totalSteps;
+
+              for (const step of plan.steps) {
+                  // Weight allocation by agent's typical needs
+                  const weight = this.getAgentWeight(step.agentId);
+                  allocations.set(step.agentId, {
+                      inputBudget: budgetPerStep * weight * 0.6,
+                      outputBudget: budgetPerStep * weight * 0.4
+                  });
+              }
+
+              return allocations;
+          }
+      }
+
+      class ContextCompressor {
+          async compress(context: AgentContext, maxTokens: number): Promise<CompressedContext> {
+              const currentTokens = await this.countTokens(context);
+
+              if (currentTokens <= maxTokens) {
+                  return { content: context, compressed: false };
+              }
+
+              // Strategy 1: Remove historical messages, keep recent
+              let compressed = this.trimHistory(context, maxTokens);
+
+              // Strategy 2: Summarize if still too large
+              if (await this.countTokens(compressed) > maxTokens) {
+                  compressed = await this.summarize(compressed, maxTokens);
+              }
+
+              // Strategy 3: Keep only essential fields
+              if (await this.countTokens(compressed) > maxTokens) {
+                  compressed = this.extractEssentials(compressed);
+              }
+
+              return { content: compressed, compressed: true };
+          }
+
+          private async summarize(context: AgentContext, maxTokens: number): Promise<AgentContext> {
+              // Use cheap model to summarize
+              const summary = await this.cheapLLM.invoke({
+                  messages: [{
+                      role: 'system',
+                      content: 'Summarize this context concisely, preserving key facts and decisions.'
+                  }, {
+                      role: 'user',
+                      content: JSON.stringify(context)
+                  }],
+                  max_tokens: maxTokens * 0.5
+              });
+
+              return {
+                  ...context,
+                  history: [{ role: 'system', content: `Previous context summary: ${summary.content}` }]
+              };
+          }
+      }
+    symptoms:
+      - Token costs 5-10x expected
+      - Simple tasks taking many LLM calls
+      - Rate limit errors
+    detection_pattern: 'token|budget|cost|usage'

@@ -1,0 +1,588 @@
+# Sharp Edges - Performance Optimization
+# The gotchas that cause performance regressions and wasted effort
+
+version: 1.0.0
+skill_id: performance-optimization
+
+sharp_edges:
+  - id: optimizing-wrong-thing
+    summary: Optimizing without measuring first
+    severity: critical
+    situation: |
+      You spend a week optimizing database queries. Performance doesn't
+      improve. Turns out the bottleneck was a third-party API call that
+      takes 2 seconds every request. You optimized the wrong thing.
+    why: |
+      Intuition about performance is usually wrong. The bottleneck is
+      rarely where you think it is. Without profiling, you're guessing.
+      Most "optimization" time is wasted on things that don't matter.
+    solution: |
+      # ALWAYS MEASURE FIRST
+
+      ## Frontend: Lighthouse + DevTools
+
+      # Chrome DevTools Performance tab
+      1. Open DevTools > Performance
+      2. Click Record
+      3. Perform action
+      4. Stop recording
+      5. Analyze flame chart
+
+      # Lighthouse in CI
+      npx lhci autorun --config=lighthouserc.json
+
+
+      ## Backend: Profile before optimizing
+
+      # Node.js
+      node --prof app.js
+      node --prof-process isolate-*.log > processed.txt
+
+      # Python
+      python -m cProfile -s cumtime app.py
+
+      # SQL - find actual slow queries
+      SELECT query, calls, mean_time
+      FROM pg_stat_statements
+      ORDER BY total_time DESC
+      LIMIT 20;
+
+
+      ## What to measure
+
+      1. Response time (P50, P95, P99)
+      2. Time to first byte (TTFB)
+      3. Database query count and time
+      4. Memory usage
+      5. CPU usage
+
+      ## Only optimize what the data shows is slow
+    symptoms:
+      - "I optimized X but nothing improved"
+      - Performance issues persist after optimization
+      - Spending time on micro-optimizations
+    detection_pattern: null
+
+  - id: memo-everything
+    summary: Over-using React.memo, useMemo, useCallback
+    severity: high
+    situation: |
+      You memo every component and wrap every function in useCallback.
+      Performance gets worse. Memory usage increases. Code becomes
+      unreadable. React DevTools shows constant re-renders anyway.
+    why: |
+      Memoization has overhead. Comparing props takes time. Storing
+      cached values takes memory. If the component is cheap to render,
+      memoization costs more than re-rendering. Most components don't
+      need memoization.
+    solution: |
+      # USE MEMOIZATION STRATEGICALLY
+
+      ## When to use memo()
+
+      # YES: Expensive render + same props often
+      const ExpensiveChart = memo(function Chart({ data }) {
+        // Complex SVG rendering
+        return <svg>...</svg>;
+      });
+
+      # YES: Many children that often have same props
+      const ListItem = memo(function ListItem({ item, onSelect }) {
+        return <div onClick={() => onSelect(item)}>{item.name}</div>;
+      });
+
+      # NO: Cheap component
+      const Button = memo(function Button({ children }) {
+        return <button>{children}</button>;  // Too cheap to memo
+      });
+
+      # NO: Props always change
+      const Display = memo(function Display({ data }) {
+        // If parent always passes new object, memo is useless
+        return <div>{data.value}</div>;
+      });
+
+
+      ## When to use useMemo
+
+      # YES: Expensive computation
+      const sorted = useMemo(() =>
+        items.slice().sort((a, b) => complexSort(a, b)),
+        [items]
+      );
+
+      # NO: Simple operations
+      const doubled = useMemo(() => value * 2, [value]);  // Overkill
+
+
+      ## When to use useCallback
+
+      # YES: Passed to memoized child
+      const handleClick = useCallback((id) => {
+        setSelected(id);
+      }, []);
+
+      <MemoizedList onSelect={handleClick} />
+
+      # NO: Not passed to memoized components
+      const handleClick = () => setSelected(id);  // Fine as-is
+
+
+      ## Profile first
+
+      React DevTools Profiler:
+      1. Record a session
+      2. Look for components that render often
+      3. Check if renders are expensive (>16ms)
+      4. Only memo those specific components
+    symptoms:
+      - Performance worse after adding memoization
+      - Stale data or callbacks
+      - Memory usage increasing
+    detection_pattern: 'memo\(|useMemo\(|useCallback\('
+
+  - id: n-plus-one-queries
+    summary: Database N+1 query problem
+    severity: high
+    situation: |
+      Loading a page with 100 users takes 10 seconds. Each user triggers
+      a separate query for their posts. That's 1 query for users + 100
+      queries for posts = 101 queries instead of 2.
+    why: |
+      ORMs make it easy to access related data lazily. Each access
+      triggers a query. In a loop, this explodes. The network round-trip
+      per query dominates execution time.
+    solution: |
+      # FIX N+1 QUERIES
+
+      ## Detect N+1
+
+      # Django Debug Toolbar
+      pip install django-debug-toolbar
+
+      # Prisma query logging
+      const prisma = new PrismaClient({
+        log: ['query'],
+      });
+
+      # SQLAlchemy echo
+      engine = create_engine(url, echo=True)
+
+
+      ## Fix: Eager loading
+
+      # Prisma
+      const users = await prisma.user.findMany({
+        include: { posts: true }  // JOIN in single query
+      });
+
+      # Django
+      users = User.objects.prefetch_related('posts').all()
+
+      # SQLAlchemy
+      users = session.query(User).options(
+          selectinload(User.posts)
+      ).all()
+
+
+      ## Fix: DataLoader pattern (GraphQL)
+
+      import DataLoader from 'dataloader';
+
+      const postLoader = new DataLoader(async (userIds) => {
+        const posts = await db.post.findMany({
+          where: { userId: { in: userIds } }
+        });
+
+        // Group by userId
+        const postsByUser = {};
+        for (const post of posts) {
+          postsByUser[post.userId] ??= [];
+          postsByUser[post.userId].push(post);
+        }
+
+        return userIds.map(id => postsByUser[id] ?? []);
+      });
+
+      // In resolver
+      user.posts = () => postLoader.load(user.id);
+      // Batches all loads in one query
+
+
+      ## Fix: Denormalization (read-heavy)
+
+      // Store post_count on user
+      // Update on write, avoid COUNT query on read
+    symptoms:
+      - Slow pages with lists of related data
+      - Query count scales with data
+      - Database CPU spikes on list views
+    detection_pattern: null
+
+  - id: layout-thrashing
+    summary: Forcing layout recalculation repeatedly
+    severity: high
+    situation: |
+      Your animation stutters at 10fps. DevTools shows "Forced reflow"
+      warnings. You're reading layout properties (offsetHeight) then
+      immediately writing styles in a loop.
+    why: |
+      Reading layout properties forces the browser to recalculate layout.
+      If you write styles then read layout in a loop, the browser can't
+      batch the work. Each iteration causes a full layout recalculation.
+    solution: |
+      # AVOID LAYOUT THRASHING
+
+      ## The problem
+
+      // BAD: Read-write-read-write pattern
+      elements.forEach(el => {
+        const height = el.offsetHeight;  // Forces layout
+        el.style.height = height + 10 + 'px';  // Invalidates layout
+        // Next iteration forces layout again
+      });
+
+
+      ## The fix: Batch reads, then batch writes
+
+      // GOOD: Read all, then write all
+      const heights = elements.map(el => el.offsetHeight);  // All reads
+
+      elements.forEach((el, i) => {
+        el.style.height = heights[i] + 10 + 'px';  // All writes
+      });
+
+
+      ## Use requestAnimationFrame
+
+      function animate() {
+        // Read phase
+        const scrollTop = container.scrollTop;
+
+        // Write phase
+        element.style.transform = `translateY(${scrollTop}px)`;
+
+        requestAnimationFrame(animate);
+      }
+
+
+      ## Use CSS transforms instead of layout properties
+
+      // BAD: Triggers layout
+      element.style.left = x + 'px';
+      element.style.top = y + 'px';
+
+      // GOOD: GPU accelerated, no layout
+      element.style.transform = `translate(${x}px, ${y}px)`;
+
+
+      ## Use will-change sparingly
+
+      .animated-element {
+        will-change: transform;  /* Hint to browser */
+      }
+
+      // Remove when done
+      element.addEventListener('transitionend', () => {
+        element.style.willChange = 'auto';
+      });
+    symptoms:
+      - Janky animations
+      - "Forced reflow" in DevTools
+      - High paint/layout times
+    detection_pattern: 'offsetHeight|offsetWidth|getBoundingClientRect'
+
+  - id: blocking-main-thread
+    summary: Heavy computation blocking UI responsiveness
+    severity: high
+    situation: |
+      User clicks a button and the UI freezes for 3 seconds. The button
+      doesn't even show a loading state. You're processing a large dataset
+      synchronously on the main thread.
+    why: |
+      JavaScript is single-threaded. While your code runs, the browser
+      can't respond to user input or update the UI. Any operation over
+      50ms blocks the main thread noticeably.
+    solution: |
+      # KEEP MAIN THREAD FREE
+
+      ## Move to Web Worker
+
+      // worker.js
+      self.onmessage = ({ data }) => {
+        const result = heavyComputation(data);
+        self.postMessage(result);
+      };
+
+      // main.js
+      const worker = new Worker('worker.js');
+
+      worker.postMessage(largeDataset);
+      worker.onmessage = ({ data }) => {
+        setResult(data);
+      };
+
+
+      ## Break up work with scheduler
+
+      async function processInChunks(items) {
+        const CHUNK_SIZE = 100;
+
+        for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+          const chunk = items.slice(i, i + CHUNK_SIZE);
+          processChunk(chunk);
+
+          // Yield to main thread
+          await new Promise(resolve => setTimeout(resolve, 0));
+
+          // Or use scheduler API
+          // await scheduler.yield();
+        }
+      }
+
+
+      ## Use virtualization for large lists
+
+      // Don't render 10,000 items
+      // Only render visible items
+      import { useVirtualizer } from '@tanstack/react-virtual';
+
+
+      ## Move to server
+
+      // Instead of client-side processing
+      const result = await fetch('/api/process', {
+        method: 'POST',
+        body: JSON.stringify({ data: largeDataset })
+      });
+    symptoms:
+      - UI freezes on button click
+      - No loading feedback
+      - Browser "page unresponsive" warning
+    detection_pattern: null
+
+  - id: cache-invalidation-bugs
+    summary: Stale cache causing data inconsistencies
+    severity: medium
+    situation: |
+      User updates their profile but still sees old data. Page refresh
+      shows new data. Sometimes data is correct, sometimes stale. Users
+      report "random" bugs that disappear on refresh.
+    why: |
+      Caching without proper invalidation creates stale data. Different
+      cache layers (browser, CDN, Redis, ORM) have different TTLs. When
+      data changes, not all caches get invalidated.
+    solution: |
+      # CACHE INVALIDATION STRATEGIES
+
+      ## Explicit invalidation
+
+      async function updateUser(id, data) {
+        await db.user.update({ where: { id }, data });
+
+        // Clear related caches
+        await redis.del(`user:${id}`);
+        await redis.del(`user:${id}:profile`);
+        await redis.del(`users:list`);  // Invalidate list cache too
+      }
+
+
+      ## Cache tags (grouped invalidation)
+
+      // Set with tags
+      await cache.set(`user:${id}`, data, {
+        tags: ['users', `user:${id}`]
+      });
+
+      // Invalidate by tag
+      await cache.invalidateTag('users');  // Clears all user caches
+
+
+      ## Short TTL + stale-while-revalidate
+
+      // Fresh for 1 minute, serve stale for 1 hour while revalidating
+      Cache-Control: public, max-age=60, stale-while-revalidate=3600
+
+
+      ## Version keys
+
+      // Include version in cache key
+      const version = await redis.get('user:version');
+      const key = `user:${id}:v${version}`;
+
+      // On update, increment version
+      await redis.incr('user:version');
+      // Old caches naturally expire, new requests get new data
+
+
+      ## Client-side: Optimistic updates with refetch
+
+      // React Query
+      const mutation = useMutation({
+        mutationFn: updateUser,
+        onSuccess: () => {
+          queryClient.invalidateQueries(['user', id]);
+        }
+      });
+    symptoms:
+      - Stale data after updates
+      - Data correct after refresh
+      - Inconsistent behavior
+    detection_pattern: null
+
+  - id: bundle-size-explosion
+    summary: JavaScript bundle grows out of control
+    severity: medium
+    situation: |
+      Initial page load takes 8 seconds. DevTools shows 2MB JavaScript
+      download. You've been adding dependencies without checking size.
+      moment.js alone is 300KB.
+    why: |
+      Every npm install adds to bundle. Many libraries are larger than
+      needed. Tree-shaking only helps if you import correctly. Without
+      monitoring, bundle grows invisibly until users complain.
+    solution: |
+      # CONTROL BUNDLE SIZE
+
+      ## Analyze current bundle
+
+      # Next.js
+      ANALYZE=true npm run build
+
+      # Vite
+      npx vite-bundle-visualizer
+
+      # General
+      npx source-map-explorer dist/*.js
+
+
+      ## Choose lighter alternatives
+
+      moment.js (300KB) → date-fns (tree-shakeable, ~3KB per function)
+      lodash (70KB) → lodash-es + specific imports (~3KB)
+      axios (13KB) → fetch (built-in)
+      uuid (11KB) → crypto.randomUUID() (built-in)
+
+
+      ## Import correctly for tree-shaking
+
+      // BAD: Imports entire library
+      import _ from 'lodash';
+      import { format } from 'date-fns';  // Still might bundle all
+
+      // GOOD: Specific imports
+      import debounce from 'lodash/debounce';
+      import format from 'date-fns/format';
+
+
+      ## Code split aggressively
+
+      // Dynamic imports
+      const HeavyChart = lazy(() => import('./HeavyChart'));
+
+      // Route-based splitting (automatic in Next.js)
+
+      // Conditional loading
+      if (needsEditor) {
+        const { Editor } = await import('heavy-editor');
+      }
+
+
+      ## Set bundle budget
+
+      // next.config.js
+      module.exports = {
+        experimental: {
+          outputFileTracing: true,
+        },
+      };
+
+      // CI check
+      if (bundleSize > 500000) {
+        throw new Error('Bundle too large!');
+      }
+    symptoms:
+      - Slow initial page load
+      - Large JS download in DevTools
+      - Lighthouse performance score dropping
+    detection_pattern: 'from [\'"]moment[\'"]|from [\'"]lodash[\'"]'
+
+  - id: memory-leaks
+    summary: Memory usage grows until page crashes
+    severity: medium
+    situation: |
+      Your SPA works fine initially. After an hour of use, it becomes
+      sluggish. Eventually the tab crashes. Memory usage in DevTools
+      shows steady increase over time.
+    why: |
+      Event listeners not cleaned up. Closures holding references to
+      large objects. Subscriptions not unsubscribed. Timers not cleared.
+      React state holding stale data.
+    solution: |
+      # PREVENT MEMORY LEAKS
+
+      ## Clean up event listeners
+
+      // BAD: Never cleaned up
+      useEffect(() => {
+        window.addEventListener('resize', handler);
+      }, []);
+
+      // GOOD: Cleanup function
+      useEffect(() => {
+        window.addEventListener('resize', handler);
+        return () => window.removeEventListener('resize', handler);
+      }, []);
+
+
+      ## Abort fetch requests
+
+      useEffect(() => {
+        const controller = new AbortController();
+
+        fetch('/api/data', { signal: controller.signal })
+          .then(setData)
+          .catch(err => {
+            if (err.name !== 'AbortError') throw err;
+          });
+
+        return () => controller.abort();
+      }, []);
+
+
+      ## Unsubscribe from subscriptions
+
+      useEffect(() => {
+        const subscription = observable.subscribe(handleData);
+        return () => subscription.unsubscribe();
+      }, []);
+
+
+      ## Clear timers
+
+      useEffect(() => {
+        const timer = setInterval(pollData, 5000);
+        return () => clearInterval(timer);
+      }, []);
+
+
+      ## WeakMap for caches
+
+      // BAD: Map holds strong references
+      const cache = new Map();
+
+      // GOOD: WeakMap allows garbage collection
+      const cache = new WeakMap();
+
+
+      ## Profile memory
+
+      // Chrome DevTools > Memory
+      // Take heap snapshots before/after action
+      // Look for growing "Detached" DOM nodes
+      // Check "Retainers" to find what holds references
+    symptoms:
+      - Memory usage grows over time
+      - Page slows down over time
+      - Tab crashes after extended use
+    detection_pattern: 'addEventListener|setInterval|setTimeout'

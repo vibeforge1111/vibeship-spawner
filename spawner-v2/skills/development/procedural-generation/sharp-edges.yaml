@@ -1,0 +1,445 @@
+# Procedural Generation Sharp Edges
+
+sharp_edges:
+  - id: seed-reproducibility-failure
+    summary: Same seed produces different results across versions or platforms
+    severity: critical
+    situation: Player shares seed, friend gets completely different level
+    why: |
+      RNG implementations differ between languages/platforms.
+      Using system random instead of portable seeded RNG.
+      Generator logic changed between versions.
+      Floating point precision differences.
+    solution: |
+      # Use a portable, deterministic RNG implementation
+
+      class SeededRandom {
+          // Mulberry32: simple, fast, portable, deterministic
+          private state: number
+
+          constructor(seed: number) {
+              this.state = seed
+          }
+
+          next(): number {
+              let t = this.state += 0x6D2B79F5
+              t = Math.imul(t ^ t >>> 15, t | 1)
+              t ^= t + Math.imul(t ^ t >>> 7, t | 61)
+              return ((t ^ t >>> 14) >>> 0) / 4294967296
+          }
+
+          nextInt(min: number, max: number): number {
+              return Math.floor(this.next() * (max - min + 1)) + min
+          }
+
+          // IMPORTANT: Always consume RNG in same order
+          shuffle<T>(array: T[]): T[] {
+              const result = [...array]
+              for (let i = result.length - 1; i > 0; i--) {
+                  const j = this.nextInt(0, i)
+                  [result[i], result[j]] = [result[j], result[i]]
+              }
+              return result
+          }
+      }
+
+      # Version your generator
+      class LevelGenerator {
+          static VERSION = "1.2.0"  // Increment when logic changes
+
+          generate(seed: number): Level {
+              // Store version with level for compatibility
+              const level = this._generate(seed)
+              level.generatorVersion = LevelGenerator.VERSION
+              return level
+          }
+      }
+    symptoms:
+      - Players report different results for same seed
+      - Seeds that worked before now produce broken levels
+      - Cross-platform multiplayer desyncs
+    detection_pattern: 'Math\.random|random\(\)|rand\(\)'
+
+  - id: wfc-contradiction-spiral
+    summary: Wave Function Collapse enters contradiction loop, hangs game
+    severity: critical
+    situation: Level generation takes forever or crashes with stack overflow
+    why: |
+      WFC can reach states where no valid tile placement exists.
+      Naive implementations retry indefinitely or crash.
+      Poor tile adjacency rules create frequent contradictions.
+    solution: |
+      class RobustWFC {
+          private maxAttempts = 100
+          private maxPropagationSteps = 10000
+          private attempts = 0
+
+          generate(width: number, height: number, seed: number): TileGrid | null {
+              for (let attempt = 0; attempt < this.maxAttempts; attempt++) {
+                  this.attempts = attempt
+                  this.initGrid(width, height)
+                  const rng = new SeededRandom(seed + attempt)
+
+                  try {
+                      return this.collapse(rng)
+                  } catch (e) {
+                      if (e instanceof ContradictionError) {
+                          console.log(`WFC attempt ${attempt} failed, retrying`)
+                          continue
+                      }
+                      throw e
+                  }
+              }
+
+              // Graceful fallback
+              console.warn(`WFC failed after ${this.maxAttempts} attempts`)
+              return this.generateFallback(seed)
+          }
+
+          private propagate(startCell: Cell): void {
+              const queue = [startCell]
+              let steps = 0
+
+              while (queue.length > 0 && steps < this.maxPropagationSteps) {
+                  steps++
+                  const cell = queue.shift()!
+                  // ... propagation logic
+              }
+
+              if (steps >= this.maxPropagationSteps) {
+                  throw new ContradictionError("Propagation limit exceeded")
+              }
+          }
+
+          private generateFallback(seed: number): TileGrid {
+              // Simple fallback that always works
+              // Maybe a pre-made template with minor variations
+              return this.simpleGenerator.generate(seed)
+          }
+      }
+    symptoms:
+      - Loading screen hangs
+      - High CPU usage during generation
+      - Stack overflow crash
+    detection_pattern: 'while.*!collapsed|WaveFunctionCollapse|wfc'
+
+  - id: llm-pcg-dead-end
+    summary: LLM generates content that breaks game logic
+    severity: high
+    situation: LLM generates quest with non-existent items, locations, or impossible conditions
+    why: |
+      LLMs hallucinate content not in your game.
+      JSON parsing fails on malformed output.
+      Generated values don't match game enums.
+      LLM doesn't understand game constraints.
+    solution: |
+      class ValidatedLLMGenerator {
+          async generateQuest(context: GameContext): Quest | null {
+              const attempts = 3
+
+              for (let i = 0; i < attempts; i++) {
+                  try {
+                      const rawResponse = await this.llm.complete(
+                          this.buildPrompt(context)
+                      )
+
+                      // Parse with error handling
+                      const parsed = this.safeParseJSON(rawResponse)
+                      if (!parsed) {
+                          console.warn("LLM returned invalid JSON, retrying")
+                          continue
+                      }
+
+                      // Validate against game data
+                      const validated = this.validateAgainstGameData(
+                          parsed, context
+                      )
+                      if (!validated.valid) {
+                          console.warn(`Validation failed: ${validated.errors}`)
+                          continue
+                      }
+
+                      return validated.quest
+                  } catch (e) {
+                      console.error(`LLM quest generation attempt ${i} failed`, e)
+                  }
+              }
+
+              // Return pre-made fallback quest
+              return this.getFallbackQuest(context)
+          }
+
+          private validateAgainstGameData(
+              parsed: any,
+              context: GameContext
+          ): { valid: boolean, quest?: Quest, errors?: string[] } {
+              const errors: string[] = []
+
+              // Check all referenced items exist
+              for (const item of parsed.requiredItems || []) {
+                  if (!context.gameData.items.has(item)) {
+                      errors.push(`Unknown item: ${item}`)
+                  }
+              }
+
+              // Check locations exist
+              if (!context.gameData.locations.has(parsed.location)) {
+                  errors.push(`Unknown location: ${parsed.location}`)
+              }
+
+              // Check enemy types exist
+              for (const enemy of parsed.enemies || []) {
+                  if (!context.gameData.enemyTypes.has(enemy)) {
+                      errors.push(`Unknown enemy: ${enemy}`)
+                  }
+              }
+
+              return {
+                  valid: errors.length === 0,
+                  quest: errors.length === 0 ? this.buildQuest(parsed) : undefined,
+                  errors
+              }
+          }
+
+          buildPrompt(context: GameContext): string {
+              // CRITICAL: Constrain LLM to valid options
+              return `
+              Generate a quest using ONLY these options:
+
+              Valid locations: ${[...context.gameData.locations].join(', ')}
+              Valid items: ${[...context.gameData.items].join(', ')}
+              Valid enemies: ${[...context.gameData.enemyTypes].join(', ')}
+
+              Player level: ${context.playerLevel}
+              Recent quests: ${context.recentQuests.join(', ')}
+
+              Return JSON: { location, requiredItems[], enemies[], objective }
+              Use ONLY the values listed above. Do not invent new ones.
+              `
+          }
+      }
+    symptoms:
+      - Quests reference non-existent items
+      - Players can't complete generated content
+      - Errors during quest parsing
+    detection_pattern: 'llm.*generate|generate.*quest|ai.*content'
+
+  - id: unplayable-level-generation
+    summary: Generator creates levels that are impossible to complete
+    severity: high
+    situation: Player starts level, realizes there's no path to exit
+    why: |
+      Random placement can block critical paths.
+      No validation of completability.
+      Edge cases in generation logic.
+    solution: |
+      class PlayableLevelGenerator {
+          generate(params: LevelParams): Level {
+              for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+                  const level = this.rawGenerate(params, attempt)
+
+                  // CRITICAL: Verify before returning
+                  if (this.isPlayable(level)) {
+                      return level
+                  }
+
+                  console.log(`Seed ${params.seed + attempt} unplayable, retrying`)
+              }
+
+              // Always have a fallback
+              return this.handcraftedFallback(params.difficulty)
+          }
+
+          isPlayable(level: Level): boolean {
+              // 1. Path exists from start to goal
+              const path = this.findPath(level.start, level.goal, level)
+              if (!path) return false
+
+              // 2. All keys reachable before their doors
+              for (const [key, door] of level.keyDoorPairs) {
+                  if (!this.keyBeforeDoor(key, door, level)) return false
+              }
+
+              // 3. Player can return (if required)
+              if (level.requiresBacktracking) {
+                  const returnPath = this.findPath(level.goal, level.start, level)
+                  if (!returnPath) return false
+              }
+
+              // 4. No softlock rooms (can enter but not exit)
+              for (const room of level.rooms) {
+                  if (!this.hasExit(room, level)) return false
+              }
+
+              return true
+          }
+
+          keyBeforeDoor(key: Key, door: Door, level: Level): boolean {
+              // Player must be able to reach key without passing through door
+              const pathToKey = this.findPath(
+                  level.start,
+                  key.position,
+                  level,
+                  [door.position]  // Blocked tiles
+              )
+              return pathToKey !== null
+          }
+      }
+    symptoms:
+      - Players report stuck in levels
+      - QA finds seed that creates broken level
+      - Softlocks reported
+    detection_pattern: 'generate.*level|level.*generator|dungeon.*gen'
+
+  - id: performance-budget-explosion
+    summary: Generated content causes framerate to tank
+    severity: high
+    situation: Generator creates level with 10x expected entities, game unplayable
+    why: |
+      No budget constraints on generation.
+      Entity counts unbounded.
+      Geometric complexity not limited.
+    solution: |
+      interface GenerationBudget {
+          maxEntities: number
+          maxTriangles: number
+          maxLights: number
+          maxPathNodes: number
+      }
+
+      class BudgetedGenerator {
+          generate(params: Params, budget: GenerationBudget): Level {
+              const tracking: BudgetTracking = {
+                  entities: 0,
+                  triangles: 0,
+                  lights: 0,
+                  pathNodes: 0
+              }
+
+              const level = new Level()
+
+              // Generate with budget awareness
+              this.generateRooms(level, params, budget, tracking)
+              this.populateEntities(level, params, budget, tracking)
+              this.addDetails(level, params, budget, tracking)
+
+              return level
+          }
+
+          private populateEntities(
+              level: Level,
+              params: Params,
+              budget: GenerationBudget,
+              tracking: BudgetTracking
+          ): void {
+              for (const room of level.rooms) {
+                  const desiredCount = this.calculateDesiredEnemies(room)
+                  const actualCount = Math.min(
+                      desiredCount,
+                      budget.maxEntities - tracking.entities
+                  )
+
+                  for (let i = 0; i < actualCount; i++) {
+                      const enemy = this.spawnEnemy(room, params)
+                      tracking.entities++
+                      tracking.triangles += enemy.mesh.triangleCount
+                  }
+
+                  // Stop if budget exhausted
+                  if (tracking.entities >= budget.maxEntities) {
+                      console.warn("Entity budget exhausted")
+                      break
+                  }
+              }
+          }
+      }
+
+      // Platform-specific budgets
+      const BUDGETS = {
+          pc: { maxEntities: 500, maxTriangles: 1_000_000, maxLights: 32 },
+          mobile: { maxEntities: 100, maxTriangles: 200_000, maxLights: 8 },
+          switch: { maxEntities: 200, maxTriangles: 400_000, maxLights: 16 }
+      }
+    symptoms:
+      - Frame rate drops in generated levels
+      - Some seeds cause slideshow performance
+      - Out of memory on mobile
+    detection_pattern: 'spawn.*enemy|populate|scatter|place.*entities'
+
+  - id: distribution-clustering
+    summary: Generated content clusters in unexpected ways, feels non-random
+    severity: medium
+    situation: All treasure chests in one corner, enemies in another
+    why: |
+      Uniform random distribution creates clusters.
+      Poisson disk sampling not used.
+      No minimum distance constraints.
+    solution: |
+      # Use Poisson disk sampling for natural-feeling placement
+
+      class PoissonDiskSampler {
+          generate(
+              width: number,
+              height: number,
+              minDistance: number,
+              rng: SeededRandom,
+              maxAttempts = 30
+          ): Point[] {
+              const cellSize = minDistance / Math.sqrt(2)
+              const grid: (Point | null)[][] = this.createGrid(
+                  width, height, cellSize
+              )
+              const points: Point[] = []
+              const active: Point[] = []
+
+              // Start with random point
+              const start = {
+                  x: rng.next() * width,
+                  y: rng.next() * height
+              }
+              points.push(start)
+              active.push(start)
+              this.insertIntoGrid(start, grid, cellSize)
+
+              while (active.length > 0) {
+                  const idx = rng.nextInt(0, active.length - 1)
+                  const point = active[idx]
+
+                  let found = false
+                  for (let i = 0; i < maxAttempts; i++) {
+                      const newPoint = this.sampleAround(
+                          point, minDistance, rng
+                      )
+
+                      if (this.inBounds(newPoint, width, height) &&
+                          !this.hasNeighbor(newPoint, grid, cellSize, minDistance)) {
+                          points.push(newPoint)
+                          active.push(newPoint)
+                          this.insertIntoGrid(newPoint, grid, cellSize)
+                          found = true
+                          break
+                      }
+                  }
+
+                  if (!found) {
+                      active.splice(idx, 1)
+                  }
+              }
+
+              return points
+          }
+      }
+
+      // Usage
+      const sampler = new PoissonDiskSampler()
+      const treasurePositions = sampler.generate(
+          level.width,
+          level.height,
+          MIN_TREASURE_DISTANCE,  // e.g., 50 units apart
+          rng
+      )
+    symptoms:
+      - Players notice clustering patterns
+      - Some areas too dense, others empty
+      - Feels "obviously random"
+    detection_pattern: 'random.*position|scatter|distribute|place.*random'

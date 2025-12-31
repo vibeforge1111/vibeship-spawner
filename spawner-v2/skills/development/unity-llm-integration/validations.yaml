@@ -1,0 +1,139 @@
+# Unity LLM Integration Validations
+# Automated checks to catch common Unity LLM integration mistakes
+
+validations:
+  - id: unity-sync-llm-call
+    name: Synchronous LLM Call in Unity
+    severity: critical
+    type: regex
+    pattern: '\\.Chat\\([^)]*\\)\\.Result|\\.Complete\\([^)]*\\)\\.Result|GetAwaiter\\(\\)\\.GetResult\\(\\)'
+    message: "Synchronous LLM call detected. This will freeze Unity's main thread."
+    fix_action: "Use async/await, coroutines with callbacks, or UniTask"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-llm-in-update
+    name: LLM Call in Update Loop
+    severity: critical
+    type: regex
+    pattern: 'void Update\\(\\)[^}]*\\.Chat\\(|void FixedUpdate\\(\\)[^}]*\\.Chat\\('
+    message: "LLM call in Update loop. Will flood LLM with requests and freeze game."
+    fix_action: "Move LLM calls to event handlers or throttled methods"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-model-absolute-path
+    name: Absolute Model Path
+    severity: high
+    type: regex
+    pattern: 'SetModel\\s*\\(\\s*["\'][A-Za-z]:\\\\|SetModel\\s*\\(\\s*["\']/'
+    message: "Absolute path for model. Won't work in builds - use StreamingAssets."
+    fix_action: "Place model in StreamingAssets and use Application.streamingAssetsPath"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-llm-in-start-sync
+    name: Blocking LLM Load in Start
+    severity: high
+    type: regex
+    pattern: 'void Start\\(\\)[^}]*llm\\.Load\\(\\)|void Awake\\(\\)[^}]*llm\\.Load\\(\\)'
+    message: "LLM loading in Start/Awake without async. Game will freeze during load."
+    fix_action: "Use IEnumerator Start() with yield return llm.Load() and loading UI"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-no-platform-check
+    name: No Platform-Specific Configuration
+    severity: high
+    type: regex
+    pattern: 'SetModel\\s*\\('
+    negative_pattern: '#if UNITY_|UNITY_ANDROID|UNITY_IOS|UNITY_STANDALONE|platform|Platform'
+    message: "Model configuration without platform checks. Different platforms need different models."
+    fix_action: "Add #if UNITY_ANDROID, UNITY_IOS, etc. for platform-specific model selection"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-no-llm-fallback
+    name: No Fallback for LLM Failure
+    severity: high
+    type: regex
+    pattern: 'await.*\\.Chat\\('
+    negative_pattern: 'try|catch|fallback|Fallback|timeout|Timeout'
+    message: "LLM call without error handling. What happens when LLM fails?"
+    fix_action: "Add try/catch with fallback dialogue for LLM failures"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-multiple-llm-instances
+    name: Multiple LLM Instances
+    severity: warning
+    type: regex
+    pattern: 'public LLM llm|\\[SerializeField\\].*LLM llm|new LLM\\(\\)'
+    message: "Each LLM instance loads model separately. Use singleton pattern for shared LLM."
+    fix_action: "Create LLMManager singleton and share one LLM across NPCs"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-no-loading-ui
+    name: Missing Loading UI for LLM
+    severity: warning
+    type: regex
+    pattern: 'llm\\.Load\\('
+    negative_pattern: 'loading|Loading|progress|Progress|indicator|Indicator|screen|Screen'
+    message: "LLM loading without visible feedback. Users will think app is frozen."
+    fix_action: "Add loading screen or progress indicator during model load"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-large-model-mobile
+    name: Large Model on Mobile Platform
+    severity: warning
+    type: regex
+    pattern: '(?:7[bB]|8[bB]|13[bB]|14[bB]).*\\.gguf'
+    message: "Large model (7B+) detected. May be too large for mobile deployment."
+    fix_action: "Use 1-3B models for mobile. Add platform-specific model selection."
+    applies_to:
+      - "*.cs"
+
+  - id: unity-webgl-local-llm
+    name: Local LLM in WebGL Build
+    severity: warning
+    type: regex
+    pattern: 'UNITY_WEBGL.*LLM|LLM.*UNITY_WEBGL'
+    negative_pattern: 'disabled|Disabled|fallback|Fallback|cloud|Cloud|API'
+    message: "LLM reference in WebGL code. Local LLM doesn't work in WebGL."
+    fix_action: "Disable local LLM and use cloud API fallback for WebGL"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-no-destroy-cleanup
+    name: No LLM Cleanup on Destroy
+    severity: warning
+    type: regex
+    pattern: 'LLM llm|LLMCharacter character'
+    negative_pattern: 'OnDestroy|OnDisable|Unload|Dispose|cleanup|Cleanup'
+    message: "LLM components without cleanup. May cause memory leaks between scenes."
+    fix_action: "Add OnDestroy to unload models and cancel pending operations"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-streaming-not-used
+    name: Not Using Streaming Response
+    severity: info
+    type: regex
+    pattern: 'await.*\\.Chat\\([^,)]*\\)'
+    negative_pattern: 'callback|Callback|stream|Stream|partial|Partial'
+    message: "Chat without streaming. Consider streaming for better UX in dialogue."
+    fix_action: "Use Chat(input, callback) to show text as it generates"
+    applies_to:
+      - "*.cs"
+
+  - id: unity-hard-coded-context-size
+    name: Hard-coded Context Size
+    severity: info
+    type: regex
+    pattern: 'contextSize\\s*=\\s*\\d{4}'
+    message: "Hard-coded context size. Consider platform-specific values."
+    fix_action: "Use smaller context (1024-2048) on mobile, larger (4096) on desktop"
+    applies_to:
+      - "*.cs"

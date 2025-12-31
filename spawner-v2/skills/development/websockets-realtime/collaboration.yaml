@@ -1,0 +1,465 @@
+# Collaboration - WebSockets & Real-time
+# How this skill works with other skills
+
+version: 1.0.0
+skill_id: websockets-realtime
+
+prerequisites:
+  required: []
+
+  recommended:
+    - skill: backend
+      reason: "Server-side WebSocket handling"
+      what_to_know:
+        - "Node.js event loop"
+        - "Express/Fastify server"
+        - "Authentication patterns"
+
+    - skill: react-patterns
+      reason: "Client-side integration"
+      what_to_know:
+        - "React hooks"
+        - "State management"
+        - "Effect cleanup"
+
+  knowledge:
+    - "HTTP protocol"
+    - "TCP/IP basics"
+    - "Async JavaScript"
+
+delegation_triggers:
+  - trigger: "user needs caching infrastructure"
+    delegate_to: redis-specialist
+    context: "Redis pub/sub for scaling"
+
+  - trigger: "user needs database persistence"
+    delegate_to: postgres-wizard
+    context: "Storing messages, events"
+
+  - trigger: "user needs Kubernetes setup"
+    delegate_to: kubernetes
+    context: "Scaling WebSocket servers"
+
+  - trigger: "user needs load balancing"
+    delegate_to: devops
+    context: "Sticky sessions, ingress"
+
+  - trigger: "user needs frontend state"
+    delegate_to: react-patterns
+    context: "Client-side real-time state"
+
+receives_context_from:
+  - skill: backend
+    receives:
+      - "Authentication mechanism"
+      - "Server framework (Express, Fastify)"
+      - "Existing API structure"
+
+  - skill: react-patterns
+    receives:
+      - "Component structure"
+      - "State management (Redux, Zustand)"
+      - "UI requirements"
+
+  - skill: redis-specialist
+    receives:
+      - "Redis connection details"
+      - "Pub/sub channel structure"
+      - "Cache patterns in use"
+
+provides_context_to:
+  - skill: redis-specialist
+    provides:
+      - "Pub/sub requirements"
+      - "Channel naming conventions"
+      - "Message payload structure"
+
+  - skill: devops
+    provides:
+      - "WebSocket server requirements"
+      - "Sticky session needs"
+      - "Health check endpoints"
+
+  - skill: testing-strategies
+    provides:
+      - "WebSocket test patterns"
+      - "Mock server setup"
+      - "E2E testing considerations"
+
+escalation_paths:
+  - situation: "Scaling to many connections"
+    escalate_to: kubernetes
+    context: "Horizontal scaling, resource limits"
+
+  - situation: "Cross-server communication"
+    escalate_to: redis-specialist
+    context: "Redis pub/sub setup"
+
+  - situation: "Load balancing WebSockets"
+    escalate_to: devops
+    context: "Sticky sessions, ingress config"
+
+workflow_integration:
+  typical_sequence:
+    1:
+      step: "Design real-time requirements"
+      skills: [websockets-realtime]
+      output: "Protocol design, message types"
+
+    2:
+      step: "Set up server infrastructure"
+      skills: [backend, websockets-realtime]
+      output: "WebSocket server with auth"
+
+    3:
+      step: "Add pub/sub for scaling"
+      skills: [redis-specialist]
+      output: "Redis channels configured"
+
+    4:
+      step: "Build client hooks"
+      skills: [react-patterns, websockets-realtime]
+      output: "useWebSocket, connection management"
+
+    5:
+      step: "Implement features"
+      skills: [websockets-realtime]
+      output: "Presence, typing, notifications"
+
+    6:
+      step: "Configure deployment"
+      skills: [kubernetes, devops]
+      output: "Scaled WebSocket infrastructure"
+
+  decision_points:
+    - question: "WebSocket or SSE?"
+      guidance: |
+        WebSocket when:
+        - Bidirectional communication
+        - Low latency required
+        - Chat, games, collaboration
+
+        SSE when:
+        - Server-to-client only
+        - Notifications, feeds
+        - Simpler implementation
+
+    - question: "Socket.io or native WebSocket?"
+      guidance: |
+        Socket.io when:
+        - Need fallback to polling
+        - Want rooms/namespaces built-in
+        - Prefer higher-level API
+        - Need auto-reconnection
+
+        Native WebSocket when:
+        - Want minimal overhead
+        - Control over protocol
+        - HTTP/2 with SSE as fallback
+        - Modern browser only
+
+    - question: "Horizontal scaling approach?"
+      guidance: |
+        Sticky sessions when:
+        - Simpler setup
+        - State in WebSocket server
+        - Lower latency
+
+        Redis pub/sub when:
+        - No sticky sessions possible
+        - Need to reach any user from any server
+        - Shared state required
+
+collaboration_patterns:
+  with_nextjs:
+    when: "Real-time in Next.js app"
+    approach: |
+      Next.js + WebSocket:
+
+      ## Option 1: Separate WebSocket server
+
+      // Recommended for production
+      // WebSocket runs on different port/service
+
+      // pages/api/ws.ts - For dev proxy
+      export default function handler(req, res) {
+        res.redirect(307, process.env.WS_URL);
+      }
+
+
+      ## Option 2: SSE via API routes
+
+      // app/api/events/route.ts
+      export async function GET() {
+        const stream = new ReadableStream({
+          start(controller) {
+            // Stream events...
+          }
+        });
+
+        return new Response(stream, {
+          headers: { 'Content-Type': 'text/event-stream' }
+        });
+      }
+
+
+      ## Client hook
+
+      // hooks/useRealtime.ts
+      export function useRealtime(channel: string) {
+        const [data, setData] = useState(null);
+
+        useEffect(() => {
+          const ws = new WebSocket(
+            `${process.env.NEXT_PUBLIC_WS_URL}?channel=${channel}`
+          );
+
+          ws.onmessage = (e) => setData(JSON.parse(e.data));
+
+          return () => ws.close(1000);
+        }, [channel]);
+
+        return data;
+      }
+
+  with_socket_io:
+    when: "Using Socket.io"
+    approach: |
+      Socket.io Setup:
+
+      ## Server
+
+      import { Server } from 'socket.io';
+      import { createAdapter } from '@socket.io/redis-adapter';
+      import { createClient } from 'redis';
+
+      const io = new Server(server, {
+        cors: {
+          origin: process.env.CLIENT_URL,
+          credentials: true,
+        },
+      });
+
+      // Redis adapter for scaling
+      const pubClient = createClient({ url: process.env.REDIS_URL });
+      const subClient = pubClient.duplicate();
+
+      await Promise.all([pubClient.connect(), subClient.connect()]);
+      io.adapter(createAdapter(pubClient, subClient));
+
+      // Authentication middleware
+      io.use((socket, next) => {
+        const token = socket.handshake.auth.token;
+        try {
+          const user = verifyToken(token);
+          socket.data.user = user;
+          next();
+        } catch (e) {
+          next(new Error('Unauthorized'));
+        }
+      });
+
+      // Handle events
+      io.on('connection', (socket) => {
+        const userId = socket.data.user.id;
+
+        socket.join(`user:${userId}`);
+
+        socket.on('join-room', (roomId) => {
+          socket.join(`room:${roomId}`);
+        });
+
+        socket.on('message', (data) => {
+          io.to(`room:${data.roomId}`).emit('message', {
+            ...data,
+            from: userId,
+          });
+        });
+      });
+
+
+      ## Client
+
+      import { io } from 'socket.io-client';
+
+      const socket = io(process.env.NEXT_PUBLIC_API_URL, {
+        auth: { token: getToken() },
+        autoConnect: false,
+      });
+
+      // Connect when ready
+      socket.connect();
+
+      // Handle events
+      socket.on('message', (data) => {
+        console.log('Received:', data);
+      });
+
+  with_redis:
+    when: "Scaling with Redis pub/sub"
+    approach: |
+      Redis Pub/Sub for WebSockets:
+
+      import Redis from 'ioredis';
+
+      // Separate connections for pub and sub
+      const pub = new Redis(process.env.REDIS_URL);
+      const sub = new Redis(process.env.REDIS_URL);
+
+      // Channel patterns
+      const CHANNELS = {
+        broadcast: 'ws:broadcast',
+        room: (id: string) => `ws:room:${id}`,
+        user: (id: string) => `ws:user:${id}`,
+      };
+
+      // Subscribe with pattern
+      sub.psubscribe('ws:*');
+
+      sub.on('pmessage', (pattern, channel, message) => {
+        const data = JSON.parse(message);
+
+        if (channel === CHANNELS.broadcast) {
+          broadcastToAllLocal(data);
+        } else if (channel.startsWith('ws:room:')) {
+          const roomId = channel.split(':')[2];
+          broadcastToLocalRoom(roomId, data);
+        } else if (channel.startsWith('ws:user:')) {
+          const userId = channel.split(':')[2];
+          sendToLocalUser(userId, data);
+        }
+      });
+
+      // Publish from anywhere
+      export function broadcastToRoom(roomId: string, data: object) {
+        pub.publish(CHANNELS.room(roomId), JSON.stringify(data));
+      }
+
+      export function sendToUser(userId: string, data: object) {
+        pub.publish(CHANNELS.user(userId), JSON.stringify(data));
+      }
+
+platform_integration:
+  vercel:
+    setup: |
+      # Vercel + Real-time
+
+      Vercel serverless functions have 10-second timeout,
+      not suitable for persistent WebSocket connections.
+
+      ## Options:
+
+      1. Separate WebSocket server (Railway, Render, etc.)
+      2. Use Vercel Edge Functions with SSE (limited)
+      3. Use Pusher/Ably/Liveblocks as managed service
+
+      // With Pusher
+      import Pusher from 'pusher';
+
+      const pusher = new Pusher({
+        appId: process.env.PUSHER_APP_ID,
+        key: process.env.PUSHER_KEY,
+        secret: process.env.PUSHER_SECRET,
+        cluster: process.env.PUSHER_CLUSTER,
+      });
+
+      // API route
+      export async function POST(req) {
+        await pusher.trigger('channel', 'event', data);
+        return Response.json({ ok: true });
+      }
+    considerations:
+      - "Vercel doesn't support WebSocket"
+      - "Use external service or separate server"
+      - "SSE works on Edge Functions"
+
+  kubernetes:
+    setup: |
+      # Kubernetes WebSocket Setup
+
+      ## Ingress with sticky sessions
+
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        annotations:
+          nginx.ingress.kubernetes.io/affinity: cookie
+          nginx.ingress.kubernetes.io/session-cookie-name: ws-sticky
+          nginx.ingress.kubernetes.io/session-cookie-expires: "172800"
+          nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+          nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+      spec:
+        rules:
+          - host: ws.example.com
+            http:
+              paths:
+                - path: /
+                  backend:
+                    service:
+                      name: websocket-service
+                      port:
+                        number: 3001
+
+      ## WebSocket deployment
+
+      apiVersion: apps/v1
+      kind: Deployment
+      spec:
+        template:
+          spec:
+            containers:
+              - name: ws-server
+                resources:
+                  limits:
+                    memory: "512Mi"
+                  requests:
+                    memory: "256Mi"
+                livenessProbe:
+                  httpGet:
+                    path: /health
+                    port: 3001
+                  initialDelaySeconds: 5
+                readinessProbe:
+                  httpGet:
+                    path: /ready
+                    port: 3001
+    considerations:
+      - "Configure proper timeouts"
+      - "Use sticky sessions or Redis"
+      - "Set appropriate resource limits"
+
+ecosystem:
+  primary_libraries:
+    - "ws (Node.js WebSocket)"
+    - "Socket.io"
+    - "@socket.io/redis-adapter"
+    - "EventSource API"
+
+  managed_services:
+    - name: "Pusher"
+      use_when: "Need managed WebSocket at scale"
+    - name: "Ably"
+      use_when: "Enterprise real-time with SLAs"
+    - name: "Liveblocks"
+      use_when: "Collaborative features (Figma-like)"
+    - name: "Supabase Realtime"
+      use_when: "Already using Supabase"
+    - name: "PartyKit"
+      use_when: "Edge-first real-time"
+
+  testing:
+    - name: "ws"
+      use_when: "Unit testing WebSocket servers"
+    - name: "mock-socket"
+      use_when: "Mocking WebSocket in client tests"
+    - name: "Playwright"
+      use_when: "E2E testing real-time features"
+
+  alternatives:
+    - name: "Primus"
+      use_when: "Need transport abstraction"
+      avoid_when: "Simple use case"
+
+    - name: "µWebSockets.js"
+      use_when: "Need extreme performance"
+      avoid_when: "Standard performance is fine"

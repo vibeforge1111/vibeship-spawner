@@ -1,0 +1,306 @@
+id: conversation-memory
+name: Conversation Memory
+version: 1.0.0
+layer: 2
+description: Persistent memory systems for LLM conversations including short-term, long-term, and entity-based memory
+
+owns:
+  - short-term-memory
+  - long-term-memory
+  - entity-memory
+  - memory-persistence
+  - memory-retrieval
+  - memory-consolidation
+
+pairs_with:
+  - context-window-management
+  - rag-implementation
+  - prompt-caching
+  - llm-npc-dialogue
+
+ecosystem:
+  primary_tools:
+    - name: Mem0
+      description: Memory layer for AI applications
+      url: https://mem0.ai
+    - name: LangChain Memory
+      description: Memory utilities in LangChain
+      url: https://python.langchain.com/docs/modules/memory
+    - name: Redis
+      description: In-memory data store for session memory
+      url: https://redis.io
+
+prerequisites:
+  knowledge:
+    - LLM conversation patterns
+    - Database basics
+    - Key-value stores
+  skills_recommended:
+    - context-window-management
+    - rag-implementation
+
+limits:
+  does_not_cover:
+    - Knowledge graph construction
+    - Semantic search implementation
+    - Database administration
+  boundaries:
+    - Focus is memory patterns for LLMs
+    - Covers storage and retrieval strategies
+
+tags:
+  - memory
+  - conversation
+  - persistence
+  - context
+  - llm
+
+triggers:
+  - conversation memory
+  - remember
+  - memory persistence
+  - long-term memory
+  - chat history
+
+identity: |
+  You're a memory systems specialist who has built AI assistants that remember
+  users across months of interactions. You've implemented systems that know when
+  to remember, when to forget, and how to surface relevant memories.
+
+  You understand that memory is not just storage—it's about retrieval, relevance,
+  and context. You've seen systems that remember everything (and overwhelm context)
+  and systems that forget too much (frustrating users).
+
+  Your core principles:
+  1. Memory types differ—short-term, long-term, entity require different handling
+  2. Retrieval is key—stored memories are useless if not surfaced
+  3. Consolidation matters—not everything should be remembered
+  4. Privacy by design—users should control their memory
+  5. Graceful degradation—work without memory, better with it
+
+patterns:
+  - name: Tiered Memory System
+    description: Different memory tiers for different purposes
+    when: Building any conversational AI
+    example: |
+      interface MemorySystem {
+          // Buffer: Current conversation (in context)
+          buffer: ConversationBuffer;
+
+          // Short-term: Recent interactions (session)
+          shortTerm: ShortTermMemory;
+
+          // Long-term: Persistent across sessions
+          longTerm: LongTermMemory;
+
+          // Entity: Facts about people, places, things
+          entity: EntityMemory;
+      }
+
+      class TieredMemory implements MemorySystem {
+          async addMessage(message: Message): Promise<void> {
+              // Always add to buffer
+              this.buffer.add(message);
+
+              // Extract entities
+              const entities = await extractEntities(message);
+              for (const entity of entities) {
+                  await this.entity.upsert(entity);
+              }
+
+              // Check for memorable content
+              if (await isMemoryWorthy(message)) {
+                  await this.shortTerm.add({
+                      content: message.content,
+                      timestamp: Date.now(),
+                      importance: await scoreImportance(message)
+                  });
+              }
+          }
+
+          async consolidate(): Promise<void> {
+              // Move important short-term to long-term
+              const memories = await this.shortTerm.getOld(24 * 60 * 60 * 1000);
+              for (const memory of memories) {
+                  if (memory.importance > 0.7 || memory.referenced > 2) {
+                      await this.longTerm.add(memory);
+                  }
+                  await this.shortTerm.remove(memory.id);
+              }
+          }
+
+          async buildContext(query: string): Promise<string> {
+              const parts: string[] = [];
+
+              // Relevant long-term memories
+              const longTermRelevant = await this.longTerm.search(query, 3);
+              if (longTermRelevant.length) {
+                  parts.push('## Relevant Memories\n' +
+                      longTermRelevant.map(m => `- ${m.content}`).join('\n'));
+              }
+
+              // Relevant entities
+              const entities = await this.entity.getRelevant(query);
+              if (entities.length) {
+                  parts.push('## Known Entities\n' +
+                      entities.map(e => `- ${e.name}: ${e.facts.join(', ')}`).join('\n'));
+              }
+
+              // Recent conversation
+              const recent = this.buffer.getRecent(10);
+              parts.push('## Recent Conversation\n' + formatMessages(recent));
+
+              return parts.join('\n\n');
+          }
+      }
+
+  - name: Entity Memory
+    description: Store and update facts about entities
+    when: Need to remember details about people, places, things
+    example: |
+      interface Entity {
+          id: string;
+          name: string;
+          type: 'person' | 'place' | 'thing' | 'concept';
+          facts: Fact[];
+          lastMentioned: number;
+          mentionCount: number;
+      }
+
+      interface Fact {
+          content: string;
+          confidence: number;
+          source: string;  // Which message this came from
+          timestamp: number;
+      }
+
+      class EntityMemory {
+          async extractAndStore(message: Message): Promise<void> {
+              // Use LLM to extract entities and facts
+              const extraction = await llm.complete(`
+                  Extract entities and facts from this message.
+                  Return JSON: { "entities": [
+                      { "name": "...", "type": "...", "facts": ["..."] }
+                  ]}
+
+                  Message: "${message.content}"
+              `);
+
+              const { entities } = JSON.parse(extraction);
+              for (const entity of entities) {
+                  await this.upsert(entity, message.id);
+              }
+          }
+
+          async upsert(entity: ExtractedEntity, sourceId: string): Promise<void> {
+              const existing = await this.store.get(entity.name.toLowerCase());
+
+              if (existing) {
+                  // Merge facts, avoiding duplicates
+                  for (const fact of entity.facts) {
+                      if (!this.hasSimilarFact(existing.facts, fact)) {
+                          existing.facts.push({
+                              content: fact,
+                              confidence: 0.9,
+                              source: sourceId,
+                              timestamp: Date.now()
+                          });
+                      }
+                  }
+                  existing.lastMentioned = Date.now();
+                  existing.mentionCount++;
+                  await this.store.set(existing.id, existing);
+              } else {
+                  // Create new entity
+                  await this.store.set(entity.name.toLowerCase(), {
+                      id: generateId(),
+                      name: entity.name,
+                      type: entity.type,
+                      facts: entity.facts.map(f => ({
+                          content: f,
+                          confidence: 0.9,
+                          source: sourceId,
+                          timestamp: Date.now()
+                      })),
+                      lastMentioned: Date.now(),
+                      mentionCount: 1
+                  });
+              }
+          }
+      }
+
+  - name: Memory-Aware Prompting
+    description: Include relevant memories in prompts
+    when: Making LLM calls with memory context
+    example: |
+      async function promptWithMemory(
+          query: string,
+          memory: MemorySystem,
+          systemPrompt: string
+      ): Promise<string> {
+          // Retrieve relevant memories
+          const relevantMemories = await memory.longTerm.search(query, 5);
+          const entities = await memory.entity.getRelevant(query);
+          const recentContext = memory.buffer.getRecent(5);
+
+          // Build memory-augmented prompt
+          const prompt = `
+      ${systemPrompt}
+
+      ## User Context
+      ${entities.length ? `Known about user:\n${entities.map(e =>
+          `- ${e.name}: ${e.facts.map(f => f.content).join('; ')}`
+      ).join('\n')}` : ''}
+
+      ${relevantMemories.length ? `Relevant past interactions:\n${relevantMemories.map(m =>
+          `- [${formatDate(m.timestamp)}] ${m.content}`
+      ).join('\n')}` : ''}
+
+      ## Recent Conversation
+      ${formatMessages(recentContext)}
+
+      ## Current Query
+      ${query}
+          `.trim();
+
+          const response = await llm.complete(prompt);
+
+          // Extract any new memories from response
+          await memory.addMessage({ role: 'assistant', content: response });
+
+          return response;
+      }
+
+anti_patterns:
+  - name: Remember Everything
+    description: Storing every message as a memory
+    why: Overwhelms context, increases costs, reduces relevance
+    instead: Filter for memorable content based on importance scoring.
+
+  - name: No Memory Retrieval
+    description: Storing memories but not surfacing them
+    why: Stored memories useless if never retrieved
+    instead: Search and include relevant memories in every prompt.
+
+  - name: Single Memory Store
+    description: One flat list for all memories
+    why: Can't distinguish importance, type, or recency
+    instead: Tiered memory with different stores for different purposes.
+
+  - name: No Consolidation
+    description: Never processing short-term into long-term
+    why: Short-term overflows, important memories lost
+    instead: Regular consolidation based on importance and age.
+
+handoffs:
+  - trigger: context window or tokens
+    to: context-window-management
+    context: Need context optimization
+
+  - trigger: rag or retrieval
+    to: rag-implementation
+    context: Need retrieval system
+
+  - trigger: caching
+    to: prompt-caching
+    context: Need caching strategies

@@ -1,0 +1,537 @@
+# Sharp Edges - WebSockets & Real-time
+# The gotchas that cause connection issues and scaling problems
+
+version: 1.0.0
+skill_id: websockets-realtime
+
+sharp_edges:
+  - id: no-reconnection
+    summary: Client doesn't handle disconnections
+    severity: critical
+    situation: |
+      User loses WiFi for 5 seconds. WebSocket closes. Page shows
+      "disconnected" forever. User has to refresh. Happens constantly
+      on mobile. Users complain about "unreliable" notifications.
+    why: |
+      Networks are unreliable. Connections drop for many reasons: WiFi
+      switches, mobile network changes, server restarts, load balancer
+      timeouts. Without reconnection logic, any drop is permanent.
+    solution: |
+      # IMPLEMENT ROBUST RECONNECTION
+
+      class ReconnectingWebSocket {
+        private ws: WebSocket | null = null;
+        private reconnectAttempts = 0;
+        private maxReconnectAttempts = 10;
+        private baseDelay = 1000;
+
+        connect() {
+          this.ws = new WebSocket(this.url);
+
+          this.ws.onopen = () => {
+            this.reconnectAttempts = 0;  // Reset on success
+            this.onConnect();
+          };
+
+          this.ws.onclose = (event) => {
+            // 1000 = normal close, don't reconnect
+            if (event.code === 1000) return;
+
+            this.scheduleReconnect();
+          };
+        }
+
+        private scheduleReconnect() {
+          if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            this.onMaxRetriesReached();
+            return;
+          }
+
+          // Exponential backoff with jitter
+          const delay = Math.min(
+            this.baseDelay * Math.pow(2, this.reconnectAttempts),
+            30000  // Max 30 seconds
+          );
+          const jitter = delay * 0.2 * Math.random();
+
+          setTimeout(() => {
+            this.reconnectAttempts++;
+            this.connect();
+          }, delay + jitter);
+        }
+      }
+
+
+      // Also handle page visibility
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          // Reconnect when user returns to tab
+          if (!ws || ws.readyState !== WebSocket.OPEN) {
+            connect();
+          }
+        }
+      });
+
+
+      // And online/offline events
+      window.addEventListener('online', () => {
+        connect();
+      });
+    symptoms:
+      - Users must refresh to reconnect
+      - "Unreliable" on mobile
+      - Silent failures
+    detection_pattern: 'new WebSocket\\([^)]+\\)(?!.*reconnect)'
+
+  - id: no-heartbeat
+    summary: Connections timeout silently
+    severity: high
+    situation: |
+      Users stop receiving updates after being idle. No disconnect event
+      fires. Server thinks they're still connected. Only discovered when
+      user tries to send a message and it fails.
+    why: |
+      Many proxies, load balancers, and NATs close idle connections after
+      30-60 seconds. Without heartbeat/ping, you don't know the connection
+      is dead until you try to use it. Server-side memory leaks from
+      "connected" dead clients.
+    solution: |
+      # IMPLEMENT HEARTBEAT
+
+      ## Server-side ping (preferred)
+
+      // ws library does this automatically
+      const wss = new WebSocketServer({ server });
+
+      // But verify clients respond
+      const clients = new Map();
+
+      function heartbeat() {
+        this.isAlive = true;
+      }
+
+      wss.on('connection', (ws) => {
+        ws.isAlive = true;
+        ws.on('pong', heartbeat);  // Client responds to ping
+      });
+
+      // Check every 30 seconds
+      setInterval(() => {
+        wss.clients.forEach((ws) => {
+          if (ws.isAlive === false) {
+            // Client didn't respond to last ping
+            return ws.terminate();
+          }
+
+          ws.isAlive = false;
+          ws.ping();  // Send ping, expect pong
+        });
+      }, 30000);
+
+
+      ## Client-side heartbeat (for SSE or custom protocols)
+
+      function setupHeartbeat(ws) {
+        let lastPong = Date.now();
+
+        // Send ping every 25 seconds
+        const pingInterval = setInterval(() => {
+          if (Date.now() - lastPong > 60000) {
+            // No pong for 60s, connection dead
+            ws.close();
+            clearInterval(pingInterval);
+            return;
+          }
+
+          ws.send(JSON.stringify({ type: 'ping' }));
+        }, 25000);
+
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          if (data.type === 'pong') {
+            lastPong = Date.now();
+          }
+        };
+
+        ws.onclose = () => clearInterval(pingInterval);
+      }
+    symptoms:
+      - Silent connection drops
+      - Updates stop after idle period
+      - Server memory grows (dead connections)
+    detection_pattern: null
+
+  - id: memory-leak-connections
+    summary: Not cleaning up closed connections
+    severity: high
+    situation: |
+      Server memory usage grows over time. Eventually crashes or slows
+      down. Clients in connection map never removed. Timers for
+      disconnected clients keep running.
+    why: |
+      Every WebSocket connection has associated state: client object,
+      timers, subscriptions, event listeners. If not cleaned up on
+      disconnect, memory accumulates. With thousands of connections,
+      this adds up fast.
+    solution: |
+      # CLEAN UP EVERYTHING ON DISCONNECT
+
+      wss.on('connection', (ws, req) => {
+        const userId = authenticate(req);
+        const subscriptions: Subscription[] = [];
+        const timers: NodeJS.Timeout[] = [];
+
+        // Track client
+        clients.set(userId, ws);
+
+        // Setup subscriptions
+        const sub = redis.subscribe(`user:${userId}`);
+        subscriptions.push(sub);
+
+        // Setup timers
+        const heartbeat = setInterval(() => {
+          ws.ping();
+        }, 30000);
+        timers.push(heartbeat);
+
+        // CRITICAL: Clean up on close
+        ws.on('close', () => {
+          // Remove from clients
+          clients.delete(userId);
+
+          // Unsubscribe from all
+          subscriptions.forEach(sub => sub.unsubscribe());
+
+          // Clear all timers
+          timers.forEach(timer => clearInterval(timer));
+
+          // Update presence
+          redis.zrem('online', userId);
+
+          console.log(`Cleaned up ${userId}`);
+        });
+
+        // Also handle errors
+        ws.on('error', (err) => {
+          console.error(`WebSocket error for ${userId}:`, err);
+          ws.close();  // Will trigger close handler
+        });
+      });
+
+
+      // Monitor for leaks
+      setInterval(() => {
+        console.log(`Active connections: ${wss.clients.size}`);
+        console.log(`Memory: ${process.memoryUsage().heapUsed / 1024 / 1024}MB`);
+      }, 60000);
+    symptoms:
+      - Server memory grows over time
+      - "Ghost" clients in maps
+      - Server crashes after hours/days
+    detection_pattern: null
+
+  - id: scaling-without-pubsub
+    summary: Using in-memory state with multiple servers
+    severity: high
+    situation: |
+      Works on one server. Deploy second server behind load balancer.
+      User A connects to server 1, user B to server 2. User A sends
+      message to user B. Nothing happens. Users randomly can/can't
+      communicate.
+    why: |
+      In-memory Maps only exist on one server. When you scale horizontally,
+      each server has its own clients Map. A message broadcast on server 1
+      never reaches clients on server 2.
+    solution: |
+      # USE REDIS PUB/SUB FOR CROSS-SERVER
+
+      import Redis from 'ioredis';
+
+      // Each server has its own pub/sub connections
+      const pub = new Redis(process.env.REDIS_URL);
+      const sub = new Redis(process.env.REDIS_URL);
+
+      // Local clients on THIS server only
+      const localClients = new Map<string, WebSocket>();
+
+      // Subscribe to channels
+      sub.subscribe('room:*', 'user:*');
+
+      sub.on('message', (channel, message) => {
+        if (channel.startsWith('room:')) {
+          // Broadcast to room members on this server
+          const roomId = channel.split(':')[1];
+          broadcastToLocalRoom(roomId, message);
+        } else if (channel.startsWith('user:')) {
+          // Send to specific user if on this server
+          const userId = channel.split(':')[1];
+          const client = localClients.get(userId);
+          client?.send(message);
+        }
+      });
+
+      // When you want to broadcast
+      function sendToRoom(roomId: string, message: object) {
+        // Publishes to ALL servers
+        pub.publish(`room:${roomId}`, JSON.stringify(message));
+      }
+
+      function sendToUser(userId: string, message: object) {
+        // User might be on any server
+        pub.publish(`user:${userId}`, JSON.stringify(message));
+      }
+
+
+      // Also use sticky sessions or store user -> server mapping
+      // So you know which server to route to
+    symptoms:
+      - Works on dev, fails on prod
+      - Random users can't communicate
+      - Messages sometimes work
+    detection_pattern: null
+
+  - id: auth-after-upgrade
+    summary: Authenticating after WebSocket is established
+    severity: high
+    situation: |
+      WebSocket connects, then sends auth token as first message.
+      Attacker connects thousands of unauthenticated WebSockets.
+      Server runs out of memory/connections before validating any.
+    why: |
+      Once WebSocket upgrade completes, server resources are allocated.
+      If you wait for auth message, anyone can consume resources. You
+      can't rate limit by user before knowing who they are.
+    solution: |
+      # AUTHENTICATE BEFORE UPGRADE
+
+      ## Option 1: Token in URL (common but visible in logs)
+
+      // Client
+      const token = await getAuthToken();
+      const ws = new WebSocket(`wss://api.example.com/ws?token=${token}`);
+
+      // Server
+      wss.on('connection', (ws, req) => {
+        const url = new URL(req.url, 'http://localhost');
+        const token = url.searchParams.get('token');
+
+        try {
+          const user = verifyToken(token);
+          ws.userId = user.id;
+        } catch (e) {
+          ws.close(4001, 'Unauthorized');
+        }
+      });
+
+
+      ## Option 2: Cookie (automatic, secure)
+
+      // Client (browser sends cookies automatically)
+      const ws = new WebSocket('wss://api.example.com/ws');
+
+      // Server
+      wss.on('connection', (ws, req) => {
+        const cookies = parseCookies(req.headers.cookie);
+        const sessionId = cookies['session'];
+
+        const user = await getSessionUser(sessionId);
+        if (!user) {
+          ws.close(4001, 'Unauthorized');
+          return;
+        }
+
+        ws.userId = user.id;
+      });
+
+
+      ## Option 3: Ticket system (most secure)
+
+      // 1. Client gets ticket from auth endpoint
+      const { ticket } = await fetch('/api/ws-ticket', {
+        headers: { Authorization: `Bearer ${token}` }
+      }).then(r => r.json());
+
+      // 2. Ticket is one-time use, short-lived
+      await redis.setex(`ws-ticket:${ticket}`, 30, userId);
+
+      // 3. Connect with ticket
+      const ws = new WebSocket(`wss://api.example.com/ws?ticket=${ticket}`);
+
+      // 4. Server validates and consumes ticket
+      wss.on('connection', async (ws, req) => {
+        const ticket = new URL(req.url).searchParams.get('ticket');
+        const userId = await redis.get(`ws-ticket:${ticket}`);
+
+        if (!userId) {
+          ws.close(4001, 'Invalid ticket');
+          return;
+        }
+
+        // Consume ticket (one-time use)
+        await redis.del(`ws-ticket:${ticket}`);
+        ws.userId = userId;
+      });
+    symptoms:
+      - DoS vulnerability
+      - Resources exhausted by anon connections
+      - Can't rate limit properly
+    detection_pattern: 'ws\\.send.*token|ws\\.send.*auth'
+
+  - id: sse-over-http1
+    summary: SSE over HTTP/1.1 has connection limits
+    severity: medium
+    situation: |
+      User opens 6 browser tabs. 7th tab can't connect to SSE. Browser
+      blocks because HTTP/1.1 limits 6 connections per domain. Real-time
+      features stop working in some tabs.
+    why: |
+      HTTP/1.1 browsers limit 6 persistent connections per origin. Each
+      SSE connection uses one slot. With multiple tabs or components
+      using SSE, you hit the limit fast. HTTP/2 multiplexes, but not
+      all servers/proxies support it.
+    solution: |
+      # SOLUTIONS FOR SSE CONNECTION LIMITS
+
+      ## Option 1: Ensure HTTP/2 (recommended)
+
+      # Nginx config
+      server {
+        listen 443 ssl http2;  # Enable HTTP/2
+        # ...
+      }
+
+      # HTTP/2 multiplexes all requests over one connection
+      # No 6-connection limit
+
+
+      ## Option 2: Single shared SSE connection
+
+      // Use SharedWorker or BroadcastChannel
+      // One tab maintains SSE, broadcasts to others
+
+      // worker.js
+      let eventSource = null;
+      const ports = [];
+
+      self.onconnect = (e) => {
+        const port = e.ports[0];
+        ports.push(port);
+
+        // Only first connection creates EventSource
+        if (!eventSource) {
+          eventSource = new EventSource('/events');
+          eventSource.onmessage = (event) => {
+            ports.forEach(p => p.postMessage(event.data));
+          };
+        }
+
+        port.onmessage = () => {
+          // Handle messages from tabs
+        };
+      };
+
+
+      ## Option 3: Use WebSocket instead
+
+      // WebSocket doesn't have the same limit
+      // Single connection, bidirectional
+      // Better for multiple real-time features
+
+
+      ## Option 4: Domain sharding (hack)
+
+      // Distribute SSE across subdomains
+      // sse1.example.com, sse2.example.com
+      // 6 connections each = 12 total
+      // But adds complexity and latency
+    symptoms:
+      - Some tabs don't receive updates
+      - Works with 1-2 tabs, fails with more
+      - HTTP/1.1 in production
+    detection_pattern: 'new EventSource'
+
+  - id: large-payload-broadcast
+    summary: Broadcasting large messages to many clients
+    severity: medium
+    situation: |
+      You broadcast a 100KB JSON object to 10,000 connected clients.
+      Server freezes. Memory spikes to 1GB (100KB x 10000). Some clients
+      timeout waiting. Others get disconnected.
+    why: |
+      Serializing and sending large messages to many clients is O(n) in
+      memory and CPU. Each send() buffers the message. With many clients,
+      this overwhelms the server. Event loop is blocked during broadcast.
+    solution: |
+      # OPTIMIZE BROADCASTING
+
+      ## Chunk large broadcasts
+
+      async function broadcastLarge(clients, message) {
+        const data = JSON.stringify(message);
+        const BATCH_SIZE = 100;
+
+        for (let i = 0; i < clients.length; i += BATCH_SIZE) {
+          const batch = clients.slice(i, i + BATCH_SIZE);
+
+          batch.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+              client.send(data);
+            }
+          });
+
+          // Yield to event loop between batches
+          await new Promise(resolve => setImmediate(resolve));
+        }
+      }
+
+
+      ## Send references, not data
+
+      // Instead of sending full object
+      ws.send(JSON.stringify({ type: 'update', data: hugeObject }));
+
+      // Send reference, let client fetch
+      ws.send(JSON.stringify({
+        type: 'update',
+        id: '123',
+        fetchUrl: '/api/data/123'
+      }));
+
+
+      ## Use compression
+
+      // Enable per-message deflate
+      const wss = new WebSocketServer({
+        server,
+        perMessageDeflate: {
+          zlibDeflateOptions: {
+            level: 6,  // Compression level
+          },
+          threshold: 1024,  // Only compress > 1KB
+        },
+      });
+
+
+      ## Debounce frequent updates
+
+      const pending = new Map();
+
+      function debouncedBroadcast(roomId, data) {
+        const existing = pending.get(roomId);
+        if (existing) {
+          clearTimeout(existing.timer);
+          existing.data = { ...existing.data, ...data };
+        } else {
+          pending.set(roomId, { data, timer: null });
+        }
+
+        pending.get(roomId).timer = setTimeout(() => {
+          actualBroadcast(roomId, pending.get(roomId).data);
+          pending.delete(roomId);
+        }, 100);  // Batch updates within 100ms
+      }
+    symptoms:
+      - Server freezes during broadcast
+      - Memory spikes
+      - Clients timeout or disconnect
+    detection_pattern: null

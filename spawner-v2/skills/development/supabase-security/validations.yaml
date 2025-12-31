@@ -1,0 +1,121 @@
+version: 1.0.0
+skill_id: supabase-security
+
+validations:
+  - id: service-role-exposed
+    name: Service role key in client code
+    severity: critical
+    type: regex
+    pattern:
+      - "NEXT_PUBLIC.*SERVICE.*ROLE"
+      - "NEXT_PUBLIC.*service.*role"
+      - "process\.env\.NEXT_PUBLIC.*SERVICE"
+    message: Service role key must never be exposed to client
+    fix_action: Remove NEXT_PUBLIC_ prefix, use only in server code
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+      - ".env*"
+
+  - id: rls-disabled
+    name: RLS explicitly disabled
+    severity: critical
+    type: regex
+    pattern:
+      - "disable row level security"
+      - "ALTER TABLE.*DISABLE.*RLS"
+    message: RLS should never be disabled on production tables
+    fix_action: Enable RLS and create appropriate policies
+    applies_to:
+      - "*.sql"
+
+  - id: permissive-policy
+    name: Overly permissive RLS policy
+    severity: high
+    type: regex
+    pattern:
+      - "using\s*\(\s*true\s*\)"
+      - "with check\s*\(\s*true\s*\)"
+    message: Policies with (true) allow all access
+    fix_action: Add proper auth.uid() checks
+    applies_to:
+      - "*.sql"
+
+  - id: missing-auth-uid
+    name: Policy without auth.uid() check
+    severity: warning
+    type: regex
+    pattern:
+      - "create policy(?\!.*auth\.uid).*using"
+    message: Consider adding auth.uid() check to policy
+    fix_action: Verify policy properly restricts access
+    applies_to:
+      - "*.sql"
+
+  - id: public-bucket
+    name: Public storage bucket
+    severity: warning
+    type: regex
+    pattern:
+      - "public.*=.*true"
+      - "public:\s*true"
+    message: Public buckets expose all files
+    fix_action: Use private bucket with RLS policies
+    applies_to:
+      - "*.sql"
+
+  - id: anon-key-hardcoded
+    name: Hardcoded Supabase keys
+    severity: warning
+    type: regex
+    pattern:
+      - "eyJ[A-Za-z0-9_-]{50,}"
+    message: Do not hardcode Supabase keys
+    fix_action: Use environment variables
+    applies_to:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+
+code_smells:
+  - id: no-rls-enable
+    name: Table creation without RLS
+    description: CREATE TABLE without corresponding enable row level security
+    suggestion: Always enable RLS immediately after creating table
+
+  - id: update-no-with-check
+    name: UPDATE policy without with check
+    description: UPDATE policy only has using() clause
+    suggestion: Add with check() to validate new values
+
+best_practices:
+  rls_checklist:
+    recommendation: |
+      ## RLS Security Checklist
+
+      Before deploying:
+      - [ ] RLS enabled on ALL tables
+      - [ ] Every policy uses auth.uid() or auth.jwt()
+      - [ ] UPDATE policies have both using() AND with check()
+      - [ ] INSERT policies validate user_id matches auth.uid()
+      - [ ] No policies with (true) on sensitive tables
+      - [ ] Indexes exist on policy columns
+      - [ ] Service role key NOT in any NEXT_PUBLIC_ variable
+      - [ ] Storage buckets are private with RLS policies
+
+  testing_policies:
+    recommendation: |
+      ## Testing RLS Policies
+
+      -- Test as authenticated user
+      set request.jwt.claim.sub = 'user-uuid-here';
+      select * from posts;  -- Should only see own
+
+      -- Test as different user
+      set request.jwt.claim.sub = 'other-user-uuid';
+      select * from posts;  -- Should not see first user
+
+      -- Test unauthorized access
+      reset request.jwt.claim.sub;
+      select * from posts;  -- Should fail

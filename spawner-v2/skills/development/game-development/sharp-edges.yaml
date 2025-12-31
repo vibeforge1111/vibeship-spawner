@@ -1,0 +1,557 @@
+# Game Development Sharp Edges
+# Critical mistakes that cause performance issues, broken mechanics, or failed projects
+
+sharp_edges:
+  - id: frame-rate-ignorance
+    summary: Building game logic without considering frame rate independence
+    severity: critical
+    situation: Using frame count instead of delta time for movement and physics
+    why: |
+      Game runs at different speeds on different devices. 60 FPS players move twice as
+      fast as 30 FPS players. Physics becomes unpredictable. Multiplayer becomes impossible.
+    solution: |
+      # WRONG: Frame-dependent movement
+      function update() {
+        player.x += 5  // Runs twice as fast at 60 FPS vs 30 FPS
+      }
+
+      # RIGHT: Frame-independent movement
+      function update(delta) {
+        const speed = 300  // Pixels per second
+        player.x += speed * delta
+      }
+
+      # Fixed timestep for physics
+      const FIXED_STEP = 1 / 60
+      let accumulator = 0
+
+      function update(delta) {
+        accumulator += delta
+        while (accumulator >= FIXED_STEP) {
+          physicsStep(FIXED_STEP)
+          accumulator -= FIXED_STEP
+        }
+      }
+
+      # Test at different frame rates
+      # Throttle to 30 FPS and verify behavior
+    symptoms:
+      - Movement without delta multiplication
+      - Fixed values for position changes
+      - Different behavior on different machines
+      - Physics glitches at variable FPS
+    detection_pattern: '\\.x\s*\+=\s*\d+(?!\s*\*)|velocity\s*=\s*\d+(?!\s*\*)'
+
+  - id: update-loop-bloat
+    summary: Putting expensive operations in the update/tick loop
+    severity: critical
+    situation: Collision checks against every object, pathfinding every frame, allocations in update
+    why: |
+      Frame rate tanks. Game becomes unplayable at scale. Mobile devices heat up and throttle.
+      You've built something that only runs on developer machines.
+    solution: |
+      # WRONG: O(n²) collision every frame
+      function update() {
+        for (const a of entities) {
+          for (const b of entities) {
+            checkCollision(a, b)
+          }
+        }
+      }
+
+      # RIGHT: Spatial partitioning
+      const grid = new SpatialGrid(64)  // 64px cells
+
+      function update() {
+        grid.clear()
+        entities.forEach(e => grid.insert(e))
+
+        for (const entity of entities) {
+          const nearby = grid.getNearby(entity)
+          for (const other of nearby) {
+            checkCollision(entity, other)
+          }
+        }
+      }
+
+      # Profile early and often
+      # Object pooling instead of allocation
+      # Spread expensive work across frames
+      # Only update what changed
+    symptoms:
+      - Nested loops over all entities
+      - New objects created in update
+      - Pathfinding called every frame
+      - Frame rate drops with more entities
+    detection_pattern: 'new\s+\w+\s*\(.*\).*update|forEach.*forEach'
+
+  - id: state-machine-spaghetti
+    summary: Managing game state with scattered booleans and conditionals
+    severity: high
+    situation: Complex conditionals like if (isJumping && !isDead && hasWeapon && ...)
+    why: |
+      Impossible to reason about state. Bugs hide in edge cases. Adding features breaks
+      existing behavior. State transitions become unpredictable.
+    solution: |
+      # WRONG: Boolean soup
+      if (isJumping && !isDead && hasWeapon && !isMenuOpen) { ... }
+
+      # RIGHT: State machine
+      const PlayerState = {
+        IDLE: 'idle',
+        RUNNING: 'running',
+        JUMPING: 'jumping',
+        FALLING: 'falling',
+        DEAD: 'dead'
+      }
+
+      class Player {
+        state = PlayerState.IDLE
+
+        update(delta) {
+          switch (this.state) {
+            case PlayerState.IDLE:
+              if (input.jump) this.transition(PlayerState.JUMPING)
+              break
+            case PlayerState.JUMPING:
+              if (this.velocity.y > 0) this.transition(PlayerState.FALLING)
+              break
+          }
+        }
+
+        transition(newState) {
+          this.onExit(this.state)
+          this.state = newState
+          this.onEnter(newState)
+        }
+      }
+    symptoms:
+      - Multiple boolean flags for state
+      - Complex nested conditionals
+      - Bugs when states conflict
+      - Hard to add new states
+    detection_pattern: 'is[A-Z]\\w+\\s*&&.*is[A-Z]\\w+\\s*&&'
+
+  - id: input-handling-chaos
+    summary: Checking input scattered throughout the codebase
+    severity: high
+    situation: Different systems reading input independently, raw input for game actions
+    why: |
+      Input conflicts between systems. Can't rebind controls. Can't handle different input
+      devices. Menu and gameplay fight for input.
+    solution: |
+      # WRONG: Scattered input checks
+      // In player.js
+      if (keyboard.isDown('Space')) jump()
+
+      // In menu.js
+      if (keyboard.isDown('Space')) select()
+
+      // In weapon.js
+      if (keyboard.isDown('Space')) fire()
+
+      # RIGHT: Centralized input manager
+      class InputManager {
+        bindings = {
+          jump: ['Space', 'KeyW', 'GamepadA'],
+          attack: ['KeyJ', 'GamepadX']
+        }
+
+        isPressed(action) {
+          return this.bindings[action].some(key => this.keys.has(key))
+        }
+
+        // Context-aware
+        setContext(context) {
+          this.context = context  // 'gameplay', 'menu', 'dialogue'
+        }
+      }
+
+      // Single point of input handling
+      if (input.isPressed('jump') && input.context === 'gameplay') {
+        player.jump()
+      }
+    symptoms:
+      - Keyboard checks in multiple files
+      - No way to rebind controls
+      - Input conflicts between systems
+      - Hardcoded key codes everywhere
+    detection_pattern: "keyboard\\\\.isDown|keyCode\\\\s*===|key\\\\s*===\\\\s*[\"']"
+
+  - id: physics-tunneling
+    summary: Fast-moving objects passing through thin colliders
+    severity: high
+    situation: Bullet goes through wall, player falls through floor when moving fast
+    why: |
+      Discrete collision detection. Object moves too far between frames. Collision is
+      never detected. Core mechanics break at edge cases.
+    solution: |
+      # Problem: Object moves from A to B, passing through wall
+
+      Frame 1: [Bullet].......[Wall]
+      Frame 2: [Wall].......[Bullet]  // Passed through!
+
+      # Solutions:
+
+      # 1. Continuous collision detection
+      this.matter.body.setContinuousCollision(bullet, true)
+
+      # 2. Sweep testing
+      function moveSweep(entity, dx, dy) {
+        const steps = Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)))
+        const stepX = dx / steps
+        const stepY = dy / steps
+
+        for (let i = 0; i < steps; i++) {
+          entity.x += stepX
+          entity.y += stepY
+          if (checkCollision(entity)) {
+            entity.x -= stepX
+            entity.y -= stepY
+            return true  // Hit something
+          }
+        }
+        return false
+      }
+
+      # 3. Cap maximum velocity
+      const MAX_SPEED = 500  // Never move more than this per second
+      velocity.x = Math.min(velocity.x, MAX_SPEED)
+
+      # 4. Thicken colliders for thin surfaces
+    symptoms:
+      - Bullets pass through walls
+      - Player falls through floor
+      - Fast objects miss collisions
+      - Edge case physics bugs
+    detection_pattern: null
+
+  - id: memory-leak-accumulation
+    summary: Not properly destroying/disposing game objects
+    severity: high
+    situation: Event listeners not removed, textures not unloaded, references held after destroy
+    why: |
+      Memory grows over time. Game crashes after extended play. Mobile runs out of memory.
+      Performance degrades as session continues.
+    solution: |
+      # WRONG: Create without cleanup
+      class Enemy {
+        constructor() {
+          this.sprite = new Sprite()
+          eventBus.on('playerDied', this.celebrate)
+        }
+        // No cleanup!
+      }
+
+      # RIGHT: Object pooling with explicit cleanup
+      class EnemyPool {
+        spawn() {
+          const enemy = this.pool.pop() || new Enemy()
+          enemy.init()
+          return enemy
+        }
+
+        release(enemy) {
+          enemy.cleanup()  // Remove listeners, reset state
+          this.pool.push(enemy)
+        }
+      }
+
+      class Enemy {
+        init() {
+          this.listener = () => this.celebrate()
+          eventBus.on('playerDied', this.listener)
+        }
+
+        cleanup() {
+          eventBus.off('playerDied', this.listener)
+          this.sprite.visible = false
+        }
+      }
+
+      # Test long play sessions
+      # Monitor memory in profiler
+      # Watch for growing object counts
+    symptoms:
+      - Memory grows during gameplay
+      - Game slows after long sessions
+      - Events fire on destroyed objects
+      - Crash after extended play
+    detection_pattern: 'addEventListener(?![\\\\s\\\\S]*removeEventListener)|on\\([\\\\s\\\\S]*(?!off\\()'
+
+  - id: asset-loading-freeze
+    summary: Loading all assets synchronously at startup
+    severity: high
+    situation: Blocking the main thread during load, no loading feedback
+    why: |
+      Long blank screen on startup. Browser may kill the tab. Players leave before game
+      loads. Adding assets makes it worse.
+    solution: |
+      # WRONG: Synchronous blocking load
+      const allAssets = loadAll()  // Freezes for 10 seconds
+      startGame()
+
+      # RIGHT: Async with progress
+      class AssetLoader {
+        async loadAll(manifest, onProgress) {
+          const total = manifest.length
+          let loaded = 0
+
+          await Promise.all(manifest.map(async (asset) => {
+            await this.loadAsset(asset)
+            loaded++
+            onProgress(loaded / total)
+          }))
+        }
+      }
+
+      // Show loading screen
+      const loader = new AssetLoader()
+      loader.loadAll(manifest, (progress) => {
+        loadingBar.width = progress * 100 + '%'
+        loadingText.text = `Loading... ${Math.floor(progress * 100)}%`
+      })
+
+      # Lazy load non-critical assets
+      # Preload only what's needed for first scene
+      # Background loading during gameplay
+    symptoms:
+      - Blank screen on startup
+      - No loading indicator
+      - All assets loaded upfront
+      - Long initial load times
+    detection_pattern: 'loadSync|load\\(.*\\)\\s*;\\s*start'
+
+  - id: audio-disaster
+    summary: Not managing audio properly - sounds pile up and distort
+    severity: medium
+    situation: Sounds pile up, music and effects fight for volume, audio continues when paused
+    why: |
+      Horrible audio experience. Volume spikes hurt players. Unprofessional feel.
+      Audio continues during pause/menus.
+    solution: |
+      # WRONG: Fire and forget audio
+      function shoot() {
+        new Audio('shoot.wav').play()  // Creates new audio each time
+      }
+      // 100 shots = 100 audio objects = distortion
+
+      # RIGHT: Audio management
+      class AudioManager {
+        pools = new Map()
+        volumes = { master: 1, sfx: 0.8, music: 0.5 }
+
+        constructor() {
+          this.context = new AudioContext()
+        }
+
+        playSfx(name, options = {}) {
+          const pool = this.getPool(name)
+          const sound = pool.find(s => !s.playing) || pool[0]
+
+          sound.volume = this.volumes.master * this.volumes.sfx
+          sound.play()
+        }
+
+        pause() {
+          this.context.suspend()
+        }
+
+        resume() {
+          this.context.resume()
+        }
+      }
+
+      # Instance limits prevent pile-up
+      # Category volumes (music, sfx, UI)
+      # Audio responds to game state
+    symptoms:
+      - Audio distortion with many sounds
+      - Audio plays during pause
+      - No volume categories
+      - Creating new Audio objects frequently
+    detection_pattern: 'new Audio\\(|Audio\\(\\).*\\.play'
+
+  - id: save-system-afterthought
+    summary: Adding save/load after the game is built
+    severity: high
+    situation: Saving game state that's scattered across systems, breaking saves with updates
+    why: |
+      Extremely difficult to retrofit. Can't save all necessary state. Saves break between
+      versions. Players lose progress.
+    solution: |
+      # Design for serialization from the start
+
+      # Centralized game state
+      class GameState {
+        version = 1
+        player = { x: 0, y: 0, health: 100, inventory: [] }
+        world = { level: 1, enemies: [], items: [] }
+        progress = { achievements: [], unlocks: [] }
+
+        serialize() {
+          return JSON.stringify({
+            version: this.version,
+            player: this.player,
+            world: this.world,
+            progress: this.progress
+          })
+        }
+
+        deserialize(data) {
+          const parsed = JSON.parse(data)
+          this.migrate(parsed)  // Handle version differences
+          Object.assign(this, parsed)
+        }
+
+        migrate(data) {
+          if (data.version < 2) {
+            // Migration from v1 to v2
+            data.player.stamina = 100
+          }
+        }
+      }
+
+      # Version your save format
+      # Test save/load throughout development
+      # Handle migration between versions
+    symptoms:
+      - State scattered across systems
+      - No save versioning
+      - Saves break after updates
+      - Can't serialize game state
+    detection_pattern: null
+
+  - id: scope-explosion
+    summary: Adding features without cutting others
+    severity: critical
+    situation: "Just one more mechanic" without time adjustment
+    why: |
+      Game never ships. Everything is half-done. Quality suffers. Team burns out.
+      Project dies in development.
+    solution: |
+      # The reality of game development
+      Every feature you add:
+      - Needs implementation
+      - Needs testing
+      - Needs balancing
+      - Needs polish
+      - Interacts with other features
+      - Creates bugs
+
+      # Ruthless scope management
+
+      1. Define MVP that's actually minimum
+         - What's the core loop?
+         - What's the smallest playable version?
+
+      2. Cut features, not quality
+         - Better to have 3 polished features than 10 broken ones
+
+      3. Playable at every stage
+         - Always have a working build
+         - Add features incrementally
+
+      4. The 80/20 rule
+         - 20% of features provide 80% of fun
+         - Find your 20% and polish it
+
+      # Ship something smaller that's polished
+      # rather than something ambitious that's broken
+    symptoms:
+      - Feature list growing
+      - Nothing fully polished
+      - Release date slipping
+      - Team burnout
+    detection_pattern: null
+
+  - id: platform-assumption
+    summary: Building only for your development environment
+    severity: high
+    situation: Mouse-only controls for touch game, no fallbacks for missing features
+    why: |
+      Game doesn't work on target platform. Controls are wrong. Performance is terrible.
+      You've built for yourself, not your players.
+    solution: |
+      # Test on target devices early
+
+      # Abstract platform-specific code
+      class InputAdapter {
+        constructor() {
+          if ('ontouchstart' in window) {
+            this.setupTouch()
+          } else {
+            this.setupMouse()
+          }
+        }
+      }
+
+      # Design for lowest common denominator
+      # Minimum spec should be defined upfront
+
+      # Performance budgets
+      const BUDGET = {
+        mobile: { drawCalls: 100, triangles: 10000 },
+        desktop: { drawCalls: 500, triangles: 100000 }
+      }
+
+      # Handle different input methods
+      - Keyboard + mouse
+      - Touch only
+      - Gamepad
+      - Hybrid
+
+      # Test early, test often on real devices
+    symptoms:
+      - Only tested on development machine
+      - Hardcoded input assumptions
+      - No mobile testing
+      - Performance not measured on target
+    detection_pattern: 'addEventListener\\(["\']click|addEventListener\\(["\']mouse'
+
+  - id: hardcoded-dependencies
+    summary: Systems tightly coupled with direct references
+    severity: medium
+    situation: Player directly accesses enemy list, UI directly reads game state
+    why: |
+      Can't test in isolation. Changing one system breaks others. Can't add features
+      without touching everything. Codebase becomes unmaintainable.
+    solution: |
+      # WRONG: Direct coupling
+      class Player {
+        update() {
+          for (const enemy of game.enemies) {  // Direct access
+            if (this.collidesWith(enemy)) {
+              game.ui.showDamage()  // Direct UI access
+            }
+          }
+        }
+      }
+
+      # RIGHT: Event-driven communication
+      class Player {
+        update() {
+          // Player only knows about collisions through events
+          this.on('collision', (other) => {
+            if (other.type === 'enemy') {
+              this.emit('damaged', { amount: other.damage })
+            }
+          })
+        }
+      }
+
+      class UI {
+        constructor(eventBus) {
+          eventBus.on('player:damaged', () => this.showDamage())
+        }
+      }
+
+      # Dependency injection
+      # Service locator pattern
+      # Entity-component-system for complex games
+    symptoms:
+      - Global game object access
+      - Direct system-to-system calls
+      - Can't test components alone
+      - Changes cascade through codebase
+    detection_pattern: 'game\\.|global\\.|window\\.game'

@@ -1,0 +1,345 @@
+# Validations - Testing Strategies
+# Automated checks for test quality issues
+
+version: 1.0.0
+skill_id: testing-strategies
+
+validations:
+  # Anti-patterns
+  - id: arbitrary-sleep
+    name: Using sleep/setTimeout in tests
+    severity: warning
+    type: regex
+    pattern:
+      - 'sleep\s*\(\s*\d+'
+      - 'waitForTimeout\s*\(\s*\d+'
+      - 'setTimeout.*expect'
+    message: "Arbitrary waits cause flaky tests"
+    fix_action: "Use waitFor, findBy, or wait for specific conditions"
+    applies_to:
+      - "*.test.ts"
+      - "*.test.tsx"
+      - "*.spec.ts"
+      - "*.test.js"
+
+  - id: only-skip-in-tests
+    name: Focused or skipped tests
+    severity: warning
+    type: regex
+    pattern:
+      - '\\.only\s*\\('
+      - 'it\\.skip'
+      - 'test\\.skip'
+      - 'describe\\.skip'
+      - 'fdescribe'
+      - 'fit\\('
+    message: "Remove .only/.skip before committing"
+    fix_action: "Remove focus/skip to run all tests"
+    applies_to:
+      - "*.test.ts"
+      - "*.test.tsx"
+      - "*.spec.ts"
+
+  - id: mocking-internal-modules
+    name: Mocking internal modules
+    severity: info
+    type: regex
+    pattern:
+      - 'jest\\.mock\\([\'"]\\.\\.?/'
+      - 'vi\\.mock\\([\'"]\\.\\.?/'
+    message: "Consider if you're mocking too much internal code"
+    fix_action: "Mock boundaries (external APIs) not internal code"
+    applies_to:
+      - "*.test.ts"
+      - "*.test.tsx"
+
+  - id: test-implementation
+    name: Testing implementation details
+    severity: info
+    type: regex
+    pattern:
+      - 'toHaveBeenCalledTimes\\(\\d+\\)'
+      - '\\.mock\\.calls\\['
+      - 'getByTestId.*container'
+    message: "May be testing implementation rather than behavior"
+    fix_action: "Test observable behavior, not internal calls"
+    applies_to:
+      - "*.test.ts"
+      - "*.test.tsx"
+
+  - id: large-snapshot
+    name: Large snapshot test
+    severity: info
+    type: regex
+    pattern:
+      - 'toMatchSnapshot\\(\\)$'
+    message: "Full component snapshots are hard to review"
+    fix_action: "Use toMatchInlineSnapshot or targeted assertions"
+    applies_to:
+      - "*.test.ts"
+      - "*.test.tsx"
+
+  # Best practices
+  - id: missing-act
+    name: Missing act() wrapper
+    severity: info
+    type: regex
+    pattern:
+      - 'fireEvent\\..*\\nawait\\s+expect'
+    message: "State updates may need act() wrapper"
+    fix_action: "Use userEvent or wrap updates in act()"
+    applies_to:
+      - "*.test.tsx"
+
+  - id: no-cleanup
+    name: Missing cleanup in beforeEach/afterEach
+    severity: info
+    type: regex
+    pattern:
+      - 'beforeAll.*\\{(?![\\s\\S]*afterAll)'
+    message: "Consider adding cleanup in afterAll/afterEach"
+    fix_action: "Add cleanup to prevent test pollution"
+    applies_to:
+      - "*.test.ts"
+      - "*.test.tsx"
+
+  - id: console-in-tests
+    name: Console statements in tests
+    severity: info
+    type: regex
+    pattern:
+      - 'console\\.(log|warn|error)\\('
+    message: "Remove console statements from tests"
+    fix_action: "Use debug() from Testing Library or remove"
+    applies_to:
+      - "*.test.ts"
+      - "*.test.tsx"
+
+  # Coverage concerns
+  - id: no-error-test
+    name: Happy path only testing
+    severity: info
+    type: regex
+    pattern:
+      - 'describe.*\\{(?![\\s\\S]*(error|fail|invalid|reject))'
+    message: "Consider adding error case tests"
+    fix_action: "Add tests for error states and edge cases"
+    applies_to:
+      - "*.test.ts"
+      - "*.test.tsx"
+
+code_smells:
+  - id: too-many-mocks
+    name: Test file with many mocks
+    description: "More than 5 jest.mock/vi.mock calls"
+    pattern: null
+    suggestion: "Consider integration test or dependency injection"
+
+  - id: giant-test
+    name: Test over 50 lines
+    description: "Single test that does too much"
+    pattern: null
+    suggestion: "Split into smaller, focused tests"
+
+  - id: no-describe
+    name: Tests without describe blocks
+    description: "Flat test files without organization"
+    pattern: null
+    suggestion: "Group related tests in describe blocks"
+
+  - id: copied-fixtures
+    name: Same fixture data in multiple tests
+    description: "Duplicate test data across files"
+    pattern: null
+    suggestion: "Create shared factories or fixtures"
+
+best_practices:
+  test_structure:
+    recommendation: |
+      Test File Structure:
+
+      describe('ComponentName', () => {
+        // Setup shared across tests
+        let mockService: MockType;
+
+        beforeEach(() => {
+          mockService = createMock();
+          vi.clearAllMocks();
+        });
+
+        describe('when user is logged in', () => {
+          beforeEach(() => {
+            mockService.isLoggedIn.mockReturnValue(true);
+          });
+
+          it('shows dashboard', () => {
+            // Arrange
+            render(<Component service={mockService} />);
+
+            // Act (if needed)
+            // ...
+
+            // Assert
+            expect(screen.getByText('Dashboard')).toBeInTheDocument();
+          });
+
+          it('handles logout', async () => {
+            const user = userEvent.setup();
+            render(<Component service={mockService} />);
+
+            await user.click(screen.getByRole('button', { name: /logout/i }));
+
+            expect(mockService.logout).toHaveBeenCalled();
+          });
+        });
+
+        describe('when user is logged out', () => {
+          // Different context
+        });
+
+        describe('error handling', () => {
+          // Error cases
+        });
+      });
+
+  query_priority:
+    recommendation: |
+      Testing Library Query Priority:
+
+      # 1. Accessible queries (preferred)
+      getByRole('button', { name: /submit/i })
+      getByLabelText(/email/i)
+      getByPlaceholderText(/search/i)
+      getByText(/welcome/i)
+      getByAltText(/profile/i)
+
+      # 2. Semantic queries
+      getByTitle(/close/i)
+
+      # 3. Test IDs (last resort)
+      getByTestId('complex-widget')
+
+      # Async queries
+      findByText  // Returns promise, waits for element
+      queryByText // Returns null if not found (for assertions)
+
+      # Matchers
+      .toBeInTheDocument()
+      .toBeVisible()
+      .toBeDisabled()
+      .toHaveValue()
+      .toHaveTextContent()
+
+  async_testing:
+    recommendation: |
+      Async Testing Patterns:
+
+      // waitFor - wait for assertion to pass
+      await waitFor(() => {
+        expect(screen.getByText('Done')).toBeInTheDocument();
+      });
+
+      // findBy - built-in waiting
+      const element = await screen.findByText('Done');
+
+      // Wait for element to disappear
+      await waitFor(() => {
+        expect(screen.queryByText('Loading')).not.toBeInTheDocument();
+      });
+
+      // Wait for multiple conditions
+      await waitFor(() => {
+        expect(screen.getByText('Title')).toBeInTheDocument();
+        expect(screen.getByText('Content')).toBeInTheDocument();
+      });
+
+      // Playwright auto-waiting
+      await expect(page.locator('.result')).toBeVisible();
+      await expect(page.locator('.spinner')).not.toBeVisible();
+
+  mocking_patterns:
+    recommendation: |
+      Mocking Patterns:
+
+      // MSW for API mocking (recommended)
+      import { rest } from 'msw';
+      import { setupServer } from 'msw/node';
+
+      const server = setupServer(
+        rest.get('/api/user', (req, res, ctx) => {
+          return res(ctx.json({ name: 'Test' }));
+        })
+      );
+
+      beforeAll(() => server.listen());
+      afterEach(() => server.resetHandlers());
+      afterAll(() => server.close());
+
+      // Override for specific test
+      it('handles error', async () => {
+        server.use(
+          rest.get('/api/user', (req, res, ctx) => {
+            return res(ctx.status(500));
+          })
+        );
+        // ...
+      });
+
+
+      // Mock time
+      beforeEach(() => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2024-01-15'));
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+
+      // Spy without mocking implementation
+      const spy = vi.spyOn(analytics, 'track');
+      // Component uses real analytics.track
+      expect(spy).toHaveBeenCalledWith('page_view');
+
+  playwright_patterns:
+    recommendation: |
+      Playwright E2E Patterns:
+
+      // Page Object Model
+      class LoginPage {
+        constructor(private page: Page) {}
+
+        async goto() {
+          await this.page.goto('/login');
+        }
+
+        async login(email: string, password: string) {
+          await this.page.fill('#email', email);
+          await this.page.fill('#password', password);
+          await this.page.click('button[type="submit"]');
+        }
+
+        async expectError(message: string) {
+          await expect(this.page.locator('.error')).toHaveText(message);
+        }
+      }
+
+      // Usage in tests
+      test('successful login', async ({ page }) => {
+        const loginPage = new LoginPage(page);
+        await loginPage.goto();
+        await loginPage.login('user@test.com', 'password');
+        await expect(page).toHaveURL('/dashboard');
+      });
+
+
+      // API testing
+      test('creates resource', async ({ request }) => {
+        const response = await request.post('/api/items', {
+          data: { name: 'Test' }
+        });
+        expect(response.ok()).toBeTruthy();
+        const item = await response.json();
+        expect(item.name).toBe('Test');
+      });

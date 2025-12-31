@@ -1,0 +1,350 @@
+# Sharp Edges - Database Migrations
+# The gotchas that cause outages and data loss
+
+version: 1.0.0
+skill_id: database-migrations
+
+sharp_edges:
+  - id: not-null-large-table
+    summary: Adding NOT NULL to large table locks everything
+    severity: critical
+    situation: |
+      You add a NOT NULL column to a 50M row table. Site goes down.
+      All queries blocked for 20 minutes while Postgres rewrites the
+      entire table. On-call gets paged. Rollback takes another 20 minutes.
+    why: |
+      Adding NOT NULL without a DEFAULT (pre-Postgres 11) or adding NOT NULL
+      to existing nullable column requires table rewrite. This holds an
+      ACCESS EXCLUSIVE lock, blocking all reads and writes.
+    solution: |
+      # ADD NOT NULL SAFELY
+
+      ## Step 1: Add column as nullable with default
+      ALTER TABLE users ADD COLUMN status VARCHAR(20) DEFAULT 'active';
+
+      ## Step 2: Backfill existing rows in batches
+      -- Run this multiple times until no more nulls
+      UPDATE users SET status = 'active'
+      WHERE id IN (
+        SELECT id FROM users WHERE status IS NULL LIMIT 10000
+      );
+
+      ## Step 3: Add NOT NULL constraint
+      -- This is fast because all rows already have values
+      ALTER TABLE users ALTER COLUMN status SET NOT NULL;
+
+
+      ## Or use Postgres 11+ feature
+      -- This is instant, no table rewrite
+      ALTER TABLE users ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'active';
+      -- Still need to backfill if default is wrong for old rows
+    symptoms:
+      - Site unresponsive during migration
+      - Queries timing out
+      - Connection pool exhausted
+    detection_pattern: 'ALTER.*ADD.*NOT NULL(?!.*DEFAULT)'
+
+  - id: column-rename-breaks-code
+    summary: Renaming column breaks running application
+    severity: critical
+    situation: |
+      You rename user_name to username. Migration runs. Immediately,
+      500 errors everywhere. Old code still running on some servers
+      is looking for user_name. You can't rollback without data loss
+      from new code.
+    why: |
+      Column renames are not backwards compatible. Old code expects old
+      name, new code expects new name. During deployment, both are running.
+      Even after full deploy, rollback becomes impossible.
+    solution: |
+      # USE EXPAND-CONTRACT PATTERN
+
+      ## Phase 1: EXPAND (1 week before)
+      -- Add new column
+      ALTER TABLE users ADD COLUMN username VARCHAR(255);
+
+      -- Copy data
+      UPDATE users SET username = user_name;
+
+      -- Add trigger to sync during transition
+      CREATE TRIGGER sync_username
+        BEFORE INSERT OR UPDATE ON users
+        FOR EACH ROW EXECUTE FUNCTION sync_username_columns();
+
+
+      ## Phase 2: MIGRATE CODE
+      -- Deploy code that reads from username
+      -- Deploy code that writes to both columns
+      -- Deploy code that only writes to username
+
+
+      ## Phase 3: CONTRACT (after full deploy)
+      -- Remove trigger
+      DROP TRIGGER sync_username ON users;
+
+      -- Remove old column
+      ALTER TABLE users DROP COLUMN user_name;
+
+
+      ## Timeline
+      Week 1: Expand (add column, sync)
+      Week 2: Deploy new code
+      Week 3: Verify all code migrated
+      Week 4: Contract (remove old column)
+    symptoms:
+      - 500 errors after deploy
+      - "Column not found" errors
+      - Cannot rollback
+    detection_pattern: 'ALTER.*RENAME.*COLUMN'
+
+  - id: missing-index-locks
+    summary: CREATE INDEX locks table for writes
+    severity: high
+    situation: |
+      You need an index for a slow query. You run CREATE INDEX.
+      Table has 100M rows. Index takes 30 minutes. All INSERTs and
+      UPDATEs are blocked. Orders can't be created. Revenue lost.
+    why: |
+      Regular CREATE INDEX takes a SHARE lock on the table, blocking
+      all writes. For large tables, this can take minutes to hours.
+    solution: |
+      # USE CONCURRENT INDEX CREATION
+
+      -- WRONG: Blocks writes
+      CREATE INDEX idx_users_email ON users(email);
+
+      -- RIGHT: Non-blocking
+      CREATE INDEX CONCURRENTLY idx_users_email ON users(email);
+
+
+      ## Important notes:
+
+      1. CONCURRENTLY cannot run in a transaction
+      2. Takes 2-3x longer than regular index
+      3. If it fails, leaves invalid index
+
+      -- Check for invalid indexes
+      SELECT indexrelname FROM pg_stat_user_indexes
+      JOIN pg_index ON indexrelid = pg_stat_user_indexes.indexrelid
+      WHERE NOT indisvalid;
+
+      -- Drop invalid index and retry
+      DROP INDEX CONCURRENTLY idx_users_email;
+      CREATE INDEX CONCURRENTLY idx_users_email ON users(email);
+
+
+      ## In migration file
+      -- Mark as non-transactional
+      -- drizzle: run separately from main migrations
+      -- prisma: use raw SQL migration
+    symptoms:
+      - Writes hanging during index creation
+      - Application timeouts
+      - Queue backlog building
+    detection_pattern: 'CREATE INDEX(?!.*CONCURRENTLY)'
+
+  - id: long-running-transaction
+    summary: Long migration holding locks forever
+    severity: high
+    situation: |
+      Migration runs UPDATE on 10M rows. Takes 30 minutes. Another
+      process needs to ALTER the table. It waits. All queries to that
+      table start piling up behind it. Everything locks.
+    why: |
+      Long-running transactions hold locks. Other DDL operations wait
+      for those locks. All subsequent queries queue behind the DDL.
+      It's a cascade of blocking.
+    solution: |
+      # BATCH LONG OPERATIONS
+
+      // WRONG: One huge update
+      await db.execute(sql`
+        UPDATE users SET status = calculate_status(data)
+      `);
+
+      // RIGHT: Batch updates
+      const BATCH_SIZE = 10000;
+
+      while (true) {
+        const result = await db.execute(sql`
+          UPDATE users
+          SET status = calculate_status(data)
+          WHERE id IN (
+            SELECT id FROM users
+            WHERE status IS NULL
+            LIMIT ${BATCH_SIZE}
+          )
+        `);
+
+        if (result.rowCount === 0) break;
+
+        // Commit between batches (releases locks)
+        await new Promise(r => setTimeout(r, 50));
+      }
+
+
+      ## Set statement timeout
+      SET statement_timeout = '30s';  -- Fail fast if stuck
+
+
+      ## Monitor long-running queries
+      SELECT pid, now() - pg_stat_activity.query_start AS duration, query
+      FROM pg_stat_activity
+      WHERE state = 'active'
+      AND now() - pg_stat_activity.query_start > interval '5 minutes';
+    symptoms:
+      - Queries hanging
+      - Lock wait timeouts
+      - Increasing latency over time
+    detection_pattern: 'UPDATE.*(?!.*LIMIT)'
+
+  - id: drop-column-with-index
+    summary: Dropping column without dropping dependent indexes
+    severity: medium
+    situation: |
+      You drop a column. Migration succeeds. Later, you notice query
+      performance degraded. Indexes on that column are now invalid
+      but still being maintained on writes. Or worse, migration fails
+      because of foreign key.
+    why: |
+      Indexes and constraints reference columns. Dropping column may
+      fail or leave dangling objects. Always clean up dependencies first.
+    solution: |
+      # CLEAN UP DEPENDENCIES FIRST
+
+      -- Step 1: Find dependent objects
+      SELECT
+        indexname,
+        indexdef
+      FROM pg_indexes
+      WHERE tablename = 'users'
+      AND indexdef LIKE '%column_name%';
+
+
+      -- Step 2: Drop indexes first
+      DROP INDEX CONCURRENTLY idx_users_old_column;
+
+
+      -- Step 3: Drop constraints
+      ALTER TABLE users DROP CONSTRAINT IF EXISTS fk_old_column;
+
+
+      -- Step 4: Now drop column
+      ALTER TABLE users DROP COLUMN old_column;
+
+
+      ## Prisma handles some of this
+      -- But review generated SQL carefully
+
+      ## Drizzle approach
+      // Remove from schema
+      // Generate migration
+      // Review SQL - add index drops if needed
+    symptoms:
+      - Migration fails with dependency error
+      - Orphaned indexes
+      - Wasted storage
+    detection_pattern: null
+
+  - id: enum-modification
+    summary: Modifying enums is surprisingly hard
+    severity: medium
+    situation: |
+      You need to add a value to an enum type. Simple, right? You
+      run ALTER TYPE ADD VALUE. It works. Then you need to remove a
+      value. You can't. Then you need to rename. You can't. Enums
+      are append-only nightmares.
+    why: |
+      PostgreSQL enums can only have values added, not removed or renamed.
+      The workaround requires creating new type, migrating data, and
+      dropping old type. It's messy and dangerous.
+    solution: |
+      # AVOID ENUMS, USE CHECK CONSTRAINTS
+
+      ## Instead of enum
+      CREATE TYPE status AS ENUM ('active', 'inactive', 'pending');
+      CREATE TABLE users (status status);
+
+      ## Use varchar with check
+      CREATE TABLE users (
+        status VARCHAR(20) NOT NULL,
+        CONSTRAINT valid_status CHECK (status IN ('active', 'inactive', 'pending'))
+      );
+
+      ## Easy to modify
+      ALTER TABLE users DROP CONSTRAINT valid_status;
+      ALTER TABLE users ADD CONSTRAINT valid_status
+        CHECK (status IN ('active', 'inactive', 'pending', 'suspended'));
+
+
+      ## If stuck with enum, add value:
+      ALTER TYPE status ADD VALUE 'suspended';
+      -- Note: Cannot be in transaction
+
+      ## If need to remove/rename enum value:
+      -- 1. Create new type
+      CREATE TYPE status_new AS ENUM ('active', 'inactive', 'suspended');
+
+      -- 2. Add new column
+      ALTER TABLE users ADD COLUMN status_new status_new;
+
+      -- 3. Migrate data
+      UPDATE users SET status_new = status::text::status_new;
+
+      -- 4. Swap columns
+      ALTER TABLE users DROP COLUMN status;
+      ALTER TABLE users RENAME COLUMN status_new TO status;
+
+      -- 5. Drop old type
+      DROP TYPE status_old;
+    symptoms:
+      - Cannot remove enum value
+      - Complex migration for simple change
+      - Tight coupling to DB type
+    detection_pattern: 'CREATE TYPE.*ENUM'
+
+  - id: migration-order-dependency
+    summary: Migrations applied in wrong order
+    severity: medium
+    situation: |
+      Developer A creates migration adding column. Developer B creates
+      migration using that column. B's migration gets merged and deployed
+      first. Production breaks: column doesn't exist.
+    why: |
+      Migrations are ordered by timestamp or sequence number. Parallel
+      development can create order dependencies that aren't caught
+      until production.
+    solution: |
+      # PREVENT ORDERING ISSUES
+
+      ## Use timestamp-based naming
+      20240115_120000_add_users.sql
+      20240115_130000_add_orders.sql
+
+      ## Merge migrations before deploy
+      -- When feature branch has multiple migrations
+      -- Squash into single migration before merging to main
+
+
+      ## CI check for migration conflicts
+      // In CI pipeline
+      const pendingMigrations = await getMigrationStatus();
+      if (pendingMigrations.some(m => m.dependsOn && !m.dependsOnApplied)) {
+        throw new Error('Migration dependency not satisfied');
+      }
+
+
+      ## Review migrations in PR
+      - Check if migration depends on other pending migrations
+      - Check if migration conflicts with other PRs
+
+
+      ## Rebase migrations when pulling
+      git pull origin main
+      # If conflicts in migrations, regenerate migration
+      npm run db:migrate:generate
+    symptoms:
+      - Column doesn't exist errors
+      - Table doesn't exist errors
+      - Works locally, fails in prod
+    detection_pattern: null

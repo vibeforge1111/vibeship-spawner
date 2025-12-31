@@ -1,0 +1,265 @@
+# Validations - WebSockets & Real-time
+# Automated checks for common WebSocket issues
+
+version: 1.0.0
+skill_id: websockets-realtime
+
+validations:
+  # Connection handling
+  - id: no-error-handler
+    name: WebSocket without error handler
+    severity: warning
+    type: regex
+    pattern:
+      - 'new WebSocket\\([^)]+\\)(?![\\s\\S]*\\.onerror)'
+      - 'WebSocketServer\\([^)]*\\)(?![\\s\\S]*\\.on\\([\'"]error)'
+    message: "WebSocket should have error handler"
+    fix_action: "Add ws.onerror or ws.on('error') handler"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.jsx"
+      - "*.tsx"
+
+  - id: no-close-handler
+    name: WebSocket without close handler
+    severity: warning
+    type: regex
+    pattern:
+      - 'new WebSocket\\([^)]+\\)(?![\\s\\S]*\\.onclose)'
+    message: "WebSocket should handle close events"
+    fix_action: "Add ws.onclose handler with reconnection logic"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.jsx"
+      - "*.tsx"
+
+  - id: hardcoded-ws-url
+    name: Hardcoded WebSocket URL
+    severity: info
+    type: regex
+    pattern:
+      - 'new WebSocket\\([\'"]ws://localhost'
+      - 'new WebSocket\\([\'"]wss://[a-z]+\\.'
+    message: "Consider using environment variable for WebSocket URL"
+    fix_action: "Use process.env.NEXT_PUBLIC_WS_URL or similar"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.jsx"
+      - "*.tsx"
+
+  # Security
+  - id: ws-without-wss
+    name: Insecure WebSocket (ws://)
+    severity: warning
+    type: regex
+    pattern:
+      - 'new WebSocket\\([\'"]ws://'
+      - 'WebSocket\\([^)]*[\'"]ws://'
+    message: "Use wss:// for secure WebSocket connections"
+    fix_action: "Change ws:// to wss:// in production"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.jsx"
+      - "*.tsx"
+
+  - id: auth-in-message
+    name: Sending auth token in message
+    severity: info
+    type: regex
+    pattern:
+      - 'ws\\.send.*token'
+      - 'ws\\.send.*auth'
+      - 'socket\\.emit.*token'
+    message: "Consider authenticating before connection instead of after"
+    fix_action: "Pass token in URL or use ticket system"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.jsx"
+      - "*.tsx"
+
+  # Memory management
+  - id: event-listener-leak
+    name: EventSource/WebSocket without cleanup
+    severity: warning
+    type: regex
+    pattern:
+      - 'useEffect\\([^]*new EventSource[^]*(?!return.*close)'
+      - 'useEffect\\([^]*new WebSocket[^]*(?!return.*close)'
+    message: "Close connection in useEffect cleanup"
+    fix_action: "Return cleanup function that calls close()"
+    applies_to:
+      - "*.jsx"
+      - "*.tsx"
+
+  - id: missing-interval-cleanup
+    name: setInterval without cleanup in WebSocket handler
+    severity: warning
+    type: regex
+    pattern:
+      - 'setInterval\\([^)]+\\)(?![\\s\\S]*clearInterval)'
+    message: "Interval may not be cleaned up"
+    fix_action: "Store interval ID and clear on disconnect"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  # Performance
+  - id: sync-broadcast
+    name: Synchronous broadcast to many clients
+    severity: info
+    type: regex
+    pattern:
+      - 'forEach.*\\.send\\('
+      - 'for.*of.*\\.send\\('
+    message: "Consider chunking broadcasts for many clients"
+    fix_action: "Use setImmediate between chunks to yield event loop"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: large-json-send
+    name: Sending large JSON without consideration
+    severity: info
+    type: regex
+    pattern:
+      - '\\.send\\(JSON\\.stringify\\([^)]{50,}'
+    message: "Large payloads may cause performance issues"
+    fix_action: "Consider pagination, compression, or sending references"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+code_smells:
+  - id: global-clients-map
+    name: Global clients Map without Redis
+    description: "Using global Map for clients without pub/sub"
+    pattern: null
+    suggestion: "Won't scale horizontally - use Redis pub/sub"
+
+  - id: too-many-event-types
+    name: More than 20 message types
+    description: "Too many message types in one WebSocket handler"
+    pattern: null
+    suggestion: "Consider splitting into namespaces or channels"
+
+  - id: no-message-validation
+    name: Parsing messages without validation
+    description: "JSON.parse without try/catch or schema validation"
+    pattern: null
+    suggestion: "Validate message structure with Zod or similar"
+
+best_practices:
+  connection_checklist:
+    recommendation: |
+      ## WebSocket Connection Checklist
+
+      ### Client-side
+
+      - [ ] Error handler (ws.onerror)
+      - [ ] Close handler (ws.onclose)
+      - [ ] Reconnection with exponential backoff
+      - [ ] Max reconnection attempts
+      - [ ] Handle page visibility (reconnect on visible)
+      - [ ] Handle online/offline events
+      - [ ] Cleanup in useEffect return
+
+      ### Server-side
+
+      - [ ] Authenticate before/during upgrade
+      - [ ] Error handler (ws.on('error'))
+      - [ ] Clean up on disconnect (remove from maps)
+      - [ ] Heartbeat/ping to detect dead connections
+      - [ ] Connection limits per user
+      - [ ] Rate limiting on messages
+      - [ ] Validate all incoming messages
+
+  message_protocol:
+    recommendation: |
+      ## Message Protocol Design
+
+      // Use consistent message structure
+      interface Message {
+        type: string;       // Event type
+        payload?: unknown;  // Event data
+        id?: string;        // For request-response correlation
+        timestamp?: number; // For ordering
+      }
+
+      // Types for different events
+      type ClientMessage =
+        | { type: 'subscribe'; payload: { channel: string } }
+        | { type: 'unsubscribe'; payload: { channel: string } }
+        | { type: 'message'; payload: { channel: string; content: string } }
+        | { type: 'ping' };
+
+      type ServerMessage =
+        | { type: 'subscribed'; payload: { channel: string } }
+        | { type: 'message'; payload: { channel: string; content: string; from: string } }
+        | { type: 'error'; payload: { code: string; message: string } }
+        | { type: 'pong' };
+
+
+      // Validate with Zod
+      const clientMessageSchema = z.discriminatedUnion('type', [
+        z.object({ type: z.literal('subscribe'), payload: z.object({ channel: z.string() }) }),
+        z.object({ type: z.literal('message'), payload: z.object({ content: z.string() }) }),
+        // ...
+      ]);
+
+  scaling_checklist:
+    recommendation: |
+      ## Scaling WebSockets Checklist
+
+      ### Single Server (< 10k connections)
+
+      - [ ] In-memory client tracking
+      - [ ] Simple broadcast
+      - [ ] Heartbeat for dead connections
+
+      ### Multi-Server (10k+ connections)
+
+      - [ ] Redis pub/sub for cross-server messages
+      - [ ] Sticky sessions OR user->server mapping
+      - [ ] Shared session/presence in Redis
+      - [ ] Connection limits per server
+      - [ ] Health checks for WebSocket servers
+
+      ### High Scale (100k+ connections)
+
+      - [ ] Dedicated WebSocket servers
+      - [ ] Connection pooling
+      - [ ] Message queues for heavy operations
+      - [ ] Sharding by user/room
+      - [ ] Geographic distribution
+
+  sse_vs_websocket:
+    recommendation: |
+      ## SSE vs WebSocket Decision Guide
+
+      ### Use SSE when:
+
+      - Server-to-client only (notifications, feeds)
+      - Simple implementation needed
+      - Automatic reconnection desired
+      - HTTP/2 available
+      - Need EventStream format
+
+      ### Use WebSocket when:
+
+      - Bidirectional communication needed
+      - Low latency required (< 50ms)
+      - Binary data transfer
+      - Many message types
+      - Custom protocol needed
+
+      ### Use Long Polling when:
+
+      - Very old browser support needed
+      - Firewalls block WebSocket
+      - Simple fallback required
+      - Infrequent updates (< 1/min)

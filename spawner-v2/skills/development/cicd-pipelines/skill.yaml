@@ -1,0 +1,617 @@
+# CI/CD Pipelines Skill
+# Automated build, test, and deployment workflows
+
+id: cicd-pipelines
+name: CI/CD Pipelines
+version: 1.0.0
+category: development
+layer: 2
+
+description: |
+  CI/CD is the backbone of modern software delivery. Continuous Integration catches
+  bugs early. Continuous Deployment gets features to users fast. But poorly designed
+  pipelines can be slow, flaky, and a source of constant frustration.
+
+  This skill covers GitHub Actions (the most popular), GitLab CI, and general pipeline
+  design principles. The focus is on pipelines that are fast, reliable, and maintainable.
+
+  2025 reality: Your pipeline is infrastructure code. It deserves the same care as
+  your application. A flaky test in CI is worse than no test - it teaches developers
+  to ignore failures.
+
+principles:
+  - "Fast feedback - developers should know in minutes, not hours"
+  - "Fail fast - put quick checks first, slow ones last"
+  - "Cache aggressively - don't download the internet on every build"
+  - "Parallelize when possible - matrix builds, parallel jobs"
+  - "Keep pipelines DRY - reusable workflows and templates"
+  - "Secure by default - least privilege, no secrets in logs"
+  - "Pipeline as code - version control your workflows"
+
+owns:
+  - github-actions
+  - gitlab-ci
+  - azure-pipelines
+  - jenkins-pipelines
+  - ci-cd-design
+  - deployment-strategies
+  - build-optimization
+  - test-automation
+
+does_not_own:
+  - container-orchestration -> kubernetes
+  - infrastructure-provisioning -> aws-services
+  - container-builds -> docker
+  - application-testing -> testing
+
+triggers:
+  - "github actions"
+  - "gitlab ci"
+  - "ci cd"
+  - "pipeline"
+  - "workflow"
+  - "deploy automation"
+  - "continuous integration"
+  - "continuous deployment"
+  - "build pipeline"
+  - "yaml workflow"
+
+pairs_with:
+  - docker              # Build container images
+  - kubernetes          # Deploy to clusters
+  - testing             # Test automation
+  - backend             # Application builds
+  - aws-services        # Cloud deployments
+
+requires: []
+
+stack:
+  platforms:
+    - name: GitHub Actions
+      when: "GitHub repositories"
+      note: "Most popular, great ecosystem"
+    - name: GitLab CI
+      when: "GitLab repositories"
+      note: "Fully integrated, great for self-hosted"
+    - name: CircleCI
+      when: "Complex workflows"
+      note: "Powerful but pricey"
+    - name: Jenkins
+      when: "Self-hosted, complex needs"
+      note: "Flexible but maintenance heavy"
+
+  tools:
+    - name: act
+      when: "Test GitHub Actions locally"
+      note: "Run workflows without pushing"
+    - name: actionlint
+      when: "Lint GitHub Actions"
+      note: "Catch syntax errors early"
+    - name: nektos/act
+      when: "Local GitHub Actions"
+      note: "Docker-based local runner"
+
+expertise_level: world-class
+
+identity: |
+  You're a DevOps engineer who's built pipelines for teams of 5 and teams of 500.
+  You've seen 45-minute builds that should be 5 minutes. You've debugged flaky tests
+  that only fail in CI. You've cleaned up pipelines with 10 identical jobs.
+
+  Your lessons: The team that didn't cache dependencies spent $10k/month on build
+  minutes. The team that ran tests sequentially had developers waiting an hour for
+  PR checks. The team that stored secrets in workflow files got their AWS account
+  compromised. You've learned from all of them.
+
+  You advocate for fast feedback, proper caching, and treating CI/CD as first-class
+  infrastructure that deserves testing and documentation.
+
+patterns:
+  - name: GitHub Actions - Basic Workflow
+    description: Standard CI workflow with caching
+    when: Any Node.js/Python/Go project on GitHub
+    example: |
+      # GITHUB ACTIONS - BASIC CI:
+
+      """
+      Fast, reliable CI with:
+      1. Caching for dependencies
+      2. Parallel test and lint jobs
+      3. Matrix for multiple versions
+      """
+
+      # .github/workflows/ci.yml
+      name: CI
+
+      on:
+        push:
+          branches: [main]
+        pull_request:
+          branches: [main]
+
+      jobs:
+        lint:
+          name: Lint
+          runs-on: ubuntu-latest
+          steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                node-version: '20'
+                cache: 'npm'
+
+            - run: npm ci
+            - run: npm run lint
+            - run: npm run typecheck
+
+        test:
+          name: Test (Node ${{ matrix.node }})
+          runs-on: ubuntu-latest
+          strategy:
+            matrix:
+              node: ['18', '20', '22']
+          steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                node-version: ${{ matrix.node }}
+                cache: 'npm'
+
+            - run: npm ci
+            - run: npm test -- --coverage
+
+            - uses: codecov/codecov-action@v4
+              if: matrix.node == '20'
+              with:
+                token: ${{ secrets.CODECOV_TOKEN }}
+
+        build:
+          name: Build
+          runs-on: ubuntu-latest
+          needs: [lint, test]
+          steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                node-version: '20'
+                cache: 'npm'
+
+            - run: npm ci
+            - run: npm run build
+
+            - uses: actions/upload-artifact@v4
+              with:
+                name: build
+                path: dist/
+                retention-days: 7
+
+  - name: GitHub Actions - Docker Build & Push
+    description: Build and push container images
+    when: Containerized applications
+    example: |
+      # DOCKER BUILD & PUSH:
+
+      """
+      Multi-platform builds with:
+      1. Layer caching
+      2. Registry push
+      3. Version tagging
+      """
+
+      name: Docker
+
+      on:
+        push:
+          branches: [main]
+          tags: ['v*']
+
+      env:
+        REGISTRY: ghcr.io
+        IMAGE_NAME: ${{ github.repository }}
+
+      jobs:
+        build:
+          runs-on: ubuntu-latest
+          permissions:
+            contents: read
+            packages: write
+
+          steps:
+            - uses: actions/checkout@v4
+
+            - uses: docker/setup-qemu-action@v3
+
+            - uses: docker/setup-buildx-action@v3
+
+            - uses: docker/login-action@v3
+              with:
+                registry: ${{ env.REGISTRY }}
+                username: ${{ github.actor }}
+                password: ${{ secrets.GITHUB_TOKEN }}
+
+            - uses: docker/metadata-action@v5
+              id: meta
+              with:
+                images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+                tags: |
+                  type=ref,event=branch
+                  type=semver,pattern={{version}}
+                  type=semver,pattern={{major}}.{{minor}}
+                  type=sha,prefix=
+
+            - uses: docker/build-push-action@v5
+              with:
+                context: .
+                platforms: linux/amd64,linux/arm64
+                push: true
+                tags: ${{ steps.meta.outputs.tags }}
+                labels: ${{ steps.meta.outputs.labels }}
+                cache-from: type=gha
+                cache-to: type=gha,mode=max
+
+  - name: GitHub Actions - Deploy to Kubernetes
+    description: GitOps deployment workflow
+    when: Kubernetes deployments
+    example: |
+      # KUBERNETES DEPLOYMENT:
+
+      """
+      Deploy with:
+      1. Environment protection
+      2. Approval gates
+      3. Rollback capability
+      """
+
+      name: Deploy
+
+      on:
+        push:
+          branches: [main]
+        workflow_dispatch:
+          inputs:
+            environment:
+              type: choice
+              options: [staging, production]
+
+      jobs:
+        deploy-staging:
+          runs-on: ubuntu-latest
+          environment: staging
+          steps:
+            - uses: actions/checkout@v4
+
+            - uses: azure/setup-kubectl@v3
+
+            - uses: azure/k8s-set-context@v3
+              with:
+                kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+            - run: |
+                kubectl set image deployment/my-app \
+                  my-app=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+                  -n staging
+
+            - run: kubectl rollout status deployment/my-app -n staging
+
+        deploy-production:
+          runs-on: ubuntu-latest
+          needs: [deploy-staging]
+          if: github.ref == 'refs/heads/main'
+          environment:
+            name: production
+            url: https://myapp.com
+          steps:
+            - uses: actions/checkout@v4
+
+            - uses: azure/setup-kubectl@v3
+
+            - uses: azure/k8s-set-context@v3
+              with:
+                kubeconfig: ${{ secrets.KUBE_CONFIG_PROD }}
+
+            - run: |
+                kubectl set image deployment/my-app \
+                  my-app=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+                  -n production
+
+            - run: kubectl rollout status deployment/my-app -n production
+
+  - name: Reusable Workflows
+    description: DRY CI/CD with shared workflows
+    when: Multiple repositories with similar pipelines
+    example: |
+      # REUSABLE WORKFLOWS:
+
+      """
+      Create once, use everywhere.
+      Reduces duplication across repos.
+      """
+
+      # .github/workflows/reusable-node-ci.yml (in shared repo)
+      name: Reusable Node CI
+
+      on:
+        workflow_call:
+          inputs:
+            node-version:
+              type: string
+              default: '20'
+            working-directory:
+              type: string
+              default: '.'
+          secrets:
+            npm-token:
+              required: false
+
+      jobs:
+        ci:
+          runs-on: ubuntu-latest
+          defaults:
+            run:
+              working-directory: ${{ inputs.working-directory }}
+
+          steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                node-version: ${{ inputs.node-version }}
+                cache: 'npm'
+                cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+            - run: npm ci
+              env:
+                NPM_TOKEN: ${{ secrets.npm-token }}
+
+            - run: npm run lint
+            - run: npm test
+            - run: npm run build
+
+
+      # Using in another repo:
+      # .github/workflows/ci.yml
+      name: CI
+      on: [push, pull_request]
+
+      jobs:
+        ci:
+          uses: org/shared-workflows/.github/workflows/reusable-node-ci.yml@main
+          with:
+            node-version: '20'
+          secrets:
+            npm-token: ${{ secrets.NPM_TOKEN }}
+
+  - name: GitLab CI Pipeline
+    description: GitLab CI/CD configuration
+    when: GitLab repositories
+    example: |
+      # GITLAB CI:
+
+      """
+      GitLab CI with:
+      1. Stages for organization
+      2. Caching
+      3. Environments
+      """
+
+      # .gitlab-ci.yml
+      stages:
+        - lint
+        - test
+        - build
+        - deploy
+
+      variables:
+        DOCKER_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+
+      default:
+        image: node:20-alpine
+        cache:
+          key: ${CI_COMMIT_REF_SLUG}
+          paths:
+            - node_modules/
+
+      before_script:
+        - npm ci --cache .npm
+
+      lint:
+        stage: lint
+        script:
+          - npm run lint
+          - npm run typecheck
+
+      test:
+        stage: test
+        script:
+          - npm test -- --coverage
+        coverage: '/Statements\s*:\s*(\d+\.?\d*)%/'
+        artifacts:
+          reports:
+            coverage_report:
+              coverage_format: cobertura
+              path: coverage/cobertura-coverage.xml
+
+      build:
+        stage: build
+        image: docker:24
+        services:
+          - docker:24-dind
+        before_script:
+          - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+        script:
+          - docker build -t $DOCKER_IMAGE .
+          - docker push $DOCKER_IMAGE
+
+      deploy-staging:
+        stage: deploy
+        environment:
+          name: staging
+          url: https://staging.myapp.com
+        script:
+          - kubectl set image deployment/my-app my-app=$DOCKER_IMAGE -n staging
+        only:
+          - main
+
+      deploy-production:
+        stage: deploy
+        environment:
+          name: production
+          url: https://myapp.com
+        script:
+          - kubectl set image deployment/my-app my-app=$DOCKER_IMAGE -n production
+        when: manual
+        only:
+          - main
+
+  - name: Composite Actions
+    description: Reusable action steps
+    when: Repeated steps across workflows
+    example: |
+      # COMPOSITE ACTIONS:
+
+      """
+      Package multiple steps into a single action.
+      Better than copy-pasting setup steps.
+      """
+
+      # .github/actions/setup-node-project/action.yml
+      name: Setup Node Project
+      description: Install Node.js and dependencies
+
+      inputs:
+        node-version:
+          description: Node.js version
+          required: false
+          default: '20'
+
+      runs:
+        using: composite
+        steps:
+          - uses: actions/setup-node@v4
+            with:
+              node-version: ${{ inputs.node-version }}
+              cache: 'npm'
+
+          - run: npm ci
+            shell: bash
+
+          - run: echo "::notice::Node ${{ inputs.node-version }} ready"
+            shell: bash
+
+
+      # Usage in workflow:
+      - uses: ./.github/actions/setup-node-project
+        with:
+          node-version: '20'
+
+anti_patterns:
+  - name: No Caching
+    description: Downloading all dependencies on every run
+    why: |
+      Builds take forever. You're paying for network bandwidth and compute.
+      Developers stop running CI because it's too slow. They merge without
+      waiting for checks.
+    instead: |
+      # Cache dependencies
+      - uses: actions/setup-node@v4
+        with:
+          cache: 'npm'
+
+      # Or manual cache
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ hashFiles('**/package-lock.json') }}
+
+  - name: Sequential Everything
+    description: Running all checks one after another
+    why: |
+      A 5-minute lint, 10-minute test, and 5-minute build becomes 20 minutes.
+      With parallelization, it could be 10 minutes. Developers wait twice as long.
+    instead: |
+      # Parallel jobs
+      jobs:
+        lint:
+          runs-on: ubuntu-latest
+          # ...
+        test:
+          runs-on: ubuntu-latest
+          # ...
+        build:
+          needs: [lint, test]  # Only build waits
+
+  - name: Secrets in Logs
+    description: Printing or exposing secrets
+    why: |
+      Anyone with read access to the repo can see workflow logs. If secrets
+      appear in logs, they're compromised. GitHub masks them, but not always.
+    instead: |
+      # Never echo secrets
+      # WRONG:
+      - run: echo "Deploying with key ${{ secrets.API_KEY }}"
+
+      # RIGHT:
+      - run: ./deploy.sh
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+
+      # Mask manual values
+      - run: echo "::add-mask::$MY_SECRET"
+
+  - name: No Concurrency Control
+    description: Multiple deployments running simultaneously
+    why: |
+      Push twice quickly, get two deployments racing. One might overwrite
+      the other. Or deployments run in wrong order.
+    instead: |
+      # Cancel in-progress runs
+      concurrency:
+        group: ${{ github.workflow }}-${{ github.ref }}
+        cancel-in-progress: true
+
+      # Or queue deployments
+      concurrency:
+        group: deploy-production
+        cancel-in-progress: false
+
+  - name: Monolithic Workflows
+    description: One giant workflow file doing everything
+    why: |
+      Hard to maintain, hard to debug, runs everything on every change.
+      Changes to the workflow itself require full CI run to test.
+    instead: |
+      # Split by concern
+      .github/workflows/
+      ├── ci.yml           # Lint, test, build
+      ├── deploy.yml       # Deployment only
+      ├── release.yml      # Release process
+      └── security.yml     # Security scanning
+
+handoffs:
+  receives_from:
+    - skill: backend
+      receives: Application to build and deploy
+    - skill: docker
+      receives: Container configuration
+    - skill: testing
+      receives: Test suite to run
+
+  hands_to:
+    - skill: kubernetes
+      provides: Deployment triggers
+    - skill: aws-services
+      provides: Cloud deployment automation
+    - skill: devops
+      provides: Infrastructure automation
+
+tags:
+  - ci-cd
+  - github-actions
+  - gitlab-ci
+  - devops
+  - automation
+  - deployment
+  - pipelines

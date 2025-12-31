@@ -1,0 +1,121 @@
+# Sharp Edges - Forms & Validation
+version: 1.0.0
+skill_id: forms-validation
+
+sharp_edges:
+  - id: client-only-validation
+    summary: Trusting client-side validation for security
+    severity: critical
+    situation: |
+      Form validates email format in JavaScript. User disables JS or
+      uses curl to submit. Invalid data reaches your database.
+    why: |
+      Client-side validation is for UX only. It can always be bypassed.
+      Server must be the source of truth.
+    solution: |
+      # VALIDATE ON BOTH SIDES
+
+      // Shared schema
+      export const userSchema = z.object({
+        email: z.string().email(),
+        age: z.number().min(18),
+      });
+
+      // Client: for immediate feedback
+      const { register } = useForm({
+        resolver: zodResolver(userSchema),
+      });
+
+      // Server: always validate again
+      export async function createUser(formData: FormData) {
+        const parsed = userSchema.safeParse({
+          email: formData.get("email"),
+          age: Number(formData.get("age")),
+        });
+        if (!parsed.success) {
+          return { errors: parsed.error.flatten().fieldErrors };
+        }
+        await db.insert(users).values(parsed.data);
+      }
+    symptoms:
+      - Invalid data in database
+      - curl bypasses all checks
+    detection_pattern: null
+
+  - id: losing-form-data
+    summary: Form clears on validation error
+    severity: high
+    situation: |
+      User fills out long form. Clicks submit. Server returns error.
+      Form resets to empty. User has to re-enter everything.
+    why: |
+      Not preserving form state across submissions. Not passing back
+      the submitted data on error.
+    solution: |
+      # PRESERVE FORM DATA
+
+      export async function submitForm(prevState, formData) {
+        const data = Object.fromEntries(formData);
+        const parsed = schema.safeParse(data);
+
+        if (!parsed.success) {
+          return {
+            errors: parsed.error.flatten().fieldErrors,
+            data, // Return submitted data!
+          };
+        }
+        return { success: true };
+      }
+
+      // Form uses returned data as defaults
+      <input name="email" defaultValue={state.data?.email ?? ""} />
+    symptoms:
+      - Form empties after error
+      - High form abandonment
+    detection_pattern: null
+
+  - id: no-loading-state
+    summary: No feedback during form submission
+    severity: medium
+    situation: |
+      User clicks Submit. Nothing happens visually. They click again.
+      Now you have duplicate submissions.
+    why: |
+      Not disabling the submit button or showing a loading state.
+    solution: |
+      # ALWAYS SHOW LOADING STATE
+
+      const [state, action, isPending] = useActionState(submitForm, {});
+
+      <button type="submit" disabled={isPending}>
+        {isPending ? "Submitting..." : "Submit"}
+      </button>
+    symptoms:
+      - Duplicate submissions
+      - No visual feedback on submit
+    detection_pattern: null
+
+  - id: zod-coercion-missing
+    summary: Form data types wrong without coercion
+    severity: medium
+    situation: |
+      Number input submitted. Zod schema expects number. Validation
+      fails because formData.get() returns string, not number.
+    why: |
+      Form data is always strings. Need to coerce to correct types.
+    solution: |
+      # USE ZOD COERCION
+
+      // WRONG
+      const schema = z.object({
+        age: z.number().min(18),
+      });
+
+      // RIGHT
+      const schema = z.object({
+        age: z.coerce.number().min(18),
+      });
+    symptoms:
+      - Number validation failing on valid input
+      - Expected number received string errors
+    detection_pattern: null

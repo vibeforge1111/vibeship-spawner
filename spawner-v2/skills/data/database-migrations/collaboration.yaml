@@ -1,0 +1,379 @@
+# Collaboration - Database Migrations
+# How this skill works with other skills
+
+version: 1.0.0
+skill_id: database-migrations
+
+prerequisites:
+  required:
+    - skill: postgres-wizard
+      reason: "PostgreSQL knowledge essential"
+      what_to_know:
+        - "Basic SQL DDL"
+        - "PostgreSQL-specific features"
+        - "Lock types and behavior"
+
+  recommended:
+    - skill: backend
+      reason: "Application code compatibility"
+      what_to_know:
+        - "ORM usage patterns"
+        - "Database connection handling"
+        - "Application deployment process"
+
+    - skill: cicd-pipelines
+      reason: "Deployment automation"
+      what_to_know:
+        - "CI/CD workflow structure"
+        - "Environment variables"
+        - "Deployment order"
+
+  knowledge:
+    - "SQL DDL (ALTER, CREATE, DROP)"
+    - "Database transactions"
+    - "Locking concepts"
+
+delegation_triggers:
+  - trigger: "user needs query optimization"
+    delegate_to: postgres-wizard
+    context: "Query performance after migration"
+
+  - trigger: "user needs deployment pipeline"
+    delegate_to: cicd-pipelines
+    context: "Migration in CI/CD"
+
+  - trigger: "user needs monitoring"
+    delegate_to: observability
+    context: "Monitor migration impact"
+
+  - trigger: "user needs kubernetes job"
+    delegate_to: kubernetes
+    context: "K8s migration job"
+
+receives_context_from:
+  - skill: backend
+    receives:
+      - "ORM being used (Drizzle, Prisma)"
+      - "Current schema structure"
+      - "Data access patterns"
+
+  - skill: postgres-wizard
+    receives:
+      - "Table sizes"
+      - "Current indexes"
+      - "Lock contention issues"
+
+  - skill: cicd-pipelines
+    receives:
+      - "Deployment strategy"
+      - "Environment configuration"
+      - "Rollback procedures"
+
+provides_context_to:
+  - skill: backend
+    provides:
+      - "Schema changes"
+      - "New column defaults"
+      - "Breaking changes timeline"
+
+  - skill: cicd-pipelines
+    provides:
+      - "Migration commands"
+      - "Pre-deploy vs post-deploy steps"
+      - "Rollback commands"
+
+  - skill: observability
+    provides:
+      - "Metrics to watch"
+      - "Alert thresholds during migration"
+      - "Lock monitoring queries"
+
+escalation_paths:
+  - situation: "Complex performance issues"
+    escalate_to: postgres-wizard
+    context: "Query plan analysis needed"
+
+  - situation: "Deployment coordination"
+    escalate_to: cicd-pipelines
+    context: "Multi-step deployment"
+
+  - situation: "Container migration jobs"
+    escalate_to: kubernetes
+    context: "K8s Job configuration"
+
+workflow_integration:
+  typical_sequence:
+    1:
+      step: "Plan schema change"
+      skills: [database-migrations]
+      output: "Migration strategy document"
+
+    2:
+      step: "Write migration files"
+      skills: [database-migrations]
+      output: "Up and down migrations"
+
+    3:
+      step: "Update application code"
+      skills: [backend]
+      output: "Backwards-compatible code"
+
+    4:
+      step: "Test on staging"
+      skills: [database-migrations, cicd-pipelines]
+      output: "Verified migration"
+
+    5:
+      step: "Deploy migration"
+      skills: [cicd-pipelines]
+      output: "Production schema updated"
+
+    6:
+      step: "Monitor and verify"
+      skills: [observability]
+      output: "Confirmed success"
+
+  decision_points:
+    - question: "Drizzle vs Prisma migrations?"
+      guidance: |
+        Drizzle when:
+        - Want SQL-first approach
+        - Need fine-grained control
+        - Using edge/serverless
+        - Team prefers raw SQL
+
+        Prisma when:
+        - Want declarative schema
+        - Need shadow database workflow
+        - Using Prisma ORM already
+        - Want built-in rollback
+
+    - question: "Single vs multi-step migration?"
+      guidance: |
+        Single step when:
+        - Adding new column (nullable or with default)
+        - Adding new table
+        - Non-breaking changes
+
+        Multi-step (expand-contract) when:
+        - Renaming column/table
+        - Changing column type
+        - Splitting or merging tables
+        - Any breaking change
+
+    - question: "When to run migrations?"
+      guidance: |
+        Before deploy (recommended):
+        - New code works with old and new schema
+        - Rollback app doesn't require rollback DB
+        - Safer, more flexible
+
+        After deploy:
+        - Only when migration needs new code
+        - More coordination required
+        - Higher risk
+
+collaboration_patterns:
+  with_drizzle:
+    when: "Using Drizzle ORM"
+    approach: |
+      Drizzle Migration Workflow:
+
+      ## Generate migration
+      npx drizzle-kit generate:pg
+
+      ## Review generated SQL
+      cat drizzle/0001_migration.sql
+
+      ## Modify if needed
+      # Add CONCURRENTLY to indexes
+      # Add batching for large updates
+      # Split into multiple files if needed
+
+      ## Apply in code
+      import { migrate } from 'drizzle-orm/postgres-js/migrator';
+
+      // Run at startup or in separate script
+      await migrate(db, { migrationsFolder: './drizzle' });
+
+
+      ## CI/CD integration
+      # 1. Generate: npx drizzle-kit generate:pg
+      # 2. Commit migration files
+      # 3. In deploy: run migrate script before new code
+
+  with_prisma:
+    when: "Using Prisma ORM"
+    approach: |
+      Prisma Migration Workflow:
+
+      ## Development
+      npx prisma migrate dev --name add_feature
+
+      ## Create migration without applying
+      npx prisma migrate dev --create-only
+
+      ## Review and modify SQL
+      vim prisma/migrations/20240115_add_feature/migration.sql
+
+      ## Apply modified migration
+      npx prisma migrate dev
+
+
+      ## Production
+      npx prisma migrate deploy
+
+      ## In package.json
+      {
+        "scripts": {
+          "db:migrate:dev": "prisma migrate dev",
+          "db:migrate:deploy": "prisma migrate deploy",
+          "db:migrate:status": "prisma migrate status",
+          "postinstall": "prisma generate"
+        }
+      }
+
+
+      ## CI/CD
+      # 1. prisma migrate deploy (idempotent)
+      # 2. Deploy application
+      # 3. Run smoke tests
+
+  with_raw_sql:
+    when: "Using raw SQL migrations"
+    approach: |
+      Raw SQL Migration Workflow:
+
+      ## Directory structure
+      migrations/
+        001_create_users.sql
+        001_create_users.down.sql
+        002_add_email_index.sql
+        002_add_email_index.down.sql
+
+
+      ## Migration runner
+      import { readdir, readFile } from 'fs/promises';
+      import { join } from 'path';
+
+      async function migrate(db: Database) {
+        // Get applied migrations
+        await db.execute(`
+          CREATE TABLE IF NOT EXISTS migrations (
+            name VARCHAR(255) PRIMARY KEY,
+            applied_at TIMESTAMPTZ DEFAULT NOW()
+          )
+        `);
+
+        const applied = await db.query('SELECT name FROM migrations');
+        const appliedSet = new Set(applied.rows.map(r => r.name));
+
+        // Get pending migrations
+        const files = await readdir('./migrations');
+        const pending = files
+          .filter(f => f.endsWith('.sql') && !f.includes('.down.'))
+          .filter(f => !appliedSet.has(f))
+          .sort();
+
+        // Apply each
+        for (const file of pending) {
+          const sql = await readFile(join('./migrations', file), 'utf-8');
+
+          await db.transaction(async (tx) => {
+            await tx.execute(sql);
+            await tx.execute(
+              'INSERT INTO migrations (name) VALUES ($1)',
+              [file]
+            );
+          });
+
+          console.log(`Applied: ${file}`);
+        }
+      }
+
+platform_integration:
+  github_actions:
+    setup: |
+      # .github/workflows/migrate.yml
+      name: Database Migration
+
+      on:
+        push:
+          branches: [main]
+          paths: ['drizzle/**', 'prisma/**']
+
+      jobs:
+        migrate:
+          runs-on: ubuntu-latest
+          steps:
+            - uses: actions/checkout@v4
+
+            - name: Setup Node
+              uses: actions/setup-node@v4
+              with:
+                node-version: 20
+
+            - name: Install dependencies
+              run: npm ci
+
+            - name: Run migrations
+              run: npm run db:migrate:deploy
+              env:
+                DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+            - name: Notify on failure
+              if: failure()
+              run: |
+                curl -X POST ${{ secrets.SLACK_WEBHOOK }} \
+                  -d '{"text": "Migration failed!"}'
+    considerations:
+      - "Run before app deploy"
+      - "Have rollback ready"
+      - "Monitor during migration"
+
+  kubernetes:
+    setup: |
+      # migration-job.yaml
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: db-migration
+      spec:
+        template:
+          spec:
+            containers:
+            - name: migrate
+              image: myapp:latest
+              command: ["npm", "run", "db:migrate:deploy"]
+              envFrom:
+              - secretRef:
+                  name: db-credentials
+            restartPolicy: Never
+        backoffLimit: 3
+    considerations:
+      - "Run as pre-deploy hook"
+      - "Use init containers for ordering"
+      - "Set appropriate timeouts"
+
+ecosystem:
+  migration_tools:
+    - name: "drizzle-kit"
+      use_when: "Using Drizzle ORM"
+    - name: "prisma migrate"
+      use_when: "Using Prisma ORM"
+    - name: "node-pg-migrate"
+      use_when: "Raw SQL with Node.js"
+    - name: "flyway"
+      use_when: "Java ecosystem / standalone"
+
+  monitoring:
+    - name: "pg_stat_activity"
+      use_when: "Monitor running queries during migration"
+    - name: "pg_locks"
+      use_when: "Check for lock contention"
+
+  testing:
+    - name: "testcontainers"
+      use_when: "Spin up Postgres for migration tests"
+    - name: "pg_dump"
+      use_when: "Create test data snapshots"

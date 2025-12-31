@@ -1,0 +1,509 @@
+# Agent Communication Sharp Edges
+
+sharp_edges:
+  - id: message-schema-drift
+    summary: Message schemas change but not all agents update
+    severity: high
+    situation: Agent A sends new message format, Agent B expects old format, parsing fails
+    why: |
+      Multiple agents, decentralized development.
+      No schema versioning.
+      Backward compatibility not considered.
+    solution: |
+      // Versioned message schemas with backward compatibility
+
+      import { z } from 'zod';
+
+      // Version 1 schema
+      const TaskRequestV1 = z.object({
+          version: z.literal(1),
+          type: z.literal('task_request'),
+          task: z.string()
+      });
+
+      // Version 2 schema (added priority)
+      const TaskRequestV2 = z.object({
+          version: z.literal(2),
+          type: z.literal('task_request'),
+          task: z.string(),
+          priority: z.enum(['low', 'medium', 'high'])
+      });
+
+      // Combined schema supporting both versions
+      const TaskRequest = z.discriminatedUnion('version', [
+          TaskRequestV1,
+          TaskRequestV2
+      ]);
+
+      class VersionedMessageHandler {
+          async handleMessage(raw: unknown): Promise<ProcessedMessage> {
+              // Parse with version detection
+              const message = TaskRequest.parse(raw);
+
+              // Normalize to latest version
+              const normalized = this.normalize(message);
+
+              return this.process(normalized);
+          }
+
+          private normalize(message: z.infer<typeof TaskRequest>): TaskRequestV2 {
+              if (message.version === 1) {
+                  // Upgrade V1 to V2 with default priority
+                  return {
+                      version: 2,
+                      type: message.type,
+                      task: message.task,
+                      priority: 'medium'  // Default for old messages
+                  };
+              }
+              return message;
+          }
+
+          // Deprecation handling
+          private warnDeprecation(version: number): void {
+              if (version < 2) {
+                  console.warn(`Message version ${version} is deprecated. Update to version 2.`);
+              }
+          }
+      }
+
+      // Schema registry for runtime validation
+      class SchemaRegistry {
+          private schemas: Map<string, Map<number, z.ZodSchema>> = new Map();
+
+          register(messageType: string, version: number, schema: z.ZodSchema): void {
+              if (!this.schemas.has(messageType)) {
+                  this.schemas.set(messageType, new Map());
+              }
+              this.schemas.get(messageType)!.set(version, schema);
+          }
+
+          validate(messageType: string, version: number, data: unknown): boolean {
+              const typeSchemas = this.schemas.get(messageType);
+              if (!typeSchemas) throw new Error(`Unknown message type: ${messageType}`);
+
+              const schema = typeSchemas.get(version);
+              if (!schema) throw new Error(`Unknown version ${version} for ${messageType}`);
+
+              return schema.safeParse(data).success;
+          }
+
+          getLatestVersion(messageType: string): number {
+              const typeSchemas = this.schemas.get(messageType);
+              if (!typeSchemas) throw new Error(`Unknown message type: ${messageType}`);
+
+              return Math.max(...typeSchemas.keys());
+          }
+      }
+    symptoms:
+      - Parsing errors in agent logs
+      - Some agents work, others fail
+      - Works in dev, fails in production
+    detection_pattern: 'parse|schema|version|\.parse\('
+
+  - id: message-ordering-assumptions
+    summary: Agent assumes messages arrive in order they were sent
+    severity: medium
+    situation: Messages arrive out of order, agent processes in wrong sequence
+    why: |
+      Async delivery doesn't guarantee order.
+      Parallel processing reorders.
+      Network/queue delays vary.
+    solution: |
+      // Handle out-of-order message delivery
+
+      class OrderedMessageProcessor {
+          private messageBuffer: Map<string, BufferedMessage[]> = new Map();
+          private expectedSequence: Map<string, number> = new Map();
+
+          async processMessage(message: SequencedMessage): Promise<void> {
+              const { correlationId, sequenceNumber } = message;
+
+              // Get or initialize expected sequence
+              const expected = this.expectedSequence.get(correlationId) ?? 0;
+
+              if (sequenceNumber === expected) {
+                  // In order - process immediately
+                  await this.process(message);
+                  this.expectedSequence.set(correlationId, expected + 1);
+
+                  // Check buffer for next messages
+                  await this.processBuffered(correlationId);
+              } else if (sequenceNumber > expected) {
+                  // Out of order - buffer for later
+                  this.buffer(correlationId, message);
+
+                  // Set timeout for missing messages
+                  this.setMissingMessageTimeout(correlationId, expected);
+              } else {
+                  // Duplicate or old message - ignore or log
+                  console.warn(`Received old message: ${sequenceNumber} < ${expected}`);
+              }
+          }
+
+          private buffer(correlationId: string, message: SequencedMessage): void {
+              if (!this.messageBuffer.has(correlationId)) {
+                  this.messageBuffer.set(correlationId, []);
+              }
+              this.messageBuffer.get(correlationId)!.push({
+                  message,
+                  bufferedAt: Date.now()
+              });
+
+              // Sort buffer by sequence number
+              this.messageBuffer.get(correlationId)!.sort(
+                  (a, b) => a.message.sequenceNumber - b.message.sequenceNumber
+              );
+          }
+
+          private async processBuffered(correlationId: string): Promise<void> {
+              const buffer = this.messageBuffer.get(correlationId);
+              if (!buffer) return;
+
+              const expected = this.expectedSequence.get(correlationId) ?? 0;
+
+              while (buffer.length > 0 && buffer[0].message.sequenceNumber === expected) {
+                  const { message } = buffer.shift()!;
+                  await this.process(message);
+                  this.expectedSequence.set(correlationId, expected + 1);
+              }
+          }
+
+          private setMissingMessageTimeout(correlationId: string, expected: number): void {
+              setTimeout(async () => {
+                  const currentExpected = this.expectedSequence.get(correlationId);
+                  if (currentExpected === expected) {
+                      // Still missing - request retransmission or skip
+                      console.warn(`Message ${expected} for ${correlationId} missing, skipping`);
+                      this.expectedSequence.set(correlationId, expected + 1);
+                      await this.processBuffered(correlationId);
+                  }
+              }, 5000);
+          }
+      }
+
+      // Alternative: Use vector clocks for causal ordering
+      class VectorClock {
+          private clock: Map<string, number> = new Map();
+
+          increment(agentId: string): Map<string, number> {
+              this.clock.set(agentId, (this.clock.get(agentId) ?? 0) + 1);
+              return new Map(this.clock);
+          }
+
+          merge(other: Map<string, number>): void {
+              for (const [id, count] of other) {
+                  this.clock.set(id, Math.max(this.clock.get(id) ?? 0, count));
+              }
+          }
+
+          happensBefore(a: Map<string, number>, b: Map<string, number>): boolean {
+              let atLeastOneLess = false;
+              for (const [id, countB] of b) {
+                  const countA = a.get(id) ?? 0;
+                  if (countA > countB) return false;
+                  if (countA < countB) atLeastOneLess = true;
+              }
+              return atLeastOneLess;
+          }
+      }
+    symptoms:
+      - Sporadic incorrect behavior
+      - Race condition-like bugs
+      - Works with slow network, fails with fast
+    detection_pattern: 'sequence|order|before|after|depend'
+
+  - id: message-loss-not-handled
+    summary: Messages lost in transit cause silent failures
+    severity: high
+    situation: Agent sends message but receiver never gets it, no retry or detection
+    why: |
+      Fire-and-forget messaging.
+      No acknowledgment protocol.
+      Network failures not anticipated.
+    solution: |
+      // Reliable messaging with acknowledgments and retries
+
+      interface ReliableMessage {
+          messageId: string;
+          payload: unknown;
+          requiresAck: boolean;
+          retryCount: number;
+          maxRetries: number;
+          sentAt: number;
+      }
+
+      class ReliableMessageSender {
+          private pendingAcks: Map<string, {
+              message: ReliableMessage;
+              timeoutHandle: NodeJS.Timeout;
+              retries: number;
+          }> = new Map();
+
+          private readonly retryDelayMs = 5000;
+          private readonly maxRetries = 3;
+
+          async send(
+              toAgent: string,
+              payload: unknown,
+              options?: { requiresAck?: boolean }
+          ): Promise<SendResult> {
+              const message: ReliableMessage = {
+                  messageId: crypto.randomUUID(),
+                  payload,
+                  requiresAck: options?.requiresAck ?? true,
+                  retryCount: 0,
+                  maxRetries: this.maxRetries,
+                  sentAt: Date.now()
+              };
+
+              await this.sendWithRetry(toAgent, message);
+
+              if (message.requiresAck) {
+                  return this.waitForAck(message.messageId);
+              }
+
+              return { success: true, messageId: message.messageId };
+          }
+
+          private async sendWithRetry(toAgent: string, message: ReliableMessage): Promise<void> {
+              await this.transport.send(toAgent, message);
+
+              if (message.requiresAck) {
+                  const timeoutHandle = setTimeout(() => {
+                      this.handleTimeout(message.messageId);
+                  }, this.retryDelayMs);
+
+                  this.pendingAcks.set(message.messageId, {
+                      message,
+                      timeoutHandle,
+                      retries: 0
+                  });
+              }
+          }
+
+          private async handleTimeout(messageId: string): Promise<void> {
+              const pending = this.pendingAcks.get(messageId);
+              if (!pending) return;
+
+              if (pending.retries < pending.message.maxRetries) {
+                  // Retry
+                  pending.retries++;
+                  console.warn(`Retrying message ${messageId}, attempt ${pending.retries}`);
+
+                  await this.transport.send(pending.message.toAgent, pending.message);
+
+                  // Reset timeout
+                  pending.timeoutHandle = setTimeout(() => {
+                      this.handleTimeout(messageId);
+                  }, this.retryDelayMs * Math.pow(2, pending.retries));  // Exponential backoff
+              } else {
+                  // Max retries exceeded
+                  this.pendingAcks.delete(messageId);
+                  this.emit('messageFailed', {
+                      messageId,
+                      reason: 'max_retries_exceeded',
+                      attempts: pending.retries + 1
+                  });
+              }
+          }
+
+          handleAck(messageId: string): void {
+              const pending = this.pendingAcks.get(messageId);
+              if (pending) {
+                  clearTimeout(pending.timeoutHandle);
+                  this.pendingAcks.delete(messageId);
+                  this.emit('messageAcked', { messageId });
+              }
+          }
+      }
+
+      class ReliableMessageReceiver {
+          private processedIds: Set<string> = new Set();
+          private idExpiryMs = 60000;
+
+          async receive(message: ReliableMessage): Promise<void> {
+              // Deduplicate
+              if (this.processedIds.has(message.messageId)) {
+                  // Already processed - just ack again
+                  await this.sendAck(message.messageId, message.fromAgent);
+                  return;
+              }
+
+              // Process
+              await this.process(message.payload);
+
+              // Track for deduplication
+              this.processedIds.add(message.messageId);
+              setTimeout(() => {
+                  this.processedIds.delete(message.messageId);
+              }, this.idExpiryMs);
+
+              // Ack
+              if (message.requiresAck) {
+                  await this.sendAck(message.messageId, message.fromAgent);
+              }
+          }
+
+          private async sendAck(messageId: string, toAgent: string): Promise<void> {
+              await this.transport.send(toAgent, {
+                  type: 'ack',
+                  messageId,
+                  timestamp: Date.now()
+              });
+          }
+      }
+    symptoms:
+      - Agents "miss" messages randomly
+      - Work not completed with no error
+      - Works locally, fails in production
+    detection_pattern: 'send|emit|publish|dispatch'
+
+  - id: broadcast-storm
+    summary: Agents react to events by emitting more events, causing cascade
+    severity: critical
+    situation: One event triggers chain reaction consuming all resources
+    why: |
+      Event handlers emit events.
+      No deduplication or rate limiting.
+      Feedback loops in event graph.
+    solution: |
+      // Prevent broadcast storms with rate limiting and deduplication
+
+      class SafeEventBus {
+          private eventCounts: Map<string, number[]> = new Map();
+          private readonly rateLimitWindow = 1000;  // 1 second
+          private readonly maxEventsPerWindow = 100;
+
+          private recentEvents: Map<string, number> = new Map();
+          private readonly dedupeWindow = 5000;  // 5 seconds
+
+          async publish(event: AgentEvent): Promise<boolean> {
+              // Check rate limit
+              if (this.isRateLimited(event.eventType)) {
+                  console.warn(`Rate limit exceeded for ${event.eventType}`);
+                  return false;
+              }
+
+              // Check for duplicate/similar events
+              if (this.isDuplicate(event)) {
+                  console.debug(`Duplicate event suppressed: ${event.eventId}`);
+                  return false;
+              }
+
+              // Track for rate limiting
+              this.trackEvent(event.eventType);
+
+              // Track for deduplication
+              this.trackForDedupe(event);
+
+              // Actually publish
+              await this.doPublish(event);
+              return true;
+          }
+
+          private isRateLimited(eventType: string): boolean {
+              const counts = this.eventCounts.get(eventType) || [];
+              const now = Date.now();
+              const recentCounts = counts.filter(t => now - t < this.rateLimitWindow);
+
+              return recentCounts.length >= this.maxEventsPerWindow;
+          }
+
+          private trackEvent(eventType: string): void {
+              if (!this.eventCounts.has(eventType)) {
+                  this.eventCounts.set(eventType, []);
+              }
+              this.eventCounts.get(eventType)!.push(Date.now());
+
+              // Cleanup old entries
+              const now = Date.now();
+              this.eventCounts.set(
+                  eventType,
+                  this.eventCounts.get(eventType)!.filter(t => now - t < this.rateLimitWindow * 2)
+              );
+          }
+
+          private isDuplicate(event: AgentEvent): boolean {
+              // Create content hash for comparison
+              const hash = this.hashEvent(event);
+              const lastSeen = this.recentEvents.get(hash);
+
+              if (lastSeen && Date.now() - lastSeen < this.dedupeWindow) {
+                  return true;
+              }
+
+              return false;
+          }
+
+          private trackForDedupe(event: AgentEvent): void {
+              const hash = this.hashEvent(event);
+              this.recentEvents.set(hash, Date.now());
+
+              // Cleanup
+              for (const [h, timestamp] of this.recentEvents) {
+                  if (Date.now() - timestamp > this.dedupeWindow) {
+                      this.recentEvents.delete(h);
+                  }
+              }
+          }
+
+          private hashEvent(event: AgentEvent): string {
+              // Hash key fields for comparison
+              return JSON.stringify({
+                  type: event.eventType,
+                  source: event.source,
+                  payload: event.payload
+              });
+          }
+      }
+
+      // Circuit breaker for event handlers
+      class EventHandlerCircuitBreaker {
+          private failures: Map<string, number> = new Map();
+          private lastFailure: Map<string, number> = new Map();
+          private readonly failureThreshold = 5;
+          private readonly resetTimeout = 30000;
+
+          async wrap(
+              handlerId: string,
+              handler: (event: AgentEvent) => Promise<void>
+          ): Promise<(event: AgentEvent) => Promise<void>> {
+              return async (event: AgentEvent) => {
+                  // Check if circuit is open
+                  if (this.isOpen(handlerId)) {
+                      console.warn(`Circuit breaker open for ${handlerId}, skipping`);
+                      return;
+                  }
+
+                  try {
+                      await handler(event);
+                      this.recordSuccess(handlerId);
+                  } catch (error) {
+                      this.recordFailure(handlerId);
+                      throw error;
+                  }
+              };
+          }
+
+          private isOpen(handlerId: string): boolean {
+              const failures = this.failures.get(handlerId) || 0;
+              const lastFail = this.lastFailure.get(handlerId) || 0;
+
+              if (failures >= this.failureThreshold) {
+                  // Check if reset timeout has passed
+                  if (Date.now() - lastFail > this.resetTimeout) {
+                      this.failures.set(handlerId, 0);
+                      return false;
+                  }
+                  return true;
+              }
+
+              return false;
+          }
+      }
+    symptoms:
+      - System becomes unresponsive
+      - Memory/CPU spike
+      - Logs fill with repeated events
+    detection_pattern: 'emit|publish|broadcast|trigger'
