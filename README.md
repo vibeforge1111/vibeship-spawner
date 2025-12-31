@@ -15,7 +15,7 @@ Transform Claude into a specialist that actually knows your stack's gotchas, rem
 | Claude forgets your project between sessions | **Project Memory** - decisions, issues, and progress persist |
 | Claude suggests patterns that break in production | **Sharp Edges** - 2,000+ gotchas from real-world failures |
 | Claude misses security issues in code | **Guardrails** - automated checks catch vulnerabilities |
-| Claude gives generic advice | **273 Specialist Skills** - deep expertise in specific domains |
+| Claude gives generic advice | **462 Specialist Skills** - deep expertise in specific domains |
 | Claude doesn't know when to hand off | **Skill Collaboration** - knows when another skill should take over |
 
 ### The Differentiation
@@ -62,7 +62,7 @@ Restart Claude Desktop.
 npx vibeship-spawner-skills install
 ```
 
-This installs **273 specialist skills** to `~/.spawner/skills/`. Zero cost, works offline.
+This installs **462 specialist skills** to `~/.spawner/skills/`. Zero cost, works offline.
 
 ### 3. Start Building
 
@@ -186,18 +186,22 @@ postgres-wizard/
 - **Specific** - each gotcha has detection patterns
 - **Collaborative** - skills know their boundaries
 
-### Why 25 Categories?
+### Why 35 Categories?
 
 We organize by **domain expertise**, not file type:
 
 ```
 ~/.spawner/skills/
-├── development/     # 57 skills - the builders
-├── data/            # 10 skills - database specialists
-├── ai/              # 12 skills - ML/LLM experts
-├── marketing/       # 33 skills - growth & content
-├── strategy/        # 15 skills - business thinking
-└── ...              # 20 more categories
+├── game-dev/        # 51 skills - Unity, Godot, Phaser
+├── marketing/       # 36 skills - AI video, SEO, content
+├── integrations/    # 25 skills - AWS, Stripe, Discord
+├── ai/              # 24 skills - LLM, embeddings, RAG
+├── ai-agents/       # 23 skills - autonomous, multi-agent
+├── creative/        # 23 skills - memes, viral, gamification
+├── devops/          # 22 skills - CI/CD, Docker, K8s
+├── backend/         # 21 skills - APIs, microservices
+├── maker/           # 11 skills - viral tools, bots, SaaS
+└── ...              # 26 more categories
 ```
 
 This mirrors how **real teams work** - you don't ask a frontend dev about database indexing.
@@ -247,29 +251,37 @@ claude mcp add --transport http spawner https://mcp.vibeship.co/mcp
 
 ## Skills Directory
 
-### Development (57 skills)
-Building software, from backend to deployment.
+> **[Browse all 462 skills online](https://spawner.vibeship.co/skills)**
+
+### Game Development (51 skills)
+Unity, Godot, Phaser, and game design patterns.
+
+| Skill | What It Knows |
+|-------|---------------|
+| `unity-development` | C# patterns, DOTS/ECS, physics, rendering |
+| `godot-development` | GDScript, signals, nodes, scene composition |
+| `phaser-gamedev` | 2D games, arcade physics, tilemaps |
+| `game-design-patterns` | State machines, object pools, ECS |
+| `multiplayer-netcode` | Rollback, prediction, authoritative servers |
+| `procedural-generation` | Terrain, dungeons, noise functions |
+| `game-audio` | FMOD, Wwise, adaptive music |
+| `game-ui-ux` | HUD design, menus, accessibility |
+| `...and 43 more` | |
+
+### Backend (21 skills)
+APIs, microservices, and server patterns.
 
 | Skill | What It Knows |
 |-------|---------------|
 | `backend` | API design, server patterns, error handling |
-| `frontend` | React patterns, state management, performance |
 | `api-designer` | REST/GraphQL design, versioning, documentation |
-| `auth-specialist` | OAuth, JWT, session management, security |
-| `devops` | CI/CD, deployment, infrastructure |
-| `security` | OWASP, vulnerability prevention, hardening |
-| `test-architect` | Testing strategies, coverage, mocking |
-| `docker-specialist` | Containerization, compose, optimization |
-| `kubernetes-deployment` | K8s patterns, scaling, monitoring |
-| `mcp-developer` | Building MCP servers and tools |
-| `prompt-engineer` | LLM prompting, chain-of-thought, evaluation |
-| `rag-engineer` | Retrieval augmented generation, embeddings |
-| `realtime-engineer` | WebSockets, SSE, live updates |
-| `performance-hunter` | Profiling, optimization, bottlenecks |
-| `migration-specialist` | Database migrations, zero-downtime |
-| `...and 42 more` | |
+| `microservices` | Service mesh, CQRS, event sourcing |
+| `caching-strategies` | Redis, CDN, cache invalidation |
+| `graphql-schema` | Schema design, DataLoader, federation |
+| `elasticsearch-search` | Full-text search, aggregations, mapping |
+| `...and 15 more` | |
 
-### Data (10 skills)
+### Data (11 skills)
 Databases, caching, and data pipelines.
 
 | Skill | What It Knows |
@@ -278,31 +290,25 @@ Databases, caching, and data pipelines.
 | `redis-specialist` | Caching patterns, pub/sub, sessions |
 | `vector-specialist` | Embeddings, similarity search, pgvector |
 | `graph-engineer` | Neo4j, graph modeling, traversals |
-| `drizzle-orm` | Schema design, migrations, type safety |
 | `temporal-craftsman` | Workflow orchestration, durable execution |
-| `pg-boss` | Job queues, background processing |
-| `graphile-worker` | PostgreSQL job queues |
 | `data-engineer` | ETL, pipelines, data quality |
-| `database-schema-design` | Normalization, relationships, indexes |
+| `...and 5 more` | |
 
-### AI & ML (24 skills)
+### AI (24 skills)
 Machine learning, LLMs, and AI applications.
 
 | Skill | What It Knows |
 |-------|---------------|
 | `llm-architect` | Model selection, prompting, fine-tuning |
 | `llm-fine-tuning` | LoRA, PEFT, training data |
-| `ml-memory` | Vector stores, context management |
 | `computer-vision-deep` | CNNs, object detection, segmentation |
 | `nlp-advanced` | Transformers, NER, sentiment |
 | `distributed-training` | Multi-GPU, DeepSpeed, FSDP |
 | `model-optimization` | Quantization, pruning, ONNX |
-| `ai-safety-alignment` | RLHF, red-teaming, guardrails |
 | `multimodal-ai` | Vision-language models, CLIP |
-| `semantic-search` | Embeddings, reranking, hybrid search |
-| `...and 14 more` | |
+| `...and 17 more` | |
 
-### Agents (10 skills)
+### AI Agents (23 skills)
 Autonomous systems and automation.
 
 | Skill | What It Knows |
@@ -316,9 +322,9 @@ Autonomous systems and automation.
 | `agent-memory-systems` | Long-term memory, retrieval |
 | `agent-tool-builder` | Tool design, function calling |
 | `agent-evaluation` | Benchmarking, evals, metrics |
-| `zapier-make-patterns` | No-code automation patterns |
+| `...and 14 more` | |
 
-### Marketing (33 skills)
+### Marketing (36 skills)
 Content, growth, and creative production.
 
 | Skill | What It Knows |
@@ -330,37 +336,74 @@ Content, growth, and creative production.
 | `ai-image-generation` | Midjourney, DALL-E, Flux prompts |
 | `viral-marketing` | Hooks, distribution, shareability |
 | `brand-storytelling` | Narrative, voice, positioning |
-| `...and 26 more` | |
+| `...and 29 more` | |
 
-### Integration (8 skills)
-Connecting services and APIs.
+### Maker (11 skills)
+Build products that ship and make money.
 
 | Skill | What It Knows |
 |-------|---------------|
-| `stripe-integration` | Payments, subscriptions, webhooks |
-| `email-systems` | Transactional, marketing, deliverability |
-| `bullmq-specialist` | Redis queues, job processing |
-| `inngest` | Event-driven functions, workflows |
-| `trigger-dev` | Background jobs, scheduling |
-| `upstash-qstash` | Serverless messaging, rate limiting |
-| `nextjs-supabase-auth` | Auth integration patterns |
-| `vercel-deployment` | Edge functions, ISR, analytics |
+| `viral-generator-builder` | Shareable generators, seeded randomness |
+| `scroll-experience` | GSAP, Framer, scroll-driven storytelling |
+| `telegram-bot-builder` | Telegraf, inline keyboards, monetization |
+| `telegram-mini-app` | TON Connect, Mini App patterns |
+| `micro-saas-launcher` | 2-week MVP, validation, Stripe |
+| `browser-extension-builder` | MV3, content scripts, chrome.storage |
+| `ai-wrapper-product` | API wrappers, prompt templates, cost tracking |
+| `notion-template-business` | Template sales, pricing, distribution |
+| `personal-tool-builder` | Scratch your itch, CLI tools, automation |
+| `...and 2 more` | |
 
-### Integrations (14 skills)
-Platform-specific expertise.
+### Creative (23 skills)
+Memes, viral hooks, gamification, and creative chaos.
+
+| Skill | What It Knows |
+|-------|---------------|
+| `meme-engineering` | Format selection, timing, distribution |
+| `viral-hooks` | Attention patterns, shareability |
+| `gamification-loops` | Engagement mechanics, progression |
+| `easter-egg-design` | Hidden features, discovery moments |
+| `generative-art` | Creative coding, p5.js, shaders |
+| `...and 18 more` | |
+
+### Integrations (25 skills)
+Platform-specific expertise and API connections.
 
 | Skill | What It Knows |
 |-------|---------------|
 | `aws-serverless` | Lambda, API Gateway, DynamoDB |
 | `gcp-cloud-run` | Cloud Run, Pub/Sub, Firestore |
-| `azure-functions` | Azure Functions, Cosmos DB |
+| `stripe-integration` | Payments, subscriptions, webhooks |
 | `discord-bot-architect` | Discord.js, slash commands, bots |
 | `slack-bot-builder` | Slack API, Block Kit, workflows |
 | `twilio-communications` | SMS, voice, WhatsApp |
-| `shopify-apps` | Shopify API, Liquid, embedded apps |
-| `...and 7 more` | |
+| `...and 19 more` | |
 
-### Frameworks (6 skills)
+### Community (11 skills)
+Build and manage thriving communities.
+
+| Skill | What It Knows |
+|-------|---------------|
+| `community-strategy` | Community design, engagement models |
+| `discord-mastery` | Server setup, bots, moderation |
+| `telegram-mastery` | Groups, channels, bots |
+| `ambassador-programs` | Recruitment, incentives, scaling |
+| `developer-community` | DevRel, docs, developer experience |
+| `...and 6 more` | |
+
+### DevOps (22 skills)
+CI/CD, infrastructure, and operations.
+
+| Skill | What It Knows |
+|-------|---------------|
+| `devops` | CI/CD, deployment, infrastructure |
+| `docker-specialist` | Containerization, compose, optimization |
+| `kubernetes-deployment` | K8s patterns, scaling, monitoring |
+| `observability-sre` | Metrics, logs, traces, alerting |
+| `infra-architect` | Cloud architecture, cost optimization |
+| `...and 17 more` | |
+
+### Frameworks (12 skills)
 Framework-specific patterns and gotchas.
 
 | Skill | What It Knows |
@@ -371,18 +414,7 @@ Framework-specific patterns and gotchas.
 | `supabase-backend` | Auth, RLS, Edge Functions |
 | `tailwind-ui` | Utility-first CSS, components |
 | `typescript-strict` | Type safety, generics, inference |
-
-### Finance (6 skills)
-Trading, DeFi, and fintech.
-
-| Skill | What It Knows |
-|-------|---------------|
-| `algorithmic-trading` | Backtesting, execution, risk |
-| `blockchain-defi` | Smart contracts, AMMs, yield |
-| `derivatives-pricing` | Options, Greeks, Monte Carlo |
-| `fintech-integration` | Plaid, payment rails, KYC |
-| `portfolio-optimization` | Mean-variance, factor models |
-| `risk-modeling` | VaR, stress testing, limits |
+| `...and 6 more` | |
 
 ### Mind (10 skills)
 Thinking frameworks and problem-solving.
@@ -395,33 +427,29 @@ Thinking frameworks and problem-solving.
 | `refactoring-guide` | Safe refactoring patterns |
 | `tech-debt-manager` | Prioritization, payoff strategies |
 | `incident-responder` | On-call, postmortems, recovery |
-| `performance-thinker` | Optimization mindset |
-| `code-quality` | Maintainability, readability |
-| `test-strategist` | What to test, coverage strategy |
-| `technical-writer` | Documentation, ADRs, RFCs |
+| `...and 4 more` | |
 
-### Mind-V5 (22 skills)
-Enhanced memory-enabled versions of core skills.
-
-These are upgraded versions of popular skills with deeper context awareness and memory integration.
-
-### Additional Categories
+### Additional Categories (17 more)
 
 | Category | Count | Focus |
 |----------|-------|-------|
-| Strategy | 15 | Product strategy, growth, positioning |
+| Strategy | 24 | Product strategy, growth, competitive intel |
+| Blockchain | 20 | Smart contracts, DeFi, NFTs, Solana |
+| Security | 13 | Auth, OWASP, compliance, privacy |
+| Design | 12 | UI, UX, branding, landing pages |
+| Education | 7 | Course creation, AI tutoring, learning design |
+| Product | 7 | A/B testing, analytics, PM |
+| Finance | 6 | Algorithmic trading, DeFi, derivatives |
+| Trading | 6 | Execution algorithms, quant research |
 | Enterprise | 6 | Compliance, governance, architecture |
-| Legal | 5 | GDPR, contracts, patents |
-| Space | 5 | Orbital mechanics, mission planning |
 | Biotech | 6 | Genomics, drug discovery, lab automation |
 | Hardware | 6 | Embedded, FPGA, robotics |
+| Legal | 5 | GDPR, contracts, patents |
+| Space | 5 | Orbital mechanics, mission planning |
 | Climate | 5 | Carbon accounting, sustainability |
 | Simulation | 5 | Monte Carlo, digital twin, physics |
-| Science | 4 | Experimental design, statistics |
 | Communications | 5 | Developer relations, crisis comms |
 | Startup | 3 | YC playbook, founder mode |
-| Design | 4 | UI, UX, branding |
-| Product | 4 | A/B testing, analytics, PM |
 
 ---
 
