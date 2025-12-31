@@ -125,3 +125,48 @@ export async function getAllEdgeIds(
   const index = await sharpEdges.get<string[]>('edge_index', 'json');
   return index ?? [];
 }
+
+/**
+ * Get sharp edges for a specific skill
+ */
+export async function getSharpEdgesForSkill(
+  env: { SHARP_EDGES: KVNamespace },
+  skillId: string
+): Promise<Array<{
+  id: string;
+  title: string;
+  severity: 'critical' | 'warning' | 'info';
+  situation?: string;
+}>> {
+  // Try to load from KV by skill ID
+  const edges = await env.SHARP_EDGES.get<SharpEdge[]>(
+    `edges_by_skill:${skillId}`,
+    'json'
+  );
+
+  if (edges) {
+    return edges.map(e => ({
+      id: e.id,
+      title: e.summary,
+      severity: e.severity === 'high' ? 'critical' : e.severity === 'medium' ? 'warning' : 'info',
+      situation: e.situation
+    }));
+  }
+
+  // Fallback: try by stack name (skill might be in stack index)
+  const stackEdges = await env.SHARP_EDGES.get<SharpEdge[]>(
+    `edges_by_stack:${skillId.toLowerCase()}`,
+    'json'
+  );
+
+  if (stackEdges) {
+    return stackEdges.map(e => ({
+      id: e.id,
+      title: e.summary,
+      severity: e.severity === 'high' ? 'critical' : e.severity === 'medium' ? 'warning' : 'info',
+      situation: e.situation
+    }));
+  }
+
+  return [];
+}

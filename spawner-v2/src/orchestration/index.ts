@@ -28,7 +28,8 @@ export {
   type WorkflowDefinition,
   type WorkflowState,
   type StepResult,
-  type WorkflowEvent
+  type WorkflowEvent,
+  type QualityGateResult
 } from './workflow.js';
 
 // Team System
@@ -83,3 +84,18 @@ export {
   type OrchestrationEventType,
   type OrchestrationEvent
 } from './events.js';
+
+// State Persistence
+export {
+  saveWorkflowState,
+  loadWorkflowState,
+  listActiveWorkflows,
+  updateWorkflowStatus,
+  saveTeamState,
+  loadTeamState,
+  listActiveTeams,
+  formatPersistedWorkflow,
+  formatWorkflowList as formatPersistedWorkflowList,
+  type PersistedWorkflowState,
+  type PersistedTeamState
+} from './persistence.js';

@@ -8,8 +8,8 @@
  * - supervised: Generator-critic loops with quality gates
  */
 
-import type { Env } from '../types.js';
-import { loadSkill, type Skill, type Collaboration } from '../skills/loader.js';
+import type { Env, Validation } from '../types.js';
+import { loadSkill, loadSkillValidations, type Skill, type Collaboration } from '../skills/loader.js';
 
 // =============================================================================
 // Types
@@ -69,6 +69,26 @@ export interface WorkflowEvent {
   workflow_id: string;
   timestamp: number;
   data: Record<string, unknown>;
+}
+
+export interface QualityGateResult {
+  passed: boolean;
+  validator_skill: string;
+  criteria_checked: Array<{
+    criterion: string;
+    passed: boolean;
+    details?: string;
+  }>;
+  validation_errors: Array<{
+    validation_id: string;
+    severity: 'critical' | 'error' | 'warning';
+    message: string;
+    matched_pattern?: string;
+  }>;
+  iteration: number;
+  max_iterations: number;
+  action: 'continue' | 'retry' | 'block' | 'warn';
+  feedback: string;
 }
 
 // =============================================================================
@@ -285,35 +305,272 @@ export class WorkflowEngine {
   }
 
   /**
-   * Run quality gate check
+   * Run quality gate check with actual enforcement
    */
   async checkQualityGate(
     step: WorkflowStep,
     outputs: Record<string, unknown>,
     iteration: number = 1
-  ): Promise<{ passed: boolean; feedback?: string }> {
+  ): Promise<QualityGateResult> {
+    // Default pass result for steps without gates
     if (!step.quality_gate) {
-      return { passed: true };
+      return {
+        passed: true,
+        validator_skill: 'none',
+        criteria_checked: [],
+        validation_errors: [],
+        iteration,
+        max_iterations: 1,
+        action: 'continue',
+        feedback: 'No quality gate defined - proceeding.'
+      };
     }
 
     const gate = step.quality_gate;
+    const maxIterations = gate.max_iterations ?? 3;
 
     // Load validator skill
     const validator = await loadSkill(this.env, gate.validator);
     if (!validator) {
-      return { passed: false, feedback: `Validator skill not found: ${gate.validator}` };
+      return {
+        passed: false,
+        validator_skill: gate.validator,
+        criteria_checked: [],
+        validation_errors: [{
+          validation_id: 'validator_not_found',
+          severity: 'critical',
+          message: `Validator skill not found: ${gate.validator}`
+        }],
+        iteration,
+        max_iterations: maxIterations,
+        action: 'block',
+        feedback: `Cannot run quality gate: validator skill "${gate.validator}" not found.`
+      };
     }
 
+    // Load validator's validations (code patterns to check)
+    const validations = await loadSkillValidations(this.env, gate.validator);
+
+    // Run validation checks against outputs
+    const validationErrors: QualityGateResult['validation_errors'] = [];
+    const outputStr = JSON.stringify(outputs);
+    const outputCode = typeof outputs.code === 'string' ? outputs.code : outputStr;
+
+    for (const validation of validations) {
+      const patterns = Array.isArray(validation.pattern) ? validation.pattern : [validation.pattern];
+
+      for (const pattern of patterns) {
+        try {
+          const regex = new RegExp(pattern, 'gi');
+          if (regex.test(outputCode)) {
+            validationErrors.push({
+              validation_id: validation.id,
+              severity: validation.severity,
+              message: validation.message,
+              matched_pattern: pattern
+            });
+          }
+        } catch {
+          // Invalid regex, skip
+        }
+      }
+    }
+
+    // Check criteria against output data
+    const criteriaResults: QualityGateResult['criteria_checked'] = [];
+
+    for (const criterion of gate.criteria) {
+      const { passed, details } = this.evaluateCriterion(criterion, outputs, validationErrors);
+      criteriaResults.push({ criterion, passed, details });
+    }
+
+    // Determine if gate passed
+    const criticalErrors = validationErrors.filter(e => e.severity === 'critical');
+    const hasFailedCriteria = criteriaResults.some(c => !c.passed);
+    const passed = criticalErrors.length === 0 && !hasFailedCriteria;
+
+    // Determine action based on result and on_fail setting
+    let action: QualityGateResult['action'] = 'continue';
+    if (!passed) {
+      if (iteration < maxIterations && gate.on_fail === 'retry') {
+        action = 'retry';
+      } else if (gate.on_fail === 'block') {
+        action = 'block';
+      } else if (gate.on_fail === 'warn') {
+        action = 'warn';
+      } else if (gate.on_fail === 'retry' && iteration >= maxIterations) {
+        action = 'block'; // Max retries exceeded
+      }
+    }
+
+    // Build feedback message
+    const feedback = this.buildGateFeedback(
+      passed,
+      criteriaResults,
+      validationErrors,
+      iteration,
+      maxIterations,
+      action
+    );
+
+    // Emit gate event
     this.emitEvent('workflow:gate', {
       step: step.skill,
       validator: gate.validator,
       iteration,
-      criteria: gate.criteria
+      max_iterations: maxIterations,
+      criteria: gate.criteria,
+      passed,
+      action,
+      errors_count: validationErrors.length
     });
 
-    // For now, return success - actual validation happens in Claude
-    // This is a hook point for future implementation
-    return { passed: true };
+    return {
+      passed,
+      validator_skill: gate.validator,
+      criteria_checked: criteriaResults,
+      validation_errors: validationErrors,
+      iteration,
+      max_iterations: maxIterations,
+      action,
+      feedback
+    };
+  }
+
+  /**
+   * Evaluate a single criterion against outputs
+   */
+  private evaluateCriterion(
+    criterion: string,
+    outputs: Record<string, unknown>,
+    validationErrors: QualityGateResult['validation_errors']
+  ): { passed: boolean; details?: string } {
+    // Built-in criteria checks
+    switch (criterion.toLowerCase()) {
+      case 'no_critical':
+      case 'no_critical_bugs':
+        const criticalCount = validationErrors.filter(e => e.severity === 'critical').length;
+        return {
+          passed: criticalCount === 0,
+          details: criticalCount > 0 ? `Found ${criticalCount} critical issues` : 'No critical issues'
+        };
+
+      case 'no_high':
+        const highCount = validationErrors.filter(e => e.severity === 'critical' || e.severity === 'error').length;
+        return {
+          passed: highCount === 0,
+          details: highCount > 0 ? `Found ${highCount} high-severity issues` : 'No high-severity issues'
+        };
+
+      case 'tests_pass':
+        const testsPass = outputs.tests_passed === true || outputs.test_status === 'passed';
+        return {
+          passed: testsPass,
+          details: testsPass ? 'Tests passed' : 'Tests did not pass or were not run'
+        };
+
+      case 'no_warnings':
+        const warningCount = validationErrors.length;
+        return {
+          passed: warningCount === 0,
+          details: warningCount > 0 ? `Found ${warningCount} warnings` : 'No warnings'
+        };
+
+      case 'has_tests':
+        const hasTests = outputs.tests !== undefined || outputs.test_files !== undefined;
+        return {
+          passed: hasTests,
+          details: hasTests ? 'Tests are present' : 'No tests found'
+        };
+
+      case 'has_docs':
+        const hasDocs = outputs.documentation !== undefined || outputs.docs !== undefined;
+        return {
+          passed: hasDocs,
+          details: hasDocs ? 'Documentation is present' : 'No documentation found'
+        };
+
+      default:
+        // Check if criterion is a state key that should be truthy
+        if (outputs[criterion] !== undefined) {
+          const passed = Boolean(outputs[criterion]);
+          return {
+            passed,
+            details: passed ? `${criterion} is present` : `${criterion} is missing or falsy`
+          };
+        }
+
+        // Unknown criterion - pass by default with warning
+        return {
+          passed: true,
+          details: `Unknown criterion: ${criterion} (skipped)`
+        };
+    }
+  }
+
+  /**
+   * Build human-readable feedback message
+   */
+  private buildGateFeedback(
+    passed: boolean,
+    criteria: QualityGateResult['criteria_checked'],
+    errors: QualityGateResult['validation_errors'],
+    iteration: number,
+    maxIterations: number,
+    action: QualityGateResult['action']
+  ): string {
+    const lines: string[] = [];
+
+    if (passed) {
+      lines.push('✅ **Quality Gate PASSED**');
+      lines.push('');
+      lines.push('All criteria met:');
+      for (const c of criteria) {
+        lines.push(`  ✓ ${c.criterion}: ${c.details || 'passed'}`);
+      }
+    } else {
+      lines.push('❌ **Quality Gate FAILED**');
+      lines.push('');
+
+      // Show failed criteria
+      const failed = criteria.filter(c => !c.passed);
+      if (failed.length > 0) {
+        lines.push('**Failed Criteria:**');
+        for (const c of failed) {
+          lines.push(`  ✗ ${c.criterion}: ${c.details || 'failed'}`);
+        }
+        lines.push('');
+      }
+
+      // Show validation errors
+      if (errors.length > 0) {
+        lines.push('**Validation Errors:**');
+        for (const e of errors.slice(0, 5)) {
+          const icon = e.severity === 'critical' ? '🚨' : e.severity === 'error' ? '❌' : '⚠️';
+          lines.push(`  ${icon} [${e.severity}] ${e.message}`);
+        }
+        if (errors.length > 5) {
+          lines.push(`  ... and ${errors.length - 5} more`);
+        }
+        lines.push('');
+      }
+
+      // Show action
+      lines.push(`**Iteration:** ${iteration}/${maxIterations}`);
+      switch (action) {
+        case 'retry':
+          lines.push('**Action:** Retrying step with feedback above');
+          break;
+        case 'block':
+          lines.push('**Action:** Workflow BLOCKED - manual intervention required');
+          break;
+        case 'warn':
+          lines.push('**Action:** Continuing with warnings (not recommended)');
+          break;
+      }
+    }
+
+    return lines.join('\n');
   }
 
   /**

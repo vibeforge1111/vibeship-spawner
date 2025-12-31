@@ -12,6 +12,8 @@
 import { z } from 'zod';
 import type { Env } from '../types.js';
 import { orchestrate, type OrchestrateInput } from '../orchestration/index.js';
+import { findTeamByTrigger, listTeams } from '../orchestration/teams.js';
+import { listBuiltinWorkflows } from '../orchestration/workflow.js';
 
 /**
  * Input schema for spawner_orchestrate
@@ -163,8 +165,109 @@ export interface OrchestrateOutput {
   }[];
   // Suggestions for next actions
   suggestions: string[];
+  // Orchestration detection - auto-detected teams/workflows
+  orchestration?: {
+    detected: boolean;
+    suggested_team?: {
+      id: string;
+      name: string;
+      description: string;
+      skills: string[];
+      trigger_matched: string;
+    };
+    suggested_workflow?: {
+      id: string;
+      name: string;
+      description: string;
+    };
+    complexity_hint?: 'simple' | 'medium' | 'complex' | 'critical';
+    recommendation: string;
+  };
   // Instruction for Claude
   _instruction: string;
+}
+
+/**
+ * Detect if user message suggests multi-skill orchestration
+ */
+function detectOrchestrationNeeds(userMessage?: string): OrchestrateOutput['orchestration'] | undefined {
+  if (!userMessage) return undefined;
+
+  const message = userMessage.toLowerCase();
+
+  // Complexity detection patterns
+  const complexityPatterns = {
+    critical: /security|audit|compliance|regulated|hipaa|pci|sox|gdpr/i,
+    complex: /full.?stack|enterprise|platform|saas|marketplace|multiple.*team/i,
+    medium: /game|app|website|api|frontend.*backend|build.*deploy/i,
+    simple: /fix|bug|update|change|add.*feature|tweak/i,
+  };
+
+  let complexityHint: 'simple' | 'medium' | 'complex' | 'critical' | undefined;
+  for (const [level, pattern] of Object.entries(complexityPatterns)) {
+    if (pattern.test(message)) {
+      complexityHint = level as typeof complexityHint;
+      break;
+    }
+  }
+
+  // Try to match a team by trigger
+  const team = findTeamByTrigger(userMessage);
+
+  // Workflow detection patterns
+  const workflowPatterns: Record<string, RegExp> = {
+    'feature-build': /build.*feature|new.*feature|implement/i,
+    'security-audit': /security.*audit|vulnerability|penetration|owasp/i,
+    'game-jam': /game.*jam|make.*game|build.*game|vibe.*code.*game/i,
+    'research-to-code': /research|investigate|explore.*then.*build/i,
+  };
+
+  let suggestedWorkflow: { id: string; name: string; description: string } | undefined;
+  const workflows = listBuiltinWorkflows();
+  for (const [id, pattern] of Object.entries(workflowPatterns)) {
+    if (pattern.test(message)) {
+      const wf = workflows.find(w => w.id === id);
+      if (wf) {
+        suggestedWorkflow = {
+          id: wf.id,
+          name: wf.name,
+          description: wf.description || '',
+        };
+        break;
+      }
+    }
+  }
+
+  // Only return if we detected something
+  if (!team && !suggestedWorkflow && !complexityHint) {
+    return undefined;
+  }
+
+  // Build recommendation
+  let recommendation = '';
+  if (team) {
+    recommendation = `Detected multi-skill project. Suggest activating **${team.name}** team with: ${team.skills.join(', ')}. Use \`spawner_workflow({ action: "start_team", team_id: "${team.id}" })\``;
+  } else if (suggestedWorkflow) {
+    recommendation = `This looks like a **${suggestedWorkflow.name}** project. Use \`spawner_workflow({ action: "start_workflow", workflow_id: "${suggestedWorkflow.id}" })\``;
+  } else if (complexityHint === 'complex' || complexityHint === 'critical') {
+    recommendation = `Complex project detected. Use \`spawner_orchestrate_brainstorm({ action: "start", goal: "${userMessage.slice(0, 100)}" })\` to choose the right orchestration pattern.`;
+  } else {
+    recommendation = `Consider using \`spawner_orchestrate_brainstorm\` to plan skill coordination.`;
+  }
+
+  return {
+    detected: true,
+    suggested_team: team ? {
+      id: team.id,
+      name: team.name,
+      description: team.description,
+      skills: team.skills,
+      trigger_matched: userMessage,
+    } : undefined,
+    suggested_workflow: suggestedWorkflow,
+    complexity_hint: complexityHint,
+    recommendation,
+  };
 }
 
 /**
@@ -209,8 +312,11 @@ export async function executeOrchestrate(
     package_json
   );
 
+  // Detect orchestration needs from user message
+  const orchestration = detectOrchestrationNeeds(user_message);
+
   // Build instruction based on path
-  const instruction = buildInstruction(result);
+  const instruction = buildInstruction(result, orchestration);
 
   // Build missing skills with spawner_skill_new parameters
   const missingSkills = result.missingSkills?.map(skill => ({
@@ -255,6 +361,7 @@ export async function executeOrchestrate(
     } : undefined,
     missing_skills: missingSkills && missingSkills.length > 0 ? missingSkills : undefined,
     suggestions: result.suggestions,
+    orchestration,
     _instruction: instruction,
   };
 }
@@ -262,12 +369,41 @@ export async function executeOrchestrate(
 /**
  * Build instruction for Claude based on orchestration result
  */
-function buildInstruction(result: Awaited<ReturnType<typeof orchestrate>>): string {
+function buildInstruction(
+  result: Awaited<ReturnType<typeof orchestrate>>,
+  orchestration?: OrchestrateOutput['orchestration']
+): string {
   const lines: string[] = [];
 
   lines.push('## Spawner Session Started');
   lines.push('');
   lines.push(`**Mode:** ${result.path}`);
+
+  // Add orchestration detection if present
+  if (orchestration?.detected) {
+    lines.push('');
+    lines.push('---');
+    lines.push('');
+    lines.push('## Multi-Skill Project Detected');
+    lines.push('');
+    if (orchestration.suggested_team) {
+      lines.push(`**Suggested Team:** ${orchestration.suggested_team.name}`);
+      lines.push(`**Skills:** ${orchestration.suggested_team.skills.join(', ')}`);
+      lines.push('');
+    }
+    if (orchestration.suggested_workflow) {
+      lines.push(`**Suggested Workflow:** ${orchestration.suggested_workflow.name}`);
+      lines.push(`> ${orchestration.suggested_workflow.description}`);
+      lines.push('');
+    }
+    if (orchestration.complexity_hint) {
+      lines.push(`**Complexity:** ${orchestration.complexity_hint}`);
+      lines.push('');
+    }
+    lines.push(`**Recommendation:** ${orchestration.recommendation}`);
+    lines.push('');
+    lines.push('---');
+  }
   lines.push('');
 
   // CRITICAL: Skills setup check - do this FIRST
@@ -383,6 +519,12 @@ function buildInstruction(result: Awaited<ReturnType<typeof orchestrate>>): stri
   // Add tool reminders
   lines.push('');
   lines.push('## Available Tools');
+  lines.push('');
+  lines.push('**Orchestration:**');
+  lines.push('- `spawner_workflow` - Start teams/workflows, validate handoffs');
+  lines.push('- `spawner_orchestrate_brainstorm` - Interactive guide to choose patterns');
+  lines.push('');
+  lines.push('**Development:**');
   lines.push('- `spawner_validate` - Run code checks before committing');
   lines.push('- `spawner_watch_out` - Get gotchas for current situation');
   lines.push('- `spawner_remember` - Save decisions and learnings');
