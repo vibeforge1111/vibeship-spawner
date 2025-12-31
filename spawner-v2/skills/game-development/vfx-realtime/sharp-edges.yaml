@@ -1,0 +1,451 @@
+# Real-Time VFX Sharp Edges
+# Critical gotchas that cause real problems in production game VFX
+
+sharp_edges:
+  - id: vfx-overdraw-spiral
+    summary: Particle overdraw compounds exponentially with layers
+    severity: critical
+    situation: Multiple particle systems rendering in same screen area
+    why: |
+      Each transparent particle renders fully, discarding result based on alpha.
+      10 particles at 10% screen coverage = 100% fill rate EACH layer.
+      3 overlapping systems = 3x that fill rate. Large particles make this worse.
+      The "just add more particles" mentality destroys frame rate exponentially.
+
+      Real example: Fire (50 particles) + Smoke (100 particles) + Sparks (200 particles)
+      With average 5x overlap per particle = 1750 fragment shader invocations
+      per pixel in the effect area. At 1080p in a 200x200 pixel area = 70M fragments.
+    solution: |
+      1. AUDIT overdraw with GPU profiler visualization mode
+      2. CAP particle counts in system settings (not just spawn rate)
+      3. REDUCE particle lifetime to limit concurrent count
+      4. USE opaque particles with alpha test for non-blended elements
+      5. COMBINE systems - render one fire texture instead of 50 flame particles
+      6. CULL particles that would render behind others (depth-based kill)
+      7. SET fill rate budgets per effect: Tier 1 = 10%, Tier 2 = 2%, Tier 3 = 0.5%
+    symptoms:
+      - GPU frame time spikes when effects trigger
+      - Framerate tanks looking at certain areas
+      - Mobile devices overheat during combat
+      - Performance varies wildly by camera angle
+      - Adding one more emitter causes disproportionate slowdown
+    detection_pattern: 'SpawnRate.*>\s*50|MaxParticles.*>\s*1000|emit.*rate.*high'
+    version_range: "*"
+    red_flags:
+      - Particle system with spawn rate > 100/sec
+      - Multiple overlapping additive effects
+      - Large billboard particles (> 10% screen coverage)
+      - No MaxParticles cap set
+
+  - id: vfx-transparency-sort-hell
+    summary: Transparency sorting is expensive and often wrong
+    severity: high
+    situation: Transparent particles rendering in wrong order causing visual artifacts
+    why: |
+      Correct transparency requires back-to-front rendering order. Sorting thousands
+      of particles every frame is O(n log n) CPU cost. Even with sorting, particles
+      can interpenetrate and still look wrong. Large particles that span depth
+      ranges can never sort correctly - part should be in front, part behind.
+
+      Sorting across multiple emitters is worse - need global sort, not per-system.
+      GPU particles can't easily sort because simulation is on GPU, sort is on CPU.
+    solution: |
+      1. USE additive blending when possible (order-independent)
+      2. DESIGN particles that don't need sorting (small, fast, opaque cores)
+      3. ACCEPT imperfection - players rarely notice at 60fps
+      4. GROUP particles by depth and sort groups, not individuals
+      5. USE OIT (Order-Independent Transparency) for critical hero effects
+      6. LIMIT sorted particle count to < 1000 per frame
+      7. For GPU particles, consider depth-write pre-pass
+    symptoms:
+      - Particles popping in front/behind each other
+      - Visual order changes as camera moves
+      - CPU spike from particle systems (not GPU)
+      - Smoke appearing in front of fire core
+    detection_pattern: 'SortMode.*ByDistance|Sort.*Depth|transparentSort'
+    version_range: "*"
+    red_flags:
+      - Sorting enabled on GPU particle system
+      - Multiple emitters with Sort enabled fighting for order
+      - Large particles that span significant depth
+
+  - id: vfx-flipbook-compression
+    summary: Texture compression destroys flipbook quality, especially on mobile
+    severity: high
+    situation: Flipbook animations looking blocky, banded, or losing alpha edges
+    why: |
+      DXT/BC compression works in 4x4 pixel blocks. Flipbook frames are often
+      small (64x64 to 256x256 per frame). Compression artifacts are VISIBLE at
+      these sizes. Alpha gradients get quantized to 4-8 levels in DXT5. Mobile
+      ASTC/ETC2 has similar issues. Pre-multiplied alpha helps but doesn't solve.
+
+      Worse: compression is shared across the entire atlas, so unrelated frames
+      can cause artifacts in each other through block boundaries.
+    solution: |
+      1. USE higher resolution per frame (min 128x128 for hero effects)
+      2. AVOID tiny frames - combine into larger animated texture
+      3. USE BC7 (desktop) or ASTC 4x4 (mobile) for better quality
+      4. TEST compression artifacts in-engine, not in image viewer
+      5. BAKE alpha into RGB (pre-multiply) to reduce alpha quantization
+      6. For critical effects, consider uncompressed (yes, memory cost)
+      7. ADD padding between frames to prevent block bleeding
+      8. USE power-of-2 frame sizes that align with block boundaries
+    symptoms:
+      - Blocky edges on smoke/fire particles
+      - Color banding in gradients
+      - Alpha edges look "chunky" or stepped
+      - Effects look fine in editor, bad in build
+    detection_pattern: 'textureCompression|DXT|BC[0-9]|ETC|ASTC'
+    version_range: "*"
+    red_flags:
+      - Flipbook with frames smaller than 64x64
+      - Subtle gradient effects with default compression
+      - Alpha channel with soft edges on mobile
+
+  - id: vfx-time-scale-ignorance
+    summary: Effects don't scale with game time (slow-mo, pause, hitstop)
+    severity: high
+    situation: Game has time manipulation but effects play at wrong speed
+    why: |
+      Particle systems using real time (Time.unscaledTime) continue during pause.
+      Systems using game time pause but don't slow correctly. Velocity is often
+      baked assuming 1.0 time scale. Flipbook animations don't account for time
+      scale at all by default. Emitters continue spawning during hitstop.
+
+      Slow-motion reveals all the sins: particles that move too fast, flipbooks
+      that animate normally while world is at 0.1x, trails that don't stretch.
+    solution: |
+      1. USE deltaTime consistently (not unscaledDeltaTime) for gameplay VFX
+      2. MULTIPLY velocities by timeScale in simulation
+      3. SCALE flipbook playback speed by timeScale
+      4. OPTION: Pause particle spawn during hitstop, let existing particles slow
+      5. SEPARATE "world" effects (use game time) from "UI" effects (use real time)
+      6. TEST all effects at 0.25x, 0.5x, 1.0x, 2.0x time scales
+      7. For Unreal: Use Game Time vs Real Time simulation space
+      8. For Unity: Check "Simulation Space" and "Time Scale Mode"
+    symptoms:
+      - Effects keep playing during pause menu
+      - Slow-mo feels wrong because particles don't slow
+      - Hitstop but fire keeps animating normally
+      - Time rewind causes effects to behave strangely
+    detection_pattern: 'Time\.unscaled|RealTime|unscaledDelta'
+    version_range: "*"
+    red_flags:
+      - Mixing scaled and unscaled time in same effect
+      - Flipbook FPS hardcoded without time scale consideration
+      - Particle velocity set in worldspace without time awareness
+
+  - id: vfx-mobile-fillrate-cliff
+    summary: Mobile GPUs have 1/10th desktop fill rate - effects that work on PC die on phone
+    severity: critical
+    situation: Effects performing fine in editor but destroying mobile frame rate
+    why: |
+      Mobile GPUs are tile-based deferred renderers with extremely limited memory
+      bandwidth. Desktop GPU: ~500 GB/s bandwidth. Mobile GPU: ~25-50 GB/s.
+      That's 10-20x less bandwidth for filling pixels. Overdraw is catastrophic.
+
+      Additionally, mobile uses unified memory - GPU and CPU share RAM. Heavy
+      particle systems starve the CPU of memory bandwidth too. Thermal throttling
+      kicks in after 30-60 seconds of high load, making performance WORSE over time.
+    solution: |
+      1. HALVE particle counts on mobile at minimum (quarter for low-end)
+      2. REDUCE particle size - smaller = less fill rate
+      3. AVOID distortion effects entirely on mobile
+      4. LIMIT overdraw to 2x average, 4x peak
+      5. USE simpler shaders - 1 texture sample max, basic math
+      6. DISABLE soft particles on low-end (depth texture sample = expensive)
+      7. CULL effects aggressively based on screen importance
+      8. TEST on actual devices, not just scaled resolution in editor
+      9. PROFILE thermal throttling - run game for 10 mins then check perf
+    symptoms:
+      - 60fps in editor, 20fps on device
+      - Framerate degrades over time (thermal throttle)
+      - Battery drains extremely fast
+      - Device gets hot during gameplay
+      - Effects work on flagship phone, die on budget phone
+    detection_pattern: null
+    version_range: "*"
+    red_flags:
+      - No separate quality settings for mobile
+      - Distortion effects included in mobile build
+      - Particle sizes unchanged between desktop and mobile
+
+  - id: vfx-alpha-blend-vs-additive
+    summary: Using wrong blend mode destroys readability and wastes fill rate
+    severity: high
+    situation: Effects looking washed out, invisible, or too bright in different contexts
+    why: |
+      ADDITIVE (src + dst): Light emission, energy, glows. Sums to white on overlap.
+      Good: Lasers, magic, fire cores, explosions. Bad: Smoke, dust, debris.
+
+      ALPHA BLEND (src * alpha + dst * (1-alpha)): Occluding materials.
+      Good: Smoke, clouds, blood, debris. Bad: Energy effects (look dim).
+
+      Problem 1: Additive on dark backgrounds = vibrant. On bright = invisible.
+      Problem 2: Alpha blend stacking = muddy colors, not brighter.
+      Problem 3: Both together with wrong order = broken compositing.
+    solution: |
+      1. RULE: If it emits light, use additive. If it blocks light, use alpha.
+      2. LAYER: Core = additive, smoke around core = alpha blend
+      3. TEST: Check effect on pure white AND pure black backgrounds
+      4. PREMULTIPLY: Premultiplied alpha improves compositing, reduces fringing
+      5. HDR: Use values > 1.0 for additive bloom instead of max saturation
+      6. SOFT ADDITIVE: Blend mode OneMinusDstColor for softer addition
+      7. MULTIPLY: Use for shadows, ground darkening (darkens only)
+    symptoms:
+      - Fire effect invisible in bright outdoor level
+      - Smoke turns level gray/washed out
+      - Stacking additive = white rectangle
+      - Colors look wrong compared to source texture
+    detection_pattern: 'Blend\s+One|BlendMode.*Add|Blend.*SrcAlpha'
+    version_range: "*"
+    red_flags:
+      - Additive blend on smoke/dust particles
+      - Alpha blend on glowing energy effect
+      - No consideration of target background brightness
+
+  - id: vfx-seam-visible-loop
+    summary: Looping effects with visible reset/seam break immersion
+    severity: medium
+    situation: Continuous effects (fire, waterfall, energy shield) showing periodic stutter
+    why: |
+      Many effects loop based on particle lifetime. When all particles die at once,
+      there's a frame with fewer particles. Noise-based animation using raw time
+      snaps back when loop restarts. Flipbook last frame doesn't blend into first.
+
+      These seams are subtle but the brain detects repetition unconsciously.
+      Players will say "something feels off" without identifying the loop point.
+    solution: |
+      1. STAGGER particle birth times - never all at once
+      2. VARY lifetime randomly (+/- 20% minimum)
+      3. USE modular noise: noise(sin(time * 2 * PI / loopDuration))
+      4. CROSSFADE: Spawn new wave as old wave fades out
+      5. FLIPBOOK: Ensure frame 0 and frame N-1 blend seamlessly
+      6. RECORD and scrub effect to find loop point, fix visually
+      7. Multiple particle groups offset by 1/N of loop period
+    symptoms:
+      - Effect "pulses" or "breathes" periodically
+      - Visible pop when loop restarts
+      - Animation feels repetitive even if you can't say why
+      - Particles all respawn at once
+    detection_pattern: 'loopDuration|Loop.*Time|lifetime.*const'
+    version_range: "*"
+    red_flags:
+      - Fixed lifetime with no randomization
+      - Single burst spawn that loops
+      - Time-based offset without modular arithmetic
+
+  - id: vfx-particle-physics-mismatch
+    summary: Particle motion not matching world physics feels wrong
+    severity: medium
+    situation: Effects that feel floaty, too fast, or disconnected from game world
+    why: |
+      Game gravity: -9.8 m/s^2. Particle gravity: random artist value.
+      Result: Debris floats like it's on the moon. Sparks fall faster than character.
+      Players don't consciously notice, but wrong physics triggers uncanny valley.
+
+      Also: Wind affects world but not particles. Water splash but particles
+      go through water surface. Character hits ground but debris keeps falling.
+    solution: |
+      1. MATCH game gravity exactly for physical debris
+      2. USE gameplay physics for collision when needed
+      3. APPLY same wind forces to particles as world
+      4. INHERIT character velocity on spawn for attached effects
+      5. KILL particles on collision with ground/water
+      6. REFERENCE real footage - slow-mo video of fire, explosions, debris
+      7. Mass-based gravity: heavier debris falls faster (larger = heavier)
+    symptoms:
+      - Debris feels floaty or moon-like
+      - Effects detached from character motion
+      - Wind affects trees but not nearby particles
+      - Splash spray going wrong direction
+    detection_pattern: 'gravity.*[\d.]+|Gravity.*Vector'
+    version_range: "*"
+    red_flags:
+      - Hardcoded gravity value different from game physics
+      - No velocity inheritance from emitter parent
+      - Particles ignoring collision with world
+
+  - id: vfx-scalability-afterthought
+    summary: No LOD system for effects = impossible to scale for different hardware
+    severity: high
+    situation: Effects working on dev machine but tanking on min-spec or console
+    why: |
+      VFX artists work on powerful machines. They make effects that look great
+      at full quality. No one thinks about low-end until the game ships.
+      Then: "just reduce particle counts" - but effects designed for 1000 particles
+      look broken with 100. Need to design for scalability from the start.
+    solution: |
+      1. DESIGN at LOW settings first, add detail for higher
+      2. CREATE quality tiers: Ultra/High/Medium/Low/Off
+      3. DOCUMENT particle budgets per tier before production
+      4. SEPARATE "essential" from "polish" particles
+      5. TEST on min-spec hardware regularly, not just at end
+      6. PROVIDE fallback effects - simple sprite if particles disabled
+      7. USE scalability system in engine:
+         - Niagara: Scalability settings, effect types
+         - VFX Graph: Output contexts with conditions
+         - Godot: Process mode and LOD
+    symptoms:
+      - Min-spec device unplayable but dev machines fine
+      - Graphics settings don't affect VFX performance
+      - Lowering quality just makes effects look broken
+      - No difference between Medium and Low VFX settings
+    detection_pattern: null
+    version_range: "*"
+    red_flags:
+      - Single quality level for all effects
+      - Effects designed only at Ultra quality
+      - No per-platform particle budgets defined
+
+  - id: vfx-depth-buffer-precision
+    summary: Depth-based effects fail at distance due to Z-buffer precision loss
+    severity: medium
+    situation: Soft particles, depth fade, distortion breaking at far distances
+    why: |
+      Z-buffer has more precision near camera, less far away. At 100m+ distance,
+      depth values may have only 1-2 bits of precision. Soft particle fade
+      calculation becomes binary - either 0 or 1, no gradient.
+
+      This is worse with large far clip plane (1000+) or small near plane (<0.1).
+      Reverse-Z helps but doesn't fully solve for extreme distances.
+    solution: |
+      1. PUSH near plane as far as possible (0.3m for FPS, 1m+ for RTS)
+      2. USE reverse-Z depth buffer when available
+      3. FADE out depth-based effects with distance
+      4. INCREASE soft particle distance for far effects
+      5. FALLBACK to non-soft particles beyond certain distance
+      6. USE linear depth in shader calculations when possible
+      7. CONSIDER logarithmic depth buffer for extreme ranges
+    symptoms:
+      - Soft particles popping between hard/soft at distance
+      - Depth fade flickering in far view
+      - Effects look fine near camera, broken far away
+      - Z-fighting in distant particle effects
+    detection_pattern: 'LinearEyeDepth|_CameraDepth|DepthFade'
+    version_range: "*"
+    red_flags:
+      - Near clip < 0.1 with far clip > 1000
+      - Depth-dependent effects used at all distances
+      - No distance-based quality falloff
+
+  - id: vfx-editor-vs-build-mismatch
+    summary: Effects look different in editor vs built game
+    severity: medium
+    situation: Color, timing, or quality of effects changes after building
+    why: |
+      Editor runs in linear color space, build might be gamma. HDR enabled in
+      editor, disabled in build settings. Texture import settings different.
+      Particle system update rate different in editor (tied to frame rate).
+      Post-processing enabled in editor scene but not in gameplay camera.
+
+      "It looked perfect in editor" is the VFX artist's lament.
+    solution: |
+      1. MATCH editor and build color space settings exactly
+      2. ALWAYS test in build, especially before milestones
+      3. LOCK particle update rate to fixed timestep if possible
+      4. VERIFY texture import settings persist to build
+      5. USE same post-processing stack in editor as gameplay
+      6. AUTOMATE visual regression testing if possible
+      7. BUILD to target platform regularly, not just at end
+    symptoms:
+      - Colors washed out or oversaturated in build
+      - Particle timing different (faster or slower)
+      - Alpha blending looks different
+      - Effects visible in editor, invisible in build
+    detection_pattern: null
+    version_range: "*"
+    red_flags:
+      - Team only testing in editor, not builds
+      - Different color space between editor and build
+      - Post-processing only in editor scene
+
+# ============================================================================
+# SYMPTOM INDEX
+# ============================================================================
+symptom_index:
+  "effects cause lag":
+    - vfx-overdraw-spiral
+    - vfx-mobile-fillrate-cliff
+    - vfx-transparency-sort-hell
+
+  "particles look wrong":
+    - vfx-flipbook-compression
+    - vfx-alpha-blend-vs-additive
+    - vfx-editor-vs-build-mismatch
+
+  "mobile performance terrible":
+    - vfx-mobile-fillrate-cliff
+    - vfx-overdraw-spiral
+    - vfx-scalability-afterthought
+
+  "effect timing feels off":
+    - vfx-time-scale-ignorance
+    - vfx-seam-visible-loop
+    - vfx-particle-physics-mismatch
+
+  "depth effects broken":
+    - vfx-depth-buffer-precision
+
+  "colors look wrong":
+    - vfx-alpha-blend-vs-additive
+    - vfx-editor-vs-build-mismatch
+    - vfx-flipbook-compression
+
+  "effect loops visibly":
+    - vfx-seam-visible-loop
+
+  "particles sorting wrong":
+    - vfx-transparency-sort-hell
+
+  "physics feels floaty":
+    - vfx-particle-physics-mismatch
+
+  "can't scale quality":
+    - vfx-scalability-afterthought
+
+# ============================================================================
+# RED FLAGS
+# ============================================================================
+red_flags:
+  code_patterns:
+    - pattern: 'SpawnRate\s*[=:]\s*\d{3,}'
+      issue: "Spawn rate > 100/sec risks overdraw"
+      severity: high
+
+    - pattern: 'MaxParticles\s*[=:]\s*\d{5,}'
+      issue: "Max particles > 10000 is dangerous without LOD"
+      severity: critical
+
+    - pattern: 'Blend\s+One\s+One|BlendMode\.Additive'
+      issue: "Additive blending - check for overdraw"
+      severity: medium
+
+    - pattern: 'SoftParticle.*true|DepthFade'
+      issue: "Soft particles - verify works at distance"
+      severity: low
+
+    - pattern: 'Time\.unscaledTime|Time\.unscaledDelta'
+      issue: "Unscaled time - won't respect slow-mo/pause"
+      severity: medium
+
+    - pattern: 'particleLifetime\s*[=:]\s*[\d.]+[^*]'
+      issue: "Fixed lifetime without randomization - potential loop seam"
+      severity: low
+
+  architecture_smells:
+    - smell: "No VFX quality settings in options menu"
+      risk: "Low-end users can't reduce VFX to playable"
+      fix: "Implement VFX quality tiers with clear budget per tier"
+
+    - smell: "Effects designed on high-end dev machine only"
+      risk: "Will ship broken on min-spec and console"
+      fix: "Profile on min-spec hardware monthly"
+
+    - smell: "All particle systems have Sort enabled"
+      risk: "CPU overhead from unnecessary sorting"
+      fix: "Disable sort for additive effects, limit sorted particle count"
+
+    - smell: "Same effects for desktop and mobile builds"
+      risk: "Mobile will run at single-digit FPS"
+      fix: "Create mobile-specific effect variants or scalability settings"

@@ -1,0 +1,447 @@
+# Validations for Packaging & Print Production
+# Automated checks for print-ready files and specifications
+
+version: "1.0.0"
+skill_id: packaging-print-production
+
+validations:
+  # ============================================================================
+  # COLOR MANAGEMENT VALIDATIONS
+  # ============================================================================
+
+  - id: rgb-color-mode-detection
+    name: "RGB Color Mode in Print Files"
+    description: "Detects files that may be in RGB mode instead of CMYK"
+    severity: critical
+    category: color-management
+    file_patterns:
+      - "*.ai"
+      - "*.psd"
+      - "*.indd"
+      - "*.pdf"
+      - "*.svg"
+    check_type: content_pattern
+    patterns:
+      - pattern: 'ColorSpace.*RGB'
+        message: "File contains RGB color space - convert to CMYK before printing"
+      - pattern: 'rgb\s*\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)'
+        message: "Found RGB color values - use CMYK for print production"
+      - pattern: 'fill="#[0-9A-Fa-f]{6}"'
+        message: "SVG contains hex colors (RGB) - export as CMYK PDF for print"
+    fix_guidance: |
+      1. Open file in native application
+      2. Convert color mode: File > Document Color Mode > CMYK
+      3. Use Proof Colors (View > Proof Colors) to preview CMYK output
+      4. Adjust out-of-gamut colors manually
+      5. Re-export as CMYK PDF/X-4
+
+  - id: pure-black-large-areas
+    name: "K100 Black in Large Areas"
+    description: "Detects pure black (K100 only) in areas that should use rich black"
+    severity: high
+    category: color-management
+    file_patterns:
+      - "*.ai"
+      - "*.svg"
+      - "*.pdf"
+    check_type: content_pattern
+    patterns:
+      - pattern: 'fill\s*[=:]\s*["'']?(?:black|#000000|#000|rgb\s*\(\s*0\s*,\s*0\s*,\s*0\s*\))'
+        message: "Found pure black - for large areas use rich black (C60 M40 Y40 K100)"
+      - pattern: 'k\s*[=:]\s*100.*[cm].*[=:]\s*0'
+        message: "Found K100 with 0% CMY - add CMY values for rich black in large areas"
+    exceptions:
+      - "Text elements under 12pt"
+      - "Barcodes"
+      - "QR codes"
+      - "Fine lines under 1pt"
+    fix_guidance: |
+      For large black areas (backgrounds, borders):
+      - Change from: C=0, M=0, Y=0, K=100
+      - Change to:   C=60, M=40, Y=40, K=100 (neutral rich black)
+
+      Keep K100 only for:
+      - Small text (under 12pt)
+      - Barcodes and QR codes
+      - Fine lines and details
+
+  - id: out-of-gamut-colors
+    name: "Out-of-Gamut Colors"
+    description: "Warns about colors that cannot be reproduced in CMYK"
+    severity: high
+    category: color-management
+    file_patterns:
+      - "*.svg"
+      - "*.css"
+      - "*.html"
+    check_type: content_pattern
+    patterns:
+      # Neon/fluorescent colors
+      - pattern: 'rgb\s*\(\s*0\s*,\s*25[0-5]\s*,\s*0\s*\)'
+        message: "Neon green (0,255,0) cannot be reproduced in CMYK - will become dull"
+      - pattern: 'rgb\s*\(\s*25[0-5]\s*,\s*0\s*,\s*25[0-5]\s*\)'
+        message: "Neon magenta (255,0,255) cannot be reproduced in CMYK - will lose vibrancy"
+      - pattern: 'rgb\s*\(\s*0\s*,\s*25[0-5]\s*,\s*25[0-5]\s*\)'
+        message: "Neon cyan (0,255,255) cannot be reproduced in CMYK"
+      - pattern: '#00FF00|#0F0\b'
+        message: "Pure green (#00FF00) is out of CMYK gamut"
+      - pattern: '#FF00FF|#F0F\b'
+        message: "Pure magenta (#FF00FF) is out of CMYK gamut"
+      - pattern: '#00FFFF|#0FF\b'
+        message: "Pure cyan (#00FFFF) is out of CMYK gamut"
+    fix_guidance: |
+      1. Enable gamut warning in your design application
+      2. Identify flagged colors and find CMYK-safe alternatives
+      3. Accept that some vibrancy loss is unavoidable
+      4. Consider Pantone spot colors for critical brand colors
+      5. Test with physical proof before production
+
+  # ============================================================================
+  # FILE PREPARATION VALIDATIONS
+  # ============================================================================
+
+  - id: missing-bleed
+    name: "Missing or Insufficient Bleed"
+    description: "Checks for proper bleed area in print files"
+    severity: critical
+    category: file-preparation
+    file_patterns:
+      - "*.pdf"
+      - "*.ai"
+      - "*.indd"
+    check_type: content_pattern
+    patterns:
+      - pattern: '/BleedBox.*\[\s*0\s+0\s+'
+        message: "PDF BleedBox starts at origin - verify bleed is included"
+      - pattern: '/TrimBox.*\[\s*(\d+\.?\d*)\s+(\d+\.?\d*)\s+(\d+\.?\d*)\s+(\d+\.?\d*)\s*\]'
+        message: "Verify TrimBox is smaller than MediaBox/BleedBox by 3mm on each side"
+    manual_check: |
+      Automated bleed detection is limited. Manually verify:
+      1. Document has 3mm bleed defined
+      2. All edge-touching artwork extends to bleed boundary
+      3. No important content within 4-5mm of trim line (safe zone)
+    fix_guidance: |
+      Standard bleed requirements:
+      - Cards: 3mm all edges
+      - Boxes: 3mm all edges
+      - Game boards: 10mm for fold-over edges
+      - Punchboards: 3mm around entire board, 3mm around each token
+
+      Add bleed in design application before export.
+
+  - id: low-resolution-images
+    name: "Low Resolution Images for Print"
+    description: "Detects images that may be too low resolution for quality printing"
+    severity: high
+    category: file-preparation
+    file_patterns:
+      - "*.html"
+      - "*.css"
+      - "*.svg"
+    check_type: content_pattern
+    patterns:
+      - pattern: '(?:72|96)\s*(?:dpi|ppi)'
+        message: "Image at screen resolution (72/96 dpi) - print requires 300 dpi minimum"
+      - pattern: 'resolution\s*[=:]\s*[1-9]\d?\s*(?:dpi|ppi)'
+        message: "Image below 100 dpi - will appear pixelated in print"
+    note: |
+      Resolution in linked files cannot be fully verified via pattern matching.
+      Use design application's preflight tools:
+      - Illustrator: Window > Document Info > Linked Files
+      - InDesign: Window > Links (check effective ppi)
+      - Acrobat: Print Production > Preflight
+    fix_guidance: |
+      All images must be:
+      - 300 DPI minimum at final print size
+      - No upscaling (enlarging increases apparent low resolution)
+      - Embedded, not linked (for final production files)
+
+      Formula: Final print size (inches) x 300 = required pixel dimensions
+
+  - id: font-not-outlined
+    name: "Fonts Not Converted to Outlines"
+    description: "Checks for fonts that should be outlined for print production"
+    severity: medium
+    category: file-preparation
+    file_patterns:
+      - "*.pdf"
+    check_type: content_pattern
+    patterns:
+      - pattern: '/Type\s*/Font'
+        message: "PDF contains embedded fonts - consider outlining all text for production"
+    note: |
+      Embedded fonts are acceptable if:
+      - Full font is embedded (not subset)
+      - Manufacturer confirms font support
+
+      Outlining is safer but increases file size and prevents text editing.
+    fix_guidance: |
+      To outline fonts in Illustrator:
+      1. Select All (Cmd/Ctrl + A)
+      2. Type > Create Outlines (Cmd/Ctrl + Shift + O)
+      3. Save as new file (preserve editable version)
+
+      Verify no text remains:
+      - Type > Find Font should show empty list
+
+  # ============================================================================
+  # TYPOGRAPHY VALIDATIONS
+  # ============================================================================
+
+  - id: small-font-detection
+    name: "Fonts Below Minimum Print Size"
+    description: "Detects font sizes that may be too small for print legibility"
+    severity: high
+    category: typography
+    file_patterns:
+      - "*.svg"
+      - "*.css"
+      - "*.html"
+    check_type: content_pattern
+    patterns:
+      - pattern: 'font-size\s*[=:]\s*[1-5](?:\.\d+)?(?:pt|px)'
+        message: "Font size under 6pt - may be illegible in print"
+      - pattern: 'font-size\s*[=:]\s*6(?:\.\d+)?(?:pt|px)'
+        message: "6pt font detected - verify this is only for footnotes/legal text"
+      - pattern: 'font-size\s*[=:]\s*7(?:\.\d+)?(?:pt|px)'
+        message: "7pt font detected - acceptable for secondary text only"
+    recommendations: |
+      Minimum font sizes for print:
+      - Body text: 8pt minimum
+      - Secondary text: 7pt
+      - Fine print/footnotes: 6pt (absolute minimum)
+      - Reversed text (light on dark): Add 1pt to above
+
+  - id: thin-font-weights
+    name: "Thin Font Weights for Small Text"
+    description: "Warns about light/thin font weights that may not print well at small sizes"
+    severity: medium
+    category: typography
+    file_patterns:
+      - "*.svg"
+      - "*.css"
+    check_type: content_pattern
+    patterns:
+      - pattern: 'font-weight\s*[=:]\s*(?:100|200|thin|hairline|extra-?light)'
+        message: "Thin/light font weight may not print clearly - use regular (400) or bold for small text"
+      - pattern: 'font-family.*(?:Thin|Light|Hairline)'
+        message: "Light font variant detected - verify legibility at print size"
+    fix_guidance: |
+      For text under 10pt:
+      - Use Regular (400) or Medium (500) weight minimum
+      - Avoid Thin (100), Extra-Light (200), Light (300)
+      - Sans-serif fonts maintain legibility better than serif at small sizes
+
+  # ============================================================================
+  # STRUCTURAL VALIDATIONS
+  # ============================================================================
+
+  - id: dieline-color-standards
+    name: "Non-Standard Dieline Colors"
+    description: "Checks for correct dieline color coding"
+    severity: medium
+    category: file-structure
+    file_patterns:
+      - "*.ai"
+      - "*.svg"
+      - "*.pdf"
+    check_type: content_pattern
+    patterns:
+      - pattern: '(?:cut|die).*(?:line|path).*(?:black|#000)'
+        message: "Cut/die lines should be Magenta (not black) for industry standard"
+      - pattern: '(?:fold|score).*(?:line|path).*(?:black|#000)'
+        message: "Fold/score lines should be Cyan (not black) for industry standard"
+    note: |
+      Industry standard dieline colors:
+      - Cut lines: 100% Magenta (red appearance)
+      - Fold lines: 100% Cyan (blue appearance)
+      - Bleed boundary: 50% Magenta + 100% Yellow (orange)
+
+      Dieline layer should be:
+      - Non-printing (set to spot color marked "non-printing")
+      - Locked (prevent accidental modification)
+      - Named clearly: "DIELINE" or "DIE"
+
+  - id: spot-color-separation
+    name: "Spot Color Not Properly Separated"
+    description: "Checks for spot colors that may not be properly set up"
+    severity: medium
+    category: file-structure
+    file_patterns:
+      - "*.pdf"
+      - "*.ai"
+    check_type: content_pattern
+    patterns:
+      - pattern: '/Separation.*PANTONE'
+        message: "Pantone spot color detected - verify with manufacturer that spot colors are expected"
+      - pattern: '/DeviceN.*\[.*PANTONE'
+        message: "Multiple spot colors detected - confirm separations with printer"
+    note: |
+      Spot colors are appropriate for:
+      - Foil stamping (separate layer)
+      - Spot UV (separate layer)
+      - Pantone brand colors (premium printing)
+
+      Spot colors NOT appropriate for:
+      - Standard CMYK printing (will be converted, may shift)
+      - Low-budget print runs
+
+  # ============================================================================
+  # DIMENSION VALIDATIONS
+  # ============================================================================
+
+  - id: box-clearance-check
+    name: "Insufficient Box Clearance"
+    description: "Checks for proper component clearance in box specifications"
+    severity: medium
+    category: dimensions
+    check_type: specification_review
+    rules: |
+      When reviewing box specifications:
+
+      Minimum internal clearances:
+      - Width: largest component + 15mm
+      - Length: largest component + 15mm
+      - Height: component stack + insert + 15mm
+
+      Punchboard sizing:
+      - Punchboard should be 15mm smaller per dimension than box top
+
+      Insert compartments:
+      - Unsleeved cards: +2mm width, +3mm height
+      - Sleeved cards: +5mm width, +5mm height
+      - Tokens: +3mm per dimension
+
+      Verify against manufacturer templates.
+    manual_check: true
+
+  - id: token-spacing-check
+    name: "Punchboard Token Spacing"
+    description: "Validates proper spacing between tokens on punchboards"
+    severity: medium
+    category: dimensions
+    check_type: specification_review
+    rules: |
+      Punchboard spacing requirements:
+
+      Between tokens: 6mm minimum between any die lines
+      Token to edge: 3mm bleed + 3mm margin = 6mm from artwork edge to board edge
+      Token internal margin: 3mm from die line to non-background artwork
+
+      If tokens are closer than 6mm:
+      - Risk of tokens tearing during punching
+      - Die cannot be manufactured accurately
+
+      Verify with manufacturer's punchboard template.
+    manual_check: true
+
+  # ============================================================================
+  # COST OPTIMIZATION VALIDATIONS
+  # ============================================================================
+
+  - id: card-count-optimization
+    name: "Suboptimal Card Counts"
+    description: "Identifies card counts that don't optimize sheet usage"
+    severity: low
+    category: cost-optimization
+    check_type: specification_review
+    rules: |
+      Standard poker cards fit ~54 per sheet.
+      Optimal deck sizes: 54, 108, 162, 216 (multiples of 54)
+
+      Inefficient counts (examples):
+      - 55-108 cards = 2 sheets (same as 108 cards)
+      - 109-162 cards = 3 sheets (same as 162 cards)
+
+      If your count is just over a multiple:
+      - Consider adding content to fill sheet
+      - Consider reducing cards to previous multiple
+
+      Ask manufacturer for their specific sheet capacity.
+    manual_check: true
+
+  - id: unnecessary-custom-die
+    name: "Potentially Unnecessary Custom Die"
+    description: "Flags custom shapes that could be simplified to standard dies"
+    severity: low
+    category: cost-optimization
+    check_type: specification_review
+    rules: |
+      Custom die costs: $200-500 per unique die
+
+      Before using custom shapes, consider:
+      - Can tokens be rectangular? (much cheaper)
+      - Can similar tokens share a die pattern?
+      - Does box match any standard manufacturer template?
+
+      Standard (free) die shapes:
+      - Rectangle with 3mm corner radius
+      - Square with 3mm corner radius
+      - Standard card sizes (poker, tarot, mini, etc.)
+      - Standard box templates
+
+      Review components and identify custom die requirements.
+    manual_check: true
+
+# ============================================================================
+# PREFLIGHT CHECKLIST
+# ============================================================================
+
+preflight_checklist:
+  name: "Print Production Preflight Checklist"
+  description: "Complete checklist before submitting files to manufacturer"
+
+  sections:
+    - name: "Color"
+      items:
+        - "All files in CMYK color mode"
+        - "Rich black (C60 M40 Y40 K100) for large black areas"
+        - "K100 only for small text and fine lines"
+        - "ICC profile matches manufacturer spec"
+        - "Out-of-gamut colors identified and adjusted"
+
+    - name: "Dimensions"
+      items:
+        - "Document size matches dieline exactly"
+        - "3mm bleed on all edges (10mm for game boards)"
+        - "Safe zone: 4-5mm from trim for critical content"
+        - "All measurements in mm (or as manufacturer requires)"
+
+    - name: "Typography"
+      items:
+        - "All fonts converted to outlines"
+        - "No missing fonts warnings"
+        - "Minimum 8pt body text"
+        - "Minimum 6pt for fine print"
+        - "Reversed text 1pt larger than normal requirements"
+
+    - name: "Images"
+      items:
+        - "All images 300 DPI minimum"
+        - "All images embedded (not linked)"
+        - "No upscaling of low-res images"
+        - "No RGB images remaining"
+
+    - name: "Dielines"
+      items:
+        - "Dieline on separate, locked layer"
+        - "Cut lines: 100% Magenta, 0.25pt"
+        - "Score lines: 100% Cyan, 0.25pt, dashed"
+        - "Dieline set to non-printing/spot color"
+        - "Dieline matches manufacturer template"
+
+    - name: "Export"
+      items:
+        - "Format: PDF/X-4 or PDF/X-1a"
+        - "Bleed included in export settings"
+        - "Trim marks included"
+        - "Transparency flattened (if required)"
+        - "File named per manufacturer convention"
+
+    - name: "Verification"
+      items:
+        - "Opened PDF to verify appearance"
+        - "Checked all pages/artboards"
+        - "Verified bleed visually extends to edges"
+        - "Confirmed no missing/substituted fonts"
+        - "Physical test print at actual size (for text legibility)"

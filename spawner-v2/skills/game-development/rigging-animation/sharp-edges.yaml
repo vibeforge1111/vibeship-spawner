@@ -1,0 +1,565 @@
+# Rigging & Animation Sharp Edges
+# These are the gotchas that break rigs and waste weeks of work
+
+sharp_edges:
+  - id: rig-fbx-bind-pose-vs-rest-pose
+    summary: FBX exports bind pose and rest pose differently, causing skeleton offset
+    severity: critical
+    situation: Character rig works in Maya/Blender but skeleton is offset or scaled wrong in Unity/Unreal
+    why: |
+      FBX has two pose concepts that DCCs handle differently:
+      - Bind Pose: The pose mesh was skinned to (stored in skin cluster)
+      - Rest Pose: The pose skeleton returns to when no animation applied
+
+      Maya's FBX exporter uses bind pose for skeleton.
+      Blender's FBX exporter can use rest pose or current pose.
+      If these don't match, engine imports with offsets.
+      Unity especially struggles when bind != rest.
+    solution: |
+      Before export:
+      1. Go to bind pose (Maya: Skin > Go To Bind Pose)
+      2. Freeze all joint transforms (Maya: Modify > Freeze Transformations)
+      3. In Blender: Apply armature transforms, ensure rest pose = bind pose
+      4. Export settings: Bake Animation, use scene units
+      5. Unity: Check "Bake Axis Conversion" in import settings
+
+      Validation:
+      - Joint positions should be identical in DCC and engine
+      - Skeleton should have no offset from mesh in T-pose
+      - No unexpected scaling on root or any joints
+    symptoms:
+      - Mesh floats away from skeleton in engine
+      - Character is scaled wrong
+      - Skeleton rotated 90 degrees
+      - Animation plays correctly but bind pose is offset
+    detection_pattern: 'bind\s*pose|rest\s*pose|go\s*to\s*bind'
+    version_range: "all"
+
+  - id: rig-weight-normalization-culling
+    summary: Export silently removes low-weight bone influences causing mesh tears
+    severity: critical
+    situation: Mesh tears or spikes appear in engine that weren't visible in DCC
+    why: |
+      FBX export and game engines cull bone influences below thresholds:
+      - Weights below ~0.01 often removed entirely
+      - "Max bones per vertex" setting (usually 4) drops lowest weights
+      - Remaining weights get renormalized to sum to 1.0
+
+      If vertex had weights: BoneA=0.5, BoneB=0.49, BoneC=0.01
+      After cull: BoneA=0.505, BoneB=0.495
+      The 0.01 on BoneC might have been important for smooth falloff.
+    solution: |
+      Before binding:
+      - Set Maya Smooth Bind to "Max Influences: 4" from start
+      - Blender: Limit Total vertex group after auto-weights
+
+      Before export:
+      - Maya: Prune Small Weights (0.01 threshold)
+      - Blender: Weights > Limit Total, then Clean (limit 0.01)
+
+      Problem vertices:
+      - Find vertices with many tiny influences
+      - Redistribute weight to main influences
+      - Never leave vertices with only 0.01 influence on any bone
+    symptoms:
+      - Mesh spikes or tears during animation
+      - Vertices "stick" to wrong bone
+      - Smooth areas in DCC are sharp in engine
+      - Export warnings about weight normalization
+    detection_pattern: 'prune.*weight|normalize|influence.*limit|max.*influence'
+    version_range: "all"
+
+  - id: rig-joint-limit-export-ignore
+    summary: Joint rotation limits set in DCC are ignored by game engines
+    severity: high
+    situation: IK solver over-rotates joints in engine despite limits set in Maya/Blender
+    why: |
+      Maya/Blender joint limits are:
+      - Only for DCC IK solvers
+      - Stored in proprietary format
+      - NOT part of FBX specification
+
+      Game engines implement their own IK:
+      - Unity: Animation Rigging package has own limits
+      - Unreal: Control Rig has own constraint system
+      - Neither reads DCC joint limits from FBX
+    solution: |
+      Unity implementation:
+      - Use Animation Rigging package
+      - Add "Two Bone IK Constraint" component
+      - Configure Hint (pole vector) and limits manually
+      - Or use "Damped Transform" for soft limits
+
+      Unreal implementation:
+      - Use Control Rig blueprint
+      - Add "Limit" nodes for rotation
+      - Set up per-axis min/max
+      - Use "Clamp" nodes for hard stops
+
+      Export from DCC:
+      - Document joint limits in text file
+      - Create screenshot reference of limit values
+      - Or build limits into animation (never exceed in source)
+    symptoms:
+      - Knee bends backward
+      - Elbow hyperextends
+      - IK works in DCC but breaks in engine
+      - Joints flip at extreme poses
+    detection_pattern: 'joint.*limit|rotation.*limit|clamp.*rotation'
+    version_range: "all"
+
+  - id: rig-mobile-bone-count-limit
+    summary: Mobile GPU skinning has hard limit around 75 bones per mesh
+    severity: high
+    situation: Character renders corrupted, flickers, or shows wrong pose on mobile devices
+    why: |
+      Mobile GPU shader uniform limits:
+      - ~75-128 mat4 uniforms typical (bones use 3-4 vec4 each)
+      - ES 3.0 guarantees 256 vec4 (64-85 bones)
+      - Some devices much lower (older Android)
+
+      When exceeded:
+      - Some bones get garbage matrices
+      - Mesh deforms wildly
+      - May only happen on specific devices
+      - Often no error, just visual corruption
+    solution: |
+      Design for limits:
+      - Mobile characters: 30-50 bones max
+      - Split mesh by bone region (body/face separate draw calls)
+      - Use bone LOD (reduce bones at distance)
+
+      Unity setup:
+      - Quality Settings > Blend Weights = 2 Bones (mobile)
+      - Check Skin Mesh Renderer bone count in editor
+      - Profile on target device
+
+      Unreal setup:
+      - Project Settings > Rendering > Max Bones Per Section
+      - Use Skeletal Mesh LOD with bone reduction
+      - Check "Bone Count" in Skeletal Mesh editor
+
+      Fallback:
+      - Bake animation to fewer bones procedurally
+      - Use simpler rig for mobile vs PC
+    symptoms:
+      - Character deforms wildly on mobile
+      - Works on high-end devices, breaks on low-end
+      - Mesh appears inside-out or scrambled
+      - Only some body parts render correctly
+    detection_pattern: 'bone.*count|mobile.*limit|uniform.*limit'
+    version_range: "all"
+
+  - id: rig-root-bone-placement
+    summary: Root bone not at world origin causes root motion and retargeting failures
+    severity: high
+    situation: Root motion doesn't work, character drifts, or retargeting produces offset
+    why: |
+      Root motion calculation assumes:
+      - Root bone at (0, 0, 0) in bind pose
+      - Root bone has no rotation in bind pose
+      - Movement delta calculated from origin
+
+      If root is offset:
+      - Delta calculation includes offset
+      - Character may slide or teleport
+      - Rotation origin is wrong
+
+      For retargeting:
+      - Source and target root must match
+      - Any offset compounds across skeleton
+    solution: |
+      Skeleton setup:
+      # Correct hierarchy:
+      Root (0,0,0) - no rotation
+      |-- Pelvis/Hips (actual hip position)
+          |-- Spine...
+          |-- Legs...
+
+      # Root should be:
+      - At world origin
+      - On ground plane (Y=0 typically)
+      - Aimed down world +Z or +Y (project convention)
+      - No rotation applied
+
+      Before export:
+      - Freeze transforms on root
+      - Verify world space position is 0,0,0
+      - Animation only moves root for root motion data
+    symptoms:
+      - Root motion character slides
+      - Character teleports when animation plays
+      - Retargeted animation has offset
+      - Character not standing on ground in engine
+    detection_pattern: 'root.*motion|root.*bone|origin|world.*origin'
+    version_range: "all"
+
+  - id: rig-candy-wrapper-forearm
+    summary: Forearm twists cause mesh collapse without twist bones
+    severity: high
+    situation: Wrist rotation causes ugly pinching/twisting in forearm mesh
+    why: |
+      Single forearm joint = all twist at one point
+      Mesh vertices must travel maximum distance
+      Creates characteristic "candy wrapper" collapse
+
+      Real forearm:
+      - Radius and ulna bones cross each other
+      - Twist distributes along forearm length
+      - Muscle volume shifts
+
+      Without twist bones:
+      - 180 degree twist = 180 degrees at single joint
+      - Mesh collapses to minimum diameter
+      - Looks like twisted candy wrapper
+    solution: |
+      Add twist bones between elbow and wrist:
+      # Minimum: 1 twist bone
+      Elbow
+      |-- ForearmTwist (50% from elbow to wrist)
+          |-- Wrist
+
+      # Recommended: 2 twist bones
+      Elbow
+      |-- ForearmTwist01 (33% position, 33% twist)
+          |-- ForearmTwist02 (66% position, 66% twist)
+              |-- Wrist (100% twist)
+
+      Twist distribution:
+      - Maya: Orient constraint to wrist, skip Y/Z
+      - Blender: Copy Rotation constraint, single axis
+      - Set weight/influence to match position percentage
+
+      Weight painting:
+      - Twist bones get forearm mesh weights
+      - Gradient from elbow to wrist
+      - No sharp transitions
+    symptoms:
+      - Forearm pinches on wrist rotation
+      - Mesh volume collapses
+      - Geometry crosses itself
+      - Textures stretch unnaturally
+    detection_pattern: 'twist.*bone|forearm.*twist|candy.*wrapper|roll.*bone'
+    version_range: "all"
+
+  - id: rig-shoulder-deformation-complexity
+    summary: Shoulder joint requires special handling for realistic deformation
+    severity: high
+    situation: Shoulder deforms poorly when arm raises, deltoid collapses, armpit stretches
+    why: |
+      Shoulder is anatomically complex:
+      - Clavicle rotates and translates
+      - Scapula slides across back
+      - Deltoid wraps around joint
+      - Different behavior for front/side/back raise
+
+      Single shoulder joint can't capture this
+      Even good weights fail at extreme poses
+    solution: |
+      Joint hierarchy:
+      Spine (chest level)
+      |-- Clavicle (rotates up on arm raise)
+          |-- Shoulder (main arm rotation)
+              |-- ShoulderHelper (auto-rotates 30% of shoulder)
+                  |-- UpperArm...
+
+      Helper bone setup:
+      - Position between shoulder and bicep
+      - Orient constraint to shoulder, 0.3 weight
+      - Smooths extreme rotations
+
+      Clavicle behavior:
+      - Arm at side: clavicle rotated down/back
+      - Arm at 90: clavicle rotated up ~15-20 degrees
+      - Arm at 180: clavicle rotated up ~30+ degrees
+      - Use SDK (Set Driven Key) for automatic
+
+      Corrective shapes needed:
+      - Arm at 90 front: deltoid volume
+      - Arm at 90 side: armpit close
+      - Arm at 90 back: trap engagement
+    symptoms:
+      - Deltoid muscle flattens when arm raises
+      - Armpit has holes or stretching
+      - Shoulder "pops" at certain angles
+      - Can't get smooth rotation through full range
+    detection_pattern: 'shoulder|clavicle|deltoid|armpit'
+    version_range: "all"
+
+  - id: rig-humanoid-vs-generic-unity
+    summary: Unity Humanoid rig type alters animation data and may break custom rigs
+    severity: medium
+    situation: Custom rig animations play wrong in Unity when using Humanoid avatar
+    why: |
+      Unity Humanoid rig system:
+      - Remaps bones to Unity's internal skeleton
+      - Applies muscle limits
+      - Normalizes bone orientations
+      - Loses custom bone data (props, twist bones)
+
+      Issues with Humanoid:
+      - Extra bones ignored or removed
+      - Custom orientations overwritten
+      - Animation data converted (lossy)
+      - IK retargeting may fight custom IK
+    solution: |
+      Use Humanoid when:
+      - Sharing animations between characters
+      - Using Unity's built-in IK
+      - Simple bipedal characters
+      - Using humanoid animation assets
+
+      Use Generic when:
+      - Custom skeleton with extra bones
+      - Precise animation needed
+      - Non-humanoid characters
+      - Performance-critical (no retargeting overhead)
+
+      Hybrid approach:
+      - Main skeleton as Humanoid for retargeting
+      - Extra bones (twist, helpers) as Generic layer
+      - Use Animation Rigging for procedural additions
+
+      If using Humanoid:
+      - Configure Avatar carefully
+      - Set muscle limits to match rig
+      - Verify bone mapping in debug view
+      - Test animation after import
+    symptoms:
+      - Animations look "floaty" or different from DCC
+      - Custom bones don't animate
+      - IK behaves unexpectedly
+      - Rotation values different than keyframed
+    detection_pattern: 'humanoid|avatar|generic.*rig|mecanim'
+    version_range: "Unity"
+
+  - id: rig-fbx-axis-conversion
+    summary: DCC to engine axis conversion causes 90-degree rotation on export
+    severity: medium
+    situation: Character is rotated 90 degrees or has swapped axes in engine
+    why: |
+      Different coordinate systems:
+      - Maya: Y-up, right-handed
+      - Blender: Z-up, right-handed (by default)
+      - Unity: Y-up, left-handed
+      - Unreal: Z-up, left-handed
+
+      FBX can convert, but results vary:
+      - Some exporters add 90 rotation to root
+      - Some flip axes incorrectly
+      - Animation may or may not convert
+    solution: |
+      Maya to Unity:
+      - FBX export: Axis Conversion = Off
+      - Unity import: Bake Axis Conversion = On
+      - Character faces +Z in Maya = +Z in Unity
+
+      Blender to Unity:
+      - FBX export: Apply Transform, Forward -Z, Up Y
+      - Unity import: Bake Axis Conversion = On
+      - Or: Model facing -Y in Blender = +Z in Unity
+
+      Blender to Unreal:
+      - FBX export: Apply Transform
+      - Forward X or -Y (test which works)
+      - Unreal: Force Front XAxis in import
+
+      General rule:
+      - Pick convention and document it
+      - Create test cube with labeled faces
+      - Export cube first to verify orientation
+      - Same settings for skeleton and mesh
+    symptoms:
+      - Character facing wrong direction
+      - Character lying down instead of standing
+      - Animations rotated 90 degrees
+      - Left/right swapped
+    detection_pattern: 'axis.*conversion|y.*up|z.*up|rotation.*90'
+    version_range: "all"
+
+  - id: rig-blend-shape-vertex-order
+    summary: Blend shapes break if mesh vertex order changes
+    severity: medium
+    situation: Blend shapes cause wild mesh deformation after mesh edits
+    why: |
+      Blend shapes store per-vertex deltas by index
+      Vertex indices must match between base and target
+
+      Operations that change vertex order:
+      - Adding/removing vertices
+      - Boolean operations
+      - Some modifiers (mirror, subdivision)
+      - Merging vertices
+      - Import/export (sometimes)
+
+      Result:
+      - Delta applied to wrong vertex
+      - Mesh explodes or deforms randomly
+      - Some vertices affected, others not
+    solution: |
+      Workflow protection:
+      - Lock base mesh after blend shape creation
+      - Only sculpt on blend shape copies
+      - Never modify base topology
+
+      If you must edit base:
+      - Export all blend shapes first
+      - Modify base mesh
+      - Transfer blend shapes using UV space
+      - Verify every shape manually
+
+      Tools for transfer:
+      - Maya: BlendShape Editor > Transfer
+      - Blender: Join as Shapes (from mesh)
+      - Third-party: Wrap3, R3DS Wrap
+
+      Detection:
+      - Test blend shapes at 100% after any mesh change
+      - Look for asymmetry in symmetric shapes
+      - Check vertex count matches
+    symptoms:
+      - Blend shape causes mesh explosion
+      - Only part of mesh moves correctly
+      - Blend shape creates asymmetry
+      - Shapes worked before, broken after mesh edit
+    detection_pattern: 'blend.*shape|morph.*target|vertex.*order'
+    version_range: "all"
+
+  - id: rig-animation-compression-artifacts
+    summary: Game engine animation compression causes visible popping or drift
+    severity: medium
+    situation: Smooth animation in DCC has pops, jitters, or drift in engine
+    why: |
+      Engines compress animation:
+      - Keyframe reduction (removes redundant keys)
+      - Curve simplification
+      - Quantization (reduced precision)
+      - Different interpolation methods
+
+      Small rotations affected most:
+      - Fingers, facial bones
+      - Subtle secondary motion
+      - Idle breathing
+
+      Accumulating error:
+      - Looping animations drift over time
+      - Root motion doesn't return to origin
+    solution: |
+      Unity settings:
+      - Animation > Anim. Compression: Off (for quality)
+      - Or: Optimal with higher Error threshold
+      - Increase precision for facial/finger bones
+      - Check "Resample Curves" behavior
+
+      Unreal settings:
+      - Animation asset > Compression Settings
+      - Use "Automatic" and preview before ship
+      - Per-bone compression settings for critical bones
+      - Max Diff thresholds per bone
+
+      Animation authoring:
+      - Add keys on important frames (not just auto)
+      - Use linear tangents for mechanical motion
+      - Avoid very small rotation changes
+      - Test loop seams explicitly
+    symptoms:
+      - Animation has subtle pops
+      - Character slowly drifts from position
+      - Loop doesn't seamlessly connect
+      - Fingers jitter during animation
+    detection_pattern: 'compression|keyframe.*reduction|animation.*quality'
+    version_range: "all"
+
+  - id: rig-scale-in-skeleton
+    summary: Non-uniform scale on skeleton joints breaks skinning and animation
+    severity: high
+    situation: Skeleton has scale values other than 1,1,1 causing export and animation issues
+    why: |
+      Scale in skeleton hierarchy:
+      - Compounds down the chain
+      - Affects skinning unpredictably
+      - Different engines handle differently
+      - Animation scale keys problematic
+
+      Problems:
+      - Shear/skew when rotating scaled joints
+      - Skinning weights behave wrong
+      - Export may bake or lose scale
+      - Retargeting fails completely
+    solution: |
+      Prevention:
+      - NEVER scale skeleton joints
+      - Model character at correct size initially
+      - Scale control curves instead of joints
+      - Use rig scale attribute on root control
+
+      Fixing scaled skeleton:
+      - Maya: Freeze all joint transforms
+      - Blender: Apply scale to armature
+      - Rebuild skeleton from scratch if needed
+
+      If intentional scale needed:
+      - Only use uniform scale (same X,Y,Z)
+      - Only on root or top of hierarchy
+      - Test full animation range
+      - Test export before investing more work
+
+      Squash/stretch alternative:
+      - Use constraints/expressions for stretch
+      - Scale along single axis only
+      - Apply scale to helper bone, not bind skeleton
+    symptoms:
+      - Mesh shears on rotation
+      - Skinning pulls in wrong direction
+      - Export has different proportions
+      - Animation data looks wrong in curves
+    detection_pattern: 'scale|transform.*scale|non.*uniform'
+    version_range: "all"
+
+  - id: rig-ik-chain-orientation
+    summary: IK solver fails or flips when joint orientations are inconsistent
+    severity: high
+    situation: IK solution flips, jitters, or finds wrong solution
+    why: |
+      IK solvers use joint orientation to determine:
+      - Which way to bend (pole direction)
+      - Twist along bone
+      - Solution preference
+
+      Inconsistent orientations:
+      - Solver can't predict bend direction
+      - May flip 180 at certain angles
+      - Different solutions depending on start pose
+    solution: |
+      Joint orientation rules for IK:
+      # All joints in chain must have:
+      # - Primary axis (X) pointing to child
+      # - Secondary axis (Y) pointing toward bend
+      # - Tertiary axis (Z) consistent twist
+
+      Arm IK:
+      - Shoulder/Elbow/Wrist X -> toward child
+      - Y -> forward (direction elbow bends)
+      - Pole vector placed behind elbow
+
+      Leg IK:
+      - Hip/Knee/Ankle X -> toward child
+      - Y -> forward (direction knee bends)
+      - Pole vector placed in front of knee
+
+      Validation in Maya:
+      - Select joint > Display Local Rotation Axes
+      - Verify X aims down chain
+      - Verify Y consistent in bend direction
+
+      Pole vector placement:
+      - On the plane of the bent chain
+      - Perpendicular to straight chain
+      - Distance: 1-2x limb length for stability
+    symptoms:
+      - IK flips at certain angles
+      - IK jitters when near straight
+      - Pole vector seems to have no effect
+      - IK finds unexpected solutions
+    detection_pattern: 'ik.*flip|pole.*vector|joint.*orient'
+    version_range: "all"

@@ -1,0 +1,301 @@
+# Environment Art Validations
+# Automated checks to catch common issues in environment art configuration and setup
+
+validations:
+  - id: envart-non-pot-texture
+    name: Non-Power-of-2 Texture Dimensions
+    severity: warning
+    type: regex
+    pattern:
+      - 'size["\s:=]+\[?\s*\d*[13579]\d*\s*[,x]\s*\d+'
+      - 'width["\s:=]+\d*[13579]\d+[^\d]'
+      - 'height["\s:=]+\d*[13579]\d+[^\d]'
+      - 'resolution["\s:=]+\d*[13579]\d+'
+    message: |
+      Texture dimensions should be power-of-2 (256, 512, 1024, 2048, 4096).
+      Non-POT textures waste memory due to GPU padding and may cause mipmap artifacts.
+    fix_action: "Resize textures to nearest power-of-2 dimensions (e.g., 1000x1000 -> 1024x1024)"
+    applies_to:
+      - "*.meta"
+      - "*.asset"
+      - "*.uasset"
+      - "*.json"
+      - "*.yaml"
+      - "*.xml"
+
+  - id: envart-excessive-texture-size
+    name: Oversized Textures
+    severity: warning
+    type: regex
+    pattern:
+      - '(?:4096|8192)\s*[,x]\s*(?:4096|8192)'
+      - 'size["\s:=]+8192'
+      - 'maxSize["\s:=]+8192'
+    message: |
+      4K+ textures should be reserved for hero assets only. Most props and modular
+      pieces should use 1K-2K textures. Check if this resolution is necessary.
+    fix_action: "Consider reducing to 2048x2048 unless this is a hero asset or trim sheet"
+    applies_to:
+      - "*.meta"
+      - "*.asset"
+      - "*.json"
+      - "*.yaml"
+
+  - id: envart-no-lod-defined
+    name: Missing LOD Configuration
+    severity: warning
+    type: regex
+    pattern:
+      - 'LODGroup["\s:=]+None'
+      - 'enableLOD["\s:=]+false'
+      - 'lodCount["\s:=]+1[^\d]'
+      - 'NumLODs["\s:=]+1[^\d]'
+    message: |
+      Static meshes should have multiple LOD levels defined for performance.
+      Single LOD assets don't scale with distance, wasting GPU resources.
+    fix_action: "Generate LOD levels: LOD0 (full), LOD1 (50%), LOD2 (25%), LOD3 (10%)"
+    applies_to:
+      - "*.meta"
+      - "*.asset"
+      - "*.uasset"
+      - "*.fbx.meta"
+
+  - id: envart-collision-disabled
+    name: Missing Collision on Static Mesh
+    severity: error
+    type: regex
+    pattern:
+      - 'generateColliders["\s:=]+false'
+      - 'collisionEnabled["\s:=]+false'
+      - 'bEnableCollision["\s:=]+false'
+      - 'hasCollision["\s:=]+false'
+    message: |
+      Static meshes without collision can cause gameplay issues - players walking
+      through walls, projectiles passing through objects, AI navigation failures.
+    fix_action: "Enable collision or create explicit collision mesh for static environment assets"
+    applies_to:
+      - "*.meta"
+      - "*.asset"
+      - "*.uasset"
+
+  - id: envart-uncompressed-texture
+    name: Uncompressed Textures
+    severity: warning
+    type: regex
+    pattern:
+      - 'compression["\s:=]+(?:None|Uncompressed|RGBA32)'
+      - 'textureFormat["\s:=]+RGBA32'
+      - 'CompressionSettings["\s:=]+TC_Default\s*$'
+    message: |
+      Uncompressed textures waste significant memory. Most textures should use
+      BC/DXT compression (desktop) or ASTC/ETC (mobile).
+    fix_action: "Enable texture compression: BC7/BC1 for color, BC5 for normals"
+    applies_to:
+      - "*.meta"
+      - "*.asset"
+      - "*.uasset"
+
+  - id: envart-missing-mipmaps
+    name: Mipmaps Disabled
+    severity: warning
+    type: regex
+    pattern:
+      - 'generateMipMaps["\s:=]+false'
+      - 'mipmapEnabled["\s:=]+false'
+      - 'MipGenSettings["\s:=]+TMGS_NoMipmaps'
+      - 'useMipMap["\s:=]+0'
+    message: |
+      Mipmaps should be enabled for 3D textures. Without mipmaps, textures shimmer
+      at distance (aliasing) and waste GPU bandwidth sampling full-res at all distances.
+    fix_action: "Enable mipmap generation unless this is a UI or 2D sprite texture"
+    applies_to:
+      - "*.meta"
+      - "*.asset"
+      - "*.uasset"
+
+  - id: envart-excessive-material-count
+    name: Too Many Materials on Mesh
+    severity: warning
+    type: regex
+    pattern:
+      - 'materialCount["\s:=]+(?:[5-9]|[1-9]\d+)'
+      - 'Materials\.Length["\s:=]+(?:[5-9]|[1-9]\d+)'
+      - 'numMaterials["\s:=]+(?:[5-9]|[1-9]\d+)'
+    message: |
+      Meshes with 5+ materials increase draw calls. Consider using texture atlases
+      or trim sheets to reduce material count for better batching.
+    fix_action: "Consolidate materials using atlases; aim for 1-3 materials per mesh"
+    applies_to:
+      - "*.meta"
+      - "*.asset"
+      - "*.fbx.meta"
+
+  - id: envart-lightmap-resolution-mismatch
+    name: Inconsistent Lightmap Resolution
+    severity: warning
+    type: regex
+    pattern:
+      - 'lightmapResolution["\s:=]+(?:4|8|16)[^\d]'
+      - 'LightmapRes["\s:=]+(?:4|8|16)[^\d]'
+    message: |
+      Very low lightmap resolution (4-16) may cause light bleeding and poor shadow
+      quality. Minimum 32 for small props, 64-128 for modular pieces, 256+ for large surfaces.
+    fix_action: "Increase lightmap resolution to at least 32, or higher for visible surfaces"
+    applies_to:
+      - "*.meta"
+      - "*.asset"
+      - "*.uasset"
+
+  - id: envart-static-batching-disabled
+    name: Static Batching Not Enabled
+    severity: warning
+    type: regex
+    pattern:
+      - 'staticBatchingEnabled["\s:=]+false'
+      - 'bEnableStaticMesh["\s:=]+false'
+      - 'staticFlags["\s:=]+0'
+    message: |
+      Static environment meshes should use static batching for reduced draw calls.
+      Enable static batching flags on non-moving environment geometry.
+    fix_action: "Enable static batching/static mesh flags for immobile environment assets"
+    applies_to:
+      - "*.meta"
+      - "*.asset"
+      - "*.unity"
+      - "*.prefab"
+
+  - id: envart-no-occlusion
+    name: Occlusion Culling Not Configured
+    severity: warning
+    type: regex
+    pattern:
+      - 'occlusionCulling["\s:=]+false'
+      - 'bUseAsOccluder["\s:=]+false'
+      - 'occluderEnabled["\s:=]+false'
+    message: |
+      Large environment meshes (walls, floors, large props) should participate in
+      occlusion culling to prevent rendering of hidden geometry.
+    fix_action: "Enable occluder flags on large blocking geometry (walls, floors, pillars)"
+    applies_to:
+      - "*.meta"
+      - "*.asset"
+      - "*.uasset"
+      - "*.prefab"
+
+  - id: envart-single-sided-geo
+    name: Single-Sided Geometry Warning
+    severity: warning
+    type: regex
+    pattern:
+      - 'doubleSided["\s:=]+false'
+      - 'twoSided["\s:=]+false'
+      - 'cullMode["\s:=]+Back'
+    message: |
+      Single-sided geometry is correct for performance but ensure walls and
+      enclosed spaces have thickness. Paper-thin walls cause light bleeding.
+    fix_action: "Verify walls have thickness (32+ units) or enable double-sided for foliage/cloth"
+    applies_to:
+      - "*.mat"
+      - "*.material"
+      - "*.uasset"
+
+  - id: envart-missing-vertex-colors
+    name: Mesh Without Vertex Colors
+    severity: info
+    type: regex
+    pattern:
+      - 'hasVertexColors["\s:=]+false'
+      - 'vertexColorCount["\s:=]+0'
+      - 'ImportVertexColors["\s:=]+false'
+    message: |
+      Consider using vertex colors for material variation (dirt, wear, wetness)
+      without additional texture cost. Especially useful for modular pieces.
+    fix_action: "Enable vertex color import if using vertex-based material variation"
+    applies_to:
+      - "*.meta"
+      - "*.fbx.meta"
+
+  - id: envart-excessive-poly-count
+    name: Very High Polygon Count
+    severity: warning
+    type: regex
+    pattern:
+      - 'triangleCount["\s:=]+(?:\d{6,})'
+      - 'polyCount["\s:=]+(?:\d{6,})'
+      - 'numTriangles["\s:=]+(?:\d{6,})'
+    message: |
+      Meshes with 1M+ triangles are expensive. Ensure proper LOD setup and
+      consider if this density is visible at gameplay distances.
+    fix_action: "Add aggressive LODs or reduce base polygon count if not hero asset"
+    applies_to:
+      - "*.meta"
+      - "*.asset"
+      - "*.fbx.meta"
+
+  - id: envart-unoptimized-uv
+    name: UV Channel Configuration Issue
+    severity: warning
+    type: regex
+    pattern:
+      - 'generateSecondaryUV["\s:=]+false.*lightmap'
+      - 'lightmapUVChannel["\s:=]+-1'
+      - 'hasLightmapUVs["\s:=]+false'
+    message: |
+      Lightmapped meshes need a second UV channel for lightmap UVs.
+      Without dedicated lightmap UVs, baking will produce artifacts.
+    fix_action: "Generate secondary UVs for lightmapping or use UV2 in DCC tool"
+    applies_to:
+      - "*.meta"
+      - "*.fbx.meta"
+      - "*.asset"
+
+  - id: envart-alpha-blend-opaque
+    name: Expensive Alpha Blend on Environment
+    severity: warning
+    type: regex
+    pattern:
+      - 'renderMode["\s:=]+(?:Transparent|Fade)'
+      - 'blendMode["\s:=]+Translucent'
+      - 'alphaBlend["\s:=]+true'
+    message: |
+      Transparent materials are expensive and don't write depth. Use alpha cutoff
+      (alpha test) instead of alpha blend for foliage and masked surfaces.
+    fix_action: "Switch from Transparent to Cutout/AlphaTest for foliage and fences"
+    applies_to:
+      - "*.mat"
+      - "*.material"
+      - "*.uasset"
+
+  - id: envart-missing-normal-map
+    name: Material Without Normal Map
+    severity: info
+    type: regex
+    pattern:
+      - 'normalMap["\s:=]+null'
+      - '_BumpMap["\s:=]+\{\s*\}'
+      - 'hasNormalTexture["\s:=]+false'
+    message: |
+      Environment materials typically benefit from normal maps for surface detail.
+      Ensure normal maps are assigned unless intentionally flat (stylized art).
+    fix_action: "Add normal map texture or explicitly note if flat style is intentional"
+    applies_to:
+      - "*.mat"
+      - "*.material"
+
+  - id: envart-excessive-draw-distance
+    name: Extreme Draw Distance Configuration
+    severity: warning
+    type: regex
+    pattern:
+      - 'cullingDistance["\s:=]+(?:\d{5,})'
+      - 'maxDrawDistance["\s:=]+(?:\d{5,})'
+      - 'farClip["\s:=]+100000'
+    message: |
+      Very high draw distances (10000+ units) can hurt performance and depth buffer
+      precision. Most environment assets should cull at reasonable distances.
+    fix_action: "Set appropriate cull distances: props (5000), structures (10000), terrain (far)"
+    applies_to:
+      - "*.meta"
+      - "*.asset"
+      - "*.uasset"
+      - "*.prefab"

@@ -1,0 +1,620 @@
+# Sharp Edges - Voxel Art
+# Hard-won knowledge that takes years to accumulate in voxel art
+
+id: voxel-art
+version: 1.0.0
+
+# Critical gotchas that will ruin your day (or week)
+
+edges:
+  # ============================================
+  # RESOLUTION AND SCALE DISASTERS
+  # ============================================
+
+  - id: over-resolution-trap
+    title: Higher Resolution Makes Models Worse
+    severity: critical
+    category: design
+    description: |
+      Beginners assume higher voxel resolution (64x64x64 vs 32x32x32) means better
+      quality. In voxel art, it usually means WORSE results - more noise, lost
+      silhouette, and wasted performance.
+    symptoms:
+      - Character looks "noisy" or cluttered
+      - Details hard to see at gameplay distance
+      - Massively increased polygon count
+      - Model looks worse than lower-res version
+      - Voxels become sub-pixel on screen
+    trigger_conditions:
+      - Starting with highest resolution available
+      - Coming from traditional 3D mindset
+      - Not testing at actual game camera distance
+      - Assuming "more is better"
+    prevention: |
+      The Resolution Test:
+      ```
+      1. Determine your typical camera distance
+      2. Calculate: Screen Size / Voxel Count = Pixels Per Voxel
+
+      TARGET: 2-4 pixels per voxel on screen
+
+      Example for 1080p game with character height 200px on screen:
+        200px / 32 voxels = 6.25 pixels per voxel (GOOD)
+        200px / 64 voxels = 3.125 pixels per voxel (OK)
+        200px / 128 voxels = 1.56 pixels per voxel (TOO HIGH)
+
+      Always start LOWER and only increase if needed
+      ```
+    recovery: |
+      If you've over-detailed:
+        1. Export to lower resolution (MagicaVoxel: Voxelizer tool)
+        2. Or manually rebuild at lower resolution
+        3. The rebuild often looks BETTER
+    real_world_example: |
+      "Spent 20 hours on a 128x128x128 character for a mobile game. At actual
+      camera distance, it was just noise. Rebuilt in 32x32x48 in 4 hours,
+      looked 10x better and ran 50x faster."
+
+  - id: color-banding-invisibility
+    title: Detail Hidden by Voxel Shading
+    severity: high
+    category: design
+    description: |
+      In voxel art, shading (ambient occlusion, shadows) hides interior colors
+      and subtle color variations. Artists spend hours on detail that becomes
+      invisible once lighting is applied.
+    symptoms:
+      - Carefully placed colors look identical after rendering
+      - Detail visible in editor disappears in game
+      - Gradients become flat bands
+      - Interior details completely invisible
+    trigger_conditions:
+      - Adding detail without considering lighting
+      - Using very similar colors for adjacent surfaces
+      - Not previewing with game lighting
+      - Assuming editor view matches final output
+    prevention: |
+      Color contrast for voxel lighting:
+      ```
+      MINIMUM COLOR STEPS:
+        Adjacent surfaces: 15-20% value difference
+        Highlight to shadow: 30-40% value difference
+
+      MagicaVoxel preview:
+        - Render frequently during modeling
+        - Use "Sun" lighting mode
+        - Check with ambient occlusion ON
+
+      Testing workflow:
+        1. Model with editor lighting
+        2. Render with target lighting
+        3. Compare - if detail is lost, INCREASE contrast
+        4. Reduce palette colors if too similar
+      ```
+    recovery: |
+      If detail is being lost:
+        1. Increase value contrast between colors
+        2. Remove middle tones (keep darks and lights)
+        3. Use fewer, more distinct colors
+        4. Accept that some detail should be color, not geometry
+    real_world_example: |
+      "I spent 3 hours adding subtle rust gradients to a metal barrel. With AO
+      enabled, it looked exactly the same as flat orange. Now I use 3 rust colors
+      max with high contrast."
+
+  # ============================================
+  # ANIMATION AND STORAGE NIGHTMARES
+  # ============================================
+
+  - id: animation-storage-explosion
+    title: Animation Frame Storage Explosion
+    severity: critical
+    category: performance
+    description: |
+      Frame-by-frame voxel animation stores a COMPLETE copy of the model for each
+      frame. A simple walk cycle can use 8x the storage of the static model.
+      Multiple animations compound exponentially.
+    symptoms:
+      - Project file sizes in gigabytes
+      - Mobile builds fail due to size
+      - Loading times measured in minutes
+      - Memory crashes on lower-end devices
+      - Build pipeline slows to a crawl
+    trigger_conditions:
+      - Many animation frames per animation
+      - Many animations per character
+      - High-resolution voxel models
+      - No compression strategy
+      - Not calculating storage upfront
+    prevention: |
+      Storage calculation (DO THIS FIRST):
+      ```
+      Model storage = Width x Height x Depth x 1 byte
+      Animation storage = Model x Frames x Animations
+
+      Example:
+        32x32x48 model = 49,152 bytes (48 KB)
+        8-frame walk = 384 KB
+        10 animations = 3.84 MB per character
+        50 characters = 192 MB just for animations!
+
+      STRATEGIES:
+        1. LOWER FRAME COUNT: 4-6 frames often enough
+        2. DELTA COMPRESSION: Store only changed voxels
+        3. RESOLUTION BUDGET: Smaller models = smaller animations
+        4. SPRITE RENDERING: For 2D games, render to sprites
+        5. SHARED ANIMATIONS: Reuse across similar characters
+      ```
+    recovery: |
+      If storage is already exploding:
+        1. Reduce animation frame count
+        2. Reduce model resolution
+        3. Implement run-length encoding
+        4. Consider sprite sheet approach
+        5. Cull animations that aren't essential
+    real_world_example: |
+      "Our voxel platformer had 30 animated characters. Build was 2.5 GB. After
+      reducing from 12-frame to 6-frame animations and dropping resolution from
+      64 to 32, we got it to 180 MB."
+
+  - id: animation-preview-difficulty
+    title: No Native Animation Preview in MagicaVoxel
+    severity: medium
+    category: workflow
+    description: |
+      MagicaVoxel doesn't have built-in animation playback. Artists can't see
+      their animations running without exporting to another tool, making iteration
+      painfully slow.
+    symptoms:
+      - Animation timing feels wrong in game
+      - Flickering or jerky motion
+      - Wasted export/import cycles
+      - Hard to judge animation quality
+    trigger_conditions:
+      - Creating animations in MagicaVoxel
+      - Not having external preview workflow
+    prevention: |
+      Animation preview workflows:
+      ```
+      METHOD 1: Quick file cycling
+        Name files: walk_01.vox, walk_02.vox, etc.
+        Click through quickly in file browser
+        (Rough preview, better than nothing)
+
+      METHOD 2: AniVoxel (Recommended)
+        - Import .vox files
+        - Built-in animation preview
+        - Export to multiple formats
+        - Frame timing controls
+
+      METHOD 3: Blender sequence
+        1. Export all frames as OBJ
+        2. Import to Blender as mesh sequence
+        3. Preview with animation playback
+        4. Adjust timing, re-model if needed
+
+      METHOD 4: GIF test
+        1. Render each frame in MagicaVoxel
+        2. Combine PNGs into GIF (online tool)
+        3. Check timing visually
+        4. Adjust frame count based on feel
+      ```
+
+  # ============================================
+  # MESH CONVERSION DISASTERS
+  # ============================================
+
+  - id: marching-cubes-artifacts
+    title: Marching Cubes Coplanar Face Artifacts
+    severity: critical
+    category: export
+    description: |
+      Marching cubes algorithm produces garbage when voxel faces are exactly
+      coplanar with the grid. This creates missing faces, inverted normals, and
+      z-fighting artifacts that only appear on certain surfaces.
+    symptoms:
+      - Holes in smooth surfaces
+      - Flickering triangles (z-fighting)
+      - Normals pointing wrong direction
+      - Artifacts visible only at certain angles
+      - Works fine in editor, broken in engine
+    trigger_conditions:
+      - Using marching cubes export from MagicaVoxel
+      - Surfaces aligned exactly to voxel grid
+      - Sharp 90-degree corners in smooth export
+    prevention: |
+      Avoiding marching cubes artifacts:
+      ```
+      OPTION 1: Don't use marching cubes
+        Use standard OBJ export for blocky aesthetic
+        Apply greedy meshing for optimization
+
+      OPTION 2: Pre-process before marching cubes
+        Slightly offset geometry (0.01 units)
+        Avoids exact coplanar situations
+
+      OPTION 3: Post-process mesh
+        Import to Blender
+        Remove doubles (merge by distance)
+        Recalculate normals
+        Remove zero-area faces
+
+      OPTION 4: Use better algorithms
+        Dual Contouring (better edge handling)
+        Surface Nets (fewer artifacts)
+        Custom implementation with robustness
+      ```
+    recovery: |
+      If you have marching cubes artifacts:
+        1. Re-export at slightly different scale
+        2. Or fix in Blender:
+           - Select all
+           - Mesh > Clean Up > Merge by Distance
+           - Mesh > Normals > Recalculate Outside
+           - Delete any zero-area faces
+    real_world_example: |
+      "Our voxel terrain had mysterious holes that only appeared on certain
+      slopes. Took 3 days to realize marching cubes was creating degenerate
+      faces at exact 45-degree angles. Switched to standard export + greedy mesh."
+
+  - id: naive-export-polygon-explosion
+    title: Naive Export Creates Unusable Polygon Counts
+    severity: critical
+    category: performance
+    description: |
+      Exporting voxels without optimization creates 12 triangles per voxel.
+      A modest 32x32x32 model becomes 400,000+ triangles - unusable for games.
+    symptoms:
+      - Frame rate drops from 60 to 5 FPS
+      - Models render as black (too many tris)
+      - Unity/Unreal import hangs or crashes
+      - "Draw call" warnings everywhere
+    trigger_conditions:
+      - Direct MagicaVoxel OBJ export without optimization
+      - Not checking triangle count before import
+      - Assuming voxel = efficient
+    prevention: |
+      Polygon count management:
+      ```
+      BEFORE EXPORT, calculate:
+        Worst case: Voxels x 12 = triangles
+        32x32x32 solid = 32,768 x 12 = 393,216 triangles (TOO HIGH!)
+
+      AFTER EXPORT, verify:
+        Blender: Select mesh, bottom bar shows tri count
+        Unity: Select mesh, Inspector shows tri count
+        Unreal: Click mesh, Details panel shows tri count
+
+      TARGETS:
+        Small props:     100-500 triangles
+        Characters:      500-2,000 triangles
+        Large objects:   2,000-5,000 triangles
+        Environment:     5,000-20,000 per chunk
+
+      OPTIMIZATION PIPELINE:
+        1. Export from MagicaVoxel (OBJ)
+        2. Import to Blender
+        3. Edit mode > Select All > Limited Dissolve
+        4. Check count > Apply Decimate if needed
+        5. Create LOD versions
+        6. Export for engine
+      ```
+    recovery: |
+      If model is already causing performance issues:
+        1. Reimport to Blender
+        2. Apply aggressive decimation
+        3. Or remake at lower voxel resolution
+        4. Or use Optivox for automatic greedy meshing
+    real_world_example: |
+      "Imported 10 voxel trees into Unity. FPS dropped to 3. Each tree was
+      500,000 triangles. After greedy meshing, each was 800 triangles. Game
+      ran at 60 FPS with 500 trees."
+
+  - id: greedy-mesh-color-limitation
+    title: Greedy Meshing Breaks on Multi-Color
+    severity: high
+    category: optimization
+    description: |
+      Greedy meshing only merges faces of the SAME color. Multi-colored models
+      don't benefit as much from optimization. A gradient voxel model can't be
+      effectively greedy-meshed.
+    symptoms:
+      - Optimized model still has high poly count
+      - Rainbow models don't optimize well
+      - Gradients produce many small quads
+      - Expected 90% reduction, got 20%
+    trigger_conditions:
+      - Using many colors in single model
+      - Gradient effects across surfaces
+      - Per-voxel color variation for detail
+    prevention: |
+      Designing for greedy meshing:
+      ```
+      PALETTE STRATEGY:
+        - Fewer colors = better optimization
+        - Group similar colors into single color
+        - Use material zones (one color per zone)
+        - Add variation in texture, not voxel color
+
+      EXAMPLE:
+        Instead of:  20 shades of wood grain
+        Use:         3 wood colors + texture variation in engine
+
+      ADVANCED:
+        - Bake color detail to texture
+        - Use flat voxel colors for greedy mesh
+        - Apply texture with variation in engine
+      ```
+    real_world_example: |
+      "Created beautiful gradients on a spaceship. 500 unique colors. Greedy
+      meshing reduced from 100k to 90k triangles. Remade with 8 flat colors,
+      got down to 4k triangles. Added gradient shader in engine."
+
+  # ============================================
+  # GAME ENGINE INTEGRATION ISSUES
+  # ============================================
+
+  - id: blurry-voxel-textures
+    title: Voxels Look Blurry in Engine
+    severity: high
+    category: export
+    description: |
+      Voxel palette textures import with bilinear filtering enabled, causing
+      colors to blur together and destroying the crisp voxel aesthetic.
+    symptoms:
+      - Crisp voxels in editor look soft in game
+      - Color bleeding at voxel edges
+      - Model looks "muddy" or blended
+      - Distinct colors become gradients
+    trigger_conditions:
+      - Default texture import settings in any engine
+      - Not disabling mipmaps
+      - Not setting point/nearest filtering
+    prevention: |
+      Engine texture settings for crisp voxels:
+
+      UNITY:
+      ```
+      Texture Import Settings:
+        Filter Mode: Point (no filter)
+        Compression: None or Lossless
+        Generate Mip Maps: OFF
+      ```
+
+      UNREAL:
+      ```
+      Texture Editor:
+        Filter: Nearest
+        Mip Gen Settings: NoMipmaps
+        Compression: None or VectorNoCompress
+      ```
+
+      GODOT:
+      ```
+      Import dock:
+        Filter: Nearest
+        Mipmaps: OFF
+      Or in shader:
+        TEXTURE_FILTER_NEAREST
+      ```
+    recovery: |
+      Already have blurry voxels:
+        1. Find the palette texture
+        2. Change import settings to Point/Nearest
+        3. Disable mipmaps
+        4. Reimport / refresh
+
+  - id: missing-material-files
+    title: OBJ Export Missing Material/Texture Files
+    severity: medium
+    category: export
+    description: |
+      MagicaVoxel OBJ export creates three files: .obj, .mtl, and .png palette.
+      If any are missing during import, the model appears grey or untextured.
+    symptoms:
+      - Model imports as solid grey/white
+      - "Missing material" warnings
+      - No colors on imported mesh
+      - Works in Blender, fails in engine
+    trigger_conditions:
+      - Moving only .obj file without .mtl and .png
+      - Not including all three files in project
+      - Relative path issues in .mtl file
+    prevention: |
+      Complete export workflow:
+      ```
+      1. Export from MagicaVoxel (creates 3 files):
+         - model.obj (geometry)
+         - model.mtl (material definition)
+         - model.png (color palette)
+
+      2. ALWAYS keep all three together:
+         Copy all three to project folder
+         Maintain relative paths
+
+      3. Check .mtl file references:
+         Open in text editor
+         Verify "map_Kd" points to correct PNG
+
+      4. If importing to engine:
+         Import all three files
+         Or manually create material with palette PNG
+      ```
+    recovery: |
+      If colors are missing:
+        1. Check if .mtl and .png exist
+        2. Re-export from MagicaVoxel if lost
+        3. Manually create material:
+           - New material with Unlit shader
+           - Assign palette PNG as base texture
+           - Apply to mesh
+
+  - id: scale-mismatch-voxels
+    title: Voxel Scale Doesn't Match Engine Units
+    severity: medium
+    category: export
+    description: |
+      MagicaVoxel uses 1 voxel = 1 unit. If this doesn't match engine scale
+      conventions, models appear giant or microscopic.
+    symptoms:
+      - Model is 100x too large or small
+      - Physics behaves strangely
+      - Camera near/far planes clip model
+      - Lighting looks wrong
+    trigger_conditions:
+      - First-time voxel to engine workflow
+      - Not checking scale before full production
+      - Mixing assets from different scale conventions
+    prevention: |
+      Scale standardization:
+      ```
+      BEFORE PRODUCTION:
+        1. Create 1-voxel cube test
+        2. Import to engine
+        3. Check size against reference object
+        4. Calculate scale factor
+        5. Document for team
+
+      COMMON SCALES:
+        Unity:  1 unit = 1 meter (voxels likely very small)
+        Unreal: 1 unit = 1 cm (voxels closer to 1:1)
+        Godot:  1 unit = 1 meter
+
+      APPROACHES:
+        Option A: Scale in MagicaVoxel export
+        Option B: Scale on import in engine
+        Option C: Scale in Blender intermediate step
+
+      BEST PRACTICE:
+        Define: "1 voxel = 5 cm" or similar
+        All artists use same convention
+        Document in project wiki
+      ```
+
+  # ============================================
+  # DESTRUCTIBLE VOXEL ISSUES
+  # ============================================
+
+  - id: structural-integrity-performance
+    title: Structural Integrity Calculation Is Expensive
+    severity: high
+    category: performance
+    description: |
+      Real structural integrity (stress simulation) doesn't scale. Small structures
+      are fine, but large buildings require approximations or performance tanks.
+    symptoms:
+      - Frame rate drops when structure damaged
+      - Buildings freeze game during collapse
+      - Physics simulation stutters
+      - Works on small tests, fails at scale
+    trigger_conditions:
+      - Implementing accurate structural simulation
+      - Large destructible buildings
+      - Many simultaneous destructions
+    prevention: |
+      Structural integrity strategies:
+      ```
+      SMALL STRUCTURES (< 1000 voxels):
+        Full connectivity analysis OK
+        Flood fill from ground
+        Disconnected pieces fall
+
+      MEDIUM STRUCTURES (1000-10000 voxels):
+        Simplified connectivity
+        Check only load-bearing columns
+        Approximate stress distribution
+
+      LARGE STRUCTURES (> 10000 voxels):
+        Teardown approach:
+          - Pre-compute breakpoints
+          - Chunk-based analysis
+          - Only simulate visible chunks
+          - Delay calculation (spread over frames)
+
+      ALTERNATIVE: Scripted destruction
+        - Pre-authored collapse sequences
+        - Triggered by damage thresholds
+        - Predictable performance
+      ```
+    real_world_example: |
+      "Tried full structural simulation on 100k voxel building. Removing one
+      support beam caused 5-second freeze. Switched to chunk-based approach:
+      only recalculate 32x32x32 chunks. Now instant."
+
+  - id: chunk-regeneration-stutter
+    title: Chunk Mesh Regeneration Causes Stutter
+    severity: high
+    category: performance
+    description: |
+      When a voxel is destroyed, the chunk mesh must be regenerated. If done
+      synchronously on main thread, this causes visible frame drops.
+    symptoms:
+      - Game stutters when destroying voxels
+      - FPS drops during mining/building
+      - Visible hesitation on each hit
+      - Worse with larger chunks
+    trigger_conditions:
+      - Regenerating mesh on main thread
+      - Large chunk sizes (64x64x64)
+      - No mesh caching strategy
+      - Frequent modifications
+    prevention: |
+      Async mesh regeneration:
+      ```
+      1. Voxel modified
+      2. Flag chunk as dirty
+      3. Add to regeneration queue
+      4. Background thread regenerates mesh
+      5. Main thread swaps mesh atomically
+
+      UNITY EXAMPLE:
+        Use Unity Jobs + Burst for mesh generation
+        NativeArray for voxel data
+        ScheduleMeshGeneration() on damage
+        Complete on LateUpdate
+
+      CHUNK SIZE:
+        Too small (8x8x8): Many draw calls
+        Too large (64x64x64): Long regeneration
+        Sweet spot: 16x16x16 to 32x32x32
+
+      ADDITIONAL TRICKS:
+        - Double-buffer meshes (generate new while old displays)
+        - Priority queue (visible chunks first)
+        - LOD meshes for distant chunks
+      ```
+    real_world_example: |
+      "Original: 50ms stutter on each voxel break (64x64x64 chunks on main thread).
+      Fix: 32x32x32 chunks + background jobs. Now <1ms on main thread, invisible."
+
+# Quick lookup table
+quick_reference:
+  before_starting_model:
+    - "Define palette FIRST (16-64 colors)"
+    - "Determine target screen size"
+    - "Calculate appropriate voxel resolution"
+    - "Set up animation frame budget"
+
+  before_export:
+    - "Check voxel count is reasonable"
+    - "Verify colors are distinct enough"
+    - "Plan mesh optimization approach"
+    - "Calculate expected triangle count"
+
+  before_engine_import:
+    - "Include .obj, .mtl, AND .png files"
+    - "Know your scale conversion factor"
+    - "Plan texture filter settings (Nearest)"
+    - "Prepare LOD strategy"
+
+  animation_planning:
+    - "Calculate total frame storage"
+    - "Set frame count limits"
+    - "Plan compression strategy"
+    - "Test animation preview workflow"
+
+  destructible_voxels:
+    - "Choose structural integrity approach"
+    - "Plan chunk sizes for performance"
+    - "Implement async mesh regeneration"
+    - "Test with worst-case destruction"

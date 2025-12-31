@@ -1,127 +1,486 @@
+# Procedural Generation - Validations
+# Automated code checks for procedural content generation systems
+
 id: procedural-generation
 skill: Procedural Generation
-version: "1.0"
+version: "2.0.0"
 
 validations:
-  - id: check-seeded-random
-    name: Seeded Random Number Generator
-    description: Generation should use seeded RNG for reproducibility
+
+  # ============================================================================
+  # CRITICAL: Reproducibility and Seeding
+  # ============================================================================
+
+  - id: unseeded-math-random
+    name: Unseeded Math.random() Usage
+    description: |
+      Math.random() is not seedable. For reproducible procedural generation,
+      you need a seedable PRNG. Without seeds, you can't debug, share worlds,
+      or synchronize multiplayer.
     pattern: "Math\\.random\\(\\)"
     file_glob: "**/*.{js,ts,jsx,tsx}"
+    match: absent
+    context_pattern: "generate|procedural|noise|spawn|level|dungeon|terrain|random"
+    message: |
+      Math.random() detected in procedural generation code. Use a seedable PRNG instead:
+      - SplitMix64/Xoshiro for high quality
+      - Mulberry32 for simple use cases
+      - Custom LCG if you need to match legacy systems
+    severity: error
+    autofix: false
+
+  - id: seed-storage
+    name: Seed Storage/Logging
+    description: |
+      Generated content seeds should be stored and/or logged for debugging
+      and reproducibility. Without the seed, you can't reproduce bugs.
+    pattern: "seed|worldSeed|levelSeed"
+    file_glob: "**/*.{js,ts,jsx,tsx}"
     match: present
-    context_pattern: "seed|xorshift|mulberry|sfc32"
-    message: "Use seeded RNG instead of Math.random() for reproducible generation"
+    context_pattern: "generate|create|build|spawn"
+    message: |
+      Ensure seeds are:
+      1. Logged on generation (console.log, analytics)
+      2. Stored with save data
+      3. Displayed to players for sharing
     severity: warning
     autofix: false
 
-  - id: check-generation-validation
-    name: Content Validation
-    description: Generated content should be validated for playability
-    pattern: "generate.*dungeon|generate.*level|generate.*world"
+  - id: deterministic-order
+    name: Deterministic Operation Order
+    description: |
+      Random number consumption order must be deterministic. Set/Map iteration,
+      Promise.all, and object key order can cause non-determinism.
+    pattern: "new Set|new Map|Object\\.keys|Object\\.entries|Promise\\.all"
     file_glob: "**/*.{js,ts,jsx,tsx}"
     match: present
-    context_pattern: "valid|connect|reachable|check"
-    message: "Validate generated content is playable before using"
+    context_pattern: "rng|random|seed|generate"
+    message: |
+      Potential non-determinism detected. Ensure:
+      1. Sort arrays before iteration with random
+      2. Use arrays instead of Sets/Maps when order matters
+      3. Avoid Promise.all when results affect random sequence
     severity: warning
     autofix: false
 
-  - id: check-fallback
-    name: Generation Fallback
-    description: Have fallback content when generation fails
-    pattern: "generate|procedural"
+  # ============================================================================
+  # HIGH: Content Validation
+  # ============================================================================
+
+  - id: generation-validation
+    name: Generated Content Validation
+    description: |
+      All procedurally generated content that affects gameplay must be validated
+      before being shown to players. Unvalidated content can softlock games.
+    pattern: "generate.*\\(|create.*Level|build.*Dungeon|spawn.*Room"
     file_glob: "**/*.{js,ts,jsx,tsx}"
     match: present
-    context_pattern: "fallback|default|template|catch"
-    message: "Provide fallback content when procedural generation fails"
+    context_pattern: "validate|isValid|check|verify|connected|reachable|solvable"
+    message: |
+      Generated content should be validated for:
+      1. Connectivity (all areas reachable)
+      2. Completability (can reach exit from spawn)
+      3. Required elements present (keys, items)
+      4. No softlock conditions
+      Have a fallback for when validation fails.
+    severity: error
+    autofix: false
+
+  - id: fallback-content
+    name: Fallback Content Exists
+    description: |
+      When procedural generation fails repeatedly, hand-crafted fallback content
+      should be used instead of showing broken content.
+    pattern: "fallback|default.*level|backup|predefined"
+    file_glob: "**/*.{js,ts,jsx,tsx}"
+    match: present
+    context_pattern: "generate|failed|invalid|retry"
+    message: |
+      No fallback content detected. Add:
+      1. Hand-crafted backup levels
+      2. Known-good seed database
+      3. Simplified generation mode
     severity: warning
     autofix: false
 
-  - id: check-chunk-system
-    name: Chunk-Based Generation
-    description: Large worlds should use chunked generation
-    pattern: "infinite.*world|large.*terrain|endless"
+  - id: connectivity-check
+    name: Flood Fill Connectivity Check
+    description: |
+      Generated maps should use flood fill or equivalent to verify all
+      floor/walkable tiles are connected.
+    pattern: "flood.*fill|is.*connected|check.*connectivity|bfs|dfs"
     file_glob: "**/*.{js,ts,jsx,tsx}"
     match: present
-    context_pattern: "chunk|tile|sector|region"
-    message: "Use chunk-based generation for infinite/large worlds"
-    severity: info
-    autofix: false
-
-  - id: check-async-generation
-    name: Async Generation
-    description: Heavy generation should not block main thread
-    pattern: "for.*noise|generate.*terrain"
-    file_glob: "**/*.{js,ts,jsx,tsx}"
-    match: present
-    context_pattern: "async|worker|requestIdleCallback|setTimeout"
-    message: "Consider async generation to avoid blocking main thread"
-    severity: info
-    autofix: false
-
-  - id: check-noise-octaves
-    name: Noise Octaves Configuration
-    description: FBM should have configurable octaves
-    pattern: "fbm|fractal.*noise"
-    file_glob: "**/*.{js,ts,jsx,tsx}"
-    match: present
-    context_pattern: "octaves|layers|frequency"
-    message: "Make noise octaves configurable for different quality levels"
-    severity: info
-    autofix: false
-
-  - id: check-coordinate-overflow
-    name: Coordinate Overflow Handling
-    description: Large coordinates should be handled without overflow
-    pattern: "worldX|worldY|chunkX|chunkY"
-    file_glob: "**/*.{js,ts,jsx,tsx}"
-    match: present
-    context_pattern: "BigInt|clamp|modulo|wrap"
-    message: "Consider coordinate overflow at world boundaries"
-    severity: info
-    autofix: false
-
-  - id: check-wfc-backtrack
-    name: WFC Backtracking
-    description: Wave Function Collapse should handle contradictions
-    pattern: "wfc|wave.*function|collapse"
-    file_glob: "**/*.{js,ts,jsx,tsx}"
-    match: present
-    context_pattern: "backtrack|contradiction|retry|history"
-    message: "Handle WFC contradictions with backtracking"
+    context_pattern: "dungeon|level|cave|map|grid"
+    message: |
+      No connectivity check found. Generated maps may have isolated areas.
+      Implement flood fill from spawn to verify all areas are reachable.
     severity: warning
     autofix: false
 
-  - id: check-deterministic-seed
-    name: Deterministic Seed Storage
-    description: Store seed for reproducibility and debugging
-    pattern: "generate|procedural|random"
+  # ============================================================================
+  # HIGH: Performance
+  # ============================================================================
+
+  - id: async-generation
+    name: Async/Background Generation
+    description: |
+      Heavy procedural generation should not block the main thread.
+      Use Web Workers, requestIdleCallback, or chunked generation.
+    pattern: "for\\s*\\([^)]*noise|while.*generate|new Array\\(\\d{4,}"
     file_glob: "**/*.{js,ts,jsx,tsx}"
     match: present
-    context_pattern: "seed|log.*seed|store.*seed|save.*seed"
-    message: "Log or store generation seed for debugging"
+    context_pattern: "async|worker|setTimeout|requestIdleCallback|requestAnimationFrame"
+    message: |
+      Large generation loop may block main thread. Consider:
+      1. Web Workers for heavy computation
+      2. requestIdleCallback for time-slicing
+      3. Chunked generation across frames
+      4. Show loading indicator during generation
+    severity: warning
+    autofix: false
+
+  - id: chunk-based-infinite
+    name: Chunk-Based Infinite World
+    description: |
+      Infinite/large worlds should use chunk-based generation to enable
+      on-demand loading and memory management.
+    pattern: "infinite|endless|large.*world|open.*world"
+    file_glob: "**/*.{js,ts,jsx,tsx}"
+    match: present
+    context_pattern: "chunk|tile|sector|region|segment|partition"
+    message: |
+      Large world detected without chunking. Implement:
+      1. Coordinate to chunk mapping
+      2. Chunk loading/unloading by distance
+      3. Chunk caching with LRU eviction
+      4. Pre-generation of nearby chunks
+    severity: warning
+    autofix: false
+
+  - id: noise-caching
+    name: Noise Function Caching
+    description: |
+      Expensive noise functions called repeatedly with same coordinates should
+      be cached or memoized.
+    pattern: "noise\\(|fbm\\(|perlin\\(|simplex\\("
+    file_glob: "**/*.{js,ts,jsx,tsx}"
+    match: present
+    context_pattern: "cache|memo|store|map.*get"
+    message: |
+      Consider caching noise values for repeated lookups:
+      1. Memoize by coordinate hash
+      2. Pre-compute heightmaps
+      3. Use LOD for distant samples
     severity: info
     autofix: false
+
+  # ============================================================================
+  # MEDIUM: Algorithm Quality
+  # ============================================================================
+
+  - id: noise-domain-warp
+    name: Domain Warping for Natural Terrain
+    description: |
+      Raw noise often has visible grid artifacts. Domain warping breaks up
+      regularity and creates more organic-looking results.
+    pattern: "noise.*terrain|heightmap|landscape"
+    file_glob: "**/*.{js,ts,jsx,tsx}"
+    match: present
+    context_pattern: "warp|distort|offset|transform"
+    message: |
+      Consider adding domain warping to break up noise grid artifacts:
+      warpedNoise(x, y) = noise(x + noise(x,y), y + noise(x+c,y+c))
+    severity: info
+    autofix: false
+
+  - id: wfc-backtracking
+    name: WFC Backtracking Support
+    description: |
+      Wave Function Collapse can reach contradiction states where no valid
+      tiles remain. Backtracking or restart logic is needed.
+    pattern: "wfc|wave.*function.*collapse|entropy"
+    file_glob: "**/*.{js,ts,jsx,tsx}"
+    match: present
+    context_pattern: "backtrack|retry|history|undo|restore|restart"
+    message: |
+      WFC detected without visible backtracking. Implement:
+      1. History stack for backtracking
+      2. Max backtrack limit
+      3. Restart on contradiction
+      4. Fallback pattern for repeated failures
+    severity: warning
+    autofix: false
+
+  - id: l-system-limits
+    name: L-System Growth Limits
+    description: |
+      L-systems grow exponentially. Without limits, they can crash the browser.
+    pattern: "l-system|axiom|rewrite|production"
+    file_glob: "**/*.{js,ts,jsx,tsx}"
+    match: present
+    context_pattern: "max.*iteration|max.*length|limit|cap"
+    message: |
+      L-system detected without visible limits. Add:
+      1. Maximum iteration count
+      2. Maximum string length
+      3. Early termination on overflow
+    severity: warning
+    autofix: false
+
+  - id: markov-training-data
+    name: Markov Chain Training Size
+    description: |
+      Markov chains need sufficient training data. Order-2 chains need 50+
+      examples; order-3 needs 200+.
+    pattern: "markov|chain|train|ngram"
+    file_glob: "**/*.{js,ts,jsx,tsx}"
+    match: present
+    context_pattern: "train|example|corpus|data"
+    message: |
+      Ensure Markov chain has sufficient training data:
+      - Order 1: 20+ examples
+      - Order 2: 50+ examples
+      - Order 3: 200+ examples
+      - Higher orders need exponentially more
+    severity: info
+    autofix: false
+
+  # ============================================================================
+  # MEDIUM: Large Coordinate Handling
+  # ============================================================================
+
+  - id: coordinate-overflow
+    name: Large Coordinate Handling
+    description: |
+      Large world coordinates can overflow integers or lose float precision.
+      Use chunk-local coordinates for rendering.
+    pattern: "worldX|worldY|globalPos|absolutePos"
+    file_glob: "**/*.{js,ts,jsx,tsx}"
+    match: present
+    context_pattern: "chunk|local|relative|origin|BigInt"
+    message: |
+      Large coordinates detected. Ensure:
+      1. Rendering uses camera-relative coords
+      2. Chunk coordinates are integers
+      3. Local positions within chunks
+      4. Origin recentering for far positions
+    severity: warning
+    autofix: false
+
+  - id: float-accumulation
+    name: Float Accumulation Errors
+    description: |
+      Accumulated floating-point operations diverge across platforms.
+      Calculate positions from integers where possible.
+    pattern: "\\+=.*0\\.\\d|position.*\\+="
+    file_glob: "**/*.{js,ts,jsx,tsx}"
+    match: present
+    context_pattern: "generate|procedural|world"
+    message: |
+      Float accumulation may cause platform divergence. Calculate from integers:
+      BAD: pos += 0.001
+      GOOD: pos = step * stepSize
+    severity: info
+    autofix: false
+
+  # ============================================================================
+  # MEDIUM: Variety and Quality
+  # ============================================================================
+
+  - id: content-variety
+    name: Content Variety System
+    description: |
+      Procedural content can feel samey without explicit variety mechanisms.
+      Use stratified sampling and rare content injection.
+    pattern: "generate|spawn|create.*room|place"
+    file_glob: "**/*.{js,ts,jsx,tsx}"
+    match: present
+    context_pattern: "rare|common|weight|tier|variety|unique|special"
+    message: |
+      Consider adding variety mechanisms:
+      1. Weighted rarity tiers (common/uncommon/rare)
+      2. Bad luck protection (increasing rare chance)
+      3. Guaranteed unique elements per level
+      4. Level "moods" or themes
+    severity: info
+    autofix: false
+
+  - id: biome-blending
+    name: Biome Transition Smoothing
+    description: |
+      Hard biome boundaries are immersion-breaking. Blend biomes at transitions.
+    pattern: "biome|climate|zone"
+    file_glob: "**/*.{js,ts,jsx,tsx}"
+    match: present
+    context_pattern: "blend|transition|gradient|smooth|interpolate"
+    message: |
+      Biome system detected. Consider smooth transitions:
+      1. Sample biomes at low frequency
+      2. Blend properties in transition zones
+      3. Define valid transition pairs
+      4. Avoid impossible adjacencies (snow next to desert)
+    severity: info
+    autofix: false
+
+  # ============================================================================
+  # LOW: Best Practices
+  # ============================================================================
+
+  - id: seed-display
+    name: Player-Visible Seed
+    description: |
+      Players should be able to see and share world seeds. Display on
+      pause menu or world select.
+    pattern: "seed|worldSeed"
+    file_glob: "**/*.{js,ts,jsx,tsx,svelte,vue}"
+    match: present
+    context_pattern: "display|show|render|UI|text"
+    message: |
+      Consider displaying seed to players for sharing.
+      Human-friendly format: "dragon-castle-42" > "847293847"
+    severity: info
+    autofix: false
+
+  - id: generation-metrics
+    name: Generation Quality Metrics
+    description: |
+      Track generation metrics to identify problems and improve quality.
+    pattern: "generate|create.*level"
+    file_glob: "**/*.{js,ts,jsx,tsx}"
+    match: present
+    context_pattern: "metrics|analytics|telemetry|track|log"
+    message: |
+      Consider tracking generation metrics:
+      - First-attempt success rate
+      - Average retry count
+      - Fallback usage rate
+      - Failed seed patterns
+    severity: info
+    autofix: false
+
+  - id: debug-visualization
+    name: Generation Debug Visualization
+    description: |
+      Debug visualization helps tune and debug procedural systems.
+    pattern: "generate|noise|dungeon"
+    file_glob: "**/*.{js,ts,jsx,tsx}"
+    match: present
+    context_pattern: "debug|visualize|preview|canvas"
+    message: |
+      Consider adding debug visualization:
+      1. Noise value heatmaps
+      2. Room/corridor overlays
+      3. Validation step display
+      4. Parameter sliders (dat.GUI)
+    severity: info
+    autofix: false
+
+# ============================================================================
+# Pre-commit Hooks
+# ============================================================================
 
 pre_commit:
-  - id: generation-test
-    name: Generation Test Suite
-    command: "npm run test:generation"
-    description: Test procedural generation with known seeds
+  - id: generation-determinism-test
+    name: Generation Determinism Test
+    command: "npm run test:generation:determinism"
+    description: Verify same seed produces identical results
+    required: true
 
-  - id: validity-check
-    name: Content Validity Test
-    command: "npm run test:validity"
-    description: Test that generated content is always valid
+  - id: generation-validity-test
+    name: Generation Validity Test
+    command: "npm run test:generation:validity"
+    description: Test that all generated content is valid/playable
+    required: true
+
+  - id: seed-coverage-test
+    name: Seed Range Coverage Test
+    command: "npm run test:generation:seeds"
+    description: Test generation across many random seeds
+    required: false
+
+# ============================================================================
+# CI Checks
+# ============================================================================
 
 ci_checks:
   - id: stress-test
     name: Generation Stress Test
-    command: "npm run test:stress"
-    description: Test generation with many random seeds
+    command: "npm run test:generation:stress"
+    description: Test generation performance and memory usage
     required: false
 
-  - id: determinism-test
-    name: Determinism Test
-    command: "npm run test:determinism"
-    description: Verify same seed produces identical results
+  - id: cross-platform-determinism
+    name: Cross-Platform Determinism Test
+    command: "npm run test:generation:crossplatform"
+    description: Verify generation produces identical checksums on all platforms
     required: true
+
+  - id: regression-snapshot
+    name: Generation Snapshot Regression
+    command: "npm run test:generation:snapshot"
+    description: Ensure known seeds produce expected output
+    required: true
+
+  - id: fallback-coverage
+    name: Fallback Content Test
+    command: "npm run test:generation:fallback"
+    description: Verify fallback content exists and is valid
+    required: true
+
+# ============================================================================
+# Example Test Scripts
+# ============================================================================
+
+test_scripts:
+  determinism: |
+    // test/generation-determinism.test.js
+    describe('Generation Determinism', () => {
+      const TEST_SEEDS = [0, 1, 12345, 2147483647, 0xDEADBEEF];
+
+      for (const seed of TEST_SEEDS) {
+        it(`seed ${seed} produces identical results`, () => {
+          const result1 = generate(seed);
+          const result2 = generate(seed);
+          expect(result1.checksum).toBe(result2.checksum);
+        });
+      }
+    });
+
+  validity: |
+    // test/generation-validity.test.js
+    describe('Generation Validity', () => {
+      it('all seeds produce valid content', () => {
+        const failures = [];
+
+        for (let i = 0; i < 10000; i++) {
+          const seed = Math.floor(Math.random() * 0xFFFFFFFF);
+          const result = generate(seed);
+
+          if (!result.isValid) {
+            failures.push({ seed, reason: result.validationError });
+          }
+        }
+
+        expect(failures).toEqual([]);
+      });
+    });
+
+  stress: |
+    // test/generation-stress.test.js
+    describe('Generation Performance', () => {
+      it('generates 100x100 map in under 100ms', () => {
+        const start = performance.now();
+        generate({ width: 100, height: 100 });
+        const duration = performance.now() - start;
+        expect(duration).toBeLessThan(100);
+      });
+
+      it('memory usage stays under 50MB for 1000x1000', () => {
+        const before = process.memoryUsage().heapUsed;
+        generate({ width: 1000, height: 1000 });
+        const after = process.memoryUsage().heapUsed;
+        const used = (after - before) / 1024 / 1024;
+        expect(used).toBeLessThan(50);
+      });
+    });

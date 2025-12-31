@@ -1,0 +1,405 @@
+# Lighting Design Validations
+# Automated checks to catch common lighting mistakes before they become problems
+
+validations:
+  # ==========================================================================
+  # LIGHTMAP CONFIGURATION
+  # ==========================================================================
+  - id: lighting-extreme-lightmap-resolution
+    name: Extreme Lightmap Resolution
+    severity: warning
+    type: regex
+    pattern:
+      - 'lightmapResolution\s*[=:]\s*[5-9]\d{2}'
+      - 'lightmapResolution\s*[=:]\s*\d{4,}'
+      - 'Light\s*Map\s*Resolution["\s:]*[5-9]\d{2}'
+      - 'Light\s*Map\s*Resolution["\s:]*\d{4,}'
+    message: "Very high lightmap resolution (512+). This will increase bake time and memory significantly."
+    fix_action: "Reserve high resolution (256-512) for hero surfaces only. Use 32-128 for most geometry."
+    applies_to:
+      - "*.unity"
+      - "*.prefab"
+      - "*.asset"
+      - "*.uasset"
+      - "*.ini"
+
+  - id: lighting-zero-lightmap-padding
+    name: Zero Lightmap UV Padding
+    severity: error
+    type: regex
+    pattern:
+      - 'packMargin\s*[=:]\s*0(?:\.0+)?(?!\d)'
+      - 'Pack\s*Margin["\s:]*0(?:\.0+)?(?!\d)'
+    message: "Lightmap UV pack margin is 0. This causes visible seams between UV islands."
+    fix_action: "Set pack margin to at least 2-4 texels worth (0.01-0.02 at typical resolutions)."
+    applies_to:
+      - "*.unity"
+      - "*.prefab"
+      - "*.asset"
+
+  # ==========================================================================
+  # SHADOW CONFIGURATION
+  # ==========================================================================
+  - id: lighting-excessive-shadow-distance
+    name: Excessive Shadow Distance
+    severity: warning
+    type: regex
+    pattern:
+      - 'shadowDistance\s*[=:]\s*\d{4,}'
+      - 'Shadow\s*Distance["\s:]*\d{4,}'
+      - 'ShadowMaxDistance\s*[=:]\s*\d{4,}'
+    message: "Shadow distance over 1000 units. This spreads shadow map resolution thin and impacts performance."
+    fix_action: "Reduce shadow distance to match actual gameplay needs. Use fog to hide shadow pop-out."
+    applies_to:
+      - "*.unity"
+      - "*.asset"
+      - "*.ini"
+      - "*.uasset"
+
+  - id: lighting-zero-shadow-bias
+    name: Zero Shadow Bias
+    severity: error
+    type: regex
+    pattern:
+      - 'shadowBias\s*[=:]\s*0(?:\.0+)?(?!\d)'
+      - 'normalBias\s*[=:]\s*0(?:\.0+)?(?!\d)'
+      - 'ShadowDepthBias\s*[=:]\s*0(?:\.0+)?(?!\d)'
+    message: "Shadow bias is 0. This causes shadow acne (dotted patterns on surfaces)."
+    fix_action: "Set shadow bias to 0.05-0.1 and normal bias to 0.4-1.0. Tune for minimal peter-panning."
+    applies_to:
+      - "*.unity"
+      - "*.prefab"
+      - "*.asset"
+      - "*.uasset"
+
+  - id: lighting-single-shadow-cascade
+    name: Single Shadow Cascade Outdoor
+    severity: warning
+    type: regex
+    pattern:
+      - 'shadowCascadeCount\s*[=:]\s*1(?!\d)'
+      - 'shadowCascades\s*[=:]\s*1(?!\d)'
+      - 'NumDynamicShadowCascades\s*[=:]\s*1(?!\d)'
+    message: "Only 1 shadow cascade configured. Outdoor scenes benefit from 2-4 cascades for quality distribution."
+    fix_action: "Use 2-4 cascades for directional light. Tune cascade distances based on gameplay range."
+    applies_to:
+      - "*.unity"
+      - "*.asset"
+      - "*.ini"
+      - "*.uasset"
+
+  # ==========================================================================
+  # LIGHT INTENSITY AND COLOR
+  # ==========================================================================
+  - id: lighting-extreme-intensity
+    name: Extreme Light Intensity
+    severity: warning
+    type: regex
+    pattern:
+      - 'intensity\s*[=:]\s*\d{3,}'
+      - 'lightIntensity\s*[=:]\s*\d{3,}'
+      - 'Intensity\s*[=:]\s*\d{3,}'
+    message: "Light intensity over 100. Unless using physical light units, this may cause blown-out lighting."
+    fix_action: "Review intensity in context of HDR pipeline. If using arbitrary units, keep most lights 0.5-3."
+    applies_to:
+      - "*.unity"
+      - "*.prefab"
+      - "*.asset"
+      - "*.uasset"
+      - "*.gd"
+      - "*.tscn"
+
+  - id: lighting-pure-color-light
+    name: Pure Saturated Light Color
+    severity: warning
+    type: regex
+    pattern:
+      - 'color\s*[=:]\s*(?:Color\()?(?:1\.0,\s*0\.0,\s*0\.0|0\.0,\s*1\.0,\s*0\.0|0\.0,\s*0\.0,\s*1\.0)'
+      - 'LightColor\s*[=:]\s*\(R=(?:255|1\.0),G=0,B=0\)'
+      - 'LightColor\s*[=:]\s*\(R=0,G=(?:255|1\.0),B=0\)'
+      - 'LightColor\s*[=:]\s*\(R=0,G=0,B=(?:255|1\.0)\)'
+    message: "Pure saturated color light (pure red, green, or blue). This rarely looks natural."
+    fix_action: "Use color temperatures for natural light (2700K-6500K). Desaturate for realistic appearance."
+    applies_to:
+      - "*.unity"
+      - "*.prefab"
+      - "*.asset"
+      - "*.uasset"
+      - "*.tscn"
+
+  # ==========================================================================
+  # PROBE CONFIGURATION
+  # ==========================================================================
+  - id: lighting-missing-reflection-probe
+    name: Missing Reflection Probe in Interior
+    severity: warning
+    type: regex
+    pattern:
+      - 'ReflectionProbe'
+    message: "Check if reflection probes are present for interior spaces. Without them, interiors reflect the skybox."
+    fix_action: "Add ReflectionProbe components in each distinct interior space with box projection enabled."
+    applies_to:
+      - "*.unity"
+
+  - id: lighting-probe-inside-geometry
+    name: Potential Probe Inside Geometry
+    severity: warning
+    type: regex
+    pattern:
+      - 'LightProbeGroup'
+      - 'lightProbes'
+    message: "Review light probe placement. Auto-generated probes may be inside walls, causing black lighting."
+    fix_action: "Manually inspect probe positions. Remove probes inside geometry. Add probes at lighting transitions."
+    applies_to:
+      - "*.unity"
+      - "*.prefab"
+
+  # ==========================================================================
+  # PERFORMANCE CONCERNS
+  # ==========================================================================
+  - id: lighting-realtime-point-shadow
+    name: Realtime Point Light Shadows
+    severity: warning
+    type: regex
+    pattern:
+      - 'shadowType\s*[=:]\s*(?:Hard|Soft)(?:.*pointLight|point)'
+      - 'castShadows\s*[=:]\s*true(?:.*pointLight|point)'
+      - 'Point.*Shadow.*Type\s*[=:]\s*(?:Shadow|Raytraced)'
+    message: "Point light with realtime shadows enabled. This is expensive (6 shadow maps per light)."
+    fix_action: "Consider: baked shadows, only shadow from key point lights, or shadow-less fill lights."
+    applies_to:
+      - "*.unity"
+      - "*.prefab"
+      - "*.asset"
+      - "*.uasset"
+
+  - id: lighting-many-realtime-lights
+    name: Many Realtime Lights
+    severity: warning
+    type: regex
+    pattern:
+      - 'lightType\s*[=:]\s*(?:Point|Spot)'
+    message: "Check realtime light count. Many realtime lights impact performance, especially with shadows."
+    fix_action: "Use baked lighting where possible. Limit realtime to moving objects and key lights."
+    applies_to:
+      - "*.unity"
+      - "*.prefab"
+
+  - id: lighting-high-bounce-count
+    name: High Light Bounce Count
+    severity: warning
+    type: regex
+    pattern:
+      - 'bounces\s*[=:]\s*[5-9]'
+      - 'bounces\s*[=:]\s*\d{2,}'
+      - 'NumIndirectLightingBounces\s*[=:]\s*[5-9]'
+      - 'NumSkyLightingBounces\s*[=:]\s*[5-9]'
+    message: "Light bounce count over 4. Higher bounces have diminishing returns and exponential bake time."
+    fix_action: "2-3 bounces captures most indirect lighting. Only increase for very specific needs."
+    applies_to:
+      - "*.unity"
+      - "*.asset"
+      - "*.uasset"
+      - "*.ini"
+
+  # ==========================================================================
+  # HDR AND POST-PROCESSING
+  # ==========================================================================
+  - id: lighting-bloom-threshold-one
+    name: Bloom Threshold at Maximum
+    severity: warning
+    type: regex
+    pattern:
+      - 'bloomThreshold\s*[=:]\s*1(?:\.0+)?(?!\d)'
+      - 'threshold\s*[=:]\s*1(?:\.0+)?(?:\s*//.*bloom)?'
+    message: "Bloom threshold at 1.0. If scene values are LDR (max 1.0), bloom won't appear."
+    fix_action: "Set threshold relative to scene luminance. For HDR, 1.0-2.0. For LDR, 0.8-0.9."
+    applies_to:
+      - "*.unity"
+      - "*.asset"
+      - "*.cs"
+      - "*.shader"
+
+  - id: lighting-exposure-not-configured
+    name: Missing Exposure Configuration
+    severity: warning
+    type: regex
+    pattern:
+      - 'exposure\s*[=:]\s*(?:null|None|0(?:\.0+)?)'
+    message: "Exposure may not be configured. Without proper exposure, HDR scenes will look incorrect."
+    fix_action: "Set up exposure (auto or fixed) appropriate for scene brightness range."
+    applies_to:
+      - "*.unity"
+      - "*.asset"
+
+  # ==========================================================================
+  # MOBILE-SPECIFIC
+  # ==========================================================================
+  - id: lighting-mobile-realtime-gi
+    name: Realtime GI on Mobile Build
+    severity: error
+    type: regex
+    pattern:
+      - 'realtimeGI\s*[=:]\s*true(?:.*mobile)?'
+      - 'UpdateGI\s*[=:]\s*true'
+    message: "Realtime GI detected which may be targeting mobile. This is too expensive for most mobile devices."
+    fix_action: "Use fully baked lighting for mobile. Update probe data only at level load if needed."
+    applies_to:
+      - "*.unity"
+      - "*.asset"
+
+  - id: lighting-mobile-volumetrics
+    name: Volumetric Effects on Mobile
+    severity: warning
+    type: regex
+    pattern:
+      - 'volumetric(?:Fog|Lighting|Clouds)\s*[=:]\s*true'
+      - 'VolumetricFog\s*[=:]\s*true'
+    message: "Volumetric effects enabled. These are typically too expensive for mobile platforms."
+    fix_action: "Disable volumetrics on mobile quality tier. Use simple fog and particle effects instead."
+    applies_to:
+      - "*.unity"
+      - "*.asset"
+      - "*.uasset"
+
+  # ==========================================================================
+  # SHADER-RELATED LIGHTING
+  # ==========================================================================
+  - id: lighting-manual-gamma-in-shader
+    name: Manual Gamma Conversion in Lighting Shader
+    severity: warning
+    type: regex
+    pattern:
+      - 'pow\s*\([^,]+,\s*2\.2\s*\)'
+      - 'pow\s*\([^,]+,\s*0\.454'
+      - 'pow\s*\([^,]+,\s*1\.0\s*/\s*2\.2'
+    message: "Manual gamma conversion in shader. Ensure this is intentional and matches your color space settings."
+    fix_action: "Use engine's linear/gamma workflow. Manual conversion should only be for specific cases."
+    applies_to:
+      - "*.shader"
+      - "*.hlsl"
+      - "*.glsl"
+      - "*.cginc"
+
+  - id: lighting-normalize-in-fragment
+    name: Light Direction Normalize in Fragment
+    severity: warning
+    type: regex
+    pattern:
+      - 'normalize\s*\(\s*lightDir'
+      - 'normalize\s*\(\s*_WorldSpaceLightPos'
+    message: "Normalizing light direction per-pixel. For directional lights, this can be done once in vertex shader."
+    fix_action: "For directional lights, normalize in vertex shader and interpolate. Point/spot need per-pixel."
+    applies_to:
+      - "*.shader"
+      - "*.hlsl"
+      - "*.glsl"
+      - "*.cginc"
+
+  # ==========================================================================
+  # UNREAL-SPECIFIC
+  # ==========================================================================
+  - id: lighting-unreal-no-importance-volume
+    name: Missing Lightmass Importance Volume
+    severity: warning
+    type: regex
+    pattern:
+      - 'LightmassImportanceVolume'
+    message: "Check for Lightmass Importance Volume. Without it, light baking quality suffers outside playable area."
+    fix_action: "Add LightmassImportanceVolume covering all playable areas to focus bake quality."
+    applies_to:
+      - "*.umap"
+      - "*.uasset"
+
+  - id: lighting-unreal-lumen-quality
+    name: Lumen Quality Settings
+    severity: warning
+    type: regex
+    pattern:
+      - 'LumenSceneLightingQuality\s*[=:]\s*(?:Low|Preview)'
+      - 'LumenReflectionsQuality\s*[=:]\s*(?:Low|Preview)'
+    message: "Lumen quality set to Low/Preview. Fine for development, ensure quality is set for final."
+    fix_action: "Set appropriate Lumen quality for target platform. Test on target hardware."
+    applies_to:
+      - "*.ini"
+      - "*.uasset"
+
+  # ==========================================================================
+  # GODOT-SPECIFIC
+  # ==========================================================================
+  - id: lighting-godot-sdfgi-bounds
+    name: SDFGI Without Bounds
+    severity: warning
+    type: regex
+    pattern:
+      - 'sdfgi_enabled\s*[=:]\s*true'
+    message: "SDFGI enabled. Ensure SDFGI bounds are properly configured for your scene size."
+    fix_action: "Adjust SDFGI cascade sizes and max distance to match scene dimensions."
+    applies_to:
+      - "*.tscn"
+      - "*.tres"
+      - "*.gd"
+
+  - id: lighting-godot-omni-shadow
+    name: Godot OmniLight Shadows
+    severity: warning
+    type: regex
+    pattern:
+      - 'OmniLight3D(?:.*\n)*.*shadow_enabled\s*[=:]\s*true'
+    message: "OmniLight with shadows enabled. Point light shadows are expensive (6 renders per light)."
+    fix_action: "Limit shadowed omni lights. Consider SpotLight for directional shadows instead."
+    applies_to:
+      - "*.tscn"
+      - "*.tres"
+
+  # ==========================================================================
+  # THREE.JS / WEBGL
+  # ==========================================================================
+  - id: lighting-threejs-no-shadow-bias
+    name: Three.js Shadow Without Bias
+    severity: warning
+    type: regex
+    pattern:
+      - 'castShadow\s*=\s*true(?:(?!bias).)*$'
+      - 'shadow\.(?!.*bias)'
+    message: "Shadow casting enabled but no bias configured. Default bias may cause shadow acne."
+    fix_action: "Set light.shadow.bias = -0.0001 to -0.001 (adjust based on scene scale)."
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.jsx"
+      - "*.tsx"
+
+  - id: lighting-threejs-shadow-map-size
+    name: Three.js Default Shadow Map Size
+    severity: warning
+    type: regex
+    pattern:
+      - 'castShadow\s*=\s*true(?:(?!mapSize).)*$'
+    message: "Shadow enabled but map size not configured. Default 512 may be too low for quality."
+    fix_action: "Set light.shadow.mapSize.width/height = 1024 or 2048 for better quality."
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.jsx"
+      - "*.tsx"
+
+  # ==========================================================================
+  # GENERAL BEST PRACTICES
+  # ==========================================================================
+  - id: lighting-no-falloff
+    name: Light Without Falloff/Attenuation
+    severity: warning
+    type: regex
+    pattern:
+      - 'range\s*[=:]\s*(?:Infinity|0(?:\.0+)?)'
+      - 'attenuation\s*[=:]\s*(?:None|0)'
+    message: "Light without proper falloff/attenuation. Infinite range lights are unrealistic and can impact performance."
+    fix_action: "Set appropriate range based on light intensity. Use inverse-square falloff for realism."
+    applies_to:
+      - "*.unity"
+      - "*.prefab"
+      - "*.asset"
+      - "*.tscn"
+      - "*.js"
+      - "*.ts"

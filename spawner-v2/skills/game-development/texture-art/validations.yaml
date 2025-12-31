@@ -1,0 +1,320 @@
+# Texture Art Validations
+# Automated checks to catch common texture issues in code and shaders
+
+validations:
+  # ============================================================================
+  # CRITICAL - Will definitely cause problems
+  # ============================================================================
+
+  - id: texture-metallic-non-binary
+    name: Non-Binary Metallic Value
+    severity: critical
+    type: regex
+    pattern:
+      - 'metallic\s*[=:]\s*0\.[1-9]'
+      - 'metallic\s*[=:]\s*0\.\d[1-9]'
+      - 'Metallic\s*=\s*0\.[1-9]'
+      - '_Metallic\s*,\s*Range\s*\(\s*0\s*,\s*1\s*\)'
+    message: "Metallic should be binary (0 or 1), not a continuous value. Grayscale metallic breaks PBR physics."
+    fix_action: "Use 0 for non-metals and 1 for metals. Use masking for transitions, not intermediate values."
+    applies_to:
+      - "*.shader"
+      - "*.hlsl"
+      - "*.glsl"
+      - "*.mat"
+      - "*.json"
+
+  - id: texture-albedo-ao-multiply
+    name: AO Multiplied into Albedo
+    severity: critical
+    type: regex
+    pattern:
+      - 'albedo\s*\*=?\s*ao'
+      - 'baseColor\s*\*=?\s*ambientOcclusion'
+      - 'diffuse\s*\*=?\s*occlusion'
+      - 'color\.rgb\s*\*=?\s*ao'
+    message: "Multiplying AO into albedo bakes shadows into the texture, causing double-lighting in PBR."
+    fix_action: "Keep AO separate. Apply AO to ambient/indirect lighting only, not to albedo texture."
+    applies_to:
+      - "*.shader"
+      - "*.hlsl"
+      - "*.glsl"
+      - "*.cginc"
+
+  - id: texture-srgb-roughness-import
+    name: Roughness Imported as sRGB
+    severity: critical
+    type: regex
+    pattern:
+      - 'sRGB.*[Rr]oughness'
+      - 'sRGBTexture.*roughness'
+      - 'gamma.*[Rr]oughness'
+    message: "Roughness maps must be imported as LINEAR, not sRGB. Gamma encoding corrupts the values."
+    fix_action: "Import roughness maps with sRGB disabled. In Unity, uncheck 'sRGB (Color Texture)' for data maps."
+    applies_to:
+      - "*.meta"
+      - "*.import"
+      - "*.json"
+
+  - id: texture-normal-srgb-import
+    name: Normal Map Imported as sRGB
+    severity: critical
+    type: regex
+    pattern:
+      - '"textureType":\s*0.*".*[Nn]ormal"'
+      - 'sRGB.*[Nn]ormal[Mm]ap'
+    message: "Normal maps must be imported as LINEAR and use proper normal map compression (BC5)."
+    fix_action: "Set texture type to 'Normal map' in Unity or use Normalmap compression in Unreal."
+    applies_to:
+      - "*.meta"
+      - "*.import"
+      - "*.json"
+
+  # ============================================================================
+  # ERROR - Likely bugs or serious issues
+  # ============================================================================
+
+  - id: texture-dxt1-normal
+    name: BC1/DXT1 Compression on Normal Map
+    severity: error
+    type: regex
+    pattern:
+      - 'DXT1.*[Nn]ormal'
+      - 'BC1.*[Nn]ormal'
+      - 'textureCompression.*=.*0.*[Nn]ormal'
+      - 'RGB.*[Cc]ompression.*[Nn]ormal'
+    message: "BC1/DXT1 compression creates severe artifacts on normal maps. Use BC5 or BC7."
+    fix_action: "Use BC5 (two-channel) or BC7 for normal maps. Accept larger file size for quality."
+    applies_to:
+      - "*.meta"
+      - "*.import"
+      - "*.json"
+
+  - id: texture-unpacked-orm
+    name: Separate Grayscale Data Textures
+    severity: error
+    type: regex
+    pattern:
+      - 'tex2D\s*\(\s*_RoughnessMap'
+      - 'texture\s*\(\s*u_roughnessMap'
+      - 'SAMPLE_TEXTURE2D\s*\(\s*_MetallicMap'
+      - 'Roughness.*Map.*Metallic.*Map.*AO.*Map'
+    message: "Using separate textures for roughness/metallic/AO wastes memory. Channel pack into ORM."
+    fix_action: "Pack Occlusion, Roughness, Metallic into RGB of single texture. Sample once, unpack in shader."
+    applies_to:
+      - "*.shader"
+      - "*.hlsl"
+      - "*.glsl"
+      - "*.cginc"
+
+  - id: texture-hardcoded-resolution
+    name: Hardcoded Texture Resolution
+    severity: error
+    type: regex
+    pattern:
+      - 'texelSize\s*=\s*1\.0\s*/\s*(?:512|1024|2048|4096)'
+      - '(?:512|1024|2048|4096)\.0\s*,\s*(?:512|1024|2048|4096)\.0'
+      - 'resolution\s*=\s*(?:512|1024|2048|4096)'
+    message: "Hardcoded texture resolution breaks when texture size changes. Use texture properties."
+    fix_action: "Use _TexelSize uniform (Unity) or GetDimensions() to get texture size dynamically."
+    applies_to:
+      - "*.shader"
+      - "*.hlsl"
+      - "*.glsl"
+      - "*.cginc"
+
+  - id: texture-missing-linear-flag
+    name: Data Texture Missing Linear Flag
+    severity: error
+    type: regex
+    pattern:
+      - '\[NoScaleOffset\].*(?:Roughness|Metallic|AO|Height|Mask)'
+      - '(?:roughness|metallic|occlusion).*"2D".*\{\}'
+    message: "Data textures (roughness/metallic/AO) may be using sRGB. Verify linear color space."
+    fix_action: "Add [Linear] attribute or ensure texture import settings are correct."
+    applies_to:
+      - "*.shader"
+
+  # ============================================================================
+  # WARNING - Potential issues to review
+  # ============================================================================
+
+  - id: texture-no-mipmap-consideration
+    name: Texture Sampling Without Mipmap Consideration
+    severity: warning
+    type: regex
+    pattern:
+      - 'tex2D\s*\([^)]+\)\s*\.[rgba](?!\s*;)'
+      - 'texture\s*\([^)]+\)\s*\.\w+\s*[+\-\*]'
+    message: "Complex texture sampling may have mipmap artifacts. Consider mip level or anisotropic filtering."
+    fix_action: "For detail textures, use textureGrad or textureLod. For UI, disable mipmaps."
+    applies_to:
+      - "*.shader"
+      - "*.hlsl"
+      - "*.glsl"
+
+  - id: texture-full-res-everywhere
+    name: Sampling Full Resolution When Not Needed
+    severity: warning
+    type: regex
+    pattern:
+      - 'textureLod\s*\([^,]+,\s*[^,]+,\s*0\.0\s*\)'
+      - 'tex2Dlod\s*\([^,]+,\s*float4\s*\([^,]+,\s*[^,]+,\s*0\s*,\s*0\s*\)'
+    message: "Forcing mip level 0 (full resolution) everywhere wastes bandwidth. Let GPU choose mip."
+    fix_action: "Use standard texture() unless you specifically need highest mip. For blur/DOF, sample higher mips."
+    applies_to:
+      - "*.shader"
+      - "*.hlsl"
+      - "*.glsl"
+      - "*.cginc"
+
+  - id: texture-missing-padding-export
+    name: Potential UV Padding Issue
+    severity: warning
+    type: regex
+    pattern:
+      - 'padding.*=.*[01](?:\s|$)'
+      - 'dilation.*=.*(?:0|false)'
+      - 'edge.*extend.*false'
+    message: "Low or disabled texture padding may cause mipmap bleeding at UV seams."
+    fix_action: "Use at least 8 pixels padding for 2K textures. Enable dilation/edge extension on export."
+    applies_to:
+      - "*.json"
+      - "*.sbsar"
+      - "*.spp"
+
+  - id: texture-detail-without-tiling
+    name: Detail Texture Without Tiling Parameters
+    severity: warning
+    type: regex
+    pattern:
+      - 'detailMap|DetailMap|detail_map'
+      - '_DetailAlbedoMap.*"2D"'
+      - 'detail.*texture.*sample'
+    message: "Detail textures typically need tiling parameters. Verify detail UV scaling is exposed."
+    fix_action: "Add tiling/offset parameters for detail textures. Common scale: 2-10x base UVs."
+    applies_to:
+      - "*.shader"
+      - "*.hlsl"
+      - "*.mat"
+
+  - id: texture-gamma-manual-correction
+    name: Manual Gamma Correction
+    severity: warning
+    type: regex
+    pattern:
+      - 'pow\s*\([^,]+,\s*2\.2\s*\)'
+      - 'pow\s*\([^,]+,\s*1\.0\s*/\s*2\.2'
+      - 'pow\s*\([^,]+,\s*0\.454'
+      - 'LinearToGamma|GammaToLinear'
+    message: "Manual gamma correction suggests color space confusion. Let hardware/engine handle sRGB."
+    fix_action: "Use proper sRGB texture import and framebuffer settings. Avoid manual gamma in shaders."
+    applies_to:
+      - "*.shader"
+      - "*.hlsl"
+      - "*.glsl"
+      - "*.cginc"
+
+  - id: texture-normal-incorrect-unpack
+    name: Incorrect Normal Map Unpacking
+    severity: warning
+    type: regex
+    pattern:
+      - 'normal\s*=\s*texture\s*\([^)]+\)\s*\.rgb'
+      - 'normal\.rgb\s*=\s*tex2D'
+      - 'normalMap\s*\*\s*2\s*-\s*1'
+    message: "Normal map unpacking may not handle compression format. Verify BC5/DXT5nm handling."
+    fix_action: "Use engine-provided UnpackNormal functions that handle different compression formats."
+    applies_to:
+      - "*.shader"
+      - "*.hlsl"
+      - "*.glsl"
+      - "*.cginc"
+
+  - id: texture-uncompressed-import
+    name: Uncompressed Texture Import
+    severity: warning
+    type: regex
+    pattern:
+      - 'compression.*=.*(?:none|uncompressed|0)'
+      - 'textureCompression.*=.*3'
+      - '"format":\s*"RGBA32"'
+    message: "Uncompressed textures use 4-8x more memory. Use compression unless absolutely needed."
+    fix_action: "Use BC7/BC5 for quality, BC1/BC3 for size. Only skip compression for UI elements requiring pixel-perfect."
+    applies_to:
+      - "*.meta"
+      - "*.import"
+      - "*.json"
+
+  - id: texture-oversized-resolution
+    name: Potentially Oversized Texture Resolution
+    severity: warning
+    type: regex
+    pattern:
+      - 'maxTextureSize.*=.*8192'
+      - '8192\s*x\s*8192'
+      - '"width":\s*8192'
+    message: "8K textures consume massive memory. Verify this resolution is actually needed for texel density."
+    fix_action: "Calculate required resolution from texel density. Most assets need 1K-2K max."
+    applies_to:
+      - "*.meta"
+      - "*.import"
+      - "*.json"
+
+  # ============================================================================
+  # BEST PRACTICES
+  # ============================================================================
+
+  - id: texture-orm-naming
+    name: Non-Standard ORM Texture Naming
+    severity: info
+    type: regex
+    pattern:
+      - '_(?:ao|AO|occlusion)(?:\.|\s|$)'
+      - '_(?:rough|ROUGH|roughness)(?:\.|\s|$)'
+      - '_(?:metal|METAL|metallic)(?:\.|\s|$)'
+    message: "Consider combining AO, Roughness, Metallic into single ORM texture for efficiency."
+    fix_action: "Pack into ORM: Red=AO, Green=Roughness, Blue=Metallic. Reduces texture samples by 3x."
+    applies_to:
+      - "*.shader"
+      - "*.mat"
+      - "*.json"
+
+  - id: texture-missing-fallback
+    name: Texture Reference Without Fallback
+    severity: info
+    type: regex
+    pattern:
+      - '(?:sampler2D|Texture2D)\s+\w+\s*;'
+      - '"MainTex".*"2D".*\{\}'
+    message: "Texture properties should have sensible defaults in case texture is missing."
+    fix_action: "Provide default texture: white for albedo, (0.5,0.5,1) for normal, 0.5 for roughness."
+    applies_to:
+      - "*.shader"
+
+  - id: texture-aniso-not-set
+    name: Anisotropic Filtering Not Configured
+    severity: info
+    type: regex
+    pattern:
+      - 'anisoLevel.*=.*0'
+      - 'anisotropicFiltering.*=.*0'
+    message: "Textures viewed at oblique angles (floors, walls) benefit from anisotropic filtering."
+    fix_action: "Enable aniso level 4-16 for surfaces viewed at angles. Minimal performance cost."
+    applies_to:
+      - "*.meta"
+      - "*.import"
+
+  - id: texture-missing-streaming
+    name: Large Texture Without Streaming
+    severity: info
+    type: regex
+    pattern:
+      - 'streamingMipmaps.*=.*0.*(?:4096|8192)'
+      - '"enableStreaming":\s*false'
+    message: "Large textures should use mipmap streaming to reduce initial memory load."
+    fix_action: "Enable streaming mipmaps for 2K+ textures. Set streaming priority based on asset importance."
+    applies_to:
+      - "*.meta"
+      - "*.import"
+      - "*.json"

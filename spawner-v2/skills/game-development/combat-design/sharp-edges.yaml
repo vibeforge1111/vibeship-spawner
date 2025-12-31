@@ -1,0 +1,990 @@
+# Combat Design Sharp Edges
+# Critical mistakes that make combat feel broken, unfair, or unsatisfying
+# These are the hard-won lessons from shipped action games
+
+sharp_edges:
+  - id: hitbox-visual-mismatch
+    summary: Hitboxes that don't match visual attacks
+    severity: critical
+    situation: Attack visuals show a wide sweep but hitbox is tiny, or vice versa
+    why: |
+      This is the #1 source of player frustration in action games. When an attack
+      that visually connects deals no damage (or an attack that visually missed
+      deals damage), players feel cheated. They blame the game, not themselves,
+      and rightfully so.
+
+      From Software, Capcom, and Platinum all intentionally make hitboxes LARGER
+      than weapon meshes by 20-40%. The philosophy: if it looks like a hit, it
+      should be a hit. Players aim at the center of targets, not the exact edge
+      of their weapon swing.
+    solution: |
+      1. Always visualize hitboxes during development
+      2. Make offensive hitboxes slightly larger than visuals
+      3. Make defensive hurtboxes slightly smaller than character model
+      4. Test with hitbox visualization OFF to validate feel
+      5. Get fresh playtesters - developers become blind to mismatches
+
+      // Debug visualization is MANDATORY
+      class HitboxDebugger {
+        static enabled = true // Toggle with debug key
+
+        static render() {
+          if (!this.enabled) return
+
+          // Red = attack hitboxes (danger to enemies)
+          for (const hitbox of activeHitboxes) {
+            drawWireframe(hitbox, COLOR_RED, ALPHA_50)
+          }
+
+          // Green = hurtboxes (can receive damage)
+          for (const entity of allEntities) {
+            for (const hurtbox of entity.hurtboxes) {
+              drawWireframe(hurtbox, COLOR_GREEN, ALPHA_30)
+            }
+          }
+        }
+      }
+    symptoms:
+      - Players complain attacks "phase through" enemies
+      - Players die to attacks that "clearly missed"
+      - Inconsistent damage dealing at edges of attacks
+      - "Hitbox porn" or "hitbox gore" comments on forums
+    detection_pattern: null  # Visual issue, not code pattern
+
+  - id: input-latency-stack
+    summary: Accumulated input delay making combat unresponsive
+    severity: critical
+    situation: Multiple sources of delay compound to make inputs feel sluggish
+    why: |
+      Input latency is death by a thousand cuts. Each layer seems acceptable:
+      - Controller polling: 8-16ms
+      - Engine input processing: 1 frame (16.67ms)
+      - Animation blend-in: 5-10 frames (83-167ms)
+      - Game logic delay: variable
+      - Display lag: 16-60ms on TVs
+
+      Combined, you're at 150-300ms before the player sees their action.
+      Human reaction time is ~200-300ms. If input latency approaches
+      reaction time, combat becomes prediction-only, not reaction-based.
+
+      Fighting games target <4 frames (~67ms) of input lag.
+      Action games should target <100ms total.
+    solution: |
+      1. Measure total input-to-screen latency with high-speed camera
+      2. Minimize animation blend times for attacks (instant or 1-2 frames)
+      3. Use input buffering to mask remaining latency
+      4. Process input as early as possible in game loop
+      5. Test with wired controller on gaming monitor for baseline
+
+      // Measure and log input latency
+      class InputLatencyProfiler {
+        inputTime: number
+        actionTime: number
+
+        onInput(action: string) {
+          this.inputTime = performance.now()
+        }
+
+        onActionStart() {
+          this.actionTime = performance.now()
+          const latency = this.actionTime - this.inputTime
+          console.log(`Input latency: ${latency.toFixed(1)}ms`)
+
+          if (latency > 100) {
+            console.warn('INPUT LATENCY TOO HIGH')
+          }
+        }
+      }
+
+      // Reduce animation blend time for attacks
+      function startAttack(attackAnim: string) {
+        // BAD: Smooth blend (feels sluggish)
+        animator.crossFade(attackAnim, 0.2)
+
+        // GOOD: Near-instant transition (responsive)
+        animator.crossFade(attackAnim, 0.033) // 2 frames max
+      }
+    symptoms:
+      - Combat feels "floaty" or "sluggish"
+      - Players say inputs are "eaten"
+      - Attacks come out later than expected
+      - Dodge timing feels inconsistent
+    detection_pattern: 'crossFade\s*\([^,]+,\s*0\.[2-9]|transitionDuration\s*[=:]\s*0\.[2-9]'
+
+  - id: no-input-buffering
+    summary: Strict input timing without buffering
+    severity: critical
+    situation: Inputs only count if pressed at exact frame, with no forgiveness
+    why: |
+      Human timing is imprecise. Players press attack 2-5 frames "early" all the
+      time, expecting the action to queue. Without buffering, inputs feel dropped.
+      Players mash because single presses don't seem to register.
+
+      Every major action game uses input buffering:
+      - Street Fighter: 3-10 frame buffer
+      - Dark Souls: ~10 frame buffer
+      - Devil May Cry: ~8 frame buffer
+
+      Without buffering, players must hit exact frames. A 6-frame window at 60fps
+      is only 100ms - tighter than average human reaction time.
+    solution: |
+      // Input buffer implementation
+      class InputBuffer {
+        buffer: Array<{action: string, frame: number}> = []
+        bufferWindow: number = 10 // Frames to hold input
+
+        queueInput(action: string) {
+          this.buffer.push({
+            action,
+            frame: currentFrame
+          })
+        }
+
+        hasBufferedInput(action: string): boolean {
+          const now = currentFrame
+          return this.buffer.some(
+            b => b.action === action && (now - b.frame) <= this.bufferWindow
+          )
+        }
+
+        consumeInput(action: string): boolean {
+          const now = currentFrame
+          const index = this.buffer.findIndex(
+            b => b.action === action && (now - b.frame) <= this.bufferWindow
+          )
+
+          if (index !== -1) {
+            this.buffer.splice(index, 1)
+            return true
+          }
+          return false
+        }
+
+        update() {
+          // Clear expired inputs
+          const now = currentFrame
+          this.buffer = this.buffer.filter(
+            b => (now - b.frame) <= this.bufferWindow
+          )
+        }
+      }
+
+      // CRITICAL: Check buffer when action becomes possible
+      function onRecoveryEnd() {
+        // Player's buffered attack now executes
+        if (inputBuffer.consumeInput('attack')) {
+          startNextAttack()
+        }
+      }
+    symptoms:
+      - Players feel inputs are "dropped" or "eaten"
+      - Mashing feels necessary for reliability
+      - Combos only work when mashing
+      - Single button presses feel unreliable
+    detection_pattern: 'justPressed|isPressed\s*\(\s*["\'][^"\']+["\']\s*\)\s*(?!.*buffer)'
+
+  - id: no-coyote-time
+    summary: Requiring ground contact for jumping in platforming combat
+    severity: high
+    situation: Player pressed jump 1-3 frames after leaving ledge and nothing happens
+    why: |
+      When players run off a ledge, they press jump thinking they're still grounded.
+      Without coyote time, nothing happens. The player's mental model (I pressed
+      jump while on platform) differs from game state (you left ground 2 frames ago).
+
+      Named after Wile E. Coyote running off cliffs and hanging in mid-air.
+
+      Nearly every platformer and action game implements this:
+      - Celeste: 5 frames coyote time
+      - Hollow Knight: ~6 frames
+      - Super Meat Boy: ~4 frames
+    solution: |
+      class PlatformingController {
+        lastGroundedFrame: number = 0
+        coyoteFrames: number = 6 // Adjust per game feel
+
+        update() {
+          if (this.isOnGround()) {
+            this.lastGroundedFrame = currentFrame
+          }
+
+          if (input.justPressed('jump')) {
+            if (this.canCoyoteJump()) {
+              this.jump()
+            } else {
+              // Buffer the jump for landing
+              jumpBuffer.buffer()
+            }
+          }
+        }
+
+        canCoyoteJump(): boolean {
+          // Actually grounded
+          if (this.isOnGround()) return true
+
+          // Within coyote window
+          const framesSinceGrounded = currentFrame - this.lastGroundedFrame
+          return framesSinceGrounded <= this.coyoteFrames
+        }
+
+        isOnGround(): boolean {
+          return this.groundCheck.isColliding()
+        }
+      }
+
+      // IMPORTANT: Coyote time should NOT apply when jumping
+      // Only when walking/falling off ledge
+      // Otherwise: Jump -> coyote time -> double jump exploit
+
+      function onLeaveGround(reason: 'jump' | 'fall' | 'knockback') {
+        if (reason === 'jump') {
+          // Jumped intentionally - no coyote time
+          lastGroundedFrame = -Infinity
+        } else {
+          // Fell off or was knocked off - grant coyote time
+          lastGroundedFrame = currentFrame
+        }
+      }
+    symptoms:
+      - Players "miss" jumps at ledge edges
+      - Jumping while running feels unreliable
+      - Players slow down before jumping (compensating)
+      - Complaints about "floaty" or "unresponsive" jumping
+    detection_pattern: null  # Architecture pattern, not code smell
+
+  - id: no-recovery-windows
+    summary: Enemies with no punishable recovery after attacks
+    severity: critical
+    situation: Boss finishes attack and can immediately attack again
+    why: |
+      Recovery windows are where combat strategy lives. If enemies have no
+      vulnerability after attacking, combat becomes:
+      - Wait for attack
+      - Dodge
+      - Wait for attack
+      - Dodge
+      - (Forever, until you find the "trick")
+
+      This is tedious, not challenging. Souls-like bosses work because:
+      - Big attacks have long recoveries
+      - Small attacks have short recoveries
+      - Players learn attack patterns = recovery patterns
+
+      The "dance" of combat is: Evade -> Punish -> Reset -> Repeat
+      Without recovery windows, there's no Punish phase.
+    solution: |
+      // Every attack should have explicit recovery
+      class EnemyAttack {
+        phases = {
+          startup: 30,    // Wind-up (telegraphing)
+          active: 10,     // Danger window
+          recovery: 45,   // VULNERABLE window
+        }
+
+        // Recovery should allow player's fastest punish
+        // If player's light attack is 15 frames startup:
+        // Recovery must be >= 15 frames for a 1-hit punish
+        // >= 30 frames for a 2-hit punish
+      }
+
+      // Scale recovery to attack power
+      function calculateRecovery(attackPower: number): number {
+        // Big attack = big recovery
+        // Small attack = small recovery
+
+        const base = 20  // Minimum recovery
+        const scale = 1.5 // Frames per power unit
+
+        return Math.round(base + attackPower * scale)
+      }
+
+      // Boss example
+      const BOSS_OVERHEAD_SLAM = {
+        damage: 80,
+        startup: 45,      // Long wind-up = very readable
+        active: 15,       // Extended danger zone
+        recovery: 60,     // ONE FULL SECOND of vulnerability
+        // Player should recognize: "Big swing = long recovery = hit him now"
+      }
+
+      // THE RULE OF THUMB:
+      // If playtesters ask "when am I supposed to attack?"
+      // Your recovery windows are too short or unclear
+    symptoms:
+      - Players only attack during scripted openings
+      - Combat feels like "dodge forever until cutscene"
+      - Players feel they "can't find an opening"
+      - Fights feel unfair despite being technically beatable
+    detection_pattern: null  # Design issue, not code pattern
+
+  - id: unreadable-attack-tells
+    summary: Enemy attacks with insufficient or unclear telegraphing
+    severity: critical
+    situation: Player takes damage without understanding what attack is coming
+    why: |
+      Combat should test reaction speed and pattern recognition, not
+      memorization of invisible attacks. If players can't see an attack coming,
+      they can't react - they can only memorize or get lucky.
+
+      Good telegraph has:
+      - Distinct visual pose/animation
+      - Clear direction indication
+      - Consistent timing (same wind-up = same attack)
+      - Audio reinforcement
+
+      Bad telegraph:
+      - Looks like idle or other non-attack animation
+      - Starts with no warning, damage on frame 1
+      - Variable timing for same-looking animation
+      - Silent attacks (especially off-screen)
+    solution: |
+      // Telegraph timing budget (at 60fps)
+      // Human reaction time: 200-300ms = 12-18 frames
+
+      const TELEGRAPH_MINIMUMS = {
+        // Fast attacks: At limit of reaction
+        fast: 12,      // 200ms - skilled players can react
+
+        // Medium attacks: Comfortable reaction
+        medium: 24,    // 400ms - most players can react
+
+        // Heavy attacks: Obvious wind-up
+        heavy: 36,     // 600ms - impossible to miss
+
+        // Grab/special: Extra telegraph (high punishment)
+        grab: 30,      // 500ms - grabs should be very readable
+      }
+
+      // Layer multiple telegraph signals
+      class AttackTelegraph {
+        startTelegraph(attack: Attack) {
+          // Layer 1: Animation (primary)
+          animator.play(attack.windupAnim)
+
+          // Layer 2: Visual effect (reinforcement)
+          vfx.spawn(attack.chargeEffect, this.position)
+
+          // Layer 3: Audio (accessibility + off-screen)
+          audio.play(attack.telegraphSound, {
+            priority: 'high',
+            spatial: true
+          })
+
+          // Layer 4: UI indicator for key attacks
+          if (attack.showIndicator) {
+            ui.showAttackIndicator(attack.direction)
+          }
+        }
+      }
+
+      // TEST: Record new playtesters reacting to attacks
+      // If they get hit AND say "I didn't see that":
+      // - Telegraph too short, or
+      // - Telegraph too similar to non-attack, or
+      // - Telegraph not visually distinct enough
+    symptoms:
+      - "That came out of nowhere" comments
+      - Players die repeatedly to same attack without learning
+      - Death feels random, not earned
+      - Players only win through memorization, not reaction
+    detection_pattern: null  # Animation/design issue
+
+  - id: damage-sponge-enemies
+    summary: Enemies with excessive HP and repetitive patterns
+    severity: high
+    situation: Fight lasts 10+ minutes of repeating the same dodge-attack cycle
+    why: |
+      High HP without pattern variety creates tedium, not challenge. Players
+      master the pattern in the first minute, then spend 9 more minutes proving
+      they can repeat it perfectly without getting bored.
+
+      Long fights work when they have:
+      - Phase transitions (new patterns to learn)
+      - Escalation (increasing pressure)
+      - Variation (randomized attack selection)
+
+      Long fights fail when they're just:
+      - More HP to chew through
+      - Same pattern, longer execution
+    solution: |
+      // Instead of high HP, use phases
+      const BOSS_CONFIG = {
+        // BAD: Pure HP sponge
+        // hp: 10000,
+        // pattern: [attack1, attack2] // Repeats forever
+
+        // GOOD: Phased encounter
+        totalHp: 4000,
+        phases: [
+          {
+            hpThreshold: 1.0,  // Phase 1: 100-70% HP
+            attacks: [basicSlash, chargeAttack],
+            behavior: 'cautious',
+            telegraphMultiplier: 1.2  // Longer telegraphs in phase 1
+          },
+          {
+            hpThreshold: 0.7,  // Phase 2: 70-40% HP
+            attacks: [basicSlash, chargeAttack, newCombo, areaAttack],
+            behavior: 'aggressive',
+            telegraphMultiplier: 1.0
+          },
+          {
+            hpThreshold: 0.4,  // Phase 3: 40-0% HP
+            attacks: [enhancedSlash, chargeCombo, desperationAttack],
+            behavior: 'relentless',
+            telegraphMultiplier: 0.9  // Slightly faster
+          }
+        ]
+      }
+
+      // Rule of thumb:
+      // If fight > 3 minutes, it NEEDS phase transitions
+      // If fight > 5 minutes, it's probably too long
+
+      // Calculate expected fight duration
+      function estimateFightDuration(bossHp, playerDps, mistakeRate) {
+        const effectiveDps = playerDps * (1 - mistakeRate * 0.5)
+        const duration = bossHp / effectiveDps
+
+        if (duration > 180) {  // 3 minutes
+          console.warn('Boss fight may be too long. Consider reducing HP or adding phases.')
+        }
+
+        return duration
+      }
+    symptoms:
+      - Players win but feel bored, not triumphant
+      - "Took forever" complaints
+      - Players describe fight as "tedious" not "challenging"
+      - No memorable moments, just repetition
+    detection_pattern: null  # Design issue
+
+  - id: inconsistent-frame-data
+    summary: Same-looking attacks with different timings
+    severity: high
+    situation: Enemy has two attacks that look similar but have different wind-up times
+    why: |
+      Players build muscle memory for attack timings. If a wind-up animation
+      sometimes results in a 20-frame attack and sometimes a 30-frame attack,
+      players can't build reliable reactions.
+
+      This feels like "sometimes my dodge works, sometimes it doesn't" -
+      which players interpret as broken or random.
+
+      Variation in attack SELECTION is good.
+      Variation in attack TIMING (for same visual) is bad.
+    solution: |
+      // RULE: Visual similarity = timing similarity
+
+      // BAD: Same animation, different speeds
+      const overhead_slow = { anim: 'overhead', speed: 0.8 }
+      const overhead_fast = { anim: 'overhead', speed: 1.2 }
+      // Players can't tell which is coming
+
+      // GOOD: Different animations for different timings
+      const overhead_slow = {
+        anim: 'overhead_charged',  // Distinct pose
+        chargeEffect: true,         // Visual indicator
+        frameData: { startup: 40 }
+      }
+      const overhead_fast = {
+        anim: 'overhead_quick',    // Different animation
+        chargeEffect: false,
+        frameData: { startup: 20 }
+      }
+
+      // If you MUST have variable timing:
+      // 1. Make it visually obvious (charge-up effect)
+      // 2. Make charged version different pose
+      // 3. Audio cue for charge state
+
+      class ChargedAttack {
+        update() {
+          this.chargeTime += delta
+
+          // Visual feedback of charge level
+          if (this.chargeTime > HALF_CHARGE) {
+            vfx.setChargeLevel(this.chargeEffect, 0.5)
+            audio.play('charge_mid')
+          }
+          if (this.chargeTime > FULL_CHARGE) {
+            vfx.setChargeLevel(this.chargeEffect, 1.0)
+            audio.play('charge_full')
+            // Now player KNOWS this is the slow version
+          }
+        }
+      }
+    symptoms:
+      - "I swear I timed that right" complaints
+      - Dodge timing feels inconsistent
+      - Players can't explain why they got hit
+      - Same attacks feel different difficulty each time
+    detection_pattern: 'animationSpeed\s*=|playbackSpeed\s*[=:]\s*[^1]'
+
+  - id: perfect-play-required
+    summary: Combat that requires flawless execution to survive
+    severity: high
+    situation: Single mistake leads to death or unrecoverable state
+    why: |
+      Humans make mistakes. If your combat requires 100+ perfect decisions
+      in a row, only 0.1% of players will ever succeed. The rest will quit.
+
+      Challenge should come from:
+      - Consistency over time (resource management)
+      - Pattern adaptation (phase transitions)
+      - Strategic choices (risk vs reward)
+
+      NOT from:
+      - Single execution tests with death penalty
+      - Perfect combos required for damage
+      - Zero margin for error
+    solution: |
+      // Build in recovery mechanics
+
+      // 1. Health recovery between encounters
+      // Let players reset to full or near-full
+
+      // 2. Mistake recovery during combat
+      class CombatRecovery {
+        onPlayerHit(damage) {
+          // Invincibility after hit (can't be comboed)
+          player.grantIframes(30)  // 0.5 seconds
+
+          // Knockback creates distance (can heal/reset)
+          player.applyKnockback(hitDirection, 200)
+
+          // Show health clearly (awareness)
+          ui.flashHealthBar()
+
+          // Audio warning at low health
+          if (player.hp < player.maxHp * 0.3) {
+            audio.play('low_health_warning')
+            ui.showLowHealthVignette()
+          }
+        }
+      }
+
+      // 3. Consumable recovery (player agency)
+      // Estus Flask model: Limited heals per attempt
+      // Player chooses WHEN to use recovery resource
+
+      // 4. Difficulty from cumulative challenge
+      // Boss does 20% of your HP per hit
+      // You can take 4-5 hits before dying
+      // Challenge: Can you avoid most hits?
+      // NOT: Can you avoid ALL hits?
+
+      // BAD: One-shot attacks
+      const badBoss = {
+        damage: 100, // Equals player HP
+        // One mistake = restart
+      }
+
+      // GOOD: Proportional damage
+      const goodBoss = {
+        lightAttack: { damage: 15 },  // 6-7 hits to kill
+        heavyAttack: { damage: 30 },  // 3-4 hits to kill
+        specialAttack: { damage: 50 } // 2 hits to kill, but very telegraphed
+      }
+    symptoms:
+      - High player frustration despite "fair" mechanics
+      - Low completion rates
+      - Players describe game as "unfair" even when it's consistent
+      - "I died to one tiny mistake" complaints
+    detection_pattern: null  # Design philosophy issue
+
+  - id: animation-priority-over-responsiveness
+    summary: Long animation blend times making combat feel delayed
+    severity: high
+    situation: Attack animations use slow crossfades, making inputs feel delayed
+    why: |
+      Animators naturally want smooth transitions. But in combat, smoothness
+      is the enemy of responsiveness. A 200ms crossfade feels like 200ms of
+      input delay.
+
+      Fighting games use near-instant transitions (1-2 frames) for attacks.
+      The "pop" feels responsive even if it's not as smooth.
+
+      Combat animations should prioritize:
+      1. Responsiveness (instant start)
+      2. Readability (clear poses)
+      3. Smoothness (distant third)
+    solution: |
+      // Attack transitions should be near-instant
+
+      // BAD: Smooth blend (feels sluggish)
+      function startAttack(anim: string) {
+        animator.crossFade(anim, 0.15)  // 150ms blend = 150ms delay feel
+      }
+
+      // GOOD: Snap transition (responsive)
+      function startAttack(anim: string) {
+        animator.crossFade(anim, 0.033)  // 33ms = 2 frames, barely noticeable
+      }
+
+      // BETTER: Instant with pose matching
+      function startAttack(anim: string) {
+        // Find frame in attack anim that best matches current pose
+        const matchFrame = findBestPoseMatch(
+          animator.currentPose,
+          attackAnim.poses
+        )
+        animator.play(anim, normalizedTime: matchFrame)
+      }
+
+      // For recovery TO idle, longer blend is OK
+      // Combat is over, smoothness matters more
+      function endAttack() {
+        if (this.comboInput) {
+          // Combo continuation: Stay snappy
+          animator.crossFade(nextAttackAnim, 0.033)
+        } else {
+          // Return to idle: Can be smooth
+          animator.crossFade(idleAnim, 0.2)
+        }
+      }
+
+      // Animation priorities by state:
+      const BLEND_TIMES = {
+        // Combat (responsive)
+        idleToAttack: 0.033,     // 2 frames
+        attackToAttack: 0.033,   // 2 frames
+        anyToDodge: 0.033,       // 2 frames
+
+        // Recovery (smooth is ok)
+        attackToIdle: 0.15,      // 9 frames
+        dodgeToIdle: 0.1,        // 6 frames
+
+        // Non-combat
+        idleToWalk: 0.2,
+        walkToRun: 0.15
+      }
+    symptoms:
+      - Attacks feel "delayed" or "sluggish"
+      - Players say game "doesn't respond to inputs"
+      - Combat feels "floaty" despite good frame data
+      - Animations look smooth but feel wrong
+    detection_pattern: 'crossFade\s*\([^,]+,\s*0\.[1-9]|blendTime\s*[=:]\s*0\.[1-9]'
+
+  - id: cancel-everything-always
+    summary: Every action can cancel into any other action at any time
+    severity: medium
+    situation: Player can always dodge, always interrupt, never commits
+    why: |
+      Commitment creates depth. If every action can be canceled into anything,
+      there's no risk to swinging. Players just mash attack and cancel to dodge
+      if threatened.
+
+      Strategy comes from commitment:
+      - "Can I finish this combo or will I get punished?"
+      - "Is this opening big enough for a heavy attack?"
+      - "Should I use the safe option or the risky one?"
+
+      Without commitment, there are no decisions - just reactions.
+    solution: |
+      // Design cancel hierarchies
+
+      // Souls-like (high commitment)
+      const SOULS_CANCELS = {
+        idle: ['attack', 'roll', 'block', 'run'],
+        attackStartup: ['roll'],  // Can cancel out with resource
+        attackActive: [],         // Fully committed
+        attackRecovery: ['roll'], // Can cancel late
+        roll: [],                 // Committed during roll
+      }
+
+      // Character Action (medium commitment)
+      const ACTION_CANCELS = {
+        idle: ['attack', 'dodge', 'special', 'jump'],
+        attackStartup: ['dodge', 'jump'],    // Safe escape
+        attackActive: ['dodge'],             // Emergency out
+        attackRecovery: ['attack', 'dodge', 'jump'], // Combo options
+        dodge: [],                           // Committed during dodge
+      }
+
+      // The key is asymmetry:
+      // - Some actions are committal (risk)
+      // - Some actions are cancelable (safety)
+      // - Resources gate escapes (stamina for roll)
+
+      // Cancel system implementation
+      class ActionStateMachine {
+        canCancelInto(fromAction: string, toAction: string): boolean {
+          const allowedCancels = CANCEL_RULES[this.currentPhase]
+          return allowedCancels.includes(toAction)
+        }
+
+        update() {
+          for (const action of INPUT_PRIORITY_ORDER) {
+            if (input.justPressed(action) && this.canCancelInto(this.currentAction, action)) {
+              this.startAction(action)
+              return
+            }
+          }
+        }
+      }
+
+      // Priority order matters for conflicting inputs
+      const INPUT_PRIORITY_ORDER = [
+        'dodge',   // Highest - survival
+        'block',
+        'special',
+        'attack',  // Lowest
+      ]
+    symptoms:
+      - Combat feels "mash-y" with no thought required
+      - No tension - player is never at risk
+      - All strategies reduce to "attack, dodge if needed"
+      - Skilled and unskilled players perform similarly
+    detection_pattern: null  # Design philosophy issue
+
+  - id: hitstop-missing-or-wrong
+    summary: No freeze frame on hit, or asymmetric hitstop applied incorrectly
+    severity: high
+    situation: Attacks connect but don't feel impactful
+    why: |
+      Hitstop is the single most important "game feel" technique for combat.
+      When an attack connects, both attacker and target should freeze briefly.
+      This gives the brain time to register the hit.
+
+      Without hitstop, hits feel like they "pass through" enemies.
+      Combat feels floaty, unsatisfying, like hitting air.
+
+      Hitstop duration should scale with attack power:
+      - Light: 3-5 frames (50-83ms)
+      - Medium: 6-10 frames (100-167ms)
+      - Heavy: 12-18 frames (200-300ms)
+    solution: |
+      class HitstopManager {
+        frozen: boolean = false
+        framesRemaining: number = 0
+
+        apply(frames: number) {
+          // Take the larger hitstop if overlapping
+          this.framesRemaining = Math.max(this.framesRemaining, frames)
+          this.frozen = true
+        }
+
+        update(): boolean {
+          if (this.frozen && this.framesRemaining > 0) {
+            this.framesRemaining--
+
+            if (this.framesRemaining <= 0) {
+              this.frozen = false
+            }
+
+            return true  // Game is frozen
+          }
+          return false  // Normal update
+        }
+      }
+
+      // Apply hitstop when hit connects
+      function onHitConfirmed(attacker, target, attackData) {
+        const hitstopFrames = calculateHitstop(attackData.damage)
+
+        // BOTH entities freeze - this is critical
+        attacker.freezeFor(hitstopFrames)
+        target.freezeFor(hitstopFrames)
+
+        // Global hitstop for camera/effects
+        hitstopManager.apply(hitstopFrames)
+
+        // Spawn effects DURING hitstop
+        // This is when the player registers the hit
+        spawnHitEffect(target.position)
+        playHitSound(attackData.type)
+        screenShake.addTrauma(attackData.damage / 100)
+      }
+
+      // Asymmetric hitstop (advanced)
+      // Attacker freezes slightly less, feels like follow-through
+      function applyAsymmetricHitstop(attacker, target, frames) {
+        target.freezeFor(frames)           // Full freeze
+        attacker.freezeFor(frames * 0.7)   // 70% freeze
+      }
+    symptoms:
+      - Hits feel like they "pass through" enemies
+      - Combat feels "floaty" or "weightless"
+      - Attacks don't feel powerful regardless of damage
+      - No sense of impact or connection
+    detection_pattern: 'onHit|hitConfirmed|applyDamage.*(?!freeze|hitstop|stop)'
+
+  - id: stamina-too-restrictive
+    summary: Stamina costs so high that combat becomes wait-and-watch
+    severity: medium
+    situation: Player can only swing 2-3 times before waiting 5+ seconds to recover
+    why: |
+      Stamina should create strategic decisions, not forced downtime.
+      If stamina runs out after 2-3 actions, players spend more time waiting
+      than playing. This kills pacing and fun.
+
+      Good stamina design:
+      - 4-6 light attacks per bar
+      - 2-3 heavy attacks per bar
+      - 2-3 dodges per bar
+      - Regen begins quickly (~0.5 sec delay)
+      - Full regen in 2-4 seconds
+
+      Bad stamina design:
+      - 2 attacks per bar
+      - 1 dodge per bar
+      - 5+ second regen time
+    solution: |
+      // Stamina budget sanity check
+      const STAMINA_BUDGET = {
+        maxStamina: 100,
+
+        costs: {
+          lightAttack: 15,   // 6-7 per bar
+          heavyAttack: 30,   // 3 per bar
+          dodge: 20,         // 5 per bar
+          sprint: 5,         // Per second
+          block: 0           // Free but regen paused
+        },
+
+        recovery: {
+          rate: 30,          // Per second = ~3.3 sec full regen
+          delayAfterAction: 0.5,  // Quick restart
+          emptyPenalty: 1.5       // Extra delay when depleted
+        }
+      }
+
+      // Validate stamina design
+      function validateStaminaDesign(config) {
+        const warnings = []
+
+        // Check attack count per bar
+        const lightAttacksPerBar = config.maxStamina / config.costs.lightAttack
+        if (lightAttacksPerBar < 4) {
+          warnings.push(`Only ${lightAttacksPerBar} light attacks per bar - may feel restrictive`)
+        }
+
+        // Check regen time
+        const fullRegenTime = config.maxStamina / config.recovery.rate
+        if (fullRegenTime > 4) {
+          warnings.push(`${fullRegenTime}s to full regen - may cause excessive waiting`)
+        }
+
+        // Check dodge availability
+        const dodgesPerBar = config.maxStamina / config.costs.dodge
+        if (dodgesPerBar < 3) {
+          warnings.push(`Only ${dodgesPerBar} dodges per bar - may feel punishing`)
+        }
+
+        return warnings
+      }
+
+      // Dynamic stamina based on combat state
+      // More forgiving in easier fights, stricter in hard ones
+      function adjustStaminaForDifficulty(baseConfig, difficulty) {
+        return {
+          ...baseConfig,
+          recovery: {
+            ...baseConfig.recovery,
+            rate: baseConfig.recovery.rate * (1.2 - difficulty * 0.2)
+          }
+        }
+      }
+    symptoms:
+      - Combat feels "slow" or "boring"
+      - Players stand around waiting for stamina
+      - Aggressive play feels impossible
+      - Stamina system feels like a punishment, not a strategy
+    detection_pattern: null  # Design tuning issue
+
+  - id: iframes-wrong-duration
+    summary: I-frames too short (useless) or too long (trivializing)
+    severity: high
+    situation: Dodge i-frames don't protect reliably, or protect so long timing doesn't matter
+    why: |
+      I-frames are a skill expression mechanic. They should:
+      - Reward timing (shorter = harder)
+      - Feel reliable (not random)
+      - Have consistent windows
+
+      Too short: Dodging feels random, unreliable
+      Too long: Timing doesn't matter, just spam dodge
+
+      Reference values (at 60fps):
+      - Dark Souls roll: ~13 i-frames in 30-frame roll
+      - Bloodborne quickstep: ~10 i-frames in 26-frame dash
+      - DMC dodge: ~8 i-frames but very responsive
+    solution: |
+      // I-frame tuning guide
+      const IFRAME_GUIDELINES = {
+        // Challenging (Souls-like)
+        challenging: {
+          iframes: 10,       // 167ms window
+          dodgeDuration: 26, // 433ms total
+          ratio: 0.38        // 38% of dodge is invincible
+        },
+
+        // Standard (most action games)
+        standard: {
+          iframes: 14,       // 233ms window
+          dodgeDuration: 24, // 400ms total
+          ratio: 0.58        // 58% of dodge is invincible
+        },
+
+        // Forgiving (casual/mobile)
+        forgiving: {
+          iframes: 18,       // 300ms window
+          dodgeDuration: 24, // 400ms total
+          ratio: 0.75        // 75% of dodge is invincible
+        }
+      }
+
+      // I-frame implementation
+      class DodgeController {
+        state: 'ready' | 'startup' | 'iframes' | 'recovery' = 'ready'
+        stateFrame: number = 0
+
+        config = {
+          startup: 2,    // Vulnerable (can be hit out of dodge)
+          iframes: 12,   // Invincible
+          recovery: 10   // Vulnerable (punishable)
+        }
+
+        update() {
+          this.stateFrame++
+
+          switch (this.state) {
+            case 'startup':
+              if (this.stateFrame >= this.config.startup) {
+                this.state = 'iframes'
+                this.stateFrame = 0
+              }
+              break
+
+            case 'iframes':
+              if (this.stateFrame >= this.config.iframes) {
+                this.state = 'recovery'
+                this.stateFrame = 0
+              }
+              break
+
+            case 'recovery':
+              if (this.stateFrame >= this.config.recovery) {
+                this.state = 'ready'
+              }
+              break
+          }
+        }
+
+        isInvincible(): boolean {
+          return this.state === 'iframes'
+        }
+      }
+
+      // TESTING: Verify i-frames feel right
+      // 1. Record first-time playtesters dodging attacks
+      // 2. Success rate should be 60-80% when trying
+      // 3. If < 50%: I-frames too short or startup too long
+      // 4. If > 90%: I-frames too long, no skill required
+    symptoms:
+      - (Too short) Dodging feels random/unreliable
+      - (Too long) Combat trivial once dodge unlocked
+      - Players say "I pressed dodge!" when hit
+      - Dodging requires memorization, not reaction
+    detection_pattern: null  # Tuning issue

@@ -1,0 +1,697 @@
+id: pixel-art
+skill: Pixel Art Mastery
+version: "2.0"
+
+sharp_edges:
+  - id: rotation-breaks-pixels
+    severity: CRITICAL
+    title: Rotating Pixel Art Destroys the Grid
+    description: Any non-90-degree rotation interpolates pixels and breaks the art
+    symptoms:
+      - Blurry rotated sprites
+      - Some pixels larger than others
+      - "Staircase" patterns become irregular
+      - Art loses its crisp pixel quality
+    detection_pattern: "rotate|rotation|angle|transform|spin"
+    why_it_happens: |
+      Pixel art depends on the grid. When you rotate by 45 degrees (or any
+      non-90 multiple), the computer must interpolate where pixels land.
+      Since pixels are square and the grid is fixed, interpolation creates
+      sub-pixel values that get anti-aliased or rounded incorrectly.
+    solution: |
+      APPROACHES TO ROTATION IN PIXEL ART:
+
+      **Option 1: Pre-render rotation frames (best)**
+      ```yaml
+      # Create separate sprites for each angle
+      angles:
+        - 0    # Forward
+        - 45   # Forward-right (manually drawn)
+        - 90   # Right
+        - 135  # Back-right (manually drawn)
+        - 180  # Back
+        - 225  # Back-left (manually drawn)
+        - 270  # Left
+        - 315  # Forward-left (manually drawn)
+
+      # Each angle is a separate, hand-crafted sprite
+      # Maintains pixel integrity at every angle
+      ```
+
+      **Option 2: 90-degree rotations only**
+      ```javascript
+      // Only rotate in 90-degree increments
+      function safeRotate(sprite, degrees) {
+        const safe = Math.round(degrees / 90) * 90;
+        sprite.rotation = safe * (Math.PI / 180);
+      }
+
+      // 90-degree rotation just swaps axes - no interpolation
+      ```
+
+      **Option 3: Accept the blur for specific cases**
+      ```yaml
+      when_rotation_blur_is_acceptable:
+        - Fast-spinning particles
+        - Tiny projectiles (3x3 or smaller)
+        - Background decorations
+        - Items not critical to gameplay readability
+        - When upscaled 4x+ (blur becomes less noticeable)
+
+      never_accept_blur_on:
+        - Main character
+        - Enemies
+        - Important UI elements
+        - Any sprite the player needs to read
+      ```
+
+      **Option 4: Rotozoom technique**
+      ```yaml
+      # Work at 2x resolution, rotate, then downscale
+      # Result is less blurry but still not perfect
+
+      steps:
+        1. Create sprite at 2x target resolution
+        2. Rotate at 2x
+        3. Downscale to 1x with nearest-neighbor
+        4. Touch up any obvious artifacts manually
+      ```
+
+  - id: mixed-resolution-disaster
+    severity: CRITICAL
+    title: Mixed Pixel Resolutions Destroy Cohesion
+    description: Combining assets at different pixel densities breaks the illusion
+    symptoms:
+      - Some objects look "zoomed in" compared to others
+      - Art style feels inconsistent
+      - Game looks like an "asset flip"
+      - Players can't trust visual hierarchy
+    detection_pattern: "resolution|scale|upscale|downscale|size|import"
+    why_it_happens: |
+      If your character is 32x32 (1 pixel = 1 unit) but your background tiles
+      were made at 16x16 and stretched 2x, pixels are now different sizes.
+      The eye immediately notices this inconsistency.
+    solution: |
+      RESOLUTION DISCIPLINE:
+
+      **Rule 1: Choose once, use everywhere**
+      ```yaml
+      project_resolution:
+        base_unit: 1px
+        character_size: 32x32
+        tile_size: 16x16  # Must be same pixel density!
+        UI_pixel_size: 1px  # Same as everything else
+
+      # If tiles are 16x16, characters CAN be 32x32
+      # But both use the SAME pixel size
+      ```
+
+      **Rule 2: Never upscale pixel art**
+      ```javascript
+      // WRONG - upscaling 16x16 to 32x32
+      // Creates 2x2 pixel blocks
+      sprite = sprite.resize(2x);
+
+      // RIGHT - create at final resolution
+      // If you need 32x32, draw at 32x32
+      ```
+
+      **Rule 3: Check imported assets**
+      ```yaml
+      import_checklist:
+        - What was original resolution?
+        - Was it scaled? By what factor?
+        - Does pixel size match project?
+        - Are there sub-pixel details?
+
+      # If asset has pixels at different sizes = reject or redraw
+      ```
+
+      **Rule 4: Consistent UI**
+      ```yaml
+      # Even UI must match game pixel size
+      correct:
+        game_pixel: 1px
+        UI_pixel: 1px
+        font_pixel: 1px  # Use pixel fonts!
+
+      wrong:
+        game_pixel: 1px
+        UI_uses: vector icons  # Breaks cohesion!
+        font: TrueType smooth  # Breaks cohesion!
+      ```
+
+  - id: scaling-artifacts
+    severity: CRITICAL
+    title: Non-Integer Scaling Destroys Pixel Art
+    description: Scaling by 1.5x, 2.5x, or any non-integer breaks pixel alignment
+    symptoms:
+      - Blurry sprites in game
+      - Pixels appear different sizes
+      - Some rows/columns thicker than others
+      - Image-rendering CSS doesn't fix it
+    detection_pattern: "scale|zoom|resize|canvas|viewport|responsive"
+    solution: |
+      INTEGER SCALING ONLY:
+
+      **Why it happens:**
+      ```yaml
+      at_scale_2x:
+        1 pixel -> 2x2 pixels  # Perfect!
+        All pixels equal size
+
+      at_scale_1.5x:
+        1 pixel -> 1.5x1.5 = 2.25 pixels  # Impossible!
+        Must round: some become 2x2, some become 1x2
+        Result: uneven pixels
+      ```
+
+      **Solution: Lock to integer scales**
+      ```javascript
+      function getIntegerScale(gameWidth, screenWidth) {
+        return Math.floor(screenWidth / gameWidth);
+      }
+
+      // Game is 320px wide, screen is 1920px
+      // Scale = floor(1920/320) = 6
+      // Game renders at exactly 320 * 6 = 1920 pixels
+
+      // With letterboxing for remainder:
+      const scale = Math.floor(window.innerWidth / gameWidth);
+      const actualWidth = gameWidth * scale;
+      const padding = (window.innerWidth - actualWidth) / 2;
+      ```
+
+      **Engine configurations:**
+      ```javascript
+      // Phaser 3
+      const config = {
+        scale: {
+          mode: Phaser.Scale.FIT,
+          autoRound: true,  // CRITICAL!
+          width: 320,
+          height: 240
+        },
+        render: {
+          pixelArt: true,
+          roundPixels: true,
+          antialias: false
+        }
+      };
+
+      // Unity
+      // Set "Pixels Per Unit" consistently
+      // Enable "Pixel Snap" in material
+
+      // Godot
+      // Set stretch mode to "viewport"
+      // Set stretch aspect to "keep"
+      // Enable GPU pixel snap
+      ```
+
+      **CSS for web:**
+      ```css
+      canvas {
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;  /* Firefox */
+        -ms-interpolation-mode: nearest-neighbor;  /* IE */
+      }
+      ```
+
+  - id: anti-aliasing-contamination
+    severity: HIGH
+    title: Software Anti-Aliasing Infecting Pixel Art
+    description: Programs automatically adding smoothing to pixel art exports
+    symptoms:
+      - Edges look slightly blurred
+      - Semi-transparent pixels appear around sprites
+      - Color count explodes with in-between colors
+      - PNG has more colors than you created
+    detection_pattern: "export|save|photoshop|gimp|png|smooth|edge"
+    solution: |
+      PREVENTING ANTI-ALIASING:
+
+      **Aseprite (recommended):**
+      ```yaml
+      # Default settings are correct
+      # But verify:
+
+      Export as PNG:
+        - File > Export Sprite Sheet
+        - Or Ctrl+Shift+E for quick export
+
+      Settings that matter:
+        - "Output" uses .png (not jpg)
+        - No "resize" options checked
+        - No filters applied
+      ```
+
+      **Photoshop:**
+      ```yaml
+      DANGER: Photoshop loves to anti-alias
+
+      Must disable:
+        - Edit > Preferences > General
+        - "Image Interpolation" = Nearest Neighbor
+
+      When exporting:
+        - File > Export > Save for Web (Legacy)
+        - PNG-8 for indexed color
+        - NO "Blur" or "Quality" options
+        - NEVER use "Save As" for pixel art
+
+      When resizing (if you must):
+        - Image > Image Size
+        - Resample = "Nearest Neighbor (hard edges)"
+      ```
+
+      **GIMP:**
+      ```yaml
+      Settings:
+        - Image > Scale Image
+        - Interpolation = "None"
+
+      Export:
+        - File > Export As
+        - Choose PNG
+        - No compression artifacts
+      ```
+
+      **Verification test:**
+      ```yaml
+      After export, open file and check:
+        1. Zoom to 800%+
+        2. Look at edges
+        3. Are there any semi-transparent pixels you didn't create?
+        4. Are there colors you didn't use in your palette?
+
+      If yes: software added anti-aliasing
+      Solution: Re-export with correct settings
+      ```
+
+  - id: palette-bloat
+    severity: HIGH
+    title: Color Count Exploding Without Control
+    description: Started with 16 colors, now have 64 "slightly different" shades
+    symptoms:
+      - Can't easily palette swap
+      - Colors look almost identical
+      - Art style inconsistency
+      - File sizes larger than expected
+    detection_pattern: "color|palette|shade|swatch|hue"
+    solution: |
+      PALETTE DISCIPLINE:
+
+      **Set limits BEFORE starting:**
+      ```yaml
+      palette_limits_by_project:
+        gameboy_style: 4 colors
+        nes_style: 16 colors (4 palettes x 4)
+        snes_style: 48-64 colors
+        modern_indie: 32 colors typical
+
+      per_sprite_limits:
+        small_prop: 4-6 colors
+        character: 8-12 colors
+        large_boss: 12-16 colors
+      ```
+
+      **Lock palette in Aseprite:**
+      ```yaml
+      steps:
+        1. Sprite > Color Mode > Indexed
+        2. This forces you to use only palette colors
+        3. Any new color requires deliberately adding to palette
+
+      adding_new_color:
+        1. Really need it? Can existing color work?
+        2. Is there a similar color already? (< 15% difference)
+        3. Will this color be used elsewhere?
+        4. Does adding it push you over limits?
+      ```
+
+      **Color similarity check:**
+      ```javascript
+      function isTooSimilar(color1, color2, threshold = 30) {
+        const dr = color1.r - color2.r;
+        const dg = color1.g - color2.g;
+        const db = color1.b - color2.b;
+
+        const distance = Math.sqrt(dr*dr + dg*dg + db*db);
+        return distance < threshold;
+      }
+
+      // If two colors are within 30 units, they're probably
+      // too similar to justify both existing
+      ```
+
+      **Palette swap benefits:**
+      ```yaml
+      with_clean_palette:
+        - Enemy variants = swap 4 colors
+        - Day/night = shift all colors
+        - Player skins = simple palette swap
+        - Damage flash = swap to white palette
+
+      with_bloated_palette:
+        - Each variant = redraw everything
+        - Inconsistent colors
+        - Harder to maintain
+      ```
+
+  - id: subpixel-position-jitter
+    severity: HIGH
+    title: Sprite Positions Jittering at Subpixel Levels
+    description: Sprites shake or shimmer as they move at non-integer positions
+    symptoms:
+      - Sprites visibly vibrate during movement
+      - Edges flicker between pixels
+      - Movement looks "nervous" or unstable
+      - More noticeable at slower speeds
+    detection_pattern: "position|move|x|y|transform|subpixel|jitter"
+    solution: |
+      SUBPIXEL POSITIONING:
+
+      **The problem:**
+      ```yaml
+      # Character moves 1.5 pixels per frame
+
+      Frame 1: x = 0     -> renders at pixel 0
+      Frame 2: x = 1.5   -> rounds to pixel 2
+      Frame 3: x = 3.0   -> renders at pixel 3
+      Frame 4: x = 4.5   -> rounds to pixel 4 or 5?
+
+      # The rounding causes inconsistent jumps
+      # Visual result: jittering
+      ```
+
+      **Solution 1: Round to integers for rendering**
+      ```javascript
+      // Track position with decimals
+      character.subX += velocity.x * deltaTime;
+      character.subY += velocity.y * deltaTime;
+
+      // But render at integer position
+      character.renderX = Math.floor(character.subX);
+      character.renderY = Math.floor(character.subY);
+
+      // Physics uses subX/subY, graphics use renderX/renderY
+      ```
+
+      **Solution 2: Use pixel-locked movement**
+      ```javascript
+      // Only move in whole pixels
+      // Accumulate movement, apply when >= 1 pixel
+
+      character.moveAccumulator += velocity * deltaTime;
+
+      if (character.moveAccumulator >= 1) {
+        character.x += Math.floor(character.moveAccumulator);
+        character.moveAccumulator %= 1;  // Keep remainder
+      }
+      ```
+
+      **Solution 3: Consistent rounding**
+      ```javascript
+      // ALWAYS use same rounding method
+      // floor() is most common for pixel art
+
+      // BAD: mixing floor, round, ceil
+      x = Math.round(position.x);  // Sometimes 0, sometimes 1
+      y = Math.floor(position.y);  // Inconsistent!
+
+      // GOOD: always floor
+      x = Math.floor(position.x);
+      y = Math.floor(position.y);
+      ```
+
+      **Engine settings:**
+      ```yaml
+      Phaser 3:
+        roundPixels: true  # In game config
+
+      Unity:
+        Pixel Snap: enabled
+        # On SpriteRenderer or via shader
+
+      Godot:
+        Snap 2D transforms to pixel: ON
+        # In Project Settings
+      ```
+
+  - id: dithering-overuse
+    severity: MEDIUM
+    title: Too Much Dithering Creates Visual Noise
+    description: Every surface uses dithering, making the image busy and unclear
+    symptoms:
+      - Art looks "noisy" or "dirty"
+      - Hard to focus on important elements
+      - Gradients everywhere distract
+      - Small sprites especially affected
+    detection_pattern: "dither|gradient|pattern|texture|shade"
+    solution: |
+      DITHERING DISCIPLINE:
+
+      **When TO use dithering:**
+      ```yaml
+      good_uses:
+        - Large sky gradients
+        - Water/lava surfaces
+        - Atmospheric fog
+        - Metal surfaces (subtle)
+        - Fabric texture (very subtle)
+        - Shadows on large surfaces
+      ```
+
+      **When NOT to use dithering:**
+      ```yaml
+      bad_uses:
+        - Small sprites (< 32x32)
+        - Character faces
+        - UI elements
+        - Text or readable elements
+        - When you have enough palette colors
+        - When sharp transition looks better
+      ```
+
+      **Rule of thumb:**
+      ```yaml
+      dither_threshold:
+        if_area_smaller_than: 8x8 pixels
+        then: DON'T dither
+
+        if_transition_width: < 3 pixels
+        then: Hard edge is cleaner
+      ```
+
+      **One pattern per piece:**
+      ```yaml
+      # Pick ONE dithering style and stick with it
+
+      wrong:
+        sky: checkerboard dither
+        water: random dither
+        ground: diagonal dither
+        # Looks chaotic
+
+      right:
+        everything: checkerboard 50%
+        or: everything hard edges
+        # Consistent style
+      ```
+
+      **Clean alternative:**
+      ```yaml
+      # Instead of dithering, try:
+        - Additional palette colors (if budget allows)
+        - Hard color bands (stylistic choice)
+        - Larger color steps (bolder look)
+        - No gradient at all (flat shading)
+      ```
+
+  - id: aseprite-export-mistakes
+    severity: MEDIUM
+    title: Aseprite Export Settings Causing Problems
+    description: Common export setting mistakes that break sprite sheets
+    symptoms:
+      - Frames in wrong order
+      - Transparent pixels not transparent
+      - Sprite sheet has wrong dimensions
+      - Animation JSON doesn't match
+    detection_pattern: "aseprite|export|sprite.?sheet|json|atlas"
+    solution: |
+      ASEPRITE EXPORT CHECKLIST:
+
+      **Sprite Sheet Export:**
+      ```yaml
+      Ctrl+Shift+E or File > Export Sprite Sheet
+
+      Sheet tab:
+        Sheet Type: By Rows (most compatible)
+        # Or "Packed" for optimal space
+
+        Constraints:
+          # Either set by columns/rows OR by size
+          # Don't fight the automatic sizing
+
+        Padding: 0 (unless engine needs it)
+        Border: 0
+        Inner Padding: 0
+
+      Sprite tab:
+        Layers: Visible layers (check this!)
+        Frames: All frames
+
+      Borders tab:
+        Trim Sprite: OFF (keeps consistent frame sizes)
+        Trim Cells: OFF
+        Extrude: OFF (unless specifically needed)
+
+      Output tab:
+        Output File: .png
+        JSON Data: Enable if engine uses it
+
+        JSON format: Array or Hash (check engine docs)
+      ```
+
+      **Animation data export:**
+      ```yaml
+      For Phaser/Godot/Unity:
+        Format: JSON Array (usually)
+
+        Must include:
+          - frameTags (animation names)
+          - frame dimensions
+          - duration per frame
+
+        Check:
+          - "from" and "to" frame numbers correct
+          - Duration in milliseconds not frames
+      ```
+
+      **Common mistakes:**
+      ```yaml
+      mistake_1:
+        problem: Transparent color showing as solid
+        solution: Sprite > Color Mode > RGB Color
+                  Or check palette slot 0 = transparent
+
+      mistake_2:
+        problem: Animation plays wrong frames
+        solution: Check frame order in timeline
+                  Check JSON "from"/"to" values
+
+      mistake_3:
+        problem: Sheet dimensions unexpected
+        solution: Verify all frames same size
+                  Or use "Trim Cels" carefully
+
+      mistake_4:
+        problem: Colors look different in game
+        solution: Export as PNG-8 indexed if < 256 colors
+                  Check color profile (should be sRGB)
+      ```
+
+      **Verification:**
+      ```yaml
+      after_export:
+        1. Open sprite sheet in another program
+        2. Verify all frames present
+        3. Check transparency works
+        4. Compare colors to original
+        5. Load JSON in text editor, verify structure
+        6. Test in actual game engine
+      ```
+
+  - id: walk-cycle-sliding
+    severity: MEDIUM
+    title: Character Slides Instead of Walking
+    description: Animation and movement speed are mismatched
+    symptoms:
+      - Feet seem to slide on ground
+      - Character "moonwalks"
+      - Movement feels disconnected from animation
+      - Looks like character is on ice
+    detection_pattern: "walk|run|animation|speed|move|slide"
+    solution: |
+      SYNC ANIMATION TO MOVEMENT:
+
+      **The math:**
+      ```javascript
+      // Calculate required frame time from movement
+
+      function calcFrameTime(moveSpeed, stridePixels, frameCount) {
+        // moveSpeed: pixels per second
+        // stridePixels: how far one full walk cycle moves
+        // frameCount: frames in full cycle
+
+        const cycleTime = stridePixels / moveSpeed;  // seconds
+        const frameTime = (cycleTime / frameCount) * 1000;  // ms
+
+        return frameTime;
+      }
+
+      // Example:
+      // Speed: 100 px/sec
+      // Stride: 32 px (one step covers 32 pixels)
+      // Frames: 6
+
+      // cycleTime = 32 / 100 = 0.32 seconds
+      // frameTime = (0.32 / 6) * 1000 = 53ms per frame
+      ```
+
+      **The formula:**
+      ```yaml
+      frame_time_ms = (stride_pixels / move_speed) / frame_count * 1000
+
+      practical_ranges:
+        walk:
+          stride: 16-32 pixels
+          speed: 60-100 px/sec
+          frames: 4-6
+          typical_frame_time: 100-150ms
+
+        run:
+          stride: 24-48 pixels
+          speed: 150-250 px/sec
+          frames: 6-8
+          typical_frame_time: 50-80ms
+      ```
+
+      **Alternative: Lock step to pixels**
+      ```javascript
+      // Instead of time-based animation,
+      // advance frame every N pixels moved
+
+      class PixelLockedAnimation {
+        constructor(pixelsPerFrame) {
+          this.pixelsPerFrame = pixelsPerFrame;
+          this.distanceTraveled = 0;
+          this.currentFrame = 0;
+        }
+
+        update(distanceMoved) {
+          this.distanceTraveled += distanceMoved;
+
+          while (this.distanceTraveled >= this.pixelsPerFrame) {
+            this.currentFrame = (this.currentFrame + 1) % this.frameCount;
+            this.distanceTraveled -= this.pixelsPerFrame;
+          }
+        }
+      }
+
+      // Now animation is PERFECTLY synced to movement
+      // No sliding possible
+      ```
+
+      **Contact frames are key:**
+      ```yaml
+      in_walk_cycle:
+        frame_1_and_3: Contact poses (foot on ground)
+        frame_2_and_4: Passing poses (feet moving)
+
+      contact_frame_must:
+        - Have foot clearly on ground
+        - Foot position matches expected stride
+        - If stride is 32px, contact foot is 16px from center
+      ```

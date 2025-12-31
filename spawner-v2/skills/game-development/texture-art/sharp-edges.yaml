@@ -1,0 +1,453 @@
+# Texture Art Sharp Edges
+# Critical gotchas that cause real problems in production
+
+sharp_edges:
+  - id: texture-baked-lighting-albedo
+    summary: Baked lighting in albedo causes double-lighting artifacts
+    severity: critical
+    situation: Creating base color/albedo maps with shadows, AO, or highlights baked in
+    why: |
+      PBR engines calculate ALL lighting at runtime. When you bake lighting into albedo,
+      the engine adds MORE lighting on top. Result: shadows are too dark, highlights are
+      blown out, and the asset can never be relit correctly.
+
+      This is called "double-dipping" - lighting applied twice. Common sources:
+      - Photosourcing textures with strong shadows
+      - Using diffuse maps from older non-PBR games
+      - Painting highlights/shadows in Photoshop
+      - Applying AO directly to base color in Substance
+    solution: |
+      1. Use multiply AO on a SEPARATE layer in Substance (not baked into diffuse)
+      2. Strip lighting from photo sources using frequency separation
+      3. For older assets: extract AO, recreate clean albedo
+      4. Check values: albedo should be 50-240 sRGB, evenly lit
+      5. View albedo in isolation (no lighting) to verify cleanliness
+    symptoms:
+      - Shadows always visible regardless of light direction
+      - Asset looks "dirty" or "muddy" in all lighting conditions
+      - Cannot relight scene without re-texturing assets
+      - AO appears darker than intended
+      - Highlights baked into albedo create hot spots
+    detection_pattern: null
+    version_range: "*"
+    red_flags:
+      - Albedo values below 30 sRGB (too dark for natural materials)
+      - Strong directional shadows visible in albedo
+      - Using "diffuse" textures from pre-PBR era
+      - Multiplying AO directly onto base color layer
+
+  - id: texture-metallic-grayscale
+    summary: Grayscale metallic values break PBR physics
+    severity: critical
+    situation: Using metallic values between 0 and 1 (e.g., 0.5 metallic)
+    why: |
+      Metallic is a BINARY physical property. At the molecular level, a material either
+      conducts electrons (metal) or doesn't (dielectric). There's no "half metal" in nature.
+
+      Using 0.5 metallic creates physically impossible behavior:
+      - Fresnel calculations break (reflectivity curve is wrong)
+      - Energy conservation fails (reflects wrong amount of light)
+      - Creates "halo" artifacts around metallic-to-dielectric transitions
+      - Looks fake because it doesn't match reality
+
+      Exception: Transition zones need soft masks, but the VALUES are still 0 and 1.
+      The gradual transition is in the MASK, not the metallic value itself.
+    solution: |
+      1. Metallic map should be pure black (0) or pure white (1)
+      2. Use anti-aliased edges for transitions (the edge is soft, not the value)
+      3. For painted metal: metallic=0 where painted, metallic=1 where exposed
+      4. For oxidized metal: still metallic=1, but different roughness/base color
+      5. Test in engine: disable albedo, view metallic only - should be high contrast
+    symptoms:
+      - Metallic areas look "plastic" or "wrong"
+      - Fresnel reflections don't match real metal
+      - Edge transitions have halos or glow
+      - Material looks different in different PBR engines
+    detection_pattern: null
+    version_range: "*"
+    red_flags:
+      - Metallic map has gradients or grayscale areas
+      - Using roughness slider to fake "less metallic"
+      - Metallic histogram shows values between 10-245
+
+  - id: texture-normal-y-flip
+    summary: DirectX vs OpenGL normal map Y-channel causes inverted lighting
+    severity: high
+    situation: Normal maps appear to have inverted bumps or shadows
+    why: |
+      The green (Y) channel convention differs between graphics APIs:
+      - DirectX (Y-): Bumps lit from top-left, Y points DOWN in tangent space
+      - OpenGL (Y+): Bumps lit from top-left, Y points UP in tangent space
+
+      Using the wrong convention makes bumps appear as dents. Light hits surfaces
+      from the opposite expected direction. This is a DATA interpretation issue,
+      not a visual preference.
+
+      Engine defaults:
+      - DirectX: Unreal Engine, CryEngine, Source, Frostbite
+      - OpenGL: Unity, Godot, Blender, most web engines
+    solution: |
+      1. Know your target engine's convention BEFORE creating textures
+      2. Substance Painter: Set export preset for target engine
+      3. Fix existing: Invert green channel only in Photoshop/GIMP
+      4. Test: Create simple hemisphere, light from top-right, verify shadow direction
+      5. When in doubt: Bumps should appear to "pop out" when lit from above-left
+    symptoms:
+      - Surface details appear inverted (bumps look like dents)
+      - Lighting looks "inside out" on normal-mapped surfaces
+      - Textures look fine in one engine, broken in another
+      - Hemispheres lit from below instead of above
+    detection_pattern: null
+    version_range: "*"
+    red_flags:
+      - Using Megascans (DirectX) in Unity (OpenGL) without flip
+      - Mixing normal maps from different sources
+      - Normal map "looks fine in Substance" but broken in engine
+
+  - id: texture-normal-compression-artifacts
+    summary: Wrong compression format destroys normal map quality
+    severity: high
+    situation: Normal maps have blocky artifacts or lighting looks faceted
+    why: |
+      Normal maps store PRECISE vector data, not visual color. Standard color compression
+      (DXT1/BC1) uses 4:1 compression that creates 4x4 pixel blocks. These blocks create
+      visible stepping on curved surfaces.
+
+      The right format depends on platform:
+      - BC5 (2-channel): Best quality, stores RG only, reconstruct B in shader
+      - BC7: High quality RGB+A, 8 bits per pixel, slower to compress
+      - DXT5/BC3: Acceptable, but artifacts on gradients
+      - DXT1/BC1: NEVER use for normal maps
+
+      Note: ASTC (mobile) and ETC2 (Android) have similar quality tiers.
+    solution: |
+      1. Use BC5 compression for normal maps (most engines support)
+      2. Unity: Normal map import type auto-selects correct compression
+      3. Unreal: NormalMap compression setting uses BC5
+      4. If BC5 unavailable: BC7 > BC3 > NEVER BC1
+      5. Verify: Zoom in on compressed normal, check for 4x4 block patterns
+    symptoms:
+      - Curved surfaces look faceted or "stair-stepped"
+      - Fine normal detail is lost or blocky
+      - Lighting has visible square artifacts
+      - Works fine in Substance, broken after engine import
+    detection_pattern: null
+    version_range: "*"
+    red_flags:
+      - Normal map using DXT1/BC1 compression
+      - Normal map file size suspiciously small
+      - "Automatic" compression without checking result
+
+  - id: texture-mipmap-bleeding
+    summary: Insufficient UV padding causes color bleeding at distance
+    severity: high
+    situation: Texture colors bleed between UV islands when viewed from distance
+    why: |
+      Mipmaps are downsampled versions of textures. At each mip level, 4 pixels become 1.
+      If UV islands are too close (insufficient padding), the downsampling picks up colors
+      from neighboring islands.
+
+      The math is brutal:
+      - 2K texture with 2px padding: By mip5, the "gutter" is <1 pixel
+      - 4K texture with 4px padding: By mip6, same problem
+      - Result: "Dark seams" or "color halos" at medium-far distance
+
+      Bilinear filtering makes it worse - it samples a 2x2 pixel area, so edges bleed
+      even before mip issues appear.
+    solution: |
+      1. Minimum padding by resolution:
+         - 512: 2px, 1K: 4px, 2K: 8px, 4K: 16px
+      2. Use "Dilation + Diffusion" in Substance Painter export
+      3. Edge color should extend outward, not be transparent
+      4. Test at lowest mip level: View > Show Mip Level in engine
+      5. For texture atlases: 2x normal padding between elements
+    symptoms:
+      - Dark seams appear at UV edges when viewed from distance
+      - Colors from adjacent UV islands "leak" onto each other
+      - Works fine up close, breaks at medium-far distance
+      - LOD transitions show color popping
+    detection_pattern: null
+    version_range: "*"
+    red_flags:
+      - Padding less than 4 pixels on 2K textures
+      - Transparent gutters instead of dilated edge colors
+      - Atlas textures with minimal spacing between tiles
+
+  - id: texture-srgb-data-maps
+    summary: Using sRGB color space for data textures corrupts values
+    severity: high
+    situation: Roughness, metallic, AO, or normal maps have wrong values in engine
+    why: |
+      sRGB applies a gamma curve: linear 0.5 becomes sRGB ~0.73 (186 out of 255).
+      Data maps (roughness, metallic, AO, height, normal) store LINEAR values.
+
+      When a data map is saved/imported as sRGB:
+      - A 0.5 roughness becomes ~0.73 in the shader
+      - Normal map vectors get distorted (lighting is wrong)
+      - AO/height values are curve-shifted
+
+      This is one of the most common "my textures look different in engine" issues.
+    solution: |
+      1. Export data maps WITHOUT sRGB (linear)
+      2. Unity: Uncheck "sRGB (Color Texture)" on import
+      3. Unreal: Set Compression to "Masks" or engine handles automatically
+      4. Substance Painter: Correct by default for most exports
+      5. Photoshop: Export as 8-bit with no color profile
+    symptoms:
+      - Roughness appears glossier or more matte than authored
+      - Metallic transitions look different in engine
+      - Normal map lighting is subtly "off"
+      - Values in engine don't match Substance preview
+    detection_pattern: null
+    version_range: "*"
+    red_flags:
+      - All texture imports using same settings
+      - Not verifying color space per texture type
+      - PNG exports with embedded sRGB profile
+
+  - id: texture-memory-explosion
+    summary: Unoptimized textures consume excessive VRAM
+    severity: high
+    situation: Game runs out of texture memory or has long load times
+    why: |
+      Texture memory adds up fast:
+      - 4K RGBA uncompressed: 64MB per texture
+      - With 10 texture sets: 640MB just for one scene
+
+      Common waste:
+      - Using 4K when 1K would suffice (texel density mismatch)
+      - Separate grayscale textures instead of channel packing
+      - Unused alpha channels consuming memory
+      - Not streaming lower mips for distant objects
+    solution: |
+      1. Channel pack: ORM (Occlusion, Roughness, Metallic) in one texture
+      2. Match resolution to texel density needs (don't over-res)
+      3. Use texture streaming for large scenes
+      4. Remove unused alpha channels
+      5. Audit: Calculate total texture memory budget and allocate
+    symptoms:
+      - Out of VRAM warnings/crashes
+      - Texture streaming hitches and pop-in
+      - Long level load times
+      - Low framerates with memory pressure
+    detection_pattern: null
+    version_range: "*"
+    red_flags:
+      - Separate 2K textures for AO, Roughness, Metallic (should be one ORM)
+      - 4K textures on small props
+      - No texture LOD/streaming system
+
+  - id: texture-baking-ray-distance
+    summary: Wrong ray distance causes bake artifacts and bleeding
+    severity: high
+    situation: Normal map bake has black spots, bleeding from neighboring geometry, or wavy artifacts
+    why: |
+      Normal map baking shoots rays from low-poly to high-poly. The ray distance controls
+      how far rays travel. Problems:
+
+      - Too short: Rays don't reach high-poly surface = black spots
+      - Too long: Rays hit neighboring geometry = wrong normals bleed in
+      - No cage: Ray direction is inconsistent at hard edges = wavy normals
+
+      Substance Painter visualizes this with the cage preview, but many artists skip it.
+    solution: |
+      1. USE A CAGE MESH (copy of low-poly, slightly inflated)
+      2. Enable cage visualization before baking
+      3. Adjust until cage fully envelops high-poly
+      4. Use "match by mesh name" to isolate parts
+      5. Frontal distance: Just enough to reach high-poly
+      6. If artifacts persist: Reduce rear distance or split mesh
+    symptoms:
+      - Black spots where rays missed high-poly
+      - Details from neighboring parts baked onto wrong surface
+      - Wavy/wobbly normals on flat surfaces
+      - Bake looks different than high-poly
+    detection_pattern: null
+    version_range: "*"
+    red_flags:
+      - Baking without cage mesh
+      - Very large ray distance values
+      - Not using match by mesh name
+      - "It worked on simpler models" but fails on complex
+
+  - id: texture-texel-density-mismatch
+    summary: Inconsistent texel density makes some assets look blurry
+    severity: medium
+    situation: Some objects look crisp while others look blurry in the same scene
+    why: |
+      Texel density = pixels per unit of world space. If one object has 2x the texel density
+      of another, it will appear 2x sharper. This destroys visual cohesion.
+
+      Common causes:
+      - Different artists using different standards
+      - Not checking TD before finalizing UVs
+      - Reusing textures at different scales
+      - Over-detailing hero assets, under-detailing environment
+    solution: |
+      1. Establish project TD standard: 512px/m (third person) or 1024px/m (first person)
+      2. Check TD in Blender (TD Checker addon) or Substance before export
+      3. Intentional TD breaks only for hero assets (2x for weapons, etc.)
+      4. Document exceptions in style guide
+      5. Review all assets at distance to catch inconsistencies
+    symptoms:
+      - Some objects noticeably blurrier than neighbors
+      - Detail level inconsistent across scene
+      - Close inspection reveals some assets are "undercooked"
+      - Texture resolution doesn't match object importance
+    detection_pattern: null
+    version_range: "*"
+    red_flags:
+      - No documented TD standard
+      - Artists working independently without coordination
+      - Reusing textures at arbitrary scales
+
+  - id: texture-tiling-seams
+    summary: Visible seams when tiling textures
+    severity: medium
+    situation: Tiling textures show visible lines where edges meet
+    why: |
+      Tileable textures require edge pixels to perfectly match opposite edge pixels.
+      Common issues:
+      - Offset filter used but not blended at seams
+      - Different lighting/value at edges vs center
+      - Hard elements that cross the boundary
+      - Compression artifacts at edges
+    solution: |
+      1. Use make-seamless tools: Photoshop offset + clone, Substance Designer
+      2. Check ALL four corners (wrap both X and Y)
+      3. Blur/blend seams, don't just clone stamp
+      4. Avoid placing recognizable features near edges
+      5. Test: Tile 3x3 at low zoom to spot patterns and seams
+    symptoms:
+      - Visible grid lines when texture is tiled
+      - Repeating patterns become obvious
+      - Value/color shifts at tile boundaries
+      - Works at 1x but breaks when tiled
+    detection_pattern: null
+    version_range: "*"
+    red_flags:
+      - Quick offset filter without seam blending
+      - Never testing tiled version
+      - Distinct features placed at texture edges
+
+  - id: texture-height-vs-normal-confusion
+    summary: Misusing height maps where normal maps are needed
+    severity: medium
+    situation: Using height maps for real-time rendering detail
+    why: |
+      Height maps and normal maps serve different purposes:
+      - Height map: Grayscale displacement, actual geometry change
+      - Normal map: RGB surface angle, lighting trick only
+
+      Height maps in shaders require:
+      - Tessellation (expensive) for actual displacement
+      - Parallax Occlusion Mapping for faked depth
+      - Both are much more expensive than normal maps
+
+      Using height where normal is expected = no visual effect or crashes.
+    solution: |
+      1. Convert height to normal for standard bump mapping
+      2. Use height only for: tessellation, parallax, or as blend mask
+      3. Normal map = 90% of use cases, height = special cases
+      4. If parallax: Combine height + normal for best result
+      5. Substance can convert height to normal automatically
+    symptoms:
+      - Expected bump detail not visible
+      - Shader crashes or errors
+      - Massive performance hit from tessellation
+      - Height map connected to normal input = flat surface
+    detection_pattern: null
+    version_range: "*"
+    red_flags:
+      - Connecting height to normal map slot
+      - Using height for all detail (overkill)
+      - Not generating normal from height for standard rendering
+
+# ============================================================================
+# SYMPTOM INDEX
+# ============================================================================
+symptom_index:
+  "textures look wrong in engine":
+    - texture-srgb-data-maps
+    - texture-normal-y-flip
+    - texture-baked-lighting-albedo
+
+  "metal looks plastic":
+    - texture-metallic-grayscale
+    - texture-baked-lighting-albedo
+
+  "normal map looks inverted":
+    - texture-normal-y-flip
+
+  "textures look blurry":
+    - texture-texel-density-mismatch
+    - texture-normal-compression-artifacts
+
+  "seams visible at distance":
+    - texture-mipmap-bleeding
+    - texture-tiling-seams
+
+  "baking has artifacts":
+    - texture-baking-ray-distance
+
+  "game runs out of memory":
+    - texture-memory-explosion
+
+  "lighting looks faceted":
+    - texture-normal-compression-artifacts
+
+  "roughness doesn't match preview":
+    - texture-srgb-data-maps
+
+  "shadows baked into texture":
+    - texture-baked-lighting-albedo
+
+# ============================================================================
+# RED FLAGS
+# ============================================================================
+red_flags:
+  workflow_smells:
+    - smell: "Using diffuse maps from older games"
+      risk: "Baked lighting will double-dip with PBR"
+      fix: "Strip lighting, recreate as clean albedo + separate AO"
+
+    - smell: "Metallic map has gray values"
+      risk: "PBR physics will break, halos and wrong reflections"
+      fix: "Convert to binary (0 or 1), use mask edges for transitions"
+
+    - smell: "Same import settings for all textures"
+      risk: "Data maps treated as sRGB, values corrupted"
+      fix: "Set linear for roughness/metallic/AO/normal, sRGB for albedo only"
+
+    - smell: "No documented texel density standard"
+      risk: "Inconsistent visual quality across assets"
+      fix: "Define px/m target, verify all assets match"
+
+    - smell: "Minimal UV padding"
+      risk: "Mipmap bleeding at distance"
+      fix: "8px minimum for 2K, use dilation on export"
+
+    - smell: "Separate grayscale map textures"
+      risk: "3x texture memory waste, extra sampler cost"
+      fix: "Channel pack into ORM (or MADS for complex)"
+
+  common_mistakes:
+    - mistake: "Applying AO directly to albedo layer"
+      consequence: "Permanent shadows that can't be relit"
+      fix: "Use separate AO pass or dedicated AO texture"
+
+    - mistake: "Using BC1/DXT1 for normal maps"
+      consequence: "Severe block compression artifacts"
+      fix: "Use BC5 or BC7 compression for normal maps"
+
+    - mistake: "Not flipping green channel for engine"
+      consequence: "Inverted bumps (dents instead of bumps)"
+      fix: "Check DirectX vs OpenGL convention, flip if needed"
+
+    - mistake: "Baking without cage or match-by-name"
+      consequence: "Bleeding from neighboring geometry"
+      fix: "Create cage mesh, use mesh name matching"
+
+    - mistake: "Using height map in normal map slot"
+      consequence: "No bump effect or shader errors"
+      fix: "Convert height to normal, or use proper tessellation"

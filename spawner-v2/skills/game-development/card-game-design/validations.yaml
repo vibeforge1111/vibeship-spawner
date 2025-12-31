@@ -1,0 +1,499 @@
+# Card Game Design Validations
+# Automated checks to catch common card game design issues in code and config files
+# These patterns detect problematic card designs before they break the game
+
+validations:
+  # ===========================================================================
+  # CRITICAL - Game-breaking design issues
+  # ===========================================================================
+
+  - id: card-zero-cost-validation
+    name: Zero Mana Cost Detection
+    severity: critical
+    type: regex
+    pattern:
+      - 'manaCost["\'':\s]*0'
+      - 'cost["\'':\s]*0'
+      - '"mana":\s*0'
+      - 'mana_cost:\s*0'
+      - 'castingCost:\s*0'
+    message: |
+      Zero mana cost detected. Free spells are historically the most broken
+      cards in TCG design. Consider adding a minimum cost of 1, or adding
+      significant alternate costs (exile cards, pay life, sacrifice).
+    fix_action: |
+      Change cost to 1 or add meaningful alternate costs:
+      - Pay 2 life
+      - Exile a card from hand
+      - Sacrifice a permanent
+      - Discard a card
+    applies_to:
+      - "*.json"
+      - "*.yaml"
+      - "*.yml"
+      - "*.ts"
+      - "*.js"
+      - "*.xml"
+
+  - id: card-free-cast-detection
+    name: Free Cast Mechanic Detection
+    severity: critical
+    type: regex
+    pattern:
+      - 'freeCast["\'':\s]*true'
+      - 'canCastForFree'
+      - 'alternateCost["\'':\s]*0'
+      - 'castWithoutPaying'
+      - 'without paying.*mana cost'
+      - 'play.*for free'
+    message: |
+      Free casting mechanic detected. Cards that can be cast without paying
+      their mana cost break resource systems and enable degenerate combos.
+      Every banned card in Magic's history involved free spells.
+    fix_action: |
+      Add meaningful restrictions to free casting:
+      - Once per turn only
+      - Only during specific game states (opponent attacking)
+      - Require significant resource payment (exile 2 cards)
+      - Limit to low-impact effects
+    applies_to:
+      - "*.json"
+      - "*.yaml"
+      - "*.yml"
+      - "*.ts"
+      - "*.js"
+
+  - id: card-unrestricted-tutor
+    name: Unrestricted Tutor Detection
+    severity: critical
+    type: regex
+    pattern:
+      - 'searchLibrary.*any.*card'
+      - 'tutor.*any'
+      - 'search.*deck.*choose.*any'
+      - 'find any card'
+      - 'search your library for a card'
+    message: |
+      Unrestricted tutor effect detected. Tutors that find any card eliminate
+      variance and enable consistent combo kills. Consider adding restrictions
+      on what can be searched for.
+    fix_action: |
+      Add restrictions to the tutor:
+      - Limit by card type (creature, instant, etc.)
+      - Limit by mana cost (costs 2 or less)
+      - Limit by other criteria (color, subtype)
+      - Consider "reveal" clause for opponent knowledge
+    applies_to:
+      - "*.json"
+      - "*.yaml"
+      - "*.yml"
+      - "*.ts"
+      - "*.js"
+
+  - id: card-instant-win
+    name: Instant Win Condition Detection
+    severity: critical
+    type: regex
+    pattern:
+      - 'you win the game'
+      - 'wins the game'
+      - 'winGame\(\)'
+      - 'gameWin\s*[:=]'
+      - 'alternateWinCondition'
+    message: |
+      Alternate win condition detected. "You win the game" effects need
+      extremely careful balancing. The condition should require multiple
+      turns to achieve and provide opponent with interaction opportunities.
+    fix_action: |
+      Ensure the win condition:
+      1. Cannot be achieved instantly (requires upkeep trigger)
+      2. Has a multi-step setup
+      3. Can be disrupted by common game actions
+      4. Consider adding a "you lose the game" safety valve
+    applies_to:
+      - "*.json"
+      - "*.yaml"
+      - "*.yml"
+      - "*.ts"
+      - "*.js"
+
+  # ===========================================================================
+  # ERROR - Serious balance issues
+  # ===========================================================================
+
+  - id: card-mana-doubling
+    name: Mana Doubling Effect Detection
+    severity: error
+    type: regex
+    pattern:
+      - 'double.*mana'
+      - 'mana.*double'
+      - 'add.*twice.*mana'
+      - 'manaMultiplier'
+      - 'mana.*\*\s*2'
+      - 'multiply.*mana'
+    message: |
+      Mana doubling effect detected. Mana doublers break the resource curve
+      and enable degenerate combos with X-cost spells. Consider using
+      fixed mana addition instead.
+    fix_action: |
+      Replace doubling with fixed addition:
+      - "Add 2 mana" instead of "double mana"
+      - Cap the bonus (add up to 3 extra mana)
+      - Add "once per turn" restriction
+      - Make the effect very expensive (7+ mana)
+    applies_to:
+      - "*.json"
+      - "*.yaml"
+      - "*.yml"
+      - "*.ts"
+      - "*.js"
+
+  - id: card-repeatable-draw
+    name: Repeatable Card Draw Detection
+    severity: error
+    type: regex
+    pattern:
+      - 'tap.*draw a card'
+      - 'upkeep.*draw'
+      - 'whenever.*draw a card'
+      - 'draw.*each turn'
+      - 'repeatableDraw'
+    message: |
+      Repeatable card draw effect detected. Engines that draw cards every
+      turn create inevitable card advantage that's difficult to overcome.
+      Ensure there's a meaningful cost or limitation.
+    fix_action: |
+      Add costs and restrictions:
+      - Mana cost for activation (2+ mana)
+      - Life payment
+      - "Once per turn" limitation
+      - Condition that opponent can disrupt
+      - Make the permanent fragile (1 toughness)
+    applies_to:
+      - "*.json"
+      - "*.yaml"
+      - "*.yml"
+      - "*.ts"
+      - "*.js"
+
+  - id: card-uncapped-scaling
+    name: Uncapped Stat Scaling Detection
+    severity: error
+    type: regex
+    pattern:
+      - '\+1/\+1 for each'
+      - 'power.*equal to.*number'
+      - 'toughness.*equal to.*count'
+      - 'gets.*\+X/\+X where X'
+      - 'forEachBonus'
+      - 'countBasedStats'
+    message: |
+      Uncapped stat scaling detected. "For each" effects can create
+      arbitrarily large creatures that trivialize combat. Consider adding
+      a maximum cap.
+    fix_action: |
+      Add scaling limits:
+      - "up to +5/+5" cap
+      - Use diminishing returns (each beyond first is +1/+0)
+      - Count things that don't grow infinitely (lands, ~5-7 max)
+      - Count opponent's resources (they can deplete them)
+    applies_to:
+      - "*.json"
+      - "*.yaml"
+      - "*.yml"
+      - "*.ts"
+      - "*.js"
+
+  - id: card-hexproof-pushed
+    name: Pushed Hexproof Creature Detection
+    severity: error
+    type: regex
+    pattern:
+      - 'hexproof.*power.*[3-9]'
+      - 'power.*[3-9].*hexproof'
+      - 'hexproof.*stats.*efficient'
+      - '"hexproof".*"power":\s*[3-9]'
+    message: |
+      Powerful hexproof creature detected. Hexproof creatures with good
+      stats create uninteractive games where opponents have no answers.
+      Consider using ward instead or reducing stats.
+    fix_action: |
+      Balance hexproof creatures:
+      - Reduce stats (2/2 maximum for hexproof)
+      - Use ward instead (can target with extra cost)
+      - Make hexproof conditional (until end of turn, when blocking)
+      - Increase mana cost significantly (6+ for any meaningful stats)
+    applies_to:
+      - "*.json"
+      - "*.yaml"
+      - "*.yml"
+      - "*.ts"
+      - "*.js"
+
+  - id: card-graveyard-loop
+    name: Graveyard Loop Detection
+    severity: error
+    type: regex
+    pattern:
+      - 'return.*graveyard.*hand.*return'
+      - 'graveyard.*battlefield.*graveyard'
+      - 'recursion.*infinite'
+      - 'graveyardLoop'
+      - 'when.*dies.*return'
+    message: |
+      Potential graveyard loop detected. Cards that can return themselves
+      from the graveyard repeatedly create infinite value engines. Ensure
+      there's a terminus (exile after use).
+    fix_action: |
+      Add loop prevention:
+      - "Exile instead of graveyard" clause
+      - "Once per game" restriction
+      - Significant mana cost for recursion
+      - Exile after being cast from graveyard (like Flashback)
+    applies_to:
+      - "*.json"
+      - "*.yaml"
+      - "*.yml"
+      - "*.ts"
+      - "*.js"
+
+  # ===========================================================================
+  # WARNING - Balance concerns
+  # ===========================================================================
+
+  - id: card-land-acceleration
+    name: Early Land Acceleration Detection
+    severity: warning
+    type: regex
+    pattern:
+      - 'manaCost["\'':\s]*1.*land.*battlefield'
+      - 'cost.*1.*addLand'
+      - 'one mana.*extra land'
+      - 'turn one.*land'
+    message: |
+      1-mana land acceleration detected. Early ramp is very powerful and
+      can lead to unfair mana advantages. Consider making the effect cost
+      2+ mana or add significant drawbacks.
+    fix_action: |
+      Balance early ramp:
+      - Increase cost to 2 mana minimum
+      - Ramped land enters tapped
+      - Limit to basic lands only
+      - Add meaningful drawback (life loss, tapped creature)
+    applies_to:
+      - "*.json"
+      - "*.yaml"
+      - "*.yml"
+      - "*.ts"
+      - "*.js"
+
+  - id: card-etb-removal
+    name: ETB Removal Detection
+    severity: warning
+    type: regex
+    pattern:
+      - 'enters.*destroy.*target'
+      - 'etb.*exile.*permanent'
+      - 'when.*enters.*remove'
+      - 'entersBattlefield.*destroy'
+    message: |
+      Enter-the-battlefield removal detected. ETB removal provides inherent
+      2-for-1 card advantage. Ensure the creature has low stats or high
+      mana cost to compensate.
+    fix_action: |
+      Balance ETB removal:
+      - Creature should have poor stats (1/1 or 2/2 at most)
+      - Mana cost should be high (4+ mana)
+      - Consider making effect optional with mana cost
+      - Limit target scope (only artifacts, only creatures cost 3+)
+    applies_to:
+      - "*.json"
+      - "*.yaml"
+      - "*.yml"
+      - "*.ts"
+      - "*.js"
+
+  - id: card-flash-etb
+    name: Flash with ETB Effect Detection
+    severity: warning
+    type: regex
+    pattern:
+      - 'flash.*enters the battlefield'
+      - 'flash.*etb'
+      - 'instant speed.*when.*enters'
+      - '"flash".*"entersTrigger"'
+    message: |
+      Flash creature with ETB effect detected. This combination is
+      inherently powerful, providing both tactical flexibility and
+      guaranteed value. Reduce stats or increase cost.
+    fix_action: |
+      Balance flash + ETB:
+      - Add 1-2 mana to cost compared to sorcery-speed version
+      - Reduce power/toughness
+      - Make ETB effect weaker than instant spell equivalent
+      - Consider conditional flash (only on opponent's turn)
+    applies_to:
+      - "*.json"
+      - "*.yaml"
+      - "*.yml"
+      - "*.ts"
+      - "*.js"
+
+  - id: card-complexity-common
+    name: Complex Common Card Detection
+    severity: warning
+    type: regex
+    pattern:
+      - 'rarity.*common.*triggered.*triggered'
+      - 'rarity.*common.*whenever.*whenever'
+      - 'common.*abilities.*length.*[4-9]'
+    message: |
+      Common card with multiple triggered abilities detected. Following
+      New World Order, commons should be simple. Move complex cards to
+      uncommon or higher rarity.
+    fix_action: |
+      Simplify commons:
+      - Limit to 1 triggered ability maximum
+      - Keep rules text under 3 lines
+      - No "for each" or counting mechanics
+      - Move to uncommon if complexity is needed
+    applies_to:
+      - "*.json"
+      - "*.yaml"
+      - "*.yml"
+      - "*.ts"
+      - "*.js"
+
+  # ===========================================================================
+  # TEMPLATING - Card text quality checks
+  # ===========================================================================
+
+  - id: card-targeting-inconsistency
+    name: Targeting Language Inconsistency
+    severity: warning
+    type: regex
+    pattern:
+      - 'choose.*creature.*destroy'
+      - 'select.*target'
+      - 'pick.*target'
+    message: |
+      Inconsistent targeting language detected. In card games, "target" has
+      specific rules meaning (can be countered by hexproof/shroud). Use
+      "target" for effects that can be countered, "choose" for those that can't.
+    fix_action: |
+      Use consistent terminology:
+      - "Target" = affected by hexproof/shroud
+      - "Choose" = ignores hexproof/shroud (no targeting)
+      - Never use "select" or "pick" for targeting
+    applies_to:
+      - "*.json"
+      - "*.yaml"
+      - "*.yml"
+
+  - id: card-missing-rarity
+    name: Missing Card Rarity
+    severity: warning
+    type: regex
+    pattern:
+      - '"name":\s*"[^"]+"\s*,\s*(?!"rarity")'
+      - 'name:.*\n(?!\s*rarity:)'
+    message: |
+      Card definition may be missing rarity. Every card needs a rarity
+      for proper set distribution and draft balance.
+    fix_action: |
+      Add rarity field:
+      - "common" for simple, frequently appearing cards
+      - "uncommon" for moderate complexity, synergy pieces
+      - "rare" for powerful, complex cards
+      - "mythic" for splashy, game-changing cards
+    applies_to:
+      - "*.json"
+      - "*.yaml"
+      - "*.yml"
+
+  - id: card-stats-without-type
+    name: Stats Without Creature Type
+    severity: warning
+    type: regex
+    pattern:
+      - 'power.*[0-9].*(?!creature|type)'
+      - 'toughness.*[0-9].*(?!creature|type)'
+      - '"attack":\s*[0-9]+\s*(?!.*"type")'
+    message: |
+      Power/toughness defined without creature type. Non-creature cards
+      should not have combat stats unless they become creatures.
+    fix_action: |
+      Either:
+      - Add creature type to the card
+      - Remove power/toughness stats
+      - Add "becomes a creature" clause if needed
+    applies_to:
+      - "*.json"
+      - "*.yaml"
+      - "*.yml"
+
+  # ===========================================================================
+  # DIGITAL IMPLEMENTATION - Code-specific checks
+  # ===========================================================================
+
+  - id: card-rng-without-seed
+    name: Random Effect Without Seed
+    severity: warning
+    type: regex
+    pattern:
+      - 'Math\.random\(\)'
+      - 'random\(\)(?!\s*\(seed)'
+      - 'flip.*coin.*Math\.random'
+    message: |
+      Random effect using unseeded random. For reproducibility in replays,
+      testing, and anti-cheat, use seeded random number generators.
+    fix_action: |
+      Use seeded RNG:
+      - Pass game state seed to random function
+      - Store random results in game log
+      - Enable deterministic replay of games
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: card-state-mutation
+    name: Direct Card State Mutation
+    severity: warning
+    type: regex
+    pattern:
+      - 'card\.[a-z]+\s*='
+      - '\.power\s*\+='
+      - '\.toughness\s*='
+    message: |
+      Direct card state mutation detected. Card games should use immutable
+      state updates for proper undo/redo, networking, and debugging.
+    fix_action: |
+      Use immutable patterns:
+      - Create new card object with updated values
+      - Use game state management (Redux, Zustand)
+      - Apply mutations through action dispatchers
+    applies_to:
+      - "*.ts"
+      - "*.js"
+
+  - id: card-async-effect-resolution
+    name: Async Effect Without Queue
+    severity: warning
+    type: regex
+    pattern:
+      - 'async.*resolveEffect'
+      - 'await.*castCard'
+      - 'promise.*trigger'
+    message: |
+      Async card effect without proper queue management detected. Card
+      games need deterministic effect ordering. Use an effect stack/queue.
+    fix_action: |
+      Implement effect queue:
+      - Add effects to queue in LIFO order
+      - Resolve one at a time
+      - Handle interrupts/responses properly
+      - Never use raw async/await for game logic
+    applies_to:
+      - "*.ts"
+      - "*.js"

@@ -1,0 +1,533 @@
+# Validations - Voxel Art
+# Code patterns and configuration checks for voxel art pipelines
+
+id: voxel-art
+version: 1.0.0
+
+# These validations help catch common issues in voxel-related scripts and configs
+
+validations:
+  # ============================================
+  # UNITY VOXEL IMPORT VALIDATIONS
+  # ============================================
+
+  - id: unity-texture-filter-bilinear
+    name: Unity Voxel Texture Using Bilinear Filtering
+    severity: high
+    category: import
+    description: |
+      Voxel palette textures should use Point (nearest neighbor) filtering to
+      maintain crisp edges. Bilinear filtering blurs voxel colors together.
+    detection:
+      type: regex
+      pattern: 'filterMode\s*=\s*FilterMode\.Bilinear|FilterMode\.Trilinear'
+      file_patterns:
+        - "*.cs"
+        - "*.meta"
+    anti_pattern_example: |
+      // BAD: Bilinear filtering blurs voxel textures
+      TextureImporter importer = assetImporter as TextureImporter;
+      importer.filterMode = FilterMode.Bilinear;
+
+    correct_example: |
+      // GOOD: Point filtering for crisp voxels
+      TextureImporter importer = assetImporter as TextureImporter;
+      importer.filterMode = FilterMode.Point;
+      importer.mipmapEnabled = false;  // Also disable mipmaps
+
+    fix_suggestion: |
+      Change texture filter mode to Point:
+      ```csharp
+      importer.filterMode = FilterMode.Point;
+      importer.mipmapEnabled = false;
+      ```
+
+  - id: unity-voxel-mipmaps-enabled
+    name: Unity Voxel Texture Has Mipmaps Enabled
+    severity: medium
+    category: import
+    description: |
+      Mipmaps on voxel palette textures cause color bleeding at distance.
+      They should be disabled for crisp voxel rendering at all distances.
+    detection:
+      type: regex
+      pattern: 'mipmapEnabled\s*=\s*true'
+      file_patterns:
+        - "*.cs"
+        - "*.meta"
+    anti_pattern_example: |
+      // BAD: Mipmaps cause voxel color bleeding
+      TextureImporter importer = assetImporter as TextureImporter;
+      importer.mipmapEnabled = true;
+
+    correct_example: |
+      // GOOD: Disable mipmaps for voxel textures
+      TextureImporter importer = assetImporter as TextureImporter;
+      importer.mipmapEnabled = false;
+
+  # ============================================
+  # BLENDER VOXEL SCRIPT VALIDATIONS
+  # ============================================
+
+  - id: blender-no-limited-dissolve
+    name: Missing Limited Dissolve in Voxel Export Script
+    severity: high
+    category: optimization
+    description: |
+      Blender scripts that export voxel meshes should apply Limited Dissolve to
+      merge coplanar faces and dramatically reduce polygon count.
+    detection:
+      type: regex
+      pattern: 'export_scene\.(obj|fbx|gltf)'
+      file_patterns:
+        - "*.py"
+    anti_pattern_example: |
+      # BAD: Export voxel mesh without optimization
+      import bpy
+
+      def export_voxel_model(filepath):
+          bpy.ops.import_scene.obj(filepath="model.obj")
+          bpy.ops.export_scene.fbx(filepath=filepath)
+
+    correct_example: |
+      # GOOD: Optimize voxel mesh before export
+      import bpy
+
+      def export_voxel_model(filepath):
+          # Import voxel OBJ
+          bpy.ops.import_scene.obj(filepath="model.obj")
+
+          # Select and enter edit mode
+          obj = bpy.context.active_object
+          bpy.ops.object.mode_set(mode='EDIT')
+          bpy.ops.mesh.select_all(action='SELECT')
+
+          # Optimize: merge coplanar faces
+          bpy.ops.mesh.dissolve_limited(angle_limit=0.0001)
+          bpy.ops.mesh.tris_to_quads()
+
+          bpy.ops.object.mode_set(mode='OBJECT')
+
+          # Export optimized mesh
+          bpy.ops.export_scene.fbx(filepath=filepath)
+
+    fix_suggestion: |
+      Add limited dissolve before export:
+      ```python
+      bpy.ops.object.mode_set(mode='EDIT')
+      bpy.ops.mesh.select_all(action='SELECT')
+      bpy.ops.mesh.dissolve_limited(angle_limit=0.0001)
+      bpy.ops.object.mode_set(mode='OBJECT')
+      ```
+
+  - id: blender-voxel-no-lod
+    name: Voxel Export Without LOD Generation
+    severity: medium
+    category: optimization
+    description: |
+      Voxel models for games should have LOD (Level of Detail) versions generated
+      to maintain performance at various distances.
+    detection:
+      type: regex
+      pattern: 'export_scene\.(fbx|gltf)'
+      file_patterns:
+        - "*.py"
+    correct_example: |
+      # GOOD: Generate LODs for voxel model
+      import bpy
+
+      def generate_voxel_lods(obj, lod_ratios=[1.0, 0.5, 0.25, 0.1]):
+          """Generate LOD versions of voxel mesh"""
+          lods = []
+
+          for i, ratio in enumerate(lod_ratios):
+              # Duplicate object
+              bpy.ops.object.select_all(action='DESELECT')
+              obj.select_set(True)
+              bpy.context.view_layer.objects.active = obj
+              bpy.ops.object.duplicate()
+
+              lod_obj = bpy.context.active_object
+              lod_obj.name = f"{obj.name}_LOD{i}"
+
+              if ratio < 1.0:
+                  # Add decimate modifier
+                  mod = lod_obj.modifiers.new(name="Decimate", type='DECIMATE')
+                  mod.ratio = ratio
+                  bpy.ops.object.modifier_apply(modifier="Decimate")
+
+              lods.append(lod_obj)
+
+          return lods
+
+  # ============================================
+  # VOXEL CHUNK SYSTEM VALIDATIONS
+  # ============================================
+
+  - id: chunk-mesh-main-thread
+    name: Chunk Mesh Generation on Main Thread
+    severity: critical
+    category: performance
+    description: |
+      Generating chunk meshes synchronously on the main thread causes frame
+      drops. Voxel chunk regeneration should be done asynchronously.
+    detection:
+      type: regex
+      pattern: 'GenerateMesh|RebuildMesh|UpdateChunk|RegenerateMesh'
+      file_patterns:
+        - "*.cs"
+    anti_pattern_example: |
+      // BAD: Synchronous mesh generation blocks main thread
+      public class VoxelChunk : MonoBehaviour
+      {
+          public void OnVoxelDestroyed(int x, int y, int z)
+          {
+              voxels[x, y, z] = 0;
+              GenerateMesh();  // BLOCKS! Causes stutter
+          }
+
+          void GenerateMesh()
+          {
+              // Complex mesh generation...
+              for (int x = 0; x < size; x++)
+                  for (int y = 0; y < size; y++)
+                      for (int z = 0; z < size; z++)
+                          // Generate faces...
+          }
+      }
+
+    correct_example: |
+      // GOOD: Async mesh generation with job system
+      using Unity.Jobs;
+      using Unity.Collections;
+      using Unity.Burst;
+
+      public class VoxelChunk : MonoBehaviour
+      {
+          private bool isDirty = false;
+          private MeshGenerationJob currentJob;
+          private JobHandle jobHandle;
+
+          public void OnVoxelDestroyed(int x, int y, int z)
+          {
+              voxels[x, y, z] = 0;
+              isDirty = true;  // Flag for async rebuild
+          }
+
+          void LateUpdate()
+          {
+              // Complete previous job if ready
+              if (jobHandle.IsCompleted)
+              {
+                  jobHandle.Complete();
+                  ApplyMesh(currentJob.result);
+              }
+
+              // Start new job if dirty
+              if (isDirty && !jobHandle.IsCompleted)
+              {
+                  currentJob = new MeshGenerationJob(voxels);
+                  jobHandle = currentJob.Schedule();
+                  isDirty = false;
+              }
+          }
+      }
+
+      [BurstCompile]
+      struct MeshGenerationJob : IJob
+      {
+          public NativeArray<byte> voxels;
+          public NativeList<Vector3> result;
+
+          public void Execute()
+          {
+              // Mesh generation runs on worker thread
+          }
+      }
+
+    fix_suggestion: |
+      Move mesh generation to async/background thread:
+      - Unity: Use Job System with Burst
+      - Unreal: Use AsyncTask or GameThread delegates
+      - General: Move to separate thread, swap mesh on main thread
+
+  - id: large-chunk-size
+    name: Voxel Chunk Size Too Large
+    severity: medium
+    category: performance
+    description: |
+      Chunk sizes larger than 32x32x32 cause slow mesh regeneration and
+      excessive memory usage. Smaller chunks update faster but increase draw calls.
+    detection:
+      type: regex
+      pattern: 'chunkSize\s*=\s*(64|128|256)|CHUNK_SIZE\s*=\s*(64|128|256)'
+      file_patterns:
+        - "*.cs"
+        - "*.cpp"
+        - "*.h"
+    anti_pattern_example: |
+      // BAD: Chunk too large - slow regeneration
+      public const int CHUNK_SIZE = 64;  // 262,144 voxels per chunk!
+
+    correct_example: |
+      // GOOD: Balanced chunk size
+      public const int CHUNK_SIZE = 16;  // 4,096 voxels - fast updates
+      // Or
+      public const int CHUNK_SIZE = 32;  // 32,768 voxels - balanced
+
+    fix_suggestion: |
+      Use chunk sizes between 16 and 32:
+      - 16x16x16: Fast updates, more draw calls
+      - 32x32x32: Balanced for most games
+      - 64x64x64: Only for static content
+
+  # ============================================
+  # GREEDY MESHING VALIDATIONS
+  # ============================================
+
+  - id: no-greedy-meshing
+    name: Voxel Rendering Without Greedy Meshing
+    severity: high
+    category: performance
+    description: |
+      Rendering voxels without greedy meshing creates 6-12 triangles per voxel.
+      Greedy meshing can reduce this by 90%+.
+    detection:
+      type: regex
+      pattern: 'GenerateVoxelFace|AddVoxelQuad|CreateCube|DrawVoxel'
+      file_patterns:
+        - "*.cs"
+        - "*.cpp"
+        - "*.js"
+        - "*.ts"
+    anti_pattern_example: |
+      // BAD: Naive per-voxel face generation
+      void GenerateMesh(int[,,] voxels)
+      {
+          for (int x = 0; x < size; x++)
+          {
+              for (int y = 0; y < size; y++)
+              {
+                  for (int z = 0; z < size; z++)
+                  {
+                      if (voxels[x,y,z] != 0)
+                      {
+                          // Creates 6 quads per visible voxel
+                          if (IsExposed(x+1,y,z)) AddQuad(Right);
+                          if (IsExposed(x-1,y,z)) AddQuad(Left);
+                          // ... etc
+                      }
+                  }
+              }
+          }
+      }
+
+    correct_example: |
+      // GOOD: Greedy meshing - merge coplanar faces
+      // Reference: 0fps.net/2012/06/30/meshing-in-a-minecraft-game/
+
+      void GenerateMeshGreedy(int[,,] voxels)
+      {
+          // For each face direction
+          for (int d = 0; d < 3; d++)
+          {
+              // For each slice in that direction
+              for (int slice = 0; slice < size; slice++)
+              {
+                  // Get 2D mask of visible faces
+                  bool[,] mask = GetSliceMask(d, slice);
+
+                  // Greedy merge: find largest rectangles
+                  while (HasUnprocessedFaces(mask))
+                  {
+                      // Find starting point
+                      var start = FindStart(mask);
+
+                      // Expand width while same material
+                      int width = ExpandWidth(mask, start);
+
+                      // Expand height while same material
+                      int height = ExpandHeight(mask, start, width);
+
+                      // Create single quad for entire rectangle
+                      AddGreedyQuad(d, slice, start, width, height);
+
+                      // Mark as processed
+                      MarkProcessed(mask, start, width, height);
+                  }
+              }
+          }
+      }
+
+    fix_suggestion: |
+      Implement greedy meshing for voxel rendering.
+      See reference implementation at 0fps.net for algorithm details.
+
+  # ============================================
+  # ANIMATION STORAGE VALIDATIONS
+  # ============================================
+
+  - id: animation-no-compression
+    name: Voxel Animation Without Compression
+    severity: medium
+    category: storage
+    description: |
+      Storing full voxel frames for animation wastes storage. Delta compression
+      or run-length encoding should be used.
+    detection:
+      type: regex
+      pattern: 'animationFrames|voxelFrames|frameData'
+      file_patterns:
+        - "*.cs"
+        - "*.cpp"
+        - "*.ts"
+    anti_pattern_example: |
+      // BAD: Full copy of each animation frame
+      public class VoxelAnimation
+      {
+          // 32x32x32 x 8 frames = 262,144 bytes per animation!
+          public byte[,,,] frames = new byte[8, 32, 32, 32];
+      }
+
+    correct_example: |
+      // GOOD: Delta-compressed animation frames
+      public class VoxelAnimation
+      {
+          // Base frame stored fully
+          public byte[,,] baseFrame = new byte[32, 32, 32];
+
+          // Delta frames store only changes
+          public List<VoxelDelta>[] deltas = new List<VoxelDelta>[8];
+
+          public struct VoxelDelta
+          {
+              public ushort position;  // Packed x,y,z
+              public byte oldValue;
+              public byte newValue;
+          }
+
+          public byte[,,] GetFrame(int index)
+          {
+              var frame = (byte[,,])baseFrame.Clone();
+
+              for (int i = 1; i <= index; i++)
+              {
+                  foreach (var delta in deltas[i])
+                  {
+                      int x = delta.position & 0x1F;
+                      int y = (delta.position >> 5) & 0x1F;
+                      int z = (delta.position >> 10) & 0x1F;
+                      frame[x, y, z] = delta.newValue;
+                  }
+              }
+
+              return frame;
+          }
+      }
+
+  # ============================================
+  # FILE NAMING VALIDATIONS
+  # ============================================
+
+  - id: voxel-frame-naming
+    name: Inconsistent Voxel Animation Frame Naming
+    severity: low
+    category: organization
+    description: |
+      Voxel animation frames should use consistent naming with zero-padded
+      numbers for proper sorting.
+    detection:
+      type: regex
+      pattern: '_\d\.vox$|_[a-z]\.vox$'
+      file_patterns:
+        - "*.vox"
+    anti_pattern_example: |
+      # BAD: Inconsistent naming
+      character_walk_1.vox
+      character_walk_2.vox
+      character_walk_10.vox  # Sorts wrong!
+
+    correct_example: |
+      # GOOD: Zero-padded frame numbers
+      character_walk_01.vox
+      character_walk_02.vox
+      character_walk_10.vox
+
+      # ALSO GOOD: Explicit naming
+      character_idle_frame01.vox
+      character_idle_frame02.vox
+
+  - id: voxel-no-palette-file
+    name: Missing Shared Palette File
+    severity: low
+    category: organization
+    description: |
+      Voxel projects should have a shared palette file for consistency across
+      all models. MagicaVoxel palettes are 256x1 PNG files.
+    detection:
+      type: file_exists
+      expected_files:
+        - "palette.png"
+        - "palette/*.png"
+        - "assets/palette.png"
+      file_patterns:
+        - "*.vox"
+    correct_example: |
+      # Project structure with shared palette
+      project/
+        palette/
+          main_palette.png      # Master palette
+          character_palette.png # Character-specific
+          environment_palette.png
+        models/
+          character.vox
+          prop.vox
+
+# Summary of validation categories
+categories:
+  import:
+    description: Checks for engine import configuration issues
+    severity_default: high
+
+  optimization:
+    description: Checks for mesh and performance issues
+    severity_default: high
+
+  performance:
+    description: Checks for runtime performance issues
+    severity_default: critical
+
+  storage:
+    description: Checks for file size and memory issues
+    severity_default: medium
+
+  organization:
+    description: Checks for naming and structure issues
+    severity_default: low
+
+# How to integrate these validations
+integration_notes: |
+  These validations can be integrated into:
+
+  1. Pre-commit hooks (for .py and .cs scripts)
+  2. CI/CD pipelines (asset validation)
+  3. Custom editor tools (real-time feedback)
+  4. Asset import pipelines (Unity/Unreal)
+
+  Example Unity asset postprocessor:
+  ```csharp
+  public class VoxelTextureProcessor : AssetPostprocessor
+  {
+      void OnPreprocessTexture()
+      {
+          // Check if this is a voxel palette texture
+          if (assetPath.Contains("voxel") || assetPath.Contains("palette"))
+          {
+              TextureImporter importer = (TextureImporter)assetImporter;
+              importer.filterMode = FilterMode.Point;
+              importer.mipmapEnabled = false;
+              importer.textureCompression = TextureImporterCompression.Uncompressed;
+          }
+      }
+  }
+  ```

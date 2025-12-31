@@ -1,0 +1,546 @@
+# Validations - 3D Modeling
+# Code patterns and file structure checks for 3D assets
+
+id: 3d-modeling
+version: 1.0.0
+
+# These validations help catch common issues in scripts, configs, and workflows
+
+validations:
+  # ============================================
+  # BLENDER PYTHON SCRIPT VALIDATIONS
+  # ============================================
+
+  - id: unapplied-transforms-export
+    name: Unapplied Transforms in Export Script
+    severity: critical
+    category: export
+    description: |
+      Export scripts that don't apply transforms before exporting will cause
+      scale and rotation issues in game engines.
+    detection:
+      type: regex
+      pattern: 'fbx_export|export_scene\.fbx|gltf_export'
+      file_patterns:
+        - "*.py"
+        - "*.blend"
+    anti_pattern_example: |
+      # BAD: Exporting without applying transforms
+      import bpy
+
+      def export_model(filepath):
+          bpy.ops.export_scene.fbx(filepath=filepath)  # No transform application!
+
+    correct_example: |
+      # GOOD: Apply transforms before export
+      import bpy
+
+      def export_model(filepath):
+          # Select all mesh objects
+          for obj in bpy.context.scene.objects:
+              if obj.type == 'MESH':
+                  obj.select_set(True)
+                  bpy.context.view_layer.objects.active = obj
+
+          # Apply all transforms
+          bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+
+          # Now export
+          bpy.ops.export_scene.fbx(
+              filepath=filepath,
+              apply_scale_options='FBX_SCALE_ALL',
+              apply_unit_scale=True
+          )
+
+    fix_suggestion: |
+      Add transform application before export:
+      ```python
+      bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+      ```
+
+  - id: missing-normals-recalculation
+    name: Missing Normals Recalculation
+    severity: high
+    category: topology
+    description: |
+      Scripts that modify geometry but don't recalculate normals can leave
+      models with inverted or incorrect normals.
+    detection:
+      type: regex
+      pattern: 'bpy\.ops\.mesh\.(flip_normals|mirror|boolean|bridge_edge_loops|extrude)'
+      file_patterns:
+        - "*.py"
+    anti_pattern_example: |
+      # BAD: Mirror without recalculating normals
+      import bpy
+
+      def mirror_mesh():
+          bpy.ops.object.mode_set(mode='EDIT')
+          bpy.ops.mesh.select_all(action='SELECT')
+          bpy.ops.transform.mirror(constraint_axis=(True, False, False))
+          # Missing: recalculate_normals!
+          bpy.ops.object.mode_set(mode='OBJECT')
+
+    correct_example: |
+      # GOOD: Recalculate normals after geometry operations
+      import bpy
+
+      def mirror_mesh():
+          bpy.ops.object.mode_set(mode='EDIT')
+          bpy.ops.mesh.select_all(action='SELECT')
+          bpy.ops.transform.mirror(constraint_axis=(True, False, False))
+          bpy.ops.mesh.normals_make_consistent(inside=False)  # Recalculate!
+          bpy.ops.object.mode_set(mode='OBJECT')
+
+    fix_suggestion: |
+      Add normals recalculation after geometry changes:
+      ```python
+      bpy.ops.mesh.normals_make_consistent(inside=False)
+      ```
+
+  - id: no-ngon-check
+    name: No N-gon Check Before Export
+    severity: high
+    category: topology
+    description: |
+      Export scripts should validate that meshes contain no n-gons before
+      exporting to avoid subdivision and shading issues.
+    detection:
+      type: regex
+      pattern: 'export_scene\.(fbx|gltf|obj)'
+      file_patterns:
+        - "*.py"
+    anti_pattern_example: |
+      # BAD: Export without n-gon validation
+      import bpy
+
+      def export_for_game(filepath):
+          bpy.ops.export_scene.fbx(filepath=filepath)
+
+    correct_example: |
+      # GOOD: Check for n-gons before export
+      import bpy
+      import bmesh
+
+      def has_ngons(obj):
+          """Check if mesh has any n-gons (faces with 5+ vertices)"""
+          if obj.type != 'MESH':
+              return False
+          bm = bmesh.new()
+          bm.from_mesh(obj.data)
+          ngons = [f for f in bm.faces if len(f.verts) > 4]
+          count = len(ngons)
+          bm.free()
+          return count > 0
+
+      def export_for_game(filepath):
+          for obj in bpy.context.selected_objects:
+              if has_ngons(obj):
+                  raise ValueError(f"Object {obj.name} contains n-gons! Fix before export.")
+
+          bpy.ops.export_scene.fbx(filepath=filepath)
+
+    fix_suggestion: |
+      Add n-gon validation before export:
+      ```python
+      def has_ngons(obj):
+          bm = bmesh.new()
+          bm.from_mesh(obj.data)
+          ngons = [f for f in bm.faces if len(f.verts) > 4]
+          bm.free()
+          return len(ngons) > 0
+      ```
+
+  - id: no-nonmanifold-check
+    name: No Non-Manifold Geometry Check
+    severity: high
+    category: topology
+    description: |
+      Export scripts should check for non-manifold geometry which causes
+      physics and baking failures.
+    detection:
+      type: regex
+      pattern: 'export_scene\.(fbx|gltf|obj)'
+      file_patterns:
+        - "*.py"
+    correct_example: |
+      # GOOD: Check for non-manifold geometry
+      import bpy
+      import bmesh
+
+      def has_nonmanifold(obj):
+          """Check for non-manifold edges and verts"""
+          if obj.type != 'MESH':
+              return False
+
+          bm = bmesh.new()
+          bm.from_mesh(obj.data)
+
+          # Non-manifold edges (not exactly 2 faces)
+          nonmanifold_edges = [e for e in bm.edges if not e.is_manifold]
+
+          # Non-manifold verts (edges don't form closed fan)
+          nonmanifold_verts = [v for v in bm.verts if not v.is_manifold]
+
+          has_issues = len(nonmanifold_edges) > 0 or len(nonmanifold_verts) > 0
+          bm.free()
+          return has_issues
+
+      def export_validated(filepath):
+          for obj in bpy.context.selected_objects:
+              if has_nonmanifold(obj):
+                  print(f"WARNING: {obj.name} has non-manifold geometry!")
+          bpy.ops.export_scene.fbx(filepath=filepath)
+
+  - id: merge-by-distance-missing
+    name: Missing Merge by Distance After Boolean
+    severity: medium
+    category: topology
+    description: |
+      Boolean operations leave floating vertices. Scripts should clean up
+      after boolean operations.
+    detection:
+      type: regex
+      pattern: 'bpy\.ops\.object\.modifier_apply.*bool|\.BOOLEAN'
+      file_patterns:
+        - "*.py"
+    anti_pattern_example: |
+      # BAD: Apply boolean without cleanup
+      import bpy
+
+      def apply_boolean(obj_name, cutter_name):
+          obj = bpy.data.objects[obj_name]
+          mod = obj.modifiers.new(name="Boolean", type='BOOLEAN')
+          mod.object = bpy.data.objects[cutter_name]
+          mod.operation = 'DIFFERENCE'
+
+          bpy.context.view_layer.objects.active = obj
+          bpy.ops.object.modifier_apply(modifier="Boolean")
+          # Missing cleanup!
+
+    correct_example: |
+      # GOOD: Clean up after boolean
+      import bpy
+
+      def apply_boolean_clean(obj_name, cutter_name):
+          obj = bpy.data.objects[obj_name]
+          mod = obj.modifiers.new(name="Boolean", type='BOOLEAN')
+          mod.object = bpy.data.objects[cutter_name]
+          mod.operation = 'DIFFERENCE'
+          mod.solver = 'EXACT'  # More reliable solver
+
+          bpy.context.view_layer.objects.active = obj
+          bpy.ops.object.modifier_apply(modifier="Boolean")
+
+          # CLEANUP: Remove floating vertices
+          bpy.ops.object.mode_set(mode='EDIT')
+          bpy.ops.mesh.select_all(action='SELECT')
+          bpy.ops.mesh.remove_doubles(threshold=0.0001)
+          bpy.ops.mesh.delete_loose(use_verts=True, use_edges=True, use_faces=False)
+          bpy.ops.object.mode_set(mode='OBJECT')
+
+  # ============================================
+  # UNITY/C# IMPORT VALIDATIONS
+  # ============================================
+
+  - id: unity-import-normals-calculate
+    name: Unity Calculating Normals Instead of Importing
+    severity: medium
+    category: import
+    description: |
+      Unity should import normals from the file rather than calculating them,
+      to preserve artist intent for hard/soft edges.
+    detection:
+      type: regex
+      pattern: 'ModelImporter|ImportNormals|normalImportMode'
+      file_patterns:
+        - "*.cs"
+        - "*.meta"
+    anti_pattern_example: |
+      // BAD: Calculate normals in Unity
+      ModelImporter importer = assetImporter as ModelImporter;
+      importer.importNormals = ModelImporterNormals.Calculate;
+
+    correct_example: |
+      // GOOD: Import normals from file
+      ModelImporter importer = assetImporter as ModelImporter;
+      importer.importNormals = ModelImporterNormals.Import;
+      importer.normalCalculationMode = ModelImporterNormalCalculationMode.AreaAndAngleWeighted;
+      importer.normalSmoothingSource = ModelImporterNormalSmoothingSource.FromSmoothingGroups;
+
+  - id: unity-scale-factor-wrong
+    name: Unity Non-Standard Scale Factor
+    severity: medium
+    category: import
+    description: |
+      Unity scale factor should typically be 1.0 for properly exported assets.
+      Non-standard values indicate a pipeline issue.
+    detection:
+      type: regex
+      pattern: 'globalScale\s*=\s*(?!1\.0|1f)'
+      file_patterns:
+        - "*.cs"
+        - "*.meta"
+    anti_pattern_example: |
+      // BAD: Compensating for bad export with scale factor
+      importer.globalScale = 0.01f;  // Indicates export issue
+
+    correct_example: |
+      // GOOD: Standard scale with proper export pipeline
+      ModelImporter importer = assetImporter as ModelImporter;
+      importer.globalScale = 1.0f;
+      importer.useFileUnits = true;
+
+  # ============================================
+  # UNREAL ENGINE VALIDATIONS
+  # ============================================
+
+  - id: unreal-lod-no-auto-compute
+    name: Unreal LOD Not Using Auto Compute
+    severity: low
+    category: optimization
+    description: |
+      For hero assets, LODs should be manually created rather than auto-computed
+      to maintain quality.
+    detection:
+      type: regex
+      pattern: 'bAutoComputeLODScreenSize\s*=\s*true'
+      file_patterns:
+        - "*.cpp"
+        - "*.h"
+    correct_example: |
+      // For hero assets, set explicit LOD distances
+      StaticMesh->bAutoComputeLODScreenSize = false;
+      StaticMesh->SourceModels[0].ScreenSize = 1.0f;
+      StaticMesh->SourceModels[1].ScreenSize = 0.5f;
+      StaticMesh->SourceModels[2].ScreenSize = 0.25f;
+
+  - id: unreal-collision-not-simplified
+    name: Unreal Using Complex Collision
+    severity: medium
+    category: optimization
+    description: |
+      Using the render mesh for collision is expensive. Most objects should
+      use simplified collision.
+    detection:
+      type: regex
+      pattern: 'CollisionTraceFlag\s*=\s*CTF_UseComplexAsSimple|bUseComplexAsSimpleCollision\s*=\s*true'
+      file_patterns:
+        - "*.cpp"
+        - "*.h"
+        - "*.ini"
+    anti_pattern_example: |
+      // BAD: Using render mesh for collision (expensive)
+      StaticMeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+      StaticMesh->ComplexCollisionMesh = StaticMesh;
+      StaticMesh->bUseComplexAsSimpleCollision = true;
+
+    correct_example: |
+      // GOOD: Use simplified collision
+      // In Blender: Create low-poly collision mesh named UCX_MeshName
+      // Or in Unreal: Auto-generate convex collision
+      StaticMesh->CreateBodySetup();
+      StaticMesh->BodySetup->CollisionTraceFlag = CTF_UseSimpleAsComplex;
+
+      // For simple shapes, use primitives
+      UBoxComponent* BoxCollision = CreateDefaultSubobject<UBoxComponent>(TEXT("BoxCollision"));
+
+  # ============================================
+  # GODOT VALIDATIONS
+  # ============================================
+
+  - id: godot-mesh-not-generating-collision
+    name: Godot Not Generating Collision Shape
+    severity: medium
+    category: import
+    description: |
+      Imported meshes in Godot should have collision shapes generated for
+      physics interaction.
+    detection:
+      type: regex
+      pattern: '\.glb|\.gltf'
+      file_patterns:
+        - "*.tscn"
+        - "*.tres"
+    correct_example: |
+      # In Godot import settings (.import file):
+      [params]
+      meshes/generate_collision_shapes=true
+      meshes/collision_shape_type=1  # Convex
+
+      # Or programmatically:
+      var mesh_instance = MeshInstance3D.new()
+      mesh_instance.mesh = load("res://models/object.glb")
+      mesh_instance.create_trimesh_collision()  # For static
+      # OR
+      mesh_instance.create_convex_collision()   # For dynamic
+
+  # ============================================
+  # FILE NAMING VALIDATIONS
+  # ============================================
+
+  - id: invalid-asset-naming
+    name: Invalid Asset Naming Convention
+    severity: low
+    category: organization
+    description: |
+      Asset names should follow consistent conventions for organization
+      and automation compatibility.
+    detection:
+      type: regex
+      pattern: '(?i)^(final|new|test|old|copy|backup|\d+)[._-]|\s+\.|[^a-zA-Z0-9_.-]'
+      file_patterns:
+        - "*.fbx"
+        - "*.obj"
+        - "*.gltf"
+        - "*.glb"
+        - "*.blend"
+    anti_pattern_example: |
+      # BAD naming examples:
+      Final_Chair.fbx
+      chair final v2.fbx
+      New Folder/model.fbx
+      test123.fbx
+      chair (1).fbx
+
+    correct_example: |
+      # GOOD naming convention:
+      SM_Chair_Wood_LOD0.fbx
+      SK_Character_Hero.fbx
+      SM_Prop_Barrel_Metal_v02.fbx
+
+      # Pattern: [Type]_[Category]_[Name]_[Variant]_[LOD/Version]
+
+  - id: missing-lod-suffix
+    name: Missing LOD Suffix on LOD Meshes
+    severity: low
+    category: organization
+    description: |
+      LOD meshes should have explicit _LOD# suffix for proper identification
+      and auto-import by game engines.
+    detection:
+      type: regex
+      pattern: '(?<!LOD[0-9])\.fbx$'
+      file_patterns:
+        - "*_low.fbx"
+        - "*_med.fbx"
+        - "*_high.fbx"
+    anti_pattern_example: |
+      # BAD: Unclear LOD naming
+      chair_low.fbx
+      chair_medium.fbx
+      chair_high.fbx
+
+    correct_example: |
+      # GOOD: Standard LOD naming
+      SM_Chair_LOD0.fbx  # Base mesh
+      SM_Chair_LOD1.fbx  # 50% reduction
+      SM_Chair_LOD2.fbx  # 25% reduction
+      SM_Chair_LOD3.fbx  # 12.5% reduction
+
+  # ============================================
+  # TEXTURE FILE VALIDATIONS
+  # ============================================
+
+  - id: non-power-of-two-textures
+    name: Non-Power-of-Two Texture Dimensions
+    severity: medium
+    category: optimization
+    description: |
+      Textures should be power-of-two dimensions (256, 512, 1024, 2048, 4096)
+      for optimal GPU memory usage and mipmap generation.
+    detection:
+      type: script
+      script: |
+        # This would be validated by a separate texture checking tool
+        # Dimensions should be: 256, 512, 1024, 2048, 4096
+        valid_sizes = [256, 512, 1024, 2048, 4096, 8192]
+    file_patterns:
+        - "*.png"
+        - "*.tga"
+        - "*.jpg"
+    correct_example: |
+      # GOOD texture dimensions:
+      T_Chair_D.png     # 2048x2048
+      T_Character_D.png # 4096x4096
+      T_Icon_UI.png     # 256x256
+
+      # Can be non-square but still power-of-two:
+      T_Ribbon_D.png    # 2048x256
+
+  - id: wrong-texture-suffix
+    name: Wrong Texture Type Suffix
+    severity: low
+    category: organization
+    description: |
+      Texture files should have correct suffixes indicating their type
+      for material auto-assignment.
+    detection:
+      type: regex
+      pattern: '(?i)(?<!_[DNRMAOHE])(_diffuse|_normal|_roughness|_metallic|_ao|_height|_emissive|_opacity)\.(?:png|tga|jpg)'
+      file_patterns:
+        - "*.png"
+        - "*.tga"
+        - "*.jpg"
+    anti_pattern_example: |
+      # BAD: Full word suffixes (inconsistent)
+      chair_diffuse.png
+      chair_normal.png
+      chair_roughness.png
+
+    correct_example: |
+      # GOOD: Single letter suffixes (industry standard)
+      T_Chair_D.png   # Diffuse/Albedo
+      T_Chair_N.png   # Normal
+      T_Chair_R.png   # Roughness
+      T_Chair_M.png   # Metallic
+      T_Chair_AO.png  # Ambient Occlusion
+      T_Chair_H.png   # Height
+      T_Chair_E.png   # Emissive
+
+      # OR packed textures:
+      T_Chair_ORM.png # Occlusion, Roughness, Metallic (RGB)
+      T_Chair_ARM.png # AO, Roughness, Metallic (RGB)
+
+# Summary of validation categories
+categories:
+  export:
+    description: Checks for export script issues
+    severity_default: high
+
+  topology:
+    description: Checks for geometry problems
+    severity_default: high
+
+  import:
+    description: Checks for import configuration issues
+    severity_default: medium
+
+  optimization:
+    description: Checks for performance issues
+    severity_default: medium
+
+  organization:
+    description: Checks for naming and structure issues
+    severity_default: low
+
+# How to integrate these validations
+integration_notes: |
+  These validations can be integrated into:
+
+  1. Pre-commit hooks (for .py scripts)
+  2. CI/CD pipelines (for all files)
+  3. Editor plugins (real-time feedback)
+  4. Export scripts (validate before writing)
+
+  Example pre-commit usage:
+  ```yaml
+  # .pre-commit-config.yaml
+  - repo: local
+    hooks:
+      - id: validate-3d-scripts
+        name: Validate 3D Export Scripts
+        entry: python scripts/validate_3d.py
+        language: python
+        files: \.py$
+  ```

@@ -1,0 +1,392 @@
+# Combat Design Validations
+# Automated checks to catch common combat system implementation mistakes
+
+validations:
+  # === INPUT HANDLING ===
+
+  - id: combat-no-input-buffer
+    name: Combat Input Without Buffering
+    severity: warning
+    type: regex
+    pattern: '(justPressed|isJustPressed|GetButtonDown)\s*\([^)]*\)\s*(?!.*buffer)'
+    message: "Input check without buffering. Combat inputs should be buffered for responsiveness."
+    fix_action: "Add input buffering: store input with timestamp, consume when action becomes possible"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+      - "*.cpp"
+
+  - id: combat-raw-input-timing
+    name: Frame-Critical Raw Input
+    severity: warning
+    type: regex
+    pattern: 'if\s*\(\s*(Input|input)\.(justPressed|GetButtonDown|is_action_just_pressed)\s*\([^)]*\)\s*\)\s*\{'
+    message: "Raw input for combat action. Consider input buffering for frame-perfect actions."
+    fix_action: "Buffer combat inputs: queue input, check buffer when action window opens"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  # === ANIMATION TRANSITIONS ===
+
+  - id: combat-slow-blend-time
+    name: Slow Animation Blend for Combat
+    severity: warning
+    type: regex
+    pattern: '(crossFade|CrossFade|blend_time|transitionDuration)\s*[=:(\s]+\s*0\.[2-9]'
+    message: "Slow animation blend (>= 0.2s) in potential combat context. Attack animations should blend in < 50ms."
+    fix_action: "Use faster blend for combat: crossFade(anim, 0.033) for 2-frame transition"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  - id: combat-no-animation-event
+    name: Animation Without Damage Frame Event
+    severity: info
+    type: regex
+    pattern: '(attackAnim|attack_anim|AttackAnimation)\s*[=:]\s*["\'][^"\']+["\'](?!.*event|notify)'
+    message: "Attack animation reference without visible event/notify setup. Damage timing should use animation events."
+    fix_action: "Add animation events for damage frames, sound triggers, and VFX spawning"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  # === HITBOX MANAGEMENT ===
+
+  - id: combat-hitbox-always-active
+    name: Hitbox Without Deactivation
+    severity: error
+    type: regex
+    pattern: '(hitbox|Hitbox|hit_box)\.(enabled|active|SetActive)\s*[=(\s]+\s*true(?![^}]*false)'
+    message: "Hitbox enabled without corresponding disable. Hitboxes should only be active during attack's active frames."
+    fix_action: "Disable hitbox after active frames: hitbox.enabled = false in recovery phase"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  - id: combat-no-hitbox-reset
+    name: Hitbox Without Multi-Hit Prevention
+    severity: warning
+    type: regex
+    pattern: 'class\s+Hitbox[^{]*\{(?![^}]*(hitEntities|alreadyHit|hitList|hit_entities))'
+    message: "Hitbox class without hit tracking. Same hitbox can hit same target multiple times per swing."
+    fix_action: "Track hit entities per attack: Set<Entity> hitThisSwing, check before applying damage"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+
+  # === DAMAGE FEEDBACK ===
+
+  - id: combat-damage-no-hitstop
+    name: Damage Without Hitstop
+    severity: warning
+    type: regex
+    pattern: '(applyDamage|takeDamage|TakeDamage|deal_damage)\s*\([^)]*\)(?![^;{]*(?:hitstop|hitStop|freeze|Freeze|pause|Pause))'
+    message: "Damage dealt without hitstop/freeze frame. Hits may feel weightless."
+    fix_action: "Add hitstop on hit: freeze both attacker and target for 3-15 frames based on damage"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  - id: combat-damage-no-screenshake
+    name: Damage Without Screen Shake
+    severity: info
+    type: regex
+    pattern: '(applyDamage|takeDamage|TakeDamage|deal_damage)\s*\([^)]*\)(?![^;{]*(?:shake|Shake|trauma|Trauma|camera))'
+    message: "Damage dealt without camera shake. Consider adding screen shake for impact feedback."
+    fix_action: "Add screen shake on hit: camera.addTrauma(damage / maxDamage)"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  - id: combat-no-hit-vfx
+    name: Combat Hit Without Visual Effect
+    severity: info
+    type: regex
+    pattern: '(onHit|on_hit|OnHitConfirmed)\s*[=:(\s]+(?![^}]*(vfx|VFX|particle|Particle|effect|Effect|spawn))'
+    message: "Hit handler without VFX spawn. Visual feedback reinforces impact."
+    fix_action: "Spawn hit particles at impact point scaled to damage"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  # === FRAME DATA ===
+
+  - id: combat-no-recovery-frames
+    name: Attack Without Recovery Definition
+    severity: warning
+    type: regex
+    pattern: 'attack(Data)?[=:\s]+\{[^}]*(startup|active)(?![^}]*recovery)'
+    message: "Attack data defines startup/active but not recovery frames. All attacks need recovery windows."
+    fix_action: "Define recovery frames: period after active frames where attacker is vulnerable"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  - id: combat-magic-frame-numbers
+    name: Hardcoded Frame Data Values
+    severity: info
+    type: regex
+    pattern: '(startup|active|recovery)\s*[=:]\s*\d+(?!\s*[/*])'
+    message: "Hardcoded frame data values. Consider using named constants or data-driven config."
+    fix_action: "Use named constants: LIGHT_ATTACK_STARTUP = 5, or load from config file"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  # === INVINCIBILITY ===
+
+  - id: combat-iframe-no-duration
+    name: I-Frame Without Duration Limit
+    severity: error
+    type: regex
+    pattern: '(invincible|isInvincible|invulnerable)\s*=\s*true(?![^}]*(timer|duration|frames|setTimeout|yield))'
+    message: "Invincibility enabled without clear duration. I-frames should have explicit frame count."
+    fix_action: "Set i-frame duration: this.iframeFrames = 12; disable when counter reaches 0"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  - id: combat-dodge-no-iframe
+    name: Dodge Without I-Frame Implementation
+    severity: warning
+    type: regex
+    pattern: '(startDodge|dodge|roll|Roll)\s*\([^)]*\)\s*\{(?![^}]*(invincible|iframe|iFrame|invulnerable))'
+    message: "Dodge function without i-frame implementation. Dodges typically grant invincibility frames."
+    fix_action: "Add i-frames to dodge: set invincible after startup, clear after i-frame window"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  # === STAMINA / RESOURCES ===
+
+  - id: combat-action-no-cost
+    name: Combat Action Without Resource Cost
+    severity: info
+    type: regex
+    pattern: '(attack|dodge|roll|heavyAttack)\s*\([^)]*\)\s*\{(?![^}]*(stamina|energy|cost|resource))'
+    message: "Combat action without resource cost. Consider stamina/energy costs for strategic depth."
+    fix_action: "Add resource costs: if (!stamina.canAfford(DODGE_COST)) return; stamina.spend(DODGE_COST)"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+
+  - id: combat-stamina-instant-regen
+    name: Stamina With Immediate Regeneration
+    severity: info
+    type: regex
+    pattern: 'stamina\s*\+=(?!.*delay|.*timer|.*after)'
+    message: "Stamina regenerating without delay. Consider delay after action before regen starts."
+    fix_action: "Add regen delay: lastActionTime = now; only regen if (now - lastActionTime) > regenDelay"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+
+  # === ENEMY DESIGN ===
+
+  - id: combat-enemy-instant-attack
+    name: Enemy Attack Without Startup
+    severity: warning
+    type: regex
+    pattern: 'enemy(Attack)?[=:\s]+\{[^}]*damage(?![^}]*startup|telegraph)'
+    message: "Enemy attack data without startup/telegraph frames. Enemies need readable wind-ups."
+    fix_action: "Add startup frames >= 12 (200ms) for reactable attacks, >= 24 for comfortable reactions"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  - id: combat-boss-no-phases
+    name: Boss Without Phase System
+    severity: info
+    type: regex
+    pattern: 'class\s+Boss[^{]*\{(?![^}]*(phase|Phase|state|State|threshold))'
+    message: "Boss class without visible phase system. Long boss fights need phase transitions for variety."
+    fix_action: "Add phases: check HP thresholds, unlock new attacks, change behavior patterns"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  # === COMBO SYSTEMS ===
+
+  - id: combat-combo-no-window
+    name: Combo Without Input Window
+    severity: warning
+    type: regex
+    pattern: '(comboNext|nextAttack|chainAttack)\s*(?!.*window|timer|frame)'
+    message: "Combo system without input window tracking. Combos need defined input windows."
+    fix_action: "Add combo window: accept next input only during frames X-Y of current attack"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  - id: combat-cancel-no-hierarchy
+    name: Cancel System Without Priority
+    severity: info
+    type: regex
+    pattern: '(canCancel|canInterrupt)\s*[=:\s]+(?!.*priority|hierarchy|level)'
+    message: "Cancel system without priority hierarchy. Cancels should follow: Normal < Special < Super."
+    fix_action: "Implement cancel hierarchy: special cancels normal, super cancels special"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+
+  # === TIMING ===
+
+  - id: combat-frame-rate-dependent
+    name: Combat Timing Without Delta Time
+    severity: error
+    type: regex
+    pattern: '(frameCount|frame_count)\s*[\+\-]=\s*1(?!.*delta|.*Time)'
+    message: "Frame counting without delta time consideration. Combat timing may vary with frame rate."
+    fix_action: "Use fixed timestep for combat logic, or multiply by (targetFrameRate / actualFrameRate)"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  - id: combat-update-frame-skip
+    name: Combat Logic Skipping Frames
+    severity: warning
+    type: regex
+    pattern: '(attackFrame|combatTimer)\s*\+=\s*(delta|deltaTime|Delta)(?!.*fixed|.*step)'
+    message: "Combat frame counter using raw delta time. Frame data may be inconsistent."
+    fix_action: "Use fixed timestep: accumulator += delta; while (accumulator >= FIXED_STEP) {...}"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  # === COYOTE TIME / JUMP BUFFERING ===
+
+  - id: combat-no-coyote-time
+    name: Jump Without Coyote Time
+    severity: warning
+    type: regex
+    pattern: '(canJump|CanJump)\s*[=:(\s]+\s*(isGrounded|is_on_floor|IsGrounded)(?!.*coyote|.*grace)'
+    message: "Jump check using only ground state. Add coyote time for forgiving platform combat."
+    fix_action: "Track lastGroundedFrame; allow jump if (currentFrame - lastGroundedFrame) <= coyoteFrames"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  - id: combat-no-jump-buffer
+    name: Jump Without Input Buffering
+    severity: info
+    type: regex
+    pattern: 'if\s*\([^)]*jump[^)]*\)\s*\{[^}]*\}(?![^}]*buffer)'
+    message: "Jump input without buffering. Buffer jump presses before landing for responsiveness."
+    fix_action: "Buffer jump input; on landing check if (jumpBuffer.hasBufferedInput()) jump()"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  # === COLLISION ===
+
+  - id: combat-collision-every-frame
+    name: Expensive Collision Every Frame
+    severity: warning
+    type: regex
+    pattern: '(update|Update|_process)\s*\([^)]*\)\s*\{[^}]*(checkCollision|CheckCollision|overlap|Overlap)'
+    message: "Collision checking in update loop. May cause performance issues; only check when hitbox active."
+    fix_action: "Only check collisions when hitbox is active, use collision layers, spatial partitioning"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  - id: combat-no-hit-once-check
+    name: Hitbox Without Once-Per-Swing Check
+    severity: warning
+    type: regex
+    pattern: '(onTriggerEnter|OnTriggerEnter|body_entered)\s*\([^)]*\)\s*\{(?![^}]*(already|hasHit|hitList|hitThisSwing))'
+    message: "Collision handler without hit-once check. Same hitbox may deal damage multiple times."
+    fix_action: "Track hit entities: if (hitThisSwing.has(entity)) return; hitThisSwing.add(entity)"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  # === STATE MACHINES ===
+
+  - id: combat-state-boolean-soup
+    name: Combat State Boolean Soup
+    severity: warning
+    type: regex
+    pattern: 'is(Attacking|Dodging|Blocking)[^&|]*&&[^&|]*is(Attacking|Dodging|Blocking)'
+    message: "Multiple boolean state checks. Use a state machine for combat states."
+    fix_action: "Replace booleans with state enum: CombatState.ATTACKING, use switch statement"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  - id: combat-no-exit-state
+    name: Combat State Without Exit Handler
+    severity: info
+    type: regex
+    pattern: '(enterState|onEnter|Enter)\s*\([^)]*\)\s*\{(?![^}]*(exit|Exit|leave|Leave))'
+    message: "State machine with enter but no exit handler. Clean up state on transitions."
+    fix_action: "Add onExit handler: disable hitboxes, reset timers, restore movement"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"
+
+  # === TARGETING ===
+
+  - id: combat-lockon-no-validation
+    name: Lock-On Without Target Validation
+    severity: warning
+    type: regex
+    pattern: '(lockOn|LockOn|lockedTarget)\s*=\s*[^;]+(?!.*valid|alive|exists|null)'
+    message: "Lock-on target set without validation. Target may be dead or out of range."
+    fix_action: "Validate lock-on target each frame: if (!target.isAlive || distance > maxRange) unlock()"
+    applies_to:
+      - "*.ts"
+      - "*.js"
+      - "*.cs"
+      - "*.gd"

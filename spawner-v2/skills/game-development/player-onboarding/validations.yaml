@@ -1,0 +1,282 @@
+# Player Onboarding Validations
+# Automated checks to catch common onboarding mistakes before they hurt retention
+
+validations:
+  # ============================================================================
+  # CRITICAL: Patterns that kill retention
+  # ============================================================================
+
+  - id: unskippable-tutorial
+    name: Unskippable Tutorial Content
+    severity: error
+    type: regex
+    pattern:
+      - 'skipEnabled.*false|canSkip.*false|allowSkip.*false'
+      - 'forceWatch.*true|mandatory.*true|required.*true.*tutorial'
+    message: "Unskippable tutorial detected. Players MUST be able to skip. 30-50% of players will want to skip - if they can't, they quit instead."
+    fix_action: "Add skipEnabled: true or implement skip button. Remember to grant all rewards/unlocks when skipped."
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.yaml"
+      - "*.json"
+
+  - id: tutorial-before-gameplay
+    name: Tutorial Blocking Core Gameplay
+    severity: error
+    type: regex
+    pattern:
+      - 'await.*tutorial.*start.*Game|tutorial\.complete.*then.*startGame'
+      - 'if.*!tutorialComplete.*return|!finishedTutorial.*&&.*block'
+    message: "Tutorial blocking gameplay start. Players should be playing within 30 seconds. Integrate teaching INTO gameplay, don't gate on completion."
+    fix_action: "Move tutorial teaching into first level. Start gameplay immediately, teach during play."
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: excessive-tutorial-steps
+    name: Too Many Tutorial Steps
+    severity: warning
+    type: regex
+    pattern:
+      - 'tutorialStep.*[6-9]|step\s*[>=]\s*[6-9]'
+      - 'tutorial\.steps\.length.*>.*5|steps\.push.*steps\.push.*steps\.push.*steps\.push.*steps\.push'
+    message: "6+ tutorial steps detected. Players forget early lessons by step 6. Limit to 4-5 discrete teaching moments in first session, spread more across gameplay."
+    fix_action: "Reduce to 4-5 core steps. Defer advanced mechanics to later in gameplay."
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: info-dump-popup
+    name: Information Overload Popup
+    severity: warning
+    type: regex
+    pattern:
+      - 'showMessage.*\.length.*>.*100|displayText.*length.*>.*80'
+      - 'controls:\s*\{[^}]{400,}\}'
+    message: "Long text in tutorial detected. Players don't read. Keep prompts under 10 words. Show, don't tell."
+    fix_action: "Replace text with visual demonstration. If text necessary, limit to 5-10 words max."
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.json"
+
+  # ============================================================================
+  # HIGH: Common mistakes that hurt player experience
+  # ============================================================================
+
+  - id: no-skip-grant
+    name: Skip Without Granting Rewards
+    severity: error
+    type: regex
+    pattern:
+      - 'skipTutorial(?![\s\S]{0,200}(grant|unlock|give|add))'
+      - 'onSkip(?![\s\S]{0,200}(reward|item|ability|unlock))'
+    message: "Skip implemented but may not grant rewards. Players who skip must receive all items/unlocks/abilities they would have gotten."
+    fix_action: "Add grantSkipRewards() or equivalent after skip. Include items, abilities, flags, and state."
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: forced-cutscene
+    name: Unskippable Cutscene at Start
+    severity: warning
+    type: regex
+    pattern:
+      - 'playCutscene.*await|playVideo.*await|playIntro.*await'
+      - 'introSequence(?!.*skipOnInput|.*skipEnabled)'
+    message: "Potential unskippable cutscene at game start. Every second before first input costs players. Make interruptible or skippable."
+    fix_action: "Add skipOnInput option or skip button. Consider starting gameplay during cutscene (audio over gameplay)."
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: hint-without-cooldown
+    name: Hint System Without Cooldown
+    severity: warning
+    type: regex
+    pattern:
+      - 'showHint(?![\s\S]{0,100}(cooldown|delay|timeout|lastHint))'
+      - 'displayTip(?![\s\S]{0,100}(interval|throttle|maxShow))'
+    message: "Hint system may spam players. Hints need cooldowns to avoid annoyance. Players need time to try on their own."
+    fix_action: "Add cooldown (30s minimum), max show count, and detection for 'player exploring vs stuck'."
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: no-tutorial-analytics
+    name: Tutorial Without Analytics
+    severity: warning
+    type: regex
+    pattern:
+      - 'class.*Tutorial(?![\s\S]{0,500}(track|analytics|metrics))'
+      - 'tutorial(?![\s\S]{0,300}(funnel|conversion|dropoff))'
+    message: "Tutorial system without visible analytics. You can't improve what you don't measure. Track completion, drop-off points, time per step."
+    fix_action: "Add analytics tracking for each step: analytics.track('tutorial_step', {step, time, completed})"
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: game-over-in-tutorial
+    name: Game Over During Tutorial
+    severity: warning
+    type: regex
+    pattern:
+      - 'gameOver.*tutorial|death.*tutorial.*gameOver'
+      - 'tutorial.*onDeath.*gameOverScreen'
+    message: "Game over screen during tutorial. New players shouldn't see game over. Respawn immediately without loading screen."
+    fix_action: "Replace game over with instant respawn. Hide death count. Make tutorial phase very forgiving."
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: teaching-obvious-controls
+    name: Teaching Standard Controls
+    severity: warning
+    type: regex
+    pattern:
+      - 'tutorial.*wasd|teach.*move.*arrow|hint.*space.*jump'
+      - 'showMessage.*"press.*to.*move"|prompt.*"click.*to.*select"'
+    message: "Teaching standard controls (WASD, click, space). Gamers know these. Only teach game-specific mechanics."
+    fix_action: "Remove prompts for standard controls. Trust players to know genre conventions."
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  # ============================================================================
+  # MEDIUM: Best practice violations
+  # ============================================================================
+
+  - id: no-safe-fail-zone
+    name: No Safe Failure During Learning
+    severity: warning
+    type: regex
+    pattern:
+      - 'tutorialEnemy.*damage.*=.*(?:[2-9]|[1-9][0-9])|enemy.*damage.*tutorial.*(?:[2-9]|[1-9][0-9])'
+      - 'tutorial(?![\s\S]{0,200}(forgiving|reduced.*damage|safe))'
+    message: "Tutorial may not have safe failure. New players need forgiving environment to experiment. Reduce enemy damage, remove death penalty."
+    fix_action: "During tutorial: reduce enemy damage to 25%, give abundant health pickups, instant respawn."
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: linear-only-tutorial
+    name: Single-Path Tutorial Design
+    severity: warning
+    type: regex
+    pattern:
+      - 'if.*solution.*===.*expected|correctAnswer.*===|onlyWay.*true'
+      - 'mustUse.*mechanic|requiredAction.*===.*specific'
+    message: "Tutorial may assume single solution. Creative players will find alternatives. Accept any valid solution to objectives."
+    fix_action: "Define goal, not path. Check for objective completion regardless of method used."
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: no-veteran-detection
+    name: No Veteran Player Detection
+    severity: warning
+    type: regex
+    pattern:
+      - 'tutorial(?![\s\S]{0,400}(veteran|experience|skilled|advanced))'
+      - 'onboarding(?![\s\S]{0,400}(detectSkill|playerLevel|adapt))'
+    message: "No veteran detection in onboarding. Veterans get frustrated with basic tutorials. Detect skill and adapt teaching."
+    fix_action: "Track player actions. If using advanced techniques, reduce tutorial. Offer 'I know this' option."
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: no-context-hints
+    name: Hints Not Contextual
+    severity: warning
+    type: regex
+    pattern:
+      - 'showAllHints|displayControlList|showControls\(\)|listBindings'
+    message: "Hints shown without context. Teach mechanics when needed, not upfront. Players forget what they don't immediately use."
+    fix_action: "Trigger hints based on player situation: near gap = jump hint, near enemy = attack hint."
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: no-reinforcement-schedule
+    name: No Mechanic Reinforcement
+    severity: warning
+    type: regex
+    pattern:
+      - 'teachMechanic(?![\s\S]{0,300}(reinforce|practice|uses|repeat))'
+      - 'tutorial\.complete(?![\s\S]{0,200}schedule.*practice)'
+    message: "Teaching without reinforcement schedule. Players forget unused mechanics. Plan 3-5 uses of each mechanic in next 10 minutes."
+    fix_action: "After teaching: schedule 3 easy uses, 2 moderate uses, then combine with other mechanics."
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  # ============================================================================
+  # CHECKLIST: Onboarding completeness
+  # ============================================================================
+
+  - id: onboarding-checklist
+    name: Onboarding Completeness Check
+    severity: info
+    type: file
+    pattern: "onboarding-checklist.md"
+    message: |
+      Consider creating onboarding-checklist.md to track:
+      [ ] Skip option visible at all times
+      [ ] Time to first input < 10 seconds
+      [ ] Core loop reached < 60 seconds
+      [ ] Max 4 teaching moments in first 5 minutes
+      [ ] Safe failure (no game over in tutorial)
+      [ ] Hints have cooldown and max shows
+      [ ] Analytics for each onboarding step
+      [ ] Veteran detection/skip option
+      [ ] Mobile: 3-minute hook complete
+      [ ] Reinforcement scheduled for taught mechanics
+    fix_action: "Create checklist file to ensure comprehensive onboarding design"
+    applies_to:
+      - "**/tutorial/**"
+      - "**/onboarding/**"
+
+  # ============================================================================
+  # MOBILE-SPECIFIC
+  # ============================================================================
+
+  - id: mobile-slow-start
+    name: Mobile Game Slow Start
+    severity: error
+    type: regex
+    pattern:
+      - 'mobile.*tutorial.*duration.*>.*120|mobileOnboarding.*time.*>.*180'
+      - 'platform.*mobile.*tutorialSteps.*>.*3'
+    message: "Mobile tutorial exceeds 2-3 minutes. Mobile players decide in 3 minutes. Compress onboarding dramatically."
+    fix_action: "Mobile FTUE: first input < 5s, core loop < 60s, return hook < 180s."
+    applies_to:
+      - "*.js"
+      - "*.ts"
+      - "*.json"
+
+  - id: mobile-no-save
+    name: Mobile Without Auto-Save
+    severity: warning
+    type: regex
+    pattern:
+      - 'mobile(?![\s\S]{0,300}(autoSave|saveState|persist))'
+      - 'platform.*mobile(?![\s\S]{0,200}backgroundSave)'
+    message: "Mobile game may not auto-save frequently. Mobile players get interrupted constantly. Save every 10 seconds."
+    fix_action: "Implement aggressive auto-save. Save on any significant action. Save on app background."
+    applies_to:
+      - "*.js"
+      - "*.ts"
+
+  - id: mobile-no-return-hook
+    name: Mobile Without Return Hook
+    severity: warning
+    type: regex
+    pattern:
+      - 'mobileOnboarding(?![\s\S]{0,400}(dailyReward|energy|notification|returnHook))'
+      - 'mobile.*ftue(?![\s\S]{0,300}(anticipation|tomorrow|comeback))'
+    message: "Mobile FTUE may lack return hook. The 3-minute session must create anticipation for return. Show what they CAN'T have yet."
+    fix_action: "Before first session end: show locked content, set up daily reward, create anticipation."
+    applies_to:
+      - "*.js"
+      - "*.ts"

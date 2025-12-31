@@ -1,0 +1,787 @@
+# Sharp Edges - 3D Modeling
+# Hard-won knowledge that takes years to accumulate
+
+id: 3d-modeling
+version: 1.0.0
+
+# Critical gotchas that will ruin your day (or week)
+
+edges:
+  # ============================================
+  # TOPOLOGY DISASTERS
+  # ============================================
+
+  - id: ngon-subdivision-disaster
+    title: N-gons Destroy Subdivision Surfaces
+    severity: critical
+    category: topology
+    description: |
+      N-gons (polygons with 5+ sides) cause catastrophic artifacts when
+      subdivision surfaces are applied. The subdivision algorithm doesn't
+      know how to smoothly interpolate across irregular polygons.
+    symptoms:
+      - "Pinching" at n-gon boundaries after subdivision
+      - Shading artifacts that appear only after smoothing
+      - Wavy surfaces on what should be flat areas
+      - Different results in different software
+    trigger_conditions:
+      - Boolean operations without cleanup
+      - Lazy bridge operations
+      - Imported CAD geometry
+      - Automatic retopology without cleanup
+    prevention: |
+      ALWAYS resolve n-gons before subdividing:
+      ```
+      Blender:
+        Select All → Mesh → Clean Up → Split Non-Planar Faces
+        Then: Select n-gons (Select → Select All by Trait → Faces by Sides)
+        Convert: Poke Faces or manual quad conversion
+
+      Maya:
+        Mesh → Cleanup → Fix by: Faces with more than 4 sides
+
+      ZBrush:
+        Before export: Geometry → Modify Topology → QRemesher
+      ```
+    recovery: |
+      If already subdivided with n-gons:
+      1. Undo subdivisions if possible
+      2. If not, retopologize the affected areas
+      3. Re-subdivide cleanly
+    real_world_example: |
+      "We shipped a mobile game where the main character had n-gon artifacts
+      on their face that only appeared on certain Android devices with
+      different triangulation algorithms. 4-hour hotfix."
+
+  - id: inverted-normals-nightmare
+    title: Inverted Normals Export Disaster
+    severity: critical
+    category: export
+    description: |
+      Normals facing the wrong direction cause surfaces to appear inside-out
+      or invisible in game engines. This commonly happens after mirroring,
+      boolean operations, or scale to -1.
+    symptoms:
+      - Surfaces invisible from expected viewing angle
+      - Surfaces only visible from inside the mesh
+      - Black patches in renders
+      - Lighting appears inverted (dark where it should be light)
+    trigger_conditions:
+      - Mirror modifier with negative scale
+      - Boolean difference operations
+      - Manually flipping faces without recalculating
+      - Importing from different software
+      - Scale set to negative value
+    prevention: |
+      Before EVERY export:
+      ```
+      Blender:
+        1. Edit Mode → Select All
+        2. Mesh → Normals → Recalculate Outside (Shift+N)
+        3. Enable "Face Orientation" overlay to verify (blue = correct)
+
+      Maya:
+        1. Display → Polygons → Face Normals
+        2. Mesh Display → Reverse (if needed)
+        3. Mesh → Average Normals
+
+      Verification:
+        - Enable backface culling in viewport
+        - All faces should be visible from outside
+      ```
+    recovery: |
+      In game engine:
+      - Unity: Check "Import Materials" and material settings
+      - Unreal: Reimport with "Compute Normals" or use two-sided material
+      - Quick fix: Two-sided shader (but wastes performance)
+
+  - id: non-manifold-geometry
+    title: Non-Manifold Geometry Breaks Everything
+    severity: critical
+    category: topology
+    description: |
+      Non-manifold geometry is physically impossible mesh configurations that
+      break physics, baking, 3D printing, and game engine processing.
+    symptoms:
+      - Physics objects fall through floors
+      - Baking produces black artifacts
+      - 3D printing fails or produces holes
+      - Game engine gives import errors
+      - Boolean operations fail silently
+    trigger_conditions:
+      - Interior faces (faces inside the mesh)
+      - Edges with 3+ faces connected
+      - Vertices not connected to any edge
+      - Zero-area faces
+      - Duplicate vertices at same position
+    prevention: |
+      Check for non-manifold BEFORE export:
+      ```
+      Blender:
+        Edit Mode → Select → Select All by Trait → Non-Manifold
+        If anything selects, you have problems
+
+        Common fixes:
+        - Merge by distance (M → By Distance)
+        - Delete interior faces
+        - Recalculate normals
+        - Fill holes (Select boundary → F)
+
+      Maya:
+        Mesh → Cleanup (check Non-manifold geometry)
+
+      Detection script (Blender):
+        bpy.ops.mesh.select_non_manifold(
+          extend=False, use_wire=True, use_boundary=True,
+          use_multi_face=True, use_non_contiguous=True,
+          use_verts=True
+        )
+      ```
+    real_world_example: |
+      "Spent 2 days debugging why our character kept falling through the floor.
+      Turns out a non-manifold edge from a boolean operation made the collision
+      mesh have zero volume."
+
+  # ============================================
+  # SCALE AND TRANSFORM HORRORS
+  # ============================================
+
+  - id: unapplied-scale-baking
+    title: Unapplied Scale Ruins Baking
+    severity: critical
+    category: export
+    description: |
+      If you bake normal maps or any texture before applying scale, the
+      resulting maps will be wrong. The cage calculation uses object-space
+      coordinates, not world-space.
+    symptoms:
+      - Normal map appears stretched or compressed
+      - Baking produces completely wrong results
+      - Map looks correct in DCC but wrong in engine
+      - Proportions are wrong after bake
+    trigger_conditions:
+      - Scaling object in Object mode without applying
+      - Importing assets with different scale factors
+      - Mixing assets from different sources
+    prevention: |
+      ALWAYS before baking:
+      ```
+      Blender:
+        Ctrl+A → All Transforms (on BOTH high and low poly)
+        Verify: N panel shows Scale = 1, 1, 1
+
+      Maya:
+        Modify → Freeze Transformations
+
+      Verification:
+        - Dimensions in viewport should match world units
+        - Object scale should read 1.0 on all axes
+      ```
+    recovery: |
+      If you've already baked with wrong scale:
+      1. Apply transforms to both meshes
+      2. RE-BAKE everything from scratch
+      3. There is no shortcut - the data is wrong
+
+  - id: fbx-scale-0.01
+    title: FBX Scale 0.01 Trap (Blender to Unreal)
+    severity: high
+    category: export
+    description: |
+      Blender and Unreal have different unit scales. Blender uses meters (1 unit = 1m),
+      Unreal uses centimeters (1 unit = 1cm). The 0.01 scale factor "fix" causes
+      more problems than it solves.
+    symptoms:
+      - Model appears 100x too large or small
+      - Animations break when applied to scaled mesh
+      - Physics behaves incorrectly
+      - LOD distances are wrong
+    trigger_conditions:
+      - Blender FBX export with "Apply Unit" not understanding context
+      - Mixing scaled and unscaled assets
+      - Copying FBX settings from tutorials for different software versions
+    prevention: |
+      The CORRECT workflow (Blender to Unreal):
+      ```
+      IN BLENDER:
+        FBX Export Settings:
+        - Scale: 1.0
+        - Apply Scalings: FBX All
+        - Forward: -Y Forward
+        - Up: Z Up
+
+      IN UNREAL:
+        Import Settings:
+        - Convert Scene: ON
+        - Convert Scene Unit: ON
+
+      This tells Unreal to handle the conversion, not Blender.
+
+      ALTERNATIVE (if you need exact control):
+        Model in Blender at 0.01 scale from the start
+        (1 Blender unit = 1 Unreal unit = 1cm)
+        Export at scale 1.0
+      ```
+    real_world_example: |
+      "Our team wasted 3 days because half the models used scale 0.01 and
+      half used scale 1.0. Animations wouldn't transfer between characters,
+      physics was random. We had to re-export everything with consistent settings."
+
+  - id: axis-orientation-mismatch
+    title: Y-Up vs Z-Up Axis Hell
+    severity: high
+    category: export
+    description: |
+      Different software uses different "up" directions. Blender/Max use Z-up,
+      Maya uses Y-up by default, engines vary. Wrong settings cause rotated
+      or sideways models.
+    symptoms:
+      - Model appears rotated 90 degrees
+      - Character lying on their back instead of standing
+      - Animations rotate incorrectly
+      - Forward direction is wrong (character walks backward)
+    trigger_conditions:
+      - Cross-DCC transfer without axis settings
+      - Copying export settings from wrong software
+      - Default export settings
+    prevention: |
+      Know your axis conventions:
+      ```
+      Z-UP (Blender default, 3ds Max):
+        Forward: -Y or +Y (check software)
+        Up: Z
+
+      Y-UP (Maya default, Unity):
+        Forward: -Z or +Z
+        Up: Y
+
+      UNREAL ENGINE:
+        Imports Z-up, -Y forward (matches Blender)
+
+      UNITY:
+        Imports Y-up, -Z forward (needs conversion from Blender)
+
+      For each pipeline, document the exact settings and share with team.
+      ```
+
+  # ============================================
+  # UV AND TEXTURING TRAPS
+  # ============================================
+
+  - id: overlapping-uv-baking
+    title: Overlapping UVs Corrupt Bakes
+    severity: critical
+    category: uv
+    description: |
+      Mirrored or overlapping UVs are great for texture efficiency but
+      catastrophic for baking. Multiple surfaces project to the same
+      UV space, creating garbage data.
+    symptoms:
+      - Normal map shows averaged/blended data from multiple surfaces
+      - AO shows shadows from the wrong side
+      - Curvature map makes no sense
+      - One side of mirrored object has wrong detail
+    trigger_conditions:
+      - Using mirrored UVs (common on characters) for baking
+      - Overlapping UVs for texture reuse
+      - Automatic UV with overlap not detected
+    prevention: |
+      TWO UV CHANNELS workflow:
+      ```
+      UV0 (for baking):
+        - NO overlapping
+        - Every face has unique UV space
+        - Used for: normal maps, AO, curvature, ID maps
+
+      UV1 (for texturing):
+        - Overlapping/mirrored allowed
+        - Optimized for texture efficiency
+        - Used for: diffuse, roughness, etc.
+
+      In Blender:
+        1. Create UV0, unwrap uniquely
+        2. Bake to UV0
+        3. Create UV1 (or copy UV0), mirror/overlap
+        4. Apply textures to UV1
+      ```
+
+  - id: texel-density-variance
+    title: Texel Density Variance Looks Unprofessional
+    severity: high
+    category: uv
+    description: |
+      When UV islands have different texel densities, some surfaces appear
+      sharp while others are blurry. This immediately marks work as amateur.
+    symptoms:
+      - Face looks sharp but hands are blurry
+      - Small details have different sharpness levels
+      - Texture looks good in one area, bad in another
+      - QA keeps rejecting assets
+    trigger_conditions:
+      - Automatic UV unwrap without density check
+      - Manual unwrap without measuring
+      - Adding details without adjusting UV scale
+    prevention: |
+      Texel density workflow:
+      ```
+      1. Set project density standard:
+         - AAA hero: 10.24 px/cm
+         - Standard: 5.12 px/cm
+         - Background: 2.56 px/cm
+
+      2. Check density:
+         Blender: Use "Texel Density Checker" addon
+         Maya: Use "UV Toolkit" → Texel Density
+
+      3. Scale islands to match:
+         - Select all islands
+         - Apply uniform density scaling
+
+      4. Intentional variance:
+         - Hero faces: 1.5x base density
+         - Hidden areas: 0.5x base density
+         Document intentional variance
+      ```
+
+  - id: uv-padding-bleeding
+    title: Insufficient UV Padding Causes Bleeding
+    severity: medium
+    category: uv
+    description: |
+      Without enough padding between UV islands, mipmaps and texture filtering
+      cause colors to bleed between unrelated surfaces.
+    symptoms:
+      - Visible lines at UV seam locations
+      - Colors bleeding at edges of faces
+      - Worse at lower mipmap levels (distance)
+      - Seams visible in game but not in DCC
+    trigger_conditions:
+      - Auto-pack with too little margin
+      - Manual layout without padding awareness
+      - High-resolution texture with same pixel padding as low-res
+    prevention: |
+      Padding rules:
+      ```
+      Minimum padding (in pixels):
+        256px texture:   2px
+        512px texture:   4px
+        1024px texture:  8px
+        2048px texture:  16px
+        4096px texture:  32px
+
+      Formula: padding_pixels = texture_size / 128
+
+      In practice:
+        - Blender UV Pack: Set margin appropriately
+        - After packing, visually check smallest gaps
+        - Consider mipmap levels (divide by 2 each level)
+      ```
+
+  # ============================================
+  # BOOLEAN AND MODIFIER ISSUES
+  # ============================================
+
+  - id: boolean-floating-vertices
+    title: Boolean Leaves Floating Vertices
+    severity: high
+    category: topology
+    description: |
+      Boolean operations frequently leave isolated vertices that aren't
+      connected to any edges. These cause issues with smoothing, export,
+      and various algorithms.
+    symptoms:
+      - Shading artifacts near boolean cuts
+      - Vertex count higher than expected
+      - Non-manifold geometry warnings
+      - Strange behavior in sculpting
+    trigger_conditions:
+      - Any boolean operation
+      - Especially with complex or thin cutters
+      - Fast boolean solver (more common than Exact)
+    prevention: |
+      Post-boolean cleanup (ALWAYS):
+      ```
+      Blender:
+        Edit Mode → Select All
+        Mesh → Clean Up → Merge by Distance (threshold: 0.0001)
+        Mesh → Clean Up → Delete Loose (Verts only)
+        Select → Select All by Trait → Non-Manifold (verify empty)
+
+      Script for cleanup:
+        import bpy
+        bpy.ops.mesh.select_all(action='SELECT')
+        bpy.ops.mesh.remove_doubles(threshold=0.0001)
+        bpy.ops.mesh.delete_loose(use_verts=True, use_edges=True, use_faces=False)
+      ```
+
+  - id: boolean-coplanar-faces
+    title: Coplanar Faces Break Booleans
+    severity: high
+    category: topology
+    description: |
+      When the cutter and the target mesh have faces that are exactly
+      coplanar (on the same plane), boolean operations produce garbage
+      or fail silently.
+    symptoms:
+      - Boolean produces no visible result
+      - Faces disappear entirely
+      - Z-fighting artifacts
+      - Random faces get deleted
+    trigger_conditions:
+      - Cutter edge exactly aligned with target edge
+      - Both objects sitting on the same plane
+      - Grid-snapped geometry cutting grid-snapped geometry
+    prevention: |
+      Offset cutters slightly:
+      ```
+      Rule: Cutters should be slightly larger than the cut
+            AND slightly offset from any aligned geometry
+
+      Workflow:
+        1. Position cutter
+        2. Scale cutter 1.001x (slightly larger)
+        3. Move cutter 0.001 units in any direction
+        4. Apply boolean
+
+      This prevents exact coplanar situations while
+      being invisible in final result.
+      ```
+
+  - id: modifier-order-disaster
+    title: Wrong Modifier Order Destroys Results
+    severity: critical
+    category: workflow
+    description: |
+      Modifiers are applied top-to-bottom. Wrong order produces completely
+      different results. This is especially critical with boolean + bevel
+      + subdivision stacks.
+    symptoms:
+      - Bevels appear before booleans are cut
+      - Subdivision smooths over intended hard edges
+      - Mirror creates doubled geometry
+      - Array multiplies wrong base shape
+    trigger_conditions:
+      - Adding modifiers without considering order
+      - Moving modifiers without testing result
+      - Copying modifier stacks from other objects
+    prevention: |
+      Standard modifier order (top to bottom):
+      ```
+      1. Mirror (symmetry first, before any cuts)
+      2. Array (if repeating elements)
+      3. Boolean (all cuts)
+      4. Solidify (if adding thickness)
+      5. Bevel (edge treatment after all geometry changes)
+      6. Weighted Normal (shading improvement)
+      7. Triangulate (for export only)
+      8. Subdivision (last, for smoothing)
+
+      WHY this order:
+      - Mirror: Want symmetrical booleans
+      - Boolean before Bevel: Bevel the cut edges
+      - Bevel before Subdivision: Smooth bevel segments
+      - Weighted Normal before Triangulate: Better shading
+      ```
+
+  # ============================================
+  # RIGGING AND ANIMATION PREPARATION
+  # ============================================
+
+  - id: insufficient-edge-loops-joints
+    title: Insufficient Edge Loops at Joints
+    severity: critical
+    category: topology
+    description: |
+      Joints need minimum 3 edge loops for clean deformation. Less than
+      that causes pinching, stretching, and ugly deformation.
+    symptoms:
+      - Elbow/knee looks "pinched" when bent
+      - Candy wrapper effect on twisted joints
+      - Geometry collapses on itself
+      - Rigger sends mesh back for revision
+    trigger_conditions:
+      - Optimizing too aggressively
+      - Not considering animation during modeling
+      - Using automatic decimation on characters
+    prevention: |
+      Edge loop requirements by joint:
+      ```
+      Minimum 3 loops (pivot + 2 holding):
+        - Elbows, Knees (90-degree bend)
+
+      Minimum 5 loops (for 180-degree range):
+        - Shoulders, Hips
+        - Fingers at each knuckle
+
+      Twist sections (between loops for rotation):
+        - Forearm: 3-4 evenly spaced loops
+        - Upper leg: 3-4 evenly spaced loops
+        - Spine: 2 loops per vertebra
+
+      Holding loops (to limit weight influence):
+        - Place at edges of deformation zones
+        - Helps contain weight painting to specific areas
+      ```
+
+  - id: poles-at-joints
+    title: Poles Placed at Joints
+    severity: high
+    category: topology
+    description: |
+      5-edge poles (where 5 edges meet at one vertex) create tension in
+      the mesh. At joints, this tension causes visible artifacts during
+      deformation.
+    symptoms:
+      - Star-shaped artifacts when limb bends
+      - Shading errors at bend points
+      - Stretching in unexpected directions
+    trigger_conditions:
+      - Rushing through retopology
+      - Not planning edge flow before starting
+      - Automatic retopology without cleanup
+    prevention: |
+      Pole placement rules:
+      ```
+      SAFE zones for poles (low deformation):
+        - Center of cheek
+        - Back of head
+        - Center of back
+        - Back of hand
+        - Top of foot
+
+      DANGER zones (never place poles):
+        - Elbow/knee pivot
+        - Shoulder/hip ball joint
+        - Around eyes
+        - Around mouth
+        - Wrist crease
+        - Finger joints
+
+      How to move poles:
+        1. Identify pole location
+        2. Add edge loop to one side
+        3. Dissolve edge on other side
+        4. Pole moves to new location
+      ```
+
+  # ============================================
+  # EXPORT AND INTEROPERABILITY
+  # ============================================
+
+  - id: embedded-textures-bloat
+    title: Embedded Textures Bloat FBX Files
+    severity: medium
+    category: export
+    description: |
+      FBX can embed textures inside the file, causing massive file sizes
+      and version control nightmares. A 1MB model becomes 100MB+.
+    symptoms:
+      - FBX file is enormous (10x expected size)
+      - Git operations are slow
+      - Importing takes forever
+      - Textures are duplicated on disk
+    trigger_conditions:
+      - FBX export with "Embed Textures" enabled
+      - Default export settings in some software
+      - Trying to make "portable" files
+    prevention: |
+      Export without embedded textures:
+      ```
+      Blender:
+        FBX Export → Path Mode: Copy (or Auto/Strip)
+        UNCHECK "Embed Textures"
+
+      Maya:
+        Export → Embed Media: OFF
+
+      Best practice:
+        - Meshes in one folder
+        - Textures in textures/ subfolder
+        - Relative paths in material
+        - Version control both separately
+      ```
+
+  - id: triangulation-differences
+    title: Different Software Triangulates Differently
+    severity: high
+    category: export
+    description: |
+      When you export quads/n-gons, each software triangulates them
+      differently. This causes shading differences and unpredictable results.
+    symptoms:
+      - Model looks different in engine than in DCC
+      - Shading breaks along diagonal lines
+      - Different results on different import
+    trigger_conditions:
+      - Exporting quads to game engine
+      - Mixed quad/triangle topology
+      - N-gons in export data
+    prevention: |
+      Triangulate BEFORE export:
+      ```
+      In Blender:
+        Add Triangulate modifier (keep at bottom of stack)
+        Export with modifier applied
+
+      Or export with:
+        FBX Export → Geometry → Triangulate Faces: ON
+
+      Triangulate method matters:
+        - Beauty: Tries to make nice triangles (slower)
+        - Fixed: Consistent but may create slivers
+        - Use Beauty for final, Fixed for iteration
+      ```
+
+  - id: smooth-groups-mismatch
+    title: Smoothing Groups Don't Transfer
+    severity: medium
+    category: export
+    description: |
+      Different software handles edge smoothing differently. Maya uses
+      smoothing groups, Blender uses sharp edges, engines use their own
+      systems. Data can be lost in translation.
+    symptoms:
+      - Hard edges become soft after export
+      - Soft edges become hard
+      - Faceted shading on curved surfaces
+      - Seams visible where they shouldn't be
+    trigger_conditions:
+      - Cross-DCC workflow
+      - FBX between Blender and Maya
+      - Not explicitly setting edge data
+    prevention: |
+      Explicit smoothing workflow:
+      ```
+      Before export:
+        1. Decide which edges should be hard
+        2. Mark them explicitly (not just auto-smooth)
+        3. Export with edge data included
+
+      Blender:
+        - Mark Sharp (Ctrl+E → Mark Sharp)
+        - Add Edge Split or Weighted Normal modifier
+        - Export with "Smoothing: Edge"
+
+      Maya to Blender:
+        - May need to convert smoothing groups to hard edges
+        - Use "Mesh → Soften/Harden" before export
+
+      In engine:
+        - Import normals from file (not computed)
+        - Or regenerate with known settings
+      ```
+
+  # ============================================
+  # WORKFLOW AND ORGANIZATION
+  # ============================================
+
+  - id: no-backup-before-destructive-ops
+    title: No Backup Before Destructive Operations
+    severity: critical
+    category: workflow
+    description: |
+      Applying modifiers, triangulating, or decimating without backup
+      means you can't recover the clean source geometry.
+    symptoms:
+      - Need to make changes but modifiers are applied
+      - Client wants different detail level
+      - Can't create different LODs from source
+      - Wasted hours of work
+    trigger_conditions:
+      - "Just quickly applying" modifiers
+      - Deadline pressure
+      - Not using version control
+    prevention: |
+      Non-destructive workflow:
+      ```
+      Golden rule: NEVER apply modifiers to your only copy
+
+      Method 1: Pre-apply backup
+        1. Select object
+        2. Shift+D to duplicate
+        3. Move duplicate to "Backup" collection
+        4. Hide collection
+        5. NOW apply modifiers to working copy
+
+      Method 2: Version saves
+        1. Save as ModelName_v01.blend
+        2. Before applying: Save as ModelName_v02.blend
+        3. Apply in v02
+        4. v01 remains clean
+
+      Method 3: Git/version control
+        1. Commit before destructive operations
+        2. Tag important milestones
+        3. Can always revert
+      ```
+
+  - id: random-file-organization
+    title: Chaotic File Organization
+    severity: medium
+    category: workflow
+    description: |
+      Inconsistent naming and folder structure causes lost files, wrong
+      versions in production, and team confusion.
+    symptoms:
+      - "Which is the final file?"
+      - Wrong version shipped
+      - Can't find source files
+      - Team members can't understand project structure
+    trigger_conditions:
+      - Working fast without structure
+      - Multiple artists without guidelines
+      - Legacy project without standards
+    prevention: |
+      Establish structure from day one:
+      ```
+      Project/
+      ├── Assets/
+      │   ├── Characters/
+      │   │   └── CharacterName/
+      │   │       ├── Source/        (.blend, .ma, .zpr)
+      │   │       ├── Export/        (.fbx, .gltf)
+      │   │       └── Textures/      (.png, .tga)
+      │   ├── Props/
+      │   └── Environment/
+      ├── References/
+      └── Documentation/
+
+      Naming convention:
+        Type_Name_Variant_LOD.ext
+        SM_Chair_Wood_LOD0.fbx
+        SK_Hero_Default_LOD0.fbx
+
+      Version in filename for WIP:
+        SM_Chair_Wood_v03_wip.blend
+        SM_Chair_Wood_v03_final.blend
+      ```
+
+# Quick lookup table
+quick_reference:
+  before_export:
+    - "Apply all transforms (Ctrl+A)"
+    - "Check scale is 1,1,1"
+    - "Recalculate normals (Shift+N)"
+    - "Check for non-manifold geometry"
+    - "Verify no n-gons"
+    - "Remove floating vertices"
+
+  before_baking:
+    - "Apply transforms on BOTH high and low poly"
+    - "UVs must not overlap (use UV0 for baking)"
+    - "Normals correct on both meshes"
+    - "Cage fully encompasses high poly"
+
+  before_rigging_handoff:
+    - "3+ edge loops at every joint"
+    - "No poles at deformation areas"
+    - "Quads only (triangles at poles only)"
+    - "Clean mesh (no floating verts, no n-gons)"
+    - "Origin at expected location"
+
+  before_engine_import:
+    - "File size reasonable (no embedded textures)"
+    - "Axis orientation correct for engine"
+    - "Scale appropriate for engine units"
+    - "Materials named correctly"
+    - "LODs numbered correctly"

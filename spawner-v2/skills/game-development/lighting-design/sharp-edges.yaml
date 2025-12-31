@@ -1,0 +1,572 @@
+# Lighting Design Sharp Edges
+# Critical gotchas that have ruined lighting setups and wasted weeks of work
+
+sharp_edges:
+  - id: lightmap-uv-seam-artifacts
+    summary: Lightmap UV seams cause visible lighting discontinuities
+    severity: critical
+    situation: Baked lighting shows hard lines or color shifts at mesh UV island boundaries
+    why: |
+      Lightmap UVs must have padding between islands to prevent texture bleeding. When
+      the GPU samples between texels at a seam, it can pick up data from an adjacent
+      island. This is especially visible on curved surfaces where lighting should be
+      continuous. The problem is made worse by lightmap compression and mip levels.
+    solution: |
+      1. Ensure UV island padding in lightmap UVs:
+         - Minimum 2-4 texels at target resolution
+         - More for lower resolution lightmaps
+         - Account for mip chain (double padding per mip)
+
+      2. Auto-generate lightmap UVs with padding:
+         Unity: Generate Lightmap UVs checkbox, Pack Margin setting
+         Unreal: Light Map Resolution, Light Map Coordinate Index
+
+      3. For critical meshes:
+         - Create dedicated lightmap UV channel (UV1 or UV2)
+         - Maximize island size, minimize seam count
+         - Place seams at hard edges (normal breaks)
+
+      4. Dilate lightmap edges in bake:
+         - Most bakers have dilation setting (2-4 pixels)
+         - Fills padding area with edge color
+    symptoms:
+      - Hard lines visible on smooth curved surfaces
+      - Color shifts at mesh seams
+      - Lines appear at specific viewing angles
+      - Worse after lightmap compression
+      - Visible in certain lighting conditions only
+    detection_pattern: 'LightmapParameters|lightmapScaleOffset'
+    version_range: "*"
+    red_flags:
+      - Importing meshes without checking lightmap UVs
+      - Pack margin set to 0
+      - Overlapping lightmap UV islands
+      - Single lightmap UV for complex mesh
+
+  - id: light-probe-bleeding
+    summary: Light probes leak light through walls and floors
+    severity: critical
+    situation: Dynamic objects in dark rooms pick up bright lighting from adjacent areas
+    why: |
+      Light probes are interpolated by position - they have no knowledge of geometry.
+      A probe on the bright side of a wall will influence objects near that wall on
+      the dark side. The interpolation is based on a tetrahedralization of probe
+      positions, not on actual light paths. This is especially problematic in
+      multi-story buildings and thin walls.
+    solution: |
+      1. Dense probe placement at boundaries:
+         - Place probes on BOTH sides of walls
+         - Very close spacing at transitions (0.5-1m)
+         - Probes at floor/ceiling of each level
+
+      2. Use probe volumes/regions:
+         Unity: Light Probe Groups with dense boundary sampling
+         Unreal: Lightmass Importance Volumes with tight bounds
+
+      3. Manual probe editing:
+         - Remove probes that sample through geometry
+         - Add probes in dark corners that are being missed
+         - Test by moving object slowly through space
+
+      4. Architectural solutions:
+         - Thicken walls in geometry
+         - Add "blocker" geometry for probe sampling
+         - Extend floors/ceilings past walls
+
+      5. Consider alternatives for problematic areas:
+         - Light Probe Proxy Volumes (LPPV) in Unity
+         - Per-object ambient overrides
+         - Dedicated indoor/outdoor probe sets
+    symptoms:
+      - Characters glow in dark rooms
+      - Light "bleeds" through thin walls
+      - Upper floors lit by ground floor
+      - Brightness pops when crossing thresholds
+      - Dynamic objects don't match baked surfaces
+    detection_pattern: 'LightProbe|lightProbeUsage'
+    version_range: "*"
+    red_flags:
+      - Single-layer probe grid for multi-story building
+      - Thin walls without probe consideration
+      - Auto-generated probes without validation
+      - No probes in dark areas
+
+  - id: shadow-acne-peter-panning
+    summary: Shadows show dotted patterns (acne) or float above surfaces (peter panning)
+    severity: high
+    situation: Self-shadowing produces artifacts, or shadows don't touch their casters
+    why: |
+      Shadow mapping compares depth values with limited precision. Shadow acne occurs
+      when a surface incorrectly shadows itself due to depth precision limits. Bias
+      pushes the shadow test away from the surface - too little causes acne, too much
+      causes shadows to detach from objects (peter panning). Normal bias helps but
+      can cause light leaking at grazing angles.
+    solution: |
+      1. Balanced bias settings:
+         Depth Bias: Start at 1-2 (units vary by engine)
+         Normal Bias: Start at 1-2
+         Iterate: Fix acne first, then reduce until peter-panning gone
+
+      2. Per-light tuning:
+         - Directional lights need different bias than point/spot
+         - Large shadow distances need more bias
+         - Near objects need less bias
+
+      3. Shadow map resolution:
+         - Higher resolution = less bias needed
+         - But comes with performance cost
+         - Balance quality vs performance
+
+      4. Slope-scale bias:
+         - Automatically adjusts bias based on surface angle
+         - Better for varied geometry
+         - Most engines have this option
+
+      5. Alternative techniques:
+         - Normal offset shadows (offset in normal direction)
+         - VSM/ESM (different artifacts, no acne)
+         - Raytraced shadows (expensive, no bias issues)
+    symptoms:
+      - Dotted/striped patterns on surfaces
+      - Shadows float above ground
+      - Shadows disconnect at steep angles
+      - Moire patterns in shadows
+      - Worse at grazing angles
+    detection_pattern: 'shadowBias|normalBias|shadowNormalBias|depthBias'
+    version_range: "*"
+    red_flags:
+      - Same bias values for all light types
+      - Zero bias settings
+      - Very low shadow resolution with complex geometry
+      - Large shadow distance without cascade adjustment
+
+  - id: bake-time-explosion
+    summary: Lightmap baking takes hours or days instead of minutes
+    severity: high
+    situation: Adding content causes bake time to increase exponentially
+    why: |
+      Lightmap baking is O(n * m * samples) where n = texels, m = light bounces.
+      High resolution lightmaps on large scenes explode quickly. Additionally,
+      GPU bakers can run out of VRAM, falling back to slow CPU paths. Overlapping
+      geometry causes resampling. Unnecessary bounces add more time.
+    solution: |
+      1. Resolution audit:
+         - Lower resolution for non-hero surfaces
+         - 4-8 texels/unit is fine for distant objects
+         - Use resolution per object/group, not global
+
+      2. Reduce bounce counts:
+         - 2-3 bounces is usually sufficient
+         - First bounce is 80% of GI contribution
+         - More bounces = diminishing returns + time
+
+      3. Scene segmentation:
+         Unity: Bake selected objects only
+         Unreal: Lightmass Importance Volumes
+
+      4. GPU baking optimization:
+         - Ensure GPU baking is enabled
+         - Check VRAM isn't exceeded (watch for fallback)
+         - Close other GPU applications
+
+      5. Geometry cleanup:
+         - Remove overlapping faces
+         - Delete interior faces player never sees
+         - Simplify distant geometry
+
+      6. Iterative workflow:
+         - Use preview/fast bake for iteration
+         - Only full quality for final
+         - Bake zones independently when possible
+    symptoms:
+      - Bake time in hours instead of minutes
+      - Each added object multiplies bake time
+      - GPU memory errors during bake
+      - Progress bar barely moves
+      - Editor becomes unresponsive
+    detection_pattern: 'lightmapResolution|indirectResolution|Lightmapping'
+    version_range: "*"
+    red_flags:
+      - Global high resolution lightmap settings
+      - 5+ light bounces
+      - Entire world in single bake
+      - Overlapping/z-fighting geometry
+
+  - id: overlapping-lights-overbright
+    summary: Multiple overlapping lights cause blown-out overbright areas
+    severity: high
+    situation: Areas with multiple lights become completely white/overexposed
+    why: |
+      Light is additive. Two 1-intensity lights in the same spot = 2 intensity.
+      This is physically correct but often unintended. Combined with bloom,
+      areas quickly become blown out. Artists often create lights without
+      checking combined contribution.
+    solution: |
+      1. Light intensity audit:
+         - View scene without post-processing
+         - Check luminance/exposure values
+         - Keep important areas in 0-1 range for LDR
+
+      2. Light overlap planning:
+         - Visualize light radius/attenuation
+         - Reduce intensity of overlapping lights
+         - Key light should dominate, fills should be subtle
+
+      3. Use light groups:
+         - Isolate lights to check individual contribution
+         - A/B test light combinations
+         - Document intended combined intensity
+
+      4. Exposure/tonemapping adjustment:
+         - Set exposure for brightest intended area
+         - Use highlight compression (filmic tonemapping)
+         - Bloom threshold relative to scene luminance
+
+      5. Physical light units:
+         - Use real-world values (lumens, lux)
+         - Natural attenuation prevents overbright
+         - Requires proper exposure workflow
+    symptoms:
+      - White/blown out areas
+      - Bloom explosion in certain spots
+      - Brightness varies wildly across scene
+      - Can't see detail in bright areas
+      - Looks fine without post-processing
+    detection_pattern: 'intensity|lightIntensity|color.*\\*'
+    version_range: "*"
+    red_flags:
+      - Multiple point lights in same area
+      - No consideration of additive contribution
+      - Bloom threshold set too low
+      - No exposure compensation
+
+  - id: dynamic-objects-baked-mismatch
+    summary: Dynamic objects look wrong in baked lighting environments
+    severity: critical
+    situation: Characters/props don't match the lighting of the baked environment
+    why: |
+      Baked lighting stores in textures (lightmaps) only for static geometry.
+      Dynamic objects use light probes for indirect light and realtime lights
+      for direct. If probes don't capture the baked lighting accurately, or
+      if the main light is different for baked vs realtime, dynamic objects
+      look pasted in.
+    solution: |
+      1. Ensure main light matches:
+         - Realtime light with same direction/color as baked
+         - Mixed mode: same light for both bake and realtime
+         - Match shadow softness and color
+
+      2. Accurate probe placement:
+         - Dense probes in player-accessible areas
+         - Capture all lighting variations
+         - Validate by moving debug sphere through scene
+
+      3. Reflection probe alignment:
+         - Interior probes for indoor spaces
+         - Box projection for rooms
+         - Update probes if environment changes
+
+      4. Consider hybrid approaches:
+         - Realtime GI for dynamic contribution (expensive)
+         - SSGI/RTGI for additional indirect
+         - Ambient override per area
+
+      5. Art direction tricks:
+         - Dedicated character rim light
+         - Subtle ambient boost on characters
+         - Match key light exactly
+    symptoms:
+      - Characters look "pasted in"
+      - Wrong color tint on dynamic objects
+      - Missing indirect lighting on characters
+      - Reflections don't match environment
+      - Moving objects "pop" at probe boundaries
+    detection_pattern: 'lightProbe|useLightProbes|ContributeGI'
+    version_range: "*"
+    red_flags:
+      - Only skybox reflection, no reflection probes
+      - Different sun angle for bake vs realtime
+      - Sparse light probes in player areas
+      - No mixed mode lights
+
+  - id: reflection-probe-parallax-errors
+    summary: Reflections slide/stretch incorrectly on surfaces
+    severity: medium
+    situation: Metallic surfaces show reflections in wrong positions
+    why: |
+      Standard reflection probes capture from a single point. When the reflecting
+      surface is far from that point, the reflection appears in the wrong place.
+      Box projection helps for rooms but requires careful setup. Probe blending
+      at boundaries can also cause issues.
+    solution: |
+      1. Enable box projection:
+         - Set probe bounds to match room geometry
+         - Adjust box offset to room center
+         - Works best for box-shaped rooms
+
+      2. Probe placement:
+         - Center of room for interiors
+         - One probe per distinct space
+         - More probes for large/complex areas
+
+      3. Blend distance tuning:
+         - Reduce blend distance to minimize overlap
+         - Sharp transition sometimes better than wrong blend
+         - Test metallic objects at boundaries
+
+      4. For complex geometry:
+         - Multiple probes with careful blending
+         - Accept limitations of probe-based reflections
+         - Consider SSR for accurate reflections (more expensive)
+
+      5. Planar reflections:
+         - For flat surfaces (water, mirrors)
+         - More expensive but accurate
+         - Only enable where needed
+    symptoms:
+      - Reflections slide as camera moves
+      - Wrong objects visible in reflection
+      - Stretching at room edges
+      - Reflection "pops" at probe boundaries
+      - Metallic objects look incorrect
+    detection_pattern: 'ReflectionProbe|boxProjection|blendDistance'
+    version_range: "*"
+    red_flags:
+      - Single reflection probe for entire level
+      - Box projection disabled in interiors
+      - Probes placed in walls/corners
+      - Very large blend distances
+
+  - id: mobile-lighting-performance
+    summary: Lighting design that works on PC destroys mobile performance
+    severity: critical
+    situation: Game runs well on desktop, terribly on mobile devices
+    why: |
+      Mobile GPUs are fundamentally different from desktop. They're tile-based,
+      bandwidth limited, and thermal constrained. Desktop lighting strategies
+      don't transfer. Realtime shadows are luxury. Multiple realtime lights are
+      expensive. Lightmaps hit memory limits.
+    solution: |
+      1. Realtime light limits:
+         - 1-2 realtime lights max (often just sun)
+         - Avoid point/spot shadows entirely if possible
+         - Use baked shadows with realtime directional
+
+      2. Lightmap optimization:
+         - Lower resolution (10-20% of desktop)
+         - Aggressive compression
+         - Fewer bounces (1-2 max)
+         - ASTC compression for size
+
+      3. Simplified probe setups:
+         - Fewer, larger probe volumes
+         - Lower resolution probe capture
+         - Consider flat ambient for some scenes
+
+      4. Shadow simplification:
+         - Single cascade, shorter distance
+         - Lower resolution shadow maps
+         - Consider blob shadows for characters
+
+      5. Quality tiers:
+         - Separate lighting setups per tier
+         - Mobile: baked only, simple probes
+         - PC: full realtime, high-res everything
+
+      6. Avoid:
+         - Volumetric lighting
+         - Screen-space effects (SSAO, SSR)
+         - HDR rendering (if possible)
+         - Complex tonemapping
+    symptoms:
+      - Frame rate drops below 30 fps
+      - Device overheats
+      - Battery drains rapidly
+      - Visual quality same but performance terrible
+      - Works in editor, dies on device
+    detection_pattern: 'QualitySettings|graphicsTier|mobile'
+    version_range: "*"
+    red_flags:
+      - Same lighting settings for mobile and desktop
+      - Realtime shadows on mobile
+      - No mobile testing during development
+      - No quality tier system
+
+  - id: emissive-no-contribution
+    summary: Emissive materials don't actually light the environment
+    severity: medium
+    situation: Bright glowing materials don't illuminate nearby surfaces
+    why: |
+      By default, emissive materials only affect their own appearance - they
+      don't contribute to scene lighting. This is a common misconception.
+      Emission contribution to lightmaps requires explicit settings, and
+      realtime emission contribution requires actual lights or advanced GI.
+    solution: |
+      1. For baked GI contribution:
+         Unity: Enable "Contribute Global Illumination" on mesh
+                Set Emission > Global Illumination > Baked
+         Unreal: Set Emissive for Static Lighting on material
+                 Bake lightmaps
+
+      2. Pair with actual lights:
+         - Place point light at emissive surface
+         - Match light color and rough intensity
+         - Light does the work, emissive provides visual
+
+      3. For realtime emission:
+         - Lumen (UE5) handles this automatically
+         - RTGI solutions can capture emission
+         - Otherwise, must use actual lights
+
+      4. Area light matching:
+         - If engine supports, use area light shaped to emissive
+         - Rectangle lights for screens
+         - Disc lights for circular emissives
+    symptoms:
+      - Neon sign doesn't light nearby wall
+      - TV screen doesn't illuminate room
+      - Glowing material looks bright but no light cast
+      - Emissive looks wrong compared to actual lights
+    detection_pattern: 'emission|emissive|_EmissionColor|Global Illumination'
+    version_range: "*"
+    red_flags:
+      - Expecting emission to light scene without configuration
+      - No separate light paired with emissive
+      - Emissive intensity not set for GI contribution
+      - Realtime emission expected without proper GI
+
+  - id: hdr-bloom-clipping
+    summary: Bloom looks wrong due to improper HDR handling
+    severity: medium
+    situation: Bloom appears as harsh circles or doesn't appear at all
+    why: |
+      Bloom extracts bright pixels above a threshold. If your brightest value
+      is 1.0 (LDR), bloom threshold of 1.0 captures nothing. If values are
+      too high without proper tonemapping, bloom explodes. The threshold must
+      be set relative to your scene's actual luminance values.
+    solution: |
+      1. Work in true HDR:
+         - Render target: R16G16B16A16_Float
+         - Light intensities can exceed 1.0
+         - Sun at 5-10 intensity, indoor lights lower
+
+      2. Set threshold properly:
+         - Threshold relative to scene values
+         - If max scene value is 3.0, threshold at 1.5
+         - Soft knee/threshold for gradual falloff
+
+      3. Bloom before tonemapping:
+         - Extract bloom in HDR space
+         - Apply tonemapping after bloom composite
+         - Otherwise bloom loses energy
+
+      4. Physical light values help:
+         - Use lumens/lux for lights
+         - Natural range informs threshold
+         - Consistent across scenes
+
+      5. Intensity and scatter:
+         - Lower intensity for subtle bloom
+         - Higher scatter for softer, larger bloom
+         - Avoid harsh circular artifacts
+    symptoms:
+      - No bloom on bright objects
+      - Bloom as harsh circles/halos
+      - Bloom intensity varies wildly between scenes
+      - Tonemapped image has no bloom at all
+      - Bloom applies to everything or nothing
+    detection_pattern: 'bloom|Bloom|threshold|intensity'
+    version_range: "*"
+    red_flags:
+      - Bloom threshold = 1.0 with LDR values
+      - Bloom after tonemapping
+      - No consideration of scene luminance range
+      - Same bloom settings for all scenes
+
+# ============================================================================
+# SYMPTOM INDEX
+# ============================================================================
+symptom_index:
+  "visible seams on mesh":
+    - lightmap-uv-seam-artifacts
+
+  "dynamic objects look wrong":
+    - dynamic-objects-baked-mismatch
+    - light-probe-bleeding
+
+  "light leaking through walls":
+    - light-probe-bleeding
+
+  "shadows have patterns/dots":
+    - shadow-acne-peter-panning
+
+  "shadows floating":
+    - shadow-acne-peter-panning
+
+  "bake takes forever":
+    - bake-time-explosion
+
+  "areas too bright":
+    - overlapping-lights-overbright
+    - hdr-bloom-clipping
+
+  "reflections wrong":
+    - reflection-probe-parallax-errors
+
+  "mobile performance terrible":
+    - mobile-lighting-performance
+
+  "emissive not lighting":
+    - emissive-no-contribution
+
+  "bloom looks bad":
+    - hdr-bloom-clipping
+
+  "characters glow in dark":
+    - light-probe-bleeding
+
+  "lighting pops when moving":
+    - light-probe-bleeding
+    - reflection-probe-parallax-errors
+
+# ============================================================================
+# RED FLAGS
+# ============================================================================
+red_flags:
+  code_patterns:
+    - pattern: 'lightmapResolution.*=.*\d{3,}'
+      issue: "Very high lightmap resolution - check if needed"
+      severity: medium
+
+    - pattern: 'shadowCascadeCount.*=.*1(?!\d)'
+      issue: "Single shadow cascade - quality/distance tradeoff"
+      severity: low
+
+    - pattern: 'shadowDistance.*=.*\d{4,}'
+      issue: "Very long shadow distance - performance concern"
+      severity: medium
+
+    - pattern: 'realtime.*(?:point|spot).*shadow'
+      issue: "Realtime point/spot shadows - expensive"
+      severity: high
+
+  architecture_smells:
+    - smell: "Same lighting settings for all platforms"
+      risk: "Mobile will suffer, or PC will be underutilized"
+      fix: "Implement quality tiers with platform-specific settings"
+
+    - smell: "No lightmap resolution variation in scene"
+      risk: "Either wasting memory or lacking quality where needed"
+      fix: "Audit surfaces and assign resolution by importance"
+
+    - smell: "Auto-generated light probes without review"
+      risk: "Probes inside geometry, missing at transitions"
+      fix: "Manual review and adjustment of probe placement"
+
+    - smell: "No reflection probes in interior spaces"
+      risk: "Metallic objects reflect skybox indoors"
+      fix: "Add reflection probe per distinct interior space"
+
+    - smell: "Realtime GI enabled without performance budget"
+      risk: "Performance problems on target hardware"
+      fix: "Profile on target, consider baked alternatives"

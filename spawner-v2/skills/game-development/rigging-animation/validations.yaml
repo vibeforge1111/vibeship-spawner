@@ -1,0 +1,345 @@
+# Rigging & Animation Validations
+# Automated checks to catch common rigging and animation issues
+
+validations:
+  # ============================================================================
+  # Maya Python/MEL Script Validations
+  # ============================================================================
+
+  - id: rig-maya-hardcoded-joint-names
+    name: Hardcoded Joint Names
+    severity: warning
+    type: regex
+    pattern:
+      - 'cmds\.joint\([^)]*name\s*=\s*["\'](?!.*{)[^"\']+["\']'
+      - 'pm\.joint\([^)]*name\s*=\s*["\'](?!.*{)[^"\']+["\']'
+    message: "Hardcoded joint names make rigs inflexible. Use naming convention variables or template strings."
+    fix_action: "Create naming convention constants: SIDE_PREFIX, JOINT_SUFFIX, etc. Use f-strings or format()."
+    applies_to:
+      - "*.py"
+      - "*.mel"
+
+  - id: rig-maya-bind-without-max-influences
+    name: Bind Skin Without Max Influences
+    severity: warning
+    type: regex
+    pattern:
+      - 'skinCluster\([^)]*(?!.*maximumInfluences)[^)]*\)'
+      - 'bindSkin\([^)]*(?!.*tsb)[^)]*\)'
+    message: "Binding without max influences limit may exceed engine bone limits. Mobile: 4, PC: 8 max."
+    fix_action: "Add maximumInfluences=4 parameter for mobile, maximumInfluences=8 for PC targets."
+    applies_to:
+      - "*.py"
+      - "*.mel"
+
+  - id: rig-maya-joint-orient-not-zeroed
+    name: Joint Orient Check Missing
+    severity: warning
+    type: regex
+    pattern:
+      - 'makeIdentity\([^)]*apply\s*=\s*(?:True|1)[^)]*\)(?![\s\S]*?jointOrient)'
+    message: "Freezing transforms without checking joint orient may cause animation issues."
+    fix_action: "After freezeTransformations, verify jointOrient values are as expected for the rig."
+    applies_to:
+      - "*.py"
+      - "*.mel"
+
+  - id: rig-maya-parent-constraint-no-maintain-offset
+    name: Parent Constraint Without Maintain Offset
+    severity: warning
+    type: regex
+    pattern:
+      - 'parentConstraint\([^)]*(?!.*mo=|.*maintainOffset)[^)]*\)'
+    message: "Parent constraint without maintainOffset can cause unexpected snapping."
+    fix_action: "Add mo=True or maintainOffset=True to preserve relative positioning."
+    applies_to:
+      - "*.py"
+      - "*.mel"
+
+  - id: rig-maya-ikhandle-no-solver-type
+    name: IK Handle Without Solver Specification
+    severity: warning
+    type: regex
+    pattern:
+      - 'ikHandle\([^)]*(?!.*solver|.*sol)[^)]*\)'
+    message: "IK handle without explicit solver type may default unexpectedly (SC vs RP)."
+    fix_action: "Specify solver='ikRPsolver' for limbs or solver='ikSCsolver' for simple chains."
+    applies_to:
+      - "*.py"
+      - "*.mel"
+
+  # ============================================================================
+  # Blender Python Script Validations
+  # ============================================================================
+
+  - id: rig-blender-bone-roll-not-set
+    name: Bone Roll Not Explicitly Set
+    severity: warning
+    type: regex
+    pattern:
+      - 'edit_bones\.new\([^)]*\)(?![\s\S]{0,100}\.roll\s*=)'
+    message: "Bone created without setting roll. Inconsistent rolls cause IK and retargeting issues."
+    fix_action: "Set bone.roll explicitly after creation. Use bpy.ops.armature.calculate_roll() for consistency."
+    applies_to:
+      - "*.py"
+
+  - id: rig-blender-constraint-no-subtarget
+    name: Bone Constraint Missing Subtarget
+    severity: error
+    type: regex
+    pattern:
+      - "constraints\.new\([^)]*(?:'COPY_|'IK'|'DAMPED_TRACK')[^)]*\)[\s\S]{0,200}(?!.*subtarget)"
+    message: "Bone constraint without subtarget will likely fail. Target bone not specified."
+    fix_action: "Set constraint.subtarget = 'bone_name' after adding the constraint."
+    applies_to:
+      - "*.py"
+
+  - id: rig-blender-auto-weights-only
+    name: Using Only Automatic Weights
+    severity: warning
+    type: regex
+    pattern:
+      - "bpy\.ops\.object\.parent_set\([^)]*type\s*=\s*['\"]ARMATURE_AUTO['\"]"
+    message: "Automatic weights alone often need cleanup. Add weight normalization and limit total."
+    fix_action: "Follow up with bpy.ops.object.vertex_group_limit_total(limit=4) and clean weights."
+    applies_to:
+      - "*.py"
+
+  - id: rig-blender-armature-scale-not-applied
+    name: Armature Scale Not Applied
+    severity: warning
+    type: regex
+    pattern:
+      - "bpy\.data\.armatures\.new\([^)]*\)(?![\s\S]{0,500}bpy\.ops\.object\.transform_apply)"
+    message: "Armature created without applying transforms. Scale issues will cause export problems."
+    fix_action: "After armature creation, use bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)."
+    applies_to:
+      - "*.py"
+
+  # ============================================================================
+  # Unity C# Animation Validations
+  # ============================================================================
+
+  - id: rig-unity-animator-getbone-magic-string
+    name: HumanBodyBones Magic String Usage
+    severity: warning
+    type: regex
+    pattern:
+      - 'GetBoneTransform\([^)]*HumanBodyBones\.\w+'
+    message: "Using HumanBodyBones directly. Consider caching bone transforms for performance."
+    fix_action: "Cache bone transforms in Awake() instead of calling GetBoneTransform every frame."
+    applies_to:
+      - "*.cs"
+
+  - id: rig-unity-animation-rigging-no-weight
+    name: Animation Rigging Without Weight Control
+    severity: warning
+    type: regex
+    pattern:
+      - 'TwoBoneIKConstraint|MultiAimConstraint|DampedTransform'
+    message: "Animation Rigging constraint detected. Ensure weight property is exposed for blending."
+    fix_action: "Add [Range(0,1)] public float constraintWeight and control via RigBuilder.layers."
+    applies_to:
+      - "*.cs"
+
+  - id: rig-unity-root-motion-direct-access
+    name: Root Motion Without Delta Check
+    severity: warning
+    type: regex
+    pattern:
+      - 'animator\.rootPosition|animator\.rootRotation(?![\s\S]{0,50}delta)'
+    message: "Accessing root position/rotation directly. Consider using deltaPosition/deltaRotation for movement."
+    fix_action: "Use animator.deltaPosition and animator.deltaRotation for frame-based root motion."
+    applies_to:
+      - "*.cs"
+
+  - id: rig-unity-avatar-mask-null-check
+    name: Avatar Mask Without Null Check
+    severity: warning
+    type: regex
+    pattern:
+      - '\.avatarMask\s*=\s*\w+(?![\s\S]{0,50}null)'
+    message: "Setting avatar mask without null check. Missing masks cause layer to affect all bones."
+    fix_action: "Add null check: if (mask != null) layer.avatarMask = mask;"
+    applies_to:
+      - "*.cs"
+
+  - id: rig-unity-ik-no-weight
+    name: IK Weight Not Animated
+    severity: warning
+    type: regex
+    pattern:
+      - 'SetIKPositionWeight\([^,]+,\s*1(?:\.0)?f?\s*\)'
+      - 'SetIKRotationWeight\([^,]+,\s*1(?:\.0)?f?\s*\)'
+    message: "IK weight set to 1 without transition. This causes snapping. Lerp weights for smooth IK."
+    fix_action: "Lerp IK weight over time: ikWeight = Mathf.Lerp(ikWeight, targetWeight, Time.deltaTime * speed);"
+    applies_to:
+      - "*.cs"
+
+  # ============================================================================
+  # Unreal C++/Blueprint Validations
+  # ============================================================================
+
+  - id: rig-unreal-skeletal-mesh-no-lod
+    name: Skeletal Mesh Without LOD Setup
+    severity: warning
+    type: regex
+    pattern:
+      - 'USkeletalMesh\*(?![\s\S]{0,200}LOD|GetNumLODs)'
+    message: "Skeletal mesh referenced without LOD consideration. Performance issue on complex characters."
+    fix_action: "Implement LOD switching. Use GetNumLODs() and SetForcedLOD() for distance-based quality."
+    applies_to:
+      - "*.cpp"
+      - "*.h"
+
+  - id: rig-unreal-animation-instance-cast
+    name: Unsafe Animation Instance Cast
+    severity: warning
+    type: regex
+    pattern:
+      - 'Cast<U\w*AnimInstance>\s*\([^)]*GetAnimInstance\(\)'
+    message: "Direct cast of AnimInstance may return null. Check before using."
+    fix_action: "Use if (UMyAnimInstance* Anim = Cast<UMyAnimInstance>(Mesh->GetAnimInstance())) { ... }"
+    applies_to:
+      - "*.cpp"
+
+  - id: rig-unreal-control-rig-no-weight
+    name: Control Rig Element Without Weight
+    severity: warning
+    type: regex
+    pattern:
+      - 'FRigUnit_\w+(?![\s\S]{0,100}Weight)'
+    message: "Control Rig unit detected. Ensure Weight parameter is exposed for blending."
+    fix_action: "Add UPROPERTY Weight float to rig unit and use for procedural blending."
+    applies_to:
+      - "*.cpp"
+      - "*.h"
+
+  # ============================================================================
+  # FBX/Export File Validations
+  # ============================================================================
+
+  - id: rig-fbx-python-no-bake
+    name: FBX Export Without Animation Bake
+    severity: warning
+    type: regex
+    pattern:
+      - 'FBXExport[^;]*(?!.*[Bb]ake)'
+      - 'export_scene_fbx\([^)]*(?!.*bake_anim)'
+    message: "FBX export without baking may not include all animation data correctly."
+    fix_action: "Enable bake_anim=True in Blender, or 'Bake Animation' in Maya FBX export settings."
+    applies_to:
+      - "*.py"
+      - "*.mel"
+
+  # ============================================================================
+  # General Rigging Script Validations
+  # ============================================================================
+
+  - id: rig-script-magic-bone-numbers
+    name: Magic Numbers for Bone Limits
+    severity: warning
+    type: regex
+    pattern:
+      - 'bone.*(?:count|limit|max)\s*[=<>]\s*(?:75|128|256|4|8)\b'
+      - 'influence.*(?:count|limit|max)\s*[=<>]\s*[0-9]+'
+    message: "Magic numbers for bone/influence limits. Define constants for platform targets."
+    fix_action: "Create constants: MOBILE_MAX_BONES = 75, PC_MAX_BONES = 128, MOBILE_INFLUENCES = 4"
+    applies_to:
+      - "*.py"
+      - "*.cs"
+      - "*.cpp"
+
+  - id: rig-script-twist-hardcoded-percentage
+    name: Hardcoded Twist Percentages
+    severity: warning
+    type: regex
+    pattern:
+      - 'twist.*(?:weight|influence|factor)\s*=\s*0\.[0-9]+'
+    message: "Hardcoded twist bone percentages. Make configurable for different character proportions."
+    fix_action: "Create twist_distribution list or calculate based on bone chain position."
+    applies_to:
+      - "*.py"
+      - "*.cs"
+      - "*.cpp"
+
+  - id: rig-script-weight-no-normalize
+    name: Weight Assignment Without Normalization
+    severity: warning
+    type: regex
+    pattern:
+      - 'setAttr.*\.weightList|vertex_group.*add\([^)]*\)(?![\s\S]{0,200}normaliz)'
+    message: "Weight assignment without normalization step. Weights may not sum to 1.0."
+    fix_action: "After weight changes, call normalize weights function or verify total = 1.0 per vertex."
+    applies_to:
+      - "*.py"
+      - "*.mel"
+
+  - id: rig-script-joint-creation-loop
+    name: Joint Creation in Loop Without Hierarchy Check
+    severity: warning
+    type: regex
+    pattern:
+      - 'for.*:[\s\S]{0,50}(?:joint\(|edit_bones\.new|AddBone)(?![\s\S]{0,100}parent)'
+    message: "Creating joints in loop without explicit parent assignment. Hierarchy may be wrong."
+    fix_action: "Explicitly set parent joint/bone after creation in loop. Don't rely on selection."
+    applies_to:
+      - "*.py"
+      - "*.mel"
+
+  - id: rig-script-ik-chain-length
+    name: IK Chain Length Not Validated
+    severity: warning
+    type: regex
+    pattern:
+      - 'ikHandle|TwoBoneIK|FABRIK(?![\s\S]{0,200}(?:chain.*length|joint.*count|bone.*count))'
+    message: "IK chain created without validating joint count. Wrong chain length causes solve failures."
+    fix_action: "Validate chain has expected joint count before creating IK. Log warning if mismatch."
+    applies_to:
+      - "*.py"
+      - "*.cs"
+      - "*.cpp"
+
+  # ============================================================================
+  # Animation Data Validations
+  # ============================================================================
+
+  - id: rig-animation-loop-endpoint
+    name: Loop Animation Endpoint Mismatch Risk
+    severity: warning
+    type: regex
+    pattern:
+      - 'loop.*anim|cycl.*anim|WrapMode\.Loop'
+    message: "Looping animation detected. Verify first and last keyframes match for seamless loop."
+    fix_action: "Check that frame 0 and final frame have identical bone transforms. Use 'paste flipped' for walk cycles."
+    applies_to:
+      - "*.py"
+      - "*.cs"
+      - "*.cpp"
+
+  - id: rig-additive-no-reference
+    name: Additive Animation Without Reference Pose
+    severity: warning
+    type: regex
+    pattern:
+      - 'additive|AdditiveReferencePose|AnimationType\.Additive'
+    message: "Additive animation setup. Verify reference pose is correctly set or deltas will be wrong."
+    fix_action: "Set reference pose to T-pose or idle base. Test additive at 100% to verify delta looks correct."
+    applies_to:
+      - "*.py"
+      - "*.cs"
+      - "*.cpp"
+      - "*.asset"
+
+  - id: rig-root-motion-loop-drift
+    name: Root Motion Loop May Drift
+    severity: warning
+    type: regex
+    pattern:
+      - 'root.*motion.*loop|EnableRootMotion.*true[\s\S]{0,200}loop'
+    message: "Root motion with looping animation. Verify root returns to origin at loop point."
+    fix_action: "At final frame, root position delta should equal 0. Extract and verify root motion curve endpoint."
+    applies_to:
+      - "*.py"
+      - "*.cs"
+      - "*.cpp"
