@@ -1,0 +1,623 @@
+id: demoscene-coding
+skill: Demoscene Coding
+version: "1.0"
+
+sharp_edges:
+  - id: gpu-driver-differences
+    severity: CRITICAL
+    title: GPU Drivers Interpret Shaders Differently
+    description: Same GLSL code produces different results (or crashes) on different GPUs
+    symptoms:
+      - Works on your NVIDIA, fails on AMD
+      - Visual artifacts appear on Intel integrated graphics
+      - Shader compiles but renders wrong on competition machine
+      - "It worked in development" becomes demo party tragedy
+    detection_pattern: "shader|glsl|webgl|fragment"
+    solution: |
+      GPU Compatibility Checklist:
+
+      **Known Vendor Differences:**
+      ```yaml
+      nvidia:
+        quirks:
+          - More forgiving with undefined behavior
+          - Better at optimizing complex shaders
+          - Sometimes auto-fixes precision issues
+        dangers:
+          - Code that works here may fail elsewhere
+          - Don't rely on NVIDIA-specific optimizations
+
+      amd:
+        quirks:
+          - Stricter about GLSL spec compliance
+          - Different loop unrolling behavior
+          - Texture sampling edge cases differ
+        dangers:
+          - Will reject shaders NVIDIA accepts
+          - Division by zero handled differently
+
+      intel_integrated:
+        quirks:
+          - Most conservative implementation
+          - Slowest but most spec-compliant
+          - May not support all extensions
+        dangers:
+          - If it works here, it likely works everywhere
+          - Performance will be much lower
+      ```
+
+      **Safe Practices:**
+      ```glsl
+      // 1. Always initialize variables
+      float x = 0.;  // Not: float x;
+
+      // 2. Avoid division by zero
+      float safe = x / (y + 0.0001);  // Not: x / y
+
+      // 3. Use explicit precision
+      precision highp float;  // Not implicit
+
+      // 4. Clamp texture coordinates
+      vec4 c = texture(tex, clamp(uv, 0., 1.));
+
+      // 5. Avoid driver-dependent functions
+      // Use: floor(x + 0.5) instead of: round(x)
+
+      // 6. No undefined derivatives in conditionals
+      // BAD:
+      if(x > 0.) {
+        float d = dFdx(y);  // Undefined!
+      }
+      // GOOD:
+      float d = dFdx(y);
+      if(x > 0.) {
+        // use d
+      }
+      ```
+
+      **Testing Strategy:**
+      1. Test on at least 3 GPU vendors before compo
+      2. Use WebGL Report to check feature support
+      3. Test in multiple browsers (Chrome, Firefox, Safari)
+      4. Have a fallback for when things fail
+    references:
+      - WebGL compatibility issues
+
+  - id: audio-context-restrictions
+    severity: CRITICAL
+    title: Browser Blocks Audio Without User Interaction
+    description: AudioContext won't start until user clicks something
+    symptoms:
+      - Demo starts but no sound
+      - Audio works in development, silent at party
+      - Music starts late after someone clicks
+      - Demo timing falls apart without audio sync
+    detection_pattern: "audio|sound|music|oscillator|bytebeat"
+    solution: |
+      Audio Autoplay Solution:
+
+      **The Problem:**
+      ```javascript
+      // This will NOT work on page load
+      const ctx = new AudioContext();  // Created in "suspended" state
+      oscillator.start();  // Silent!
+      ```
+
+      **The Solution:**
+      ```javascript
+      // Option 1: Click to start (for demos at parties)
+      document.body.onclick = () => {
+        const ctx = new AudioContext();
+        ctx.resume();  // Now it works
+        startDemo(ctx);
+        document.body.onclick = null;
+      };
+
+      // Option 2: Fullscreen trigger (common at parties)
+      document.body.onclick = async () => {
+        await document.documentElement.requestFullscreen();
+        const ctx = new AudioContext();
+        await ctx.resume();
+        startDemo(ctx);
+      };
+
+      // Option 3: Any input works
+      ['click', 'keydown', 'touchstart'].forEach(e =>
+        document.addEventListener(e, function init() {
+          const ctx = new AudioContext();
+          ctx.resume().then(() => startDemo(ctx));
+          ['click', 'keydown', 'touchstart'].forEach(ev =>
+            document.removeEventListener(ev, init)
+          );
+        }, { once: true })
+      );
+      ```
+
+      **For Demo Parties:**
+      ```javascript
+      // Show "CLICK TO START" overlay
+      const overlay = document.createElement('div');
+      overlay.innerHTML = 'CLICK TO START';
+      overlay.style.cssText = 'position:fixed;inset:0;display:grid;place-items:center;font:9vw monospace;background:#000;color:#fff;cursor:pointer';
+      document.body.appendChild(overlay);
+
+      overlay.onclick = async () => {
+        overlay.remove();
+        const ctx = new AudioContext();
+        await ctx.resume();
+        startDemo(ctx);
+      };
+      ```
+    references:
+      - Web Audio autoplay policy
+
+  - id: precision-qualifier-disasters
+    severity: HIGH
+    title: mediump Precision Causes Visual Artifacts
+    description: Lower precision saves bytes but creates banding and artifacts
+    symptoms:
+      - Visible color banding in gradients
+      - Noise patterns instead of smooth surfaces
+      - Raymarcher "melts" at distance
+      - Different appearance on mobile vs desktop
+    detection_pattern: "precision|mediump|lowp|highp"
+    solution: |
+      Precision Trade-offs:
+
+      **The Problem:**
+      ```glsl
+      precision mediump float;  // Only 16-bit floats!
+
+      // This WILL break:
+      float d = 0.;
+      for(int i = 0; i < 100; i++) {
+        d += 0.01;  // Accumulates error
+      }
+      // d might be 0.98 or 1.03, not 1.0
+      ```
+
+      **Precision Requirements by Use Case:**
+      ```yaml
+      safe_with_mediump:
+        - Color values (0-1 range)
+        - UV coordinates (0-1 range)
+        - Simple math with small numbers
+        - Texture sampling
+
+      needs_highp:
+        - Raymarching distance accumulation
+        - Time-based effects (t grows large)
+        - World-space positions
+        - Noise with large inputs
+        - Any calculation where small errors compound
+      ```
+
+      **Hybrid Approach (Size + Quality):**
+      ```glsl
+      precision mediump float;  // Default for most things
+
+      // Promote specific variables to highp
+      highp float t;  // Time needs precision
+      highp vec3 ro, rd;  // Ray origin/direction
+      highp float d;  // Accumulated distance
+
+      // Or use highp block
+      #ifdef GL_ES
+      #define HP highp
+      #else
+      #define HP
+      #endif
+
+      HP float rayMarch(HP vec3 ro, HP vec3 rd) {
+        HP float d = 0.;
+        // ...
+      }
+      ```
+
+      **Mobile Testing:**
+      Mobile GPUs often force mediump. Test on phone to catch precision issues early.
+    references:
+      - GLSL precision issues
+
+  - id: frame-dependent-animation
+    severity: HIGH
+    title: Animation Speed Varies With Framerate
+    description: Demo runs 2x fast on 120Hz or crawls on slow machines
+    symptoms:
+      - Demo looks different on fast vs slow machines
+      - Music sync breaks at different framerates
+      - Physics behave erratically
+      - Judges see different demo than you
+    detection_pattern: "animation|rotate|move|time|frame"
+    solution: |
+      Framerate-Independent Animation:
+
+      **BAD - Frame-dependent:**
+      ```javascript
+      function render() {
+        rotation += 0.01;  // Faster on 120Hz, slower on 30Hz!
+        cube.rotation.y = rotation;
+        requestAnimationFrame(render);
+      }
+      ```
+
+      **GOOD - Time-based:**
+      ```javascript
+      function render(now) {
+        // 'now' is milliseconds since page load
+        const t = now / 1000;  // Convert to seconds
+
+        // Rotation at 1 radian per second, regardless of framerate
+        cube.rotation.y = t;
+
+        // Or with explicit speed
+        const speed = 0.5;  // radians per second
+        cube.rotation.y = t * speed;
+
+        requestAnimationFrame(render);
+      }
+      render(0);
+      ```
+
+      **In Shaders:**
+      ```glsl
+      uniform float t;  // Pass time, not frame count
+
+      void main() {
+        // Animate with time, not arbitrary increments
+        vec3 p = vec3(sin(t), cos(t * 0.7), sin(t * 1.3));
+
+        // For periodic effects
+        float cycle = mod(t, 4.);  // 4-second loop
+
+        // For smooth transitions
+        float fade = smoothstep(0., 1., t - 5.);  // Fade in at t=5s
+      }
+      ```
+
+      **Audio Sync:**
+      ```javascript
+      // Sync to audio time, not animation time
+      const audioTime = audioContext.currentTime - startTime;
+      uniforms.t.value = audioTime;
+
+      // Keyframes based on audio time
+      const beat = Math.floor(audioTime * (BPM / 60));
+      const beatPhase = (audioTime * (BPM / 60)) % 1;
+      ```
+    references:
+      - Game loop timing
+
+  - id: competition-machine-mismatch
+    severity: HIGH
+    title: Demo Fails on Competition Hardware
+    description: Works on your setup, crashes or glitches at the party
+    symptoms:
+      - Black screen on compo machine
+      - Shader compilation fails
+      - Audio doesn't start
+      - Resolution looks wrong
+    detection_pattern: "demo|party|compo|competition"
+    solution: |
+      Competition Preparation Checklist:
+
+      **Before the Party:**
+      ```yaml
+      hardware_testing:
+        - Test on at least 3 different computers
+        - Test on both discrete and integrated GPUs
+        - Test at party resolution (ask organizers!)
+        - Test with party's audio setup if possible
+
+      browser_compatibility:
+        - Chrome (most common at parties)
+        - Firefox (different WebGL implementation)
+        - Edge (often on party machines)
+
+      resolution_handling:
+        - Make shader use actual canvas dimensions
+        - Handle aspect ratios other than 16:9
+        - Test at 1280x720, 1920x1080, 2560x1440
+      ```
+
+      **Adaptive Resolution Code:**
+      ```javascript
+      // Query display and adapt
+      const dpr = window.devicePixelRatio || 1;
+      const maxPixels = 2073600;  // 1080p equivalent
+
+      function resize() {
+        let w = window.innerWidth;
+        let h = window.innerHeight;
+
+        // Scale down for performance if needed
+        const pixels = w * h * dpr * dpr;
+        if (pixels > maxPixels) {
+          const scale = Math.sqrt(maxPixels / pixels);
+          w = Math.floor(w * scale);
+          h = Math.floor(h * scale);
+        }
+
+        canvas.width = w;
+        canvas.height = h;
+        gl.viewport(0, 0, w, h);
+        gl.uniform2f(resLoc, w, h);
+      }
+
+      window.addEventListener('resize', resize);
+      resize();
+      ```
+
+      **Fallback System:**
+      ```javascript
+      try {
+        gl = canvas.getContext('webgl2');
+        if (!gl) throw 'No WebGL2';
+        // WebGL2 path
+      } catch(e) {
+        gl = canvas.getContext('webgl');
+        // WebGL1 fallback
+        console.log('Falling back to WebGL1');
+      }
+
+      // Feature detection
+      const ext = gl.getExtension('OES_texture_float');
+      if (!ext) {
+        // Use different technique without float textures
+      }
+      ```
+
+      **Emergency USB Contents:**
+      - Your demo as HTML file
+      - Your demo as standalone executable (if applicable)
+      - Source code for quick fixes
+      - List of required features/extensions
+    references:
+      - Demo party preparation
+
+  - id: size-counting-errors
+    severity: HIGH
+    title: Final Size Exceeds Limit
+    description: Demo is 4097 bytes for 4k compo, disqualified
+    symptoms:
+      - Minification doesn't achieve expected reduction
+      - Packer produces larger output than expected
+      - Size varies between builds
+      - Disqualified for being over limit
+    detection_pattern: "4k|64k|1k|size|byte|intro"
+    solution: |
+      Size Verification Pipeline:
+
+      **Accurate Size Counting:**
+      ```bash
+      # For JS files (what matters for web demos)
+      wc -c demo.min.js
+
+      # For HTML with inline JS
+      wc -c demo.html
+
+      # After gzip (some compos count compressed size)
+      gzip -c demo.js | wc -c
+      ```
+
+      **Build Pipeline:**
+      ```bash
+      # 1. Minify with Terser
+      terser src.js -c -m --toplevel -o stage1.js
+
+      # 2. RegPack for further compression
+      # (Variable renaming and string packing)
+
+      # 3. Check size at each stage
+      echo "Original: $(wc -c < src.js)"
+      echo "Minified: $(wc -c < stage1.js)"
+      echo "Packed: $(wc -c < final.js)"
+      ```
+
+      **Size Budget:**
+      ```yaml
+      4k_intro_budget:
+        total: 4096 bytes
+        bootstrap: ~100 bytes  # Canvas, GL context
+        shader_vertex: ~100 bytes  # Fullscreen triangle
+        shader_fragment: ~2500 bytes  # Main visuals
+        synth/music: ~500 bytes
+        animation_logic: ~400 bytes
+        buffer: ~496 bytes  # Safety margin
+
+      64k_intro_budget:
+        total: 65536 bytes
+        more_room_for: |
+          - Multiple shaders/scenes
+          - Full synth engine
+          - Texture generation
+          - Complex geometry
+      ```
+
+      **Size Reduction Tricks:**
+      ```javascript
+      // 1. Short variable names (automatic with minifier)
+
+      // 2. Implicit type coercion
+      // Instead of: parseFloat(x)
+      // Use: +x or x*1
+
+      // 3. Boolean tricks
+      // Instead of: if(x === true)
+      // Use: if(x)
+
+      // 4. Default parameters
+      // Instead of: function f(x) { x = x || 0; }
+      // Use: function f(x=0) {}
+
+      // 5. Arrow functions
+      // Instead of: function f() { return x; }
+      // Use: f = () => x
+
+      // 6. Template literals (sometimes smaller)
+      // `${a}${b}` vs a+b depends on context
+
+      // 7. Shader string compression
+      // Use packer that specifically handles GLSL
+      ```
+    references:
+      - JavaScript size optimization
+
+  - id: undefined-behavior-reliance
+    severity: MEDIUM
+    title: Relying on Undefined Behavior That Varies
+    description: Code works by accident on your machine, fails elsewhere
+    symptoms:
+      - Uninitialized variable has "correct" value on your GPU
+      - Division by zero produces usable result on your system
+      - Out-of-bounds access doesn't crash (until it does)
+      - Works in Chrome, fails in Firefox
+    detection_pattern: "undefined|uninitialized|divide|bounds"
+    solution: |
+      Undefined Behavior Traps:
+
+      **Common UB in Demos:**
+      ```glsl
+      // 1. Uninitialized variables
+      float x;  // Could be 0, garbage, or NaN
+      x += 1.;  // Result is undefined
+
+      // FIX:
+      float x = 0.;
+
+      // 2. Division by zero
+      float d = 1. / length(p);  // When p is origin
+
+      // FIX:
+      float d = 1. / (length(p) + 0.0001);
+
+      // 3. Integer overflow in loops
+      for(int i = 0; i < 1000000; i++)  // May overflow
+
+      // FIX: Use reasonable limits
+      for(int i = 0; i < 256; i++)
+
+      // 4. Array out of bounds
+      float arr[4];
+      arr[int(x)] = 1.;  // If x >= 4, undefined
+
+      // FIX:
+      arr[int(clamp(x, 0., 3.))] = 1.;
+
+      // 5. Texture wrap mode assumptions
+      texture(tex, uv);  // When uv > 1 or < 0
+
+      // FIX: Set wrap mode or clamp
+      texture(tex, fract(uv));  // If you want repeat
+      texture(tex, clamp(uv, 0., 1.));  // If you want clamp
+      ```
+
+      **JavaScript UB:**
+      ```javascript
+      // 1. Floating point comparison
+      if (0.1 + 0.2 === 0.3)  // FALSE!
+
+      // FIX:
+      if (Math.abs(a - b) < 0.0001)
+
+      // 2. Array holes
+      const arr = [1, , 3];  // arr[1] is undefined
+
+      // 3. TypedArray overflow
+      const u8 = new Uint8Array(1);
+      u8[0] = 256;  // Becomes 0
+
+      // 4. Bitwise on floats
+      const x = 1.5 | 0;  // Truncates to 1
+      ```
+    references:
+      - GLSL undefined behavior
+
+  - id: synth-audio-clipping
+    severity: MEDIUM
+    title: Audio Clips and Distorts
+    description: Generated audio exceeds [-1, 1] range
+    symptoms:
+      - Harsh distortion in audio
+      - Clicking sounds at note transitions
+      - Audio cuts out or sounds broken
+      - Volume inconsistent throughout demo
+    detection_pattern: "audio|synth|oscillator|sound|music"
+    solution: |
+      Audio Safety:
+
+      **The Problem:**
+      ```javascript
+      // Multiple oscillators add up
+      osc1.gain = 0.5;
+      osc2.gain = 0.5;
+      osc3.gain = 0.5;
+      // Combined = 1.5 = CLIPPING
+
+      // Bytebeat goes out of range
+      sample = formula(t);  // Could be anything!
+      ```
+
+      **Proper Mixing:**
+      ```javascript
+      // Master limiter
+      const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = -3;
+      limiter.knee.value = 6;
+      limiter.ratio.value = 12;
+      limiter.connect(ctx.destination);
+
+      // All sources connect to limiter
+      oscillators.forEach(o => o.connect(limiter));
+
+      // Or simple gain staging
+      const master = ctx.createGain();
+      master.gain.value = 0.3;  // Leave headroom
+      master.connect(ctx.destination);
+      ```
+
+      **Bytebeat Safety:**
+      ```javascript
+      function processBytebeat(formula, duration) {
+        const samples = duration * sampleRate;
+        const buffer = ctx.createBuffer(1, samples, sampleRate);
+        const data = buffer.getChannelData(0);
+
+        for (let i = 0; i < samples; i++) {
+          // Bytebeat formulas produce 0-255
+          const raw = formula(t++) & 255;
+          // Normalize to [-1, 1]
+          data[i] = (raw - 128) / 128;
+        }
+
+        // Normalize peaks
+        let max = 0;
+        for (let i = 0; i < samples; i++) {
+          max = Math.max(max, Math.abs(data[i]));
+        }
+        if (max > 0.99) {
+          const scale = 0.95 / max;
+          for (let i = 0; i < samples; i++) {
+            data[i] *= scale;
+          }
+        }
+
+        return buffer;
+      }
+      ```
+
+      **Click Prevention:**
+      ```javascript
+      // Always fade at start/end
+      const fadeTime = 0.01;  // 10ms
+
+      gain.setValueAtTime(0, startTime);
+      gain.linearRampToValueAtTime(1, startTime + fadeTime);
+
+      // ... play note ...
+
+      gain.setValueAtTime(1, endTime - fadeTime);
+      gain.linearRampToValueAtTime(0, endTime);
+      ```
+    references:
+      - Web Audio clipping prevention

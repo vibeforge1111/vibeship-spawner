@@ -1,0 +1,537 @@
+id: roblox-development
+skill: Roblox Development
+version: "1.0"
+
+sharp_edges:
+  - id: datastore-request-limits
+    severity: CRITICAL
+    title: DataStore Requests Are Throttled Heavily
+    description: Hit the limit and your saves silently fail
+    symptoms:
+      - Players losing data randomly
+      - "DataStore request was added to queue" warnings
+      - Save failures during high traffic
+    detection_pattern: "DataStore|GetAsync|SetAsync|UpdateAsync"
+    solution: |
+      DataStore Budget Reality:
+
+      Base budget: 60 requests/minute
+      Per player: +10 requests/minute each
+      100 players = 60 + 1000 = 1060 requests/minute
+
+      But if you save every player every second:
+      100 players * 60 saves/min = 6000 requests
+      You're 5x over budget!
+
+      Solutions:
+      ```lua
+      -- 1. Batch saves (save every 60-120 seconds)
+      local SAVE_INTERVAL = 60
+      local lastSave = {}
+
+      function ScheduleSave(player)
+          if tick() - (lastSave[player.UserId] or 0) < SAVE_INTERVAL then
+              return -- Too soon
+          end
+          lastSave[player.UserId] = tick()
+          SaveData(player)
+      end
+
+      -- 2. Use UpdateAsync for atomic updates
+      -- Better than Get + Set (race condition safe)
+      dataStore:UpdateAsync(key, function(oldData)
+          oldData = oldData or DEFAULT_DATA
+          oldData.Coins = oldData.Coins + coinsToAdd
+          return oldData
+      end)
+
+      -- 3. Queue system with retry
+      local saveQueue = {}
+
+      function QueueSave(player)
+          table.insert(saveQueue, {
+              player = player,
+              retries = 0,
+              maxRetries = 3
+          })
+      end
+
+      -- Process queue with delays
+      spawn(function()
+          while true do
+              if #saveQueue > 0 then
+                  local item = table.remove(saveQueue, 1)
+                  local success = pcall(function()
+                      SaveData(item.player)
+                  end)
+                  if not success and item.retries < item.maxRetries then
+                      item.retries = item.retries + 1
+                      table.insert(saveQueue, item)
+                  end
+              end
+              wait(0.1) -- Rate limit ourselves
+          end
+      end)
+      ```
+    references:
+      - Roblox DataStore documentation
+
+  - id: remote-event-security
+    severity: CRITICAL
+    title: Exploiters Can Fire Any RemoteEvent With Any Data
+    description: Your RemoteEvents are public APIs to hackers
+    symptoms:
+      - Players with impossible stats
+      - Instant kills, god mode
+      - Currency appearing from nowhere
+    detection_pattern: "RemoteEvent|RemoteFunction|OnServerEvent"
+    solution: |
+      Every RemoteEvent Is An Attack Vector:
+
+      What exploiters can do:
+      - Fire any RemoteEvent in your game
+      - Send any arguments they want
+      - Send wrong types (string instead of number)
+      - Send nil, huge numbers, negative numbers
+      - Fire thousands of times per second
+
+      Defense in Depth:
+      ```lua
+      -- 1. Type checking
+      local function ValidateArgs(player, targetId, damage)
+          if typeof(targetId) ~= "number" then return false end
+          if typeof(damage) ~= "number" then return false end
+          if damage < 0 or damage > 100 then return false end
+          return true
+      end
+
+      -- 2. Rate limiting
+      local lastAction = {}
+      local COOLDOWN = 0.5
+
+      local function CheckCooldown(player, action)
+          local key = player.UserId .. "_" .. action
+          local last = lastAction[key] or 0
+          if tick() - last < COOLDOWN then
+              return false
+          end
+          lastAction[key] = tick()
+          return true
+      end
+
+      -- 3. Distance/visibility checks
+      local function CanReach(player, target, maxDistance)
+          local char = player.Character
+          if not char then return false end
+          local hrp = char:FindFirstChild("HumanoidRootPart")
+          if not hrp then return false end
+
+          local distance = (hrp.Position - target.Position).Magnitude
+          return distance <= maxDistance
+      end
+
+      -- 4. Ownership verification
+      local function OwnsItem(player, itemId)
+          local data = GetPlayerData(player)
+          return table.find(data.Inventory, itemId) ~= nil
+      end
+
+      -- Complete example
+      AttackRemote.OnServerEvent:Connect(function(player, targetId)
+          -- Type check
+          if typeof(targetId) ~= "string" then return end
+
+          -- Rate limit
+          if not CheckCooldown(player, "attack") then return end
+
+          -- Get target
+          local target = workspace:FindFirstChild(targetId)
+          if not target then return end
+
+          -- Distance check
+          if not CanReach(player, target.PrimaryPart, 10) then
+              warn(player.Name .. " tried to attack from too far")
+              return
+          end
+
+          -- State check
+          local char = player.Character
+          if char.Humanoid.Health <= 0 then return end
+
+          -- NOW we can attack (server calculates damage)
+          local damage = CalculateDamage(player) -- Server-side
+          target.Humanoid:TakeDamage(damage)
+      end)
+      ```
+    references:
+      - Roblox security best practices
+
+  - id: filtering-enabled-bypass
+    severity: CRITICAL
+    title: Filtering Enabled Is Not A Security Feature
+    description: FE only separates server/client, doesn't prevent exploits
+    symptoms:
+      - "But I have Filtering Enabled on!"
+      - Exploits still working
+      - False sense of security
+    detection_pattern: "FilteringEnabled|Workspace"
+    solution: |
+      What Filtering Enabled Actually Does:
+
+      - Prevents client changes from replicating to server
+      - That's it. Nothing more.
+
+      What it DOESN'T do:
+      - Stop exploiters from firing RemoteEvents
+      - Validate any data you receive
+      - Prevent speed hacks (client-side movement)
+      - Stop ESP/wallhacks (client-side rendering)
+      - Block aimbots (client-side input)
+
+      FE + RemoteEvents = Security Hole:
+      ```lua
+      -- This is NOT secure just because FE is on:
+      GiveMoney.OnServerEvent:Connect(function(player, amount)
+          player.leaderstats.Coins.Value += amount -- EXPLOITABLE!
+      end)
+
+      -- This is secure:
+      ClaimReward.OnServerEvent:Connect(function(player, rewardId)
+          -- Validate reward exists
+          local reward = REWARDS[rewardId]
+          if not reward then return end
+
+          -- Validate player can claim
+          if not CanClaim(player, rewardId) then return end
+
+          -- Server decides the amount
+          player.leaderstats.Coins.Value += reward.coins
+          MarkClaimed(player, rewardId)
+      end)
+      ```
+
+      Security Layers Needed:
+      1. FE (baseline, always on)
+      2. Server-side validation
+      3. Rate limiting
+      4. Anti-cheat for client-side (movement)
+      5. Logging suspicious activity
+    references:
+      - Roblox FilteringEnabled
+
+  - id: memory-leaks-connections
+    severity: HIGH
+    title: Undisconnected Events Cause Memory Leaks
+    description: Every :Connect() that isn't :Disconnect()'d leaks memory
+    symptoms:
+      - Server memory growing over time
+      - Lag increasing after hours of uptime
+      - "Script exhausted" errors
+    detection_pattern: ":Connect\\(|.Heartbeat|.RenderStepped"
+    solution: |
+      Connection Leak Pattern:
+
+      ```lua
+      -- LEAKY: New connection every respawn
+      player.CharacterAdded:Connect(function(character)
+          -- New Heartbeat connection each respawn
+          game:GetService("RunService").Heartbeat:Connect(function()
+              -- This connection NEVER gets cleaned up
+          end)
+      end)
+
+      -- If player respawns 100 times = 100 Heartbeat connections!
+
+      -- FIXED: Track and disconnect
+      local playerConnections = {}
+
+      player.CharacterAdded:Connect(function(character)
+          -- Disconnect old connection if exists
+          if playerConnections[player.UserId] then
+              playerConnections[player.UserId]:Disconnect()
+          end
+
+          -- Create new connection
+          playerConnections[player.UserId] = game:GetService("RunService").Heartbeat:Connect(function()
+              -- logic
+          end)
+      end)
+
+      -- Clean up on leave
+      player.AncestryChanged:Connect(function()
+          if playerConnections[player.UserId] then
+              playerConnections[player.UserId]:Disconnect()
+              playerConnections[player.UserId] = nil
+          end
+      end)
+      ```
+
+      Connection Cleanup Pattern:
+      ```lua
+      local Maid = {}
+      Maid.__index = Maid
+
+      function Maid.new()
+          return setmetatable({_tasks = {}}, Maid)
+      end
+
+      function Maid:Add(task)
+          table.insert(self._tasks, task)
+          return task
+      end
+
+      function Maid:Cleanup()
+          for _, task in ipairs(self._tasks) do
+              if typeof(task) == "RBXScriptConnection" then
+                  task:Disconnect()
+              elseif typeof(task) == "Instance" then
+                  task:Destroy()
+              elseif typeof(task) == "function" then
+                  task()
+              end
+          end
+          self._tasks = {}
+      end
+
+      -- Usage
+      local maid = Maid.new()
+      maid:Add(Heartbeat:Connect(function() end))
+      maid:Add(someInstance)
+
+      -- When done
+      maid:Cleanup()
+      ```
+    references:
+      - Lua memory management
+
+  - id: loadstring-security
+    severity: HIGH
+    title: loadstring() Is Disabled And Dangerous
+    description: Don't try to use loadstring for dynamic code
+    symptoms:
+      - "Loadstring is not available"
+      - Trying to execute user-provided code
+      - Workarounds that introduce vulnerabilities
+    detection_pattern: "loadstring|load\\("
+    solution: |
+      loadstring Is Disabled For Good Reason:
+
+      If loadstring worked, exploiters could:
+      - Execute arbitrary code on your server
+      - Bypass all security measures
+      - Steal player data
+      - Destroy your game
+
+      Alternatives:
+      ```lua
+      -- WRONG: Trying to execute dynamic code
+      local code = RemoteEvent:InvokeServer("GetCode")
+      loadstring(code)() -- Won't work, and shouldn't
+
+      -- RIGHT: Data-driven behavior
+      local ACTIONS = {
+          jump = function(player)
+              player.Character.Humanoid.Jump = true
+          end,
+          heal = function(player)
+              player.Character.Humanoid.Health = 100
+          end
+      }
+
+      -- Client requests action by name, not code
+      RemoteEvent.OnServerEvent:Connect(function(player, actionName)
+          local action = ACTIONS[actionName]
+          if action then
+              action(player)
+          end
+      end)
+
+      -- RIGHT: ModuleScripts for organized code
+      local AbilityModule = require(ReplicatedStorage.Modules.Abilities)
+      AbilityModule.Execute(player, abilityName)
+      ```
+
+      If you think you need loadstring, you probably need:
+      - Data-driven design (tables of behavior)
+      - ModuleScripts (organized code)
+      - State machines (conditional behavior)
+    references:
+      - Roblox security model
+
+  - id: free-model-backdoors
+    severity: HIGH
+    title: Free Models Often Contain Backdoors
+    description: That cool free model might be stealing your game
+    symptoms:
+      - Unknown scripts running
+      - Data being sent to external servers
+      - Admin commands you didn't add
+    detection_pattern: "InsertService|require\\(\\d+\\)|HttpService"
+    solution: |
+      Free Model Audit Checklist:
+
+      Before using ANY free model:
+      ```lua
+      -- 1. Search for suspicious patterns
+      -- In Studio: Edit > Find All (Ctrl+Shift+F)
+
+      -- RED FLAGS:
+      require(123456789)  -- Loading external code
+      HttpService:GetAsync()  -- Sending data out
+      HttpService:PostAsync() -- Sending data out
+      loadstring()  -- Won't work but shows intent
+      getfenv()  -- Environment manipulation
+      setfenv()  -- Environment manipulation
+      Instance.new("RemoteEvent")  -- Hidden communication
+
+      -- 2. Check all scripts in the model
+      -- Don't just look at the main script
+
+      -- 3. Look for obfuscated code
+      -- If you can't read it, don't use it
+      local _0x1234 = "encoded stuff"  -- SUSPICIOUS
+
+      -- 4. Check for delayed execution
+      wait(300)  -- Why wait 5 minutes?
+      delay(600, function() end)  -- Hidden timer
+      ```
+
+      Safe Free Model Usage:
+      1. Only download from trusted creators
+      2. Check creator's other models and reputation
+      3. Read ALL scripts before inserting
+      4. Delete any script you don't understand
+      5. Never insert models directly into game (test in empty place first)
+
+      Better Alternative:
+      - Learn to make it yourself
+      - Commission from trusted developer
+      - Use official Roblox templates
+    references:
+      - Roblox free model security
+
+  - id: mobile-performance
+    severity: MEDIUM
+    title: 70% of Players Are On Mobile/Low-End Devices
+    description: Optimize for the worst device, not your gaming PC
+    symptoms:
+      - "Game works fine for me"
+      - Low ratings mentioning lag
+      - High bounce rate
+    detection_pattern: "Part|MeshPart|Union|Beam|ParticleEmitter"
+    solution: |
+      Mobile Performance Reality:
+
+      Your PC: RTX 4090, 64GB RAM
+      Average Roblox player: 5-year-old phone or Chromebook
+
+      Performance Budgets:
+      | Resource | Target | Max |
+      |----------|--------|-----|
+      | Parts | 5,000 | 20,000 |
+      | Triangles | 100,000 | 500,000 |
+      | Draw calls | 100 | 500 |
+      | Memory | 500MB | 1GB |
+      | Network | 50KB/s | 100KB/s |
+
+      Optimization Techniques:
+      ```lua
+      -- 1. Use StreamingEnabled
+      game.Workspace.StreamingEnabled = true
+      game.Workspace.StreamingMinRadius = 64
+      game.Workspace.StreamingTargetRadius = 256
+
+      -- 2. Reduce part count (merge static parts)
+      -- In Studio: Model > Union (or use MeshParts)
+
+      -- 3. Disable shadows on unimportant objects
+      for _, part in pairs(workspace:GetDescendants()) do
+          if part:IsA("BasePart") and part.Name == "Decoration" then
+              part.CastShadow = false
+          end
+      end
+
+      -- 4. Use lower quality for mobile
+      local UserInputService = game:GetService("UserInputService")
+      local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+
+      if isMobile then
+          -- Reduce particle counts
+          -- Lower texture quality
+          -- Simplify lighting
+          game.Lighting.GlobalShadows = false
+      end
+
+      -- 5. Object pooling for spawned objects
+      -- (See performance pattern above)
+      ```
+
+      Test On Target Devices:
+      - Use Roblox Device Emulator
+      - Test on actual mobile device
+      - Check MicroProfiler (F6 in Studio)
+    references:
+      - Roblox performance guidelines
+
+  - id: tos-violations
+    severity: MEDIUM
+    title: Roblox Will Delete Your Game For ToS Violations
+    description: Know the rules or lose everything
+    symptoms:
+      - Game taken down
+      - Account warned/banned
+      - Revenue lost
+    detection_pattern: "gambling|casino|dating|violence"
+    solution: |
+      ToS Violations That Will Get You Banned:
+
+      PROHIBITED:
+      - Gambling (real money or Robux outcomes)
+      - Dating/romance features
+      - Excessive violence/gore
+      - Real-world currency mentions
+      - Political content
+      - Religious content
+      - Inappropriate for 13+
+      - Scams or deceptive practices
+      - Stolen assets
+
+      GRAY AREAS (be careful):
+      - Simulated gambling (gacha) - OK if no real value
+      - Combat games - OK if not gratuitous
+      - Horror - OK with appropriate settings
+      - Social features - OK if not dating-focused
+
+      Safe Practices:
+      ```lua
+      -- 1. Use chat filter for all user text
+      local TextService = game:GetService("TextService")
+
+      function FilterText(text, fromPlayerId)
+          local success, result = pcall(function()
+              return TextService:FilterStringAsync(text, fromPlayerId)
+          end)
+
+          if success then
+              return result:GetNonChatStringForBroadcastAsync()
+          else
+              return "***" -- Fail closed
+          end
+      end
+
+      -- 2. Age-appropriate content settings
+      -- Use Experience Guidelines in Game Settings
+
+      -- 3. No external links
+      -- Don't put Discord/YouTube/etc in game
+      -- Use Roblox's Social Links feature instead
+      ```
+
+      When In Doubt:
+      - Read Roblox Community Standards
+      - Check similar games that are approved
+      - Ask in DevForum
+      - Err on the side of caution
+    references:
+      - Roblox Community Standards
+      - Roblox Terms of Service

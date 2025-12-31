@@ -1,0 +1,553 @@
+id: vr-ar-development
+skill: VR/AR Development
+version: "1.0"
+
+sharp_edges:
+  - id: motion-sickness
+    severity: CRITICAL
+    title: Camera Movement Without User Input Causes Motion Sickness
+    description: Moving the user's viewpoint without their control causes nausea
+    symptoms:
+      - Users feel nauseous within minutes
+      - "I can only play for 5 minutes" feedback
+      - Users remove headset suddenly
+      - Negative reviews about comfort
+    detection_pattern: "camera.*position|camera.*move|dolly|fly"
+    solution: |
+      Motion Sickness Prevention:
+
+      The problem: Vestibular system expects movement, eyes show none.
+
+      Dangerous movements:
+      - Forward/backward camera motion
+      - Lateral camera motion
+      - Camera rotation not initiated by user
+      - Sudden acceleration/deceleration
+
+      Safe locomotion methods:
+      ```javascript
+      // 1. Teleportation (safest)
+      class TeleportLocomotion {
+        constructor(scene, camera) {
+          this.scene = scene;
+          this.camera = camera;
+          this.teleportIndicator = this.createIndicator();
+        }
+
+        createIndicator() {
+          const geometry = new THREE.RingGeometry(0.2, 0.25, 32);
+          const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+          const ring = new THREE.Mesh(geometry, material);
+          ring.rotation.x = -Math.PI / 2;
+          ring.visible = false;
+          this.scene.add(ring);
+          return ring;
+        }
+
+        update(controller) {
+          if (controller.buttons.thumbstick.pressed) {
+            // Show teleport target
+            const target = this.raycastFloor(controller);
+            if (target) {
+              this.teleportIndicator.position.copy(target);
+              this.teleportIndicator.visible = true;
+            }
+          }
+        }
+
+        execute() {
+          if (this.teleportIndicator.visible) {
+            // Instant teleport - no motion
+            this.camera.position.x = this.teleportIndicator.position.x;
+            this.camera.position.z = this.teleportIndicator.position.z;
+            this.teleportIndicator.visible = false;
+          }
+        }
+      }
+
+      // 2. Snap rotation (no smooth rotation)
+      function snapTurn(direction, degrees = 30) {
+        // Instant rotation, not smooth
+        camera.rotation.y += THREE.MathUtils.degToRad(direction * degrees);
+      }
+
+      // 3. Vignette during motion (reduces peripheral vision)
+      function applyComfortVignette(intensity) {
+        // Narrow FOV during any motion
+        vignetteMaterial.uniforms.intensity.value = intensity;
+      }
+
+      // 4. Fixed reference frame
+      // Add static reference points that don't move with camera
+      function addReferenceFrame() {
+        // A "cockpit" or "cage" around user
+        const cage = new THREE.Group();
+        // Static elements that move WITH the camera
+        camera.add(cage);
+      }
+      ```
+
+      Best practices:
+      - Never move camera without user input
+      - Use teleport, not smooth locomotion
+      - Snap turns instead of smooth turns
+      - Vignette during any motion
+      - Test with sensitive users
+    references:
+      - VR comfort guidelines
+
+  - id: frame-rate-requirements
+    severity: CRITICAL
+    title: VR Requires 90fps, AR Requires 60fps
+    description: Dropped frames cause immediate discomfort and tracking issues
+    symptoms:
+      - Stuttering visuals
+      - Delayed response to head movement
+      - User reports dizziness
+      - "Judder" when moving head
+    detection_pattern: "render|animate|draw|update"
+    solution: |
+      Performance Budgets:
+
+      VR frame time budget: 11.1ms (90fps)
+      AR frame time budget: 16.6ms (60fps)
+      Quest 2 Pro: 8.3ms (120fps mode)
+
+      ```javascript
+      // 1. Performance monitoring
+      class XRPerformanceMonitor {
+        constructor(renderer) {
+          this.renderer = renderer;
+          this.frameTimes = [];
+          this.maxSamples = 60;
+        }
+
+        update() {
+          const info = this.renderer.info;
+          const start = performance.now();
+
+          // Your render code
+
+          const frameTime = performance.now() - start;
+          this.frameTimes.push(frameTime);
+
+          if (this.frameTimes.length > this.maxSamples) {
+            this.frameTimes.shift();
+          }
+
+          // Warn if over budget
+          if (frameTime > 11) {
+            console.warn(`Frame over budget: ${frameTime.toFixed(1)}ms`);
+            this.reduceLOD();
+          }
+        }
+
+        getStats() {
+          const avg = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
+          const max = Math.max(...this.frameTimes);
+          return { avg, max, drawCalls: this.renderer.info.render.calls };
+        }
+
+        reduceLOD() {
+          // Dynamic quality reduction
+          this.renderer.setPixelRatio(Math.min(this.renderer.getPixelRatio() * 0.9, 1));
+        }
+      }
+
+      // 2. LOD system
+      function setupLOD(mesh) {
+        const lod = new THREE.LOD();
+
+        // High detail - close
+        lod.addLevel(mesh, 0);
+
+        // Medium detail
+        const medium = mesh.clone();
+        simplifyGeometry(medium, 0.5);
+        lod.addLevel(medium, 5);
+
+        // Low detail
+        const low = mesh.clone();
+        simplifyGeometry(low, 0.2);
+        lod.addLevel(low, 15);
+
+        return lod;
+      }
+
+      // 3. Fixed foveated rendering (if supported)
+      if (renderer.xr.getFoveation) {
+        renderer.xr.setFoveation(0.5); // 0 = full resolution, 1 = maximum foveation
+      }
+
+      // 4. Render scaling
+      function adaptiveRenderScale(targetFrameTime = 11) {
+        const lastFrameTime = performance.now() - lastFrameStart;
+
+        if (lastFrameTime > targetFrameTime * 1.2) {
+          renderScale = Math.max(0.5, renderScale * 0.95);
+        } else if (lastFrameTime < targetFrameTime * 0.8) {
+          renderScale = Math.min(1.0, renderScale * 1.05);
+        }
+
+        renderer.setPixelRatio(window.devicePixelRatio * renderScale);
+      }
+      ```
+
+      Optimization priorities:
+      1. Draw calls (use instancing)
+      2. Shader complexity
+      3. Geometry count
+      4. Texture resolution
+      5. Post-processing
+    references:
+      - XR performance optimization
+
+  - id: tracking-loss
+    severity: HIGH
+    title: Tracking Can Be Lost at Any Time
+    description: Environmental factors cause tracking failures
+    symptoms:
+      - Controllers disappear
+      - Hand tracking fails
+      - World shifts suddenly
+      - Black screen or passthrough appears
+    detection_pattern: "tracking|controller|hand|pose"
+    solution: |
+      Tracking Loss Handling:
+
+      Causes:
+      - Low lighting (too dark/bright)
+      - Reflective surfaces
+      - Direct sunlight
+      - Controller occlusion
+      - Hands outside camera view
+
+      ```javascript
+      // 1. Monitor tracking state
+      function onXRFrame(time, frame) {
+        const session = frame.session;
+        const pose = frame.getViewerPose(referenceSpace);
+
+        if (!pose) {
+          // Tracking lost!
+          handleTrackingLoss();
+          return;
+        }
+
+        // Check each input source
+        for (const source of session.inputSources) {
+          const targetRayPose = frame.getPose(
+            source.targetRaySpace,
+            referenceSpace
+          );
+
+          if (!targetRayPose) {
+            handleControllerLoss(source.handedness);
+          }
+        }
+      }
+
+      // 2. Graceful degradation
+      function handleTrackingLoss() {
+        // Show warning UI
+        showTrackingWarning();
+
+        // Pause physics/gameplay
+        pauseGameplay();
+
+        // Use last known good pose
+        fallbackToLastPose();
+      }
+
+      function handleControllerLoss(hand) {
+        // Show controller ghost at last position
+        showControllerGhost(hand);
+
+        // Allow re-centering gesture
+        enableRecenterGesture();
+      }
+
+      // 3. User feedback
+      function showTrackingWarning() {
+        const warning = createTextPanel(
+          'Move to a well-lit area\nAvoid reflective surfaces',
+          { position: new THREE.Vector3(0, 1.5, -0.5) }
+        );
+        scene.add(warning);
+      }
+
+      // 4. Boundary check
+      function checkBoundary(pose) {
+        const position = pose.transform.position;
+
+        if (!isWithinPlayArea(position)) {
+          showBoundaryWarning();
+        }
+      }
+      ```
+
+      Best practices:
+      - Always check for null poses
+      - Have fallback UI for tracking loss
+      - Guide users to better environments
+      - Save state frequently
+    references:
+      - XR tracking documentation
+
+  - id: ar-anchor-drift
+    severity: HIGH
+    title: AR Anchors Drift Over Time
+    description: Placed objects slowly move from their positions
+    symptoms:
+      - Objects "walk" away from placement point
+      - Multiple sessions show different positions
+      - Large environments have worse drift
+      - Objects appear to "breathe" in place
+    detection_pattern: "anchor|plane|hit.*test|persist"
+    solution: |
+      AR Anchor Drift Mitigation:
+
+      Causes:
+      - SLAM accumulates errors over time
+      - Device movement without features
+      - Lighting changes
+      - Plane refinement updates
+
+      ```javascript
+      // 1. Anchor to persistent features when possible
+      async function createPersistentAnchor(position, referenceSpace) {
+        const session = renderer.xr.getSession();
+
+        if (session.persistentAnchors) {
+          // Use persistent anchors if available
+          const anchor = await session.createPersistentAnchor(position);
+          return anchor;
+        }
+
+        // Fallback to regular anchor
+        return session.createAnchor(position, referenceSpace);
+      }
+
+      // 2. Re-anchor periodically
+      class StableAnchor {
+        constructor(scene, initialPosition) {
+          this.scene = scene;
+          this.position = initialPosition.clone();
+          this.lastUpdate = 0;
+          this.updateInterval = 5000; // Re-anchor every 5 seconds
+        }
+
+        update(frame, hitTestSource, referenceSpace) {
+          const now = performance.now();
+
+          if (now - this.lastUpdate > this.updateInterval) {
+            // Find nearest stable surface
+            const results = frame.getHitTestResults(hitTestSource);
+
+            if (results.length > 0) {
+              const pose = results[0].getPose(referenceSpace);
+              const newPos = new THREE.Vector3().setFromMatrixPosition(
+                new THREE.Matrix4().fromArray(pose.transform.matrix)
+              );
+
+              // Only update if close to original (prevents jumps)
+              if (newPos.distanceTo(this.position) < 0.1) {
+                this.position.copy(newPos);
+              }
+            }
+
+            this.lastUpdate = now;
+          }
+        }
+      }
+
+      // 3. Relative positioning
+      class RelativePositioning {
+        constructor() {
+          this.referencePoint = null;
+          this.objects = [];
+        }
+
+        setReference(position) {
+          this.referencePoint = position.clone();
+
+          // Store relative positions
+          for (const obj of this.objects) {
+            obj.relativePosition = obj.position.clone().sub(this.referencePoint);
+          }
+        }
+
+        updateReference(newPosition) {
+          // Move all objects relative to new reference
+          const delta = newPosition.clone().sub(this.referencePoint);
+
+          for (const obj of this.objects) {
+            obj.position.copy(obj.relativePosition).add(newPosition);
+          }
+
+          this.referencePoint = newPosition.clone();
+        }
+      }
+
+      // 4. Visual feedback for uncertainty
+      function showAnchorConfidence(anchor, confidence) {
+        // Glow more when confidence is low
+        const color = new THREE.Color().lerpColors(
+          new THREE.Color(0x00ff00), // High confidence
+          new THREE.Color(0xff0000), // Low confidence
+          1 - confidence
+        );
+        anchor.material.color = color;
+      }
+      ```
+    references:
+      - AR anchor best practices
+
+  - id: ipd-handling
+    severity: MEDIUM
+    title: Incorrect IPD Causes Eye Strain
+    description: Not handling interpupillary distance causes discomfort
+    symptoms:
+      - User reports headaches
+      - "3D doesn't look right"
+      - Eye fatigue after short sessions
+      - Objects appear wrong size
+    detection_pattern: "camera|stereo|eye"
+    solution: |
+      IPD Handling:
+
+      IPD (Interpupillary Distance) varies from ~54mm to 74mm.
+      Most headsets auto-detect, but verify your code respects it.
+
+      ```javascript
+      // 1. Use native stereo camera
+      // Let WebXR handle stereo - don't create dual cameras manually
+      renderer.xr.enabled = true;
+      // WebXR automatically handles IPD from headset
+
+      // 2. Verify stereo rendering
+      function verifyXRSetup() {
+        const session = renderer.xr.getSession();
+
+        session.requestReferenceSpace('local').then(refSpace => {
+          // Check eye offset
+          const views = frame.getViewerPose(refSpace).views;
+
+          for (const view of views) {
+            console.log(`Eye: ${view.eye}`);
+            console.log(`Offset: ${view.transform.position.x}`);
+            // Should see different x offsets for left/right
+          }
+        });
+      }
+
+      // 3. Scale considerations
+      // Objects should be real-world scale
+      // If IPD is wrong, scale perception is wrong
+      function validateScale() {
+        // A 10cm cube should look like a 10cm cube
+        const testCube = new THREE.Mesh(
+          new THREE.BoxGeometry(0.1, 0.1, 0.1),
+          new THREE.MeshStandardMaterial({ color: 0xff0000 })
+        );
+        testCube.position.set(0, 1, -0.5); // 50cm away
+        scene.add(testCube);
+
+        // If this doesn't look like a 10cm cube, something is wrong
+      }
+
+      // 4. UI placement for stereo
+      // Near UI should be placed carefully
+      function safeUIPlacement() {
+        // Minimum comfortable distance for near UI
+        const MIN_UI_DISTANCE = 0.5; // 50cm
+
+        // Place UI panels beyond this distance
+        uiPanel.position.z = -0.5;
+
+        // Avoid UI at infinity (causes vergence issues)
+        const MAX_UI_DISTANCE = 3.0;
+      }
+      ```
+    references:
+      - VR optics and IPD
+
+  - id: passthrough-lighting
+    severity: MEDIUM
+    title: Virtual Objects Don't Match Real-World Lighting
+    description: AR objects look pasted on top of reality
+    symptoms:
+      - Objects look "fake"
+      - No shadows on real surfaces
+      - Lighting doesn't match room
+      - Objects are too bright/dark
+    detection_pattern: "ar|passthrough|lighting|environment"
+    solution: |
+      AR Lighting Integration:
+
+      ```javascript
+      // 1. Use WebXR lighting estimation
+      async function setupLightingEstimation() {
+        const session = renderer.xr.getSession();
+
+        if (!session.requestLightProbe) {
+          console.warn('Lighting estimation not supported');
+          return;
+        }
+
+        const lightProbe = await session.requestLightProbe();
+
+        // Update lighting each frame
+        function updateLighting(frame) {
+          const probeState = frame.getLightEstimate(lightProbe);
+
+          if (probeState) {
+            // Primary light direction
+            const direction = probeState.primaryLightDirection;
+            directionalLight.position.set(
+              direction.x,
+              direction.y,
+              direction.z
+            );
+
+            // Primary light intensity
+            const intensity = probeState.primaryLightIntensity;
+            directionalLight.intensity = intensity.luminance;
+
+            // Ambient spherical harmonics
+            if (probeState.sphericalHarmonicsCoefficients) {
+              ambientLight.sh.fromArray(
+                probeState.sphericalHarmonicsCoefficients
+              );
+            }
+          }
+        }
+      }
+
+      // 2. Shadow catcher for ground
+      function createShadowCatcher() {
+        const geometry = new THREE.PlaneGeometry(10, 10);
+        const material = new THREE.ShadowMaterial({
+          opacity: 0.3  // Adjust based on lighting
+        });
+
+        const plane = new THREE.Mesh(geometry, material);
+        plane.rotation.x = -Math.PI / 2;
+        plane.receiveShadow = true;
+
+        return plane;
+      }
+
+      // 3. Occlusion mesh (if depth available)
+      async function setupOcclusion() {
+        const session = renderer.xr.getSession();
+
+        // Request depth sensing
+        if (session.requestDepthInformation) {
+          // Create occlusion mesh from depth
+          // Virtual objects will be hidden behind real objects
+        }
+      }
+      ```
+    references:
+      - AR lighting estimation

@@ -1,0 +1,570 @@
+id: procedural-generation
+skill: Procedural Generation
+version: "1.0"
+
+sharp_edges:
+  - id: seed-reproducibility
+    severity: CRITICAL
+    title: Different Platforms Generate Different Results From Same Seed
+    description: Float precision differences break cross-platform reproducibility
+    symptoms:
+      - Same seed, different results on different machines
+      - Mobile generates different content than desktop
+      - Save files don't work across platforms
+      - Multiplayer desync from world generation
+    detection_pattern: "seed|random|noise|Math\\.random"
+    solution: |
+      Platform-Independent Random Numbers:
+
+      The problem:
+      - JavaScript Math.random() is not seedable
+      - Float operations differ between CPU architectures
+      - Same operations can produce slightly different floats
+
+      Solutions:
+      ```javascript
+      // 1. Use integer-based PRNG (most portable)
+      function xorshift32(seed) {
+        let state = seed;
+
+        return function() {
+          state ^= state << 13;
+          state ^= state >>> 17;
+          state ^= state << 5;
+
+          // Return as unsigned 32-bit
+          return (state >>> 0) / 0xffffffff;
+        };
+      }
+
+      // 2. Avoid float accumulation
+      // BAD - accumulates float errors
+      let position = 0;
+      for (let i = 0; i < 1000000; i++) {
+        position += 0.001;
+      }
+      // position might be 999.9999999997 or 1000.0000000003
+
+      // GOOD - calculate from integers
+      function getPosition(i) {
+        return i * 0.001;
+      }
+
+      // 3. Use fixed-point for critical calculations
+      class FixedPoint {
+        constructor(value, scale = 1000) {
+          this.value = Math.round(value * scale);
+          this.scale = scale;
+        }
+
+        add(other) {
+          return new FixedPoint(
+            (this.value + other.value) / this.scale,
+            this.scale
+          );
+        }
+
+        toFloat() {
+          return this.value / this.scale;
+        }
+      }
+
+      // 4. Hash-based coordinate functions
+      // Instead of accumulating noise, hash each coordinate
+      function coordNoise(x, y, seed) {
+        // Convert to integers
+        const ix = Math.floor(x * 1000);
+        const iy = Math.floor(y * 1000);
+
+        // Hash function (deterministic)
+        let h = seed;
+        h = (h ^ ix) * 0x85ebca6b;
+        h = (h ^ iy) * 0xc2b2ae35;
+
+        return (h >>> 0) / 0xffffffff;
+      }
+      ```
+
+      Testing reproducibility:
+      - Generate on multiple platforms
+      - Compare checksums of output
+      - Test on different browsers
+    references:
+      - Cross-platform determinism
+
+  - id: unplayable-content
+    severity: CRITICAL
+    title: Generated Content Can Be Impossible
+    description: Dungeons with no exits, terrain with no paths, unwinnable levels
+    symptoms:
+      - Players get stuck
+      - "Impossible" bug reports
+      - Rare seeds that break the game
+      - QA can't reproduce issues
+    detection_pattern: "generate|dungeon|level|room"
+    solution: |
+      Validity Checks Are Not Optional:
+
+      Every generated level must be verified playable.
+
+      ```javascript
+      class ValidatedGenerator {
+        constructor(seed) {
+          this.baseSeed = seed;
+          this.maxAttempts = 100;
+        }
+
+        generate(params) {
+          for (let attempt = 0; attempt < this.maxAttempts; attempt++) {
+            const seed = this.baseSeed + attempt;
+            const level = this.rawGenerate(params, seed);
+
+            const validation = this.validate(level);
+            if (validation.valid) {
+              return { level, seed, attempts: attempt + 1 };
+            }
+
+            console.log(`Seed ${seed} failed: ${validation.reason}`);
+          }
+
+          // Fallback to guaranteed-valid template
+          console.warn('All attempts failed, using fallback');
+          return { level: this.fallbackLevel(), seed: 'fallback' };
+        }
+
+        validate(level) {
+          // 1. Check connectivity
+          if (!this.isFullyConnected(level)) {
+            return { valid: false, reason: 'Disconnected areas' };
+          }
+
+          // 2. Check spawn point
+          if (!level.spawnPoint) {
+            return { valid: false, reason: 'No spawn point' };
+          }
+
+          // 3. Check exit exists and is reachable
+          if (!level.exit || !this.isReachable(level, level.spawnPoint, level.exit)) {
+            return { valid: false, reason: 'Exit not reachable' };
+          }
+
+          // 4. Check minimum playable area
+          const floorTiles = this.countFloorTiles(level);
+          if (floorTiles < params.minFloorTiles) {
+            return { valid: false, reason: 'Too small' };
+          }
+
+          // 5. Check no "softlock" situations
+          if (this.hasSoftlocks(level)) {
+            return { valid: false, reason: 'Softlock possible' };
+          }
+
+          return { valid: true };
+        }
+
+        isFullyConnected(level) {
+          // Flood fill from spawn
+          const visited = new Set();
+          const stack = [level.spawnPoint];
+
+          while (stack.length > 0) {
+            const pos = stack.pop();
+            const key = `${pos.x},${pos.y}`;
+
+            if (visited.has(key)) continue;
+            if (!level.isWalkable(pos.x, pos.y)) continue;
+
+            visited.add(key);
+
+            // Add neighbors
+            [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
+              stack.push({ x: pos.x + dx, y: pos.y + dy });
+            });
+          }
+
+          // Check all walkable tiles are visited
+          return this.countFloorTiles(level) === visited.size;
+        }
+
+        fallbackLevel() {
+          // Hand-designed level that always works
+          return loadTemplate('fallback_level');
+        }
+      }
+      ```
+    references:
+      - Procedural level validation
+
+  - id: noise-artifacts
+    severity: HIGH
+    title: Noise Functions Have Visible Artifacts
+    description: Grid patterns, repetition, or unnatural features in generated content
+    symptoms:
+      - Visible grid lines in terrain
+      - Repeating patterns every N tiles
+      - Diagonal streaking
+      - "Minecraft chunk borders" visible
+    detection_pattern: "perlin|noise|simplex|fbm"
+    solution: |
+      Common Noise Artifacts and Fixes:
+
+      1. Grid Alignment:
+      ```javascript
+      // BAD - axis-aligned artifacts
+      const height = noise2D(x, y);
+
+      // GOOD - rotate sampling coordinates
+      const angle = 0.463647; // Not 45 degrees!
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const rx = x * cos - y * sin;
+      const ry = x * sin + y * cos;
+      const height = noise2D(rx, ry);
+      ```
+
+      2. Visible Octave Layers:
+      ```javascript
+      // BAD - octaves too separated
+      const fbm = noise(x) * 1 +
+                  noise(x * 2) * 0.5 +
+                  noise(x * 4) * 0.25;
+
+      // GOOD - use non-integer lacunarity
+      const lacunarity = 2.17; // Not exactly 2
+      let freq = 1, amp = 1, value = 0;
+      for (let i = 0; i < octaves; i++) {
+        value += noise(x * freq) * amp;
+        freq *= lacunarity;
+        amp *= persistence;
+      }
+      ```
+
+      3. Repetition at Large Scales:
+      ```javascript
+      // Perlin repeats at permutation length (usually 256)
+
+      // GOOD - use larger permutation
+      const permutationSize = 512; // Or 1024
+
+      // Or use hash-based noise (no repetition)
+      function hashNoise(x, y) {
+        const n = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+        return n - Math.floor(n);
+      }
+      ```
+
+      4. Domain Warping for Natural Look:
+      ```javascript
+      // Warp the input coordinates for more organic shapes
+      function warpedNoise(x, y) {
+        const warpX = noise(x + 0, y + 0) * 0.3;
+        const warpY = noise(x + 5.2, y + 1.3) * 0.3;
+
+        return noise(x + warpX, y + warpY);
+      }
+      ```
+    references:
+      - Noise function implementation
+
+  - id: performance-at-scale
+    severity: HIGH
+    title: Generation Slows To A Crawl At Scale
+    description: Works in dev, hangs in production with real-world sizes
+    symptoms:
+      - Loading screen forever on large worlds
+      - Browser "script taking too long" warnings
+      - Memory exhaustion
+      - Players quit before loading finishes
+    detection_pattern: "generate|chunk|terrain|world"
+    solution: |
+      Chunked, Lazy, and Cached:
+
+      ```javascript
+      // 1. Chunk-based generation
+      class ChunkedWorld {
+        constructor(chunkSize = 32) {
+          this.chunkSize = chunkSize;
+          this.chunks = new Map();
+          this.generating = new Set();
+        }
+
+        async getChunk(cx, cy) {
+          const key = `${cx},${cy}`;
+
+          // Return cached
+          if (this.chunks.has(key)) {
+            return this.chunks.get(key);
+          }
+
+          // Avoid duplicate generation
+          if (this.generating.has(key)) {
+            return this.waitForChunk(key);
+          }
+
+          this.generating.add(key);
+
+          // Generate async to not block main thread
+          const chunk = await this.generateChunkAsync(cx, cy);
+
+          this.chunks.set(key, chunk);
+          this.generating.delete(key);
+
+          return chunk;
+        }
+
+        async generateChunkAsync(cx, cy) {
+          // Use web worker or split across frames
+          return new Promise(resolve => {
+            // Could use requestIdleCallback for low priority
+            setTimeout(() => {
+              resolve(this.generateChunk(cx, cy));
+            }, 0);
+          });
+        }
+
+        generateChunk(cx, cy) {
+          const chunk = new Array(this.chunkSize);
+
+          for (let y = 0; y < this.chunkSize; y++) {
+            chunk[y] = new Array(this.chunkSize);
+            for (let x = 0; x < this.chunkSize; x++) {
+              const worldX = cx * this.chunkSize + x;
+              const worldY = cy * this.chunkSize + y;
+              chunk[y][x] = this.noise.get(worldX, worldY);
+            }
+          }
+
+          return chunk;
+        }
+
+        // Unload far chunks to save memory
+        unloadFarChunks(playerX, playerY, radius = 5) {
+          const playerCX = Math.floor(playerX / this.chunkSize);
+          const playerCY = Math.floor(playerY / this.chunkSize);
+
+          for (const [key, chunk] of this.chunks) {
+            const [cx, cy] = key.split(',').map(Number);
+            const dist = Math.max(
+              Math.abs(cx - playerCX),
+              Math.abs(cy - playerCY)
+            );
+
+            if (dist > radius) {
+              this.chunks.delete(key);
+            }
+          }
+        }
+      }
+
+      // 2. LOD for distant content
+      class LODTerrain {
+        getHeight(x, y, distance) {
+          if (distance > 1000) {
+            // Very rough approximation
+            return this.noise.get(x * 0.01, y * 0.01);
+          } else if (distance > 100) {
+            // Medium detail
+            return this.noise.fbm(x, y, { octaves: 3 });
+          } else {
+            // Full detail
+            return this.noise.fbm(x, y, { octaves: 8 });
+          }
+        }
+      }
+      ```
+    references:
+      - Procedural generation performance
+
+  - id: wfc-contradiction
+    severity: MEDIUM
+    title: Wave Function Collapse Gets Stuck
+    description: WFC can reach states with no valid solution
+    symptoms:
+      - Empty cells with 0 possibilities
+      - Infinite loops in propagation
+      - Partially generated content
+      - Some seeds always fail
+    detection_pattern: "wfc|wave.*function|collapse|constraint"
+    solution: |
+      Handling WFC Contradictions:
+
+      ```javascript
+      class RobustWFC {
+        constructor(tiles, rules) {
+          this.tiles = tiles;
+          this.rules = rules;
+        }
+
+        generate(width, height, maxBacktracks = 50) {
+          let backtracks = 0;
+
+          // Stack for backtracking
+          const history = [];
+
+          while (true) {
+            const grid = this.initGrid(width, height);
+            let steps = 0;
+
+            while (true) {
+              // Find minimum entropy cell
+              const cell = this.findLowestEntropy(grid);
+
+              if (!cell) {
+                // Done!
+                return this.extractResult(grid);
+              }
+
+              if (cell.entropy === 0) {
+                // Contradiction!
+                backtracks++;
+
+                if (backtracks >= maxBacktracks) {
+                  console.warn('Too many backtracks, using fallback');
+                  return this.fallback(width, height);
+                }
+
+                // Backtrack to last choice
+                if (history.length > 0) {
+                  const snapshot = history.pop();
+                  this.restoreGrid(grid, snapshot.grid);
+
+                  // Try different choice
+                  snapshot.possibilities.delete(snapshot.chosen);
+                  if (snapshot.possibilities.size > 0) {
+                    const newChoice = this.randomFrom(snapshot.possibilities);
+                    this.collapse(grid, snapshot.x, snapshot.y, newChoice);
+                    history.push({
+                      ...snapshot,
+                      chosen: newChoice
+                    });
+                  }
+
+                  continue;
+                }
+
+                break; // Start over
+              }
+
+              // Collapse and save for backtracking
+              const possibilities = new Set(grid[cell.y][cell.x]);
+              const chosen = this.randomFrom(possibilities);
+
+              history.push({
+                grid: this.cloneGrid(grid),
+                x: cell.x,
+                y: cell.y,
+                possibilities,
+                chosen
+              });
+
+              this.collapse(grid, cell.x, cell.y, chosen);
+              this.propagate(grid);
+
+              steps++;
+              if (steps > width * height * 10) {
+                console.warn('Too many steps, restarting');
+                break;
+              }
+            }
+          }
+        }
+
+        // Ensure ruleset is consistent
+        validateRules() {
+          const errors = [];
+
+          for (const [tile, rules] of Object.entries(this.rules)) {
+            for (const [dir, allowed] of Object.entries(rules)) {
+              for (const neighbor of allowed) {
+                // Check reciprocal rule exists
+                const opposite = this.oppositeDir(dir);
+                const neighborRules = this.rules[neighbor]?.[opposite];
+
+                if (!neighborRules?.includes(tile)) {
+                  errors.push(
+                    `Missing reciprocal: ${tile} allows ${neighbor} ${dir}, ` +
+                    `but ${neighbor} doesn't allow ${tile} ${opposite}`
+                  );
+                }
+              }
+            }
+          }
+
+          return errors;
+        }
+      }
+      ```
+    references:
+      - Wave Function Collapse backtracking
+
+  - id: integer-overflow
+    severity: MEDIUM
+    title: Coordinate Systems Overflow At Scale
+    description: Worlds break at 2^31 or float precision limits
+    symptoms:
+      - World "wraps" at certain coordinates
+      - Jittering at extreme distances
+      - Chunks stop generating far from origin
+      - Precision loss causes visual glitches
+    detection_pattern: "coordinate|position|world|chunk"
+    solution: |
+      Handling Large Coordinates:
+
+      ```javascript
+      // Problem: JavaScript numbers lose precision beyond 2^53
+
+      // 1. Use relative coordinates for rendering
+      class InfiniteWorld {
+        constructor() {
+          // Use BigInt for world coordinates
+          this.originX = 0n;
+          this.originY = 0n;
+        }
+
+        worldToLocal(worldX, worldY) {
+          // Convert BigInt world coords to local float
+          return {
+            x: Number(worldX - this.originX),
+            y: Number(worldY - this.originY)
+          };
+        }
+
+        // Move origin when player travels far
+        updateOrigin(playerX, playerY) {
+          const threshold = 10000;
+
+          if (Math.abs(Number(playerX - this.originX)) > threshold) {
+            this.originX = playerX;
+            // Rebuild nearby chunks with new origin
+          }
+        }
+      }
+
+      // 2. Chunk-based coordinates
+      class ChunkCoordinates {
+        static CHUNK_SIZE = 32;
+
+        static worldToChunk(worldX, worldY) {
+          return {
+            chunkX: Math.floor(worldX / this.CHUNK_SIZE),
+            chunkY: Math.floor(worldY / this.CHUNK_SIZE),
+            localX: ((worldX % this.CHUNK_SIZE) + this.CHUNK_SIZE) % this.CHUNK_SIZE,
+            localY: ((worldY % this.CHUNK_SIZE) + this.CHUNK_SIZE) % this.CHUNK_SIZE
+          };
+        }
+
+        // Never use absolute world coords in rendering
+        // Always relative to current chunk or origin
+      }
+
+      // 3. Test at boundaries
+      const testCoords = [
+        { x: 0, y: 0 },
+        { x: 2**20, y: 2**20 },
+        { x: 2**30, y: 2**30 },
+        { x: -2**30, y: -2**30 },
+        { x: 2**31, y: 0 },  // Should handle gracefully
+      ];
+      ```
+    references:
+      - Large world coordinate systems

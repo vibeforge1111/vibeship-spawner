@@ -1,0 +1,631 @@
+id: hand-gesture-recognition
+skill: Hand Gesture Recognition
+version: "1.0"
+
+sharp_edges:
+  - id: lighting-sensitivity
+    severity: CRITICAL
+    title: Hand Detection Is Extremely Sensitive to Lighting
+    description: Poor lighting will make even the best model fail
+    symptoms:
+      - Detection works in lab, fails in real world
+      - Flickering detections
+      - Complete loss of tracking in shadows
+      - Overexposed hands cause false negatives
+    detection_pattern: "mediapipe|handpose|hand.*detect"
+    solution: |
+      Lighting Is Everything in Hand Tracking:
+
+      Common failures:
+      - Backlit hands (window behind user)
+      - Strong shadows (overhead lighting)
+      - Very dark skin in low light (model bias)
+      - Overexposed hands (direct sunlight)
+
+      Solutions:
+      ```javascript
+      // 1. Check for adequate lighting
+      function checkLighting(imageData) {
+        let totalBrightness = 0;
+        const data = imageData.data;
+
+        for (let i = 0; i < data.length; i += 4) {
+          const brightness = (data[i] + data[i+1] + data[i+2]) / 3;
+          totalBrightness += brightness;
+        }
+
+        const avgBrightness = totalBrightness / (data.length / 4);
+
+        if (avgBrightness < 50) {
+          return { ok: false, message: 'Too dark - need more light' };
+        }
+        if (avgBrightness > 200) {
+          return { ok: false, message: 'Too bright - reduce exposure' };
+        }
+        return { ok: true };
+      }
+
+      // 2. Guide users to good lighting
+      function showLightingGuide(lighting) {
+        if (!lighting.ok) {
+          showOverlay(`⚠️ ${lighting.message}`);
+          return false;
+        }
+        return true;
+      }
+
+      // 3. Adjust camera exposure if possible
+      async function optimizeCamera(videoTrack) {
+        const capabilities = videoTrack.getCapabilities();
+
+        if (capabilities.exposureMode) {
+          await videoTrack.applyConstraints({
+            advanced: [{ exposureMode: 'continuous' }]
+          });
+        }
+
+        if (capabilities.brightness) {
+          // Boost brightness slightly
+          await videoTrack.applyConstraints({
+            advanced: [{
+              brightness: capabilities.brightness.max * 0.6
+            }]
+          });
+        }
+      }
+      ```
+
+      Best practices:
+      - Test with diverse skin tones
+      - Test in various lighting conditions
+      - Provide real-time lighting feedback
+      - Consider IR-based solutions for consistent lighting
+    references:
+      - Computer vision lighting requirements
+
+  - id: webcam-quality-variance
+    severity: HIGH
+    title: Webcam Quality Varies Wildly
+    description: Your MacBook Pro camera is not what users have
+    symptoms:
+      - Works on dev machine, fails on user devices
+      - Massive latency on some cameras
+      - Low resolution breaks detection
+      - Auto-focus hunting causes detection drops
+    detection_pattern: "getUserMedia|webcam|video.*stream"
+    solution: |
+      Webcam Reality Check:
+
+      Your camera: 1080p, good low-light, fast autofocus
+      Average user: 720p laptop cam from 2018, noisy, slow
+
+      Handle the variance:
+      ```javascript
+      // 1. Adaptive resolution
+      async function getOptimalStream() {
+        // Try high res first, fallback gracefully
+        const configs = [
+          { width: 1280, height: 720 },
+          { width: 960, height: 540 },
+          { width: 640, height: 480 }
+        ];
+
+        for (const config of configs) {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                width: { ideal: config.width },
+                height: { ideal: config.height },
+                facingMode: 'user'
+              }
+            });
+
+            console.log(`Got ${config.width}x${config.height} stream`);
+            return stream;
+          } catch (e) {
+            console.log(`${config.width}x${config.height} failed, trying lower`);
+          }
+        }
+
+        // Last resort - any video
+        return navigator.mediaDevices.getUserMedia({ video: true });
+      }
+
+      // 2. Measure actual camera latency
+      async function measureCameraLatency(video) {
+        const frames = [];
+        const startTime = performance.now();
+
+        return new Promise((resolve) => {
+          let frameCount = 0;
+          const checkFrame = () => {
+            if (video.readyState >= 2) {
+              frames.push(performance.now());
+              frameCount++;
+
+              if (frameCount >= 30) {
+                const avgInterval = (frames[29] - frames[0]) / 29;
+                const fps = 1000 / avgInterval;
+                resolve({ fps, latency: avgInterval });
+                return;
+              }
+            }
+            requestAnimationFrame(checkFrame);
+          };
+          checkFrame();
+        });
+      }
+
+      // 3. Adjust processing based on capabilities
+      function adjustProcessingForDevice(capabilities) {
+        if (capabilities.fps < 20) {
+          // Slow camera - reduce model complexity
+          hands.setOptions({ modelComplexity: 0 });
+        }
+
+        if (capabilities.fps < 15) {
+          // Very slow - skip frames
+          return { skipFrames: 2 };
+        }
+
+        return { skipFrames: 0 };
+      }
+      ```
+    references:
+      - WebRTC camera handling
+
+  - id: skin-tone-bias
+    severity: HIGH
+    title: Hand Detection Models Have Skin Tone Bias
+    description: Models trained on light skin fail on darker skin tones
+    symptoms:
+      - Lower detection rates for dark-skinned users
+      - Higher false negatives for certain ethnicities
+      - Works for developers but not diverse users
+      - Customer complaints about "broken" feature
+    detection_pattern: "hand.*detect|mediapipe|handpose"
+    solution: |
+      Bias Is Real - Test for It:
+
+      Most public hand datasets are:
+      - 70%+ light-skinned hands
+      - Mostly young adult hands
+      - Few elderly hands
+      - Few hands with conditions (arthritis, etc.)
+
+      Mitigation strategies:
+      ```javascript
+      // 1. Test with diverse samples
+      const testImages = [
+        'hands_light_skin.jpg',
+        'hands_medium_skin.jpg',
+        'hands_dark_skin.jpg',
+        'hands_elderly.jpg',
+        'hands_with_rings.jpg',
+        'hands_with_tattoos.jpg'
+      ];
+
+      async function runBiasTest(detector) {
+        const results = [];
+
+        for (const image of testImages) {
+          const detections = await detector.detect(image);
+          results.push({
+            image,
+            detected: detections.length > 0,
+            confidence: detections[0]?.confidence || 0
+          });
+        }
+
+        // Flag if any category has significantly lower detection
+        const avgConfidence = results.reduce((a, r) => a + r.confidence, 0) / results.length;
+        const biasedImages = results.filter(r =>
+          r.confidence < avgConfidence * 0.7
+        );
+
+        return { results, biasedImages };
+      }
+
+      // 2. Adjust detection thresholds
+      function adaptiveThreshold(skinTone) {
+        // Lower confidence threshold for harder cases
+        // This is a band-aid, not a solution
+        const baseThreshold = 0.7;
+
+        // Could use histogram analysis to detect challenging conditions
+        return baseThreshold * 0.9;
+      }
+
+      // 3. Augment training data if training custom model
+      // - Various lighting conditions
+      // - Diverse skin tones
+      // - Age ranges
+      // - Accessories (rings, watches, gloves)
+      ```
+
+      Best practices:
+      - Test with 10+ diverse hand samples
+      - Monitor detection rates by user demographics
+      - Provide fallback input methods
+      - Be transparent about limitations
+    references:
+      - Algorithmic fairness in computer vision
+
+  - id: occlusion-handling
+    severity: HIGH
+    title: Overlapping Fingers Break Detection
+    description: When fingers cross or overlap, landmarks become unreliable
+    symptoms:
+      - Jittery landmarks when making fist
+      - Wrong finger identified
+      - Landmark jumping between fingers
+      - Gestures with crossed fingers fail
+    detection_pattern: "landmarks|finger.*tip|gesture"
+    solution: |
+      Occlusion Is the Hard Problem:
+
+      Hand tracking models see 2D - they guess 3D.
+      When fingers overlap, the guess is often wrong.
+
+      Strategies:
+      ```javascript
+      // 1. Detect occlusion and reduce confidence
+      function detectOcclusion(landmarks) {
+        const fingerTips = [4, 8, 12, 16, 20];
+        const minDistance = 0.03; // Normalized units
+
+        let occlusionScore = 0;
+
+        for (let i = 0; i < fingerTips.length; i++) {
+          for (let j = i + 1; j < fingerTips.length; j++) {
+            const dist = distance2D(
+              landmarks[fingerTips[i]],
+              landmarks[fingerTips[j]]
+            );
+
+            if (dist < minDistance) {
+              occlusionScore++;
+            }
+          }
+        }
+
+        return {
+          isOccluded: occlusionScore > 0,
+          occlusionLevel: occlusionScore / 10 // Normalize
+        };
+      }
+
+      // 2. Use temporal consistency
+      class OcclusionSmoother {
+        constructor() {
+          this.history = [];
+          this.maxHistory = 5;
+        }
+
+        smooth(landmarks, occlusion) {
+          if (occlusion.isOccluded && this.history.length > 0) {
+            // Use historical data when occluded
+            const lastGood = this.history[this.history.length - 1];
+            return this.interpolate(landmarks, lastGood, occlusion.occlusionLevel);
+          }
+
+          // Store good frames
+          if (!occlusion.isOccluded) {
+            this.history.push([...landmarks]);
+            if (this.history.length > this.maxHistory) {
+              this.history.shift();
+            }
+          }
+
+          return landmarks;
+        }
+
+        interpolate(current, previous, factor) {
+          return current.map((lm, i) => ({
+            x: lm.x * (1 - factor) + previous[i].x * factor,
+            y: lm.y * (1 - factor) + previous[i].y * factor,
+            z: lm.z * (1 - factor) + previous[i].z * factor
+          }));
+        }
+      }
+
+      // 3. Avoid gestures requiring finger overlap
+      const RELIABLE_GESTURES = [
+        'open_hand',      // All fingers extended
+        'fist',           // All fingers closed
+        'thumbs_up',      // Thumb up, others closed
+        'pointing',       // Index extended
+        'peace',          // Index + middle extended
+        'pinch'           // Thumb + index together
+      ];
+
+      // Avoid these (high occlusion probability):
+      const UNRELIABLE_GESTURES = [
+        'crossed_fingers',
+        'finger_gun',     // Overlapping middle/ring
+        'complex_signs'   // Multiple finger crossings
+      ];
+      ```
+    references:
+      - Hand occlusion research
+
+  - id: latency-perception
+    severity: MEDIUM
+    title: Even 100ms Latency Feels Broken
+    description: Gesture interfaces need <50ms response to feel natural
+    symptoms:
+      - Users feel disconnected from interface
+      - Gestures feel "laggy" or "floaty"
+      - Users overshoot targets
+      - Frustration with precise movements
+    detection_pattern: "gesture|hand.*track|interactive"
+    solution: |
+      Latency Budget for Natural Feel:
+
+      Camera capture: ~33ms (30fps)
+      Model inference: ~20-50ms
+      Gesture processing: ~5ms
+      Rendering: ~16ms
+      Total: 74-104ms
+
+      That's already too slow!
+
+      Optimization strategies:
+      ```javascript
+      // 1. Measure your actual latency
+      class LatencyTracker {
+        constructor() {
+          this.samples = [];
+        }
+
+        startFrame() {
+          this.frameStart = performance.now();
+        }
+
+        endProcessing() {
+          const latency = performance.now() - this.frameStart;
+          this.samples.push(latency);
+
+          if (this.samples.length > 100) {
+            this.samples.shift();
+          }
+        }
+
+        getStats() {
+          const sorted = [...this.samples].sort((a, b) => a - b);
+          return {
+            avg: this.samples.reduce((a, b) => a + b, 0) / this.samples.length,
+            p50: sorted[Math.floor(sorted.length * 0.5)],
+            p95: sorted[Math.floor(sorted.length * 0.95)],
+            p99: sorted[Math.floor(sorted.length * 0.99)]
+          };
+        }
+      }
+
+      // 2. Use prediction to hide latency
+      class MotionPredictor {
+        constructor() {
+          this.velocities = [];
+        }
+
+        predict(currentPos, deltaTime) {
+          if (this.velocities.length < 2) {
+            return currentPos;
+          }
+
+          // Average recent velocities
+          const avgVelocity = {
+            x: this.velocities.reduce((a, v) => a + v.x, 0) / this.velocities.length,
+            y: this.velocities.reduce((a, v) => a + v.y, 0) / this.velocities.length
+          };
+
+          // Predict ahead by ~50ms
+          const predictionTime = 0.05;
+          return {
+            x: currentPos.x + avgVelocity.x * predictionTime,
+            y: currentPos.y + avgVelocity.y * predictionTime
+          };
+        }
+
+        update(currentPos, lastPos, deltaTime) {
+          if (lastPos) {
+            const velocity = {
+              x: (currentPos.x - lastPos.x) / deltaTime,
+              y: (currentPos.y - lastPos.y) / deltaTime
+            };
+
+            this.velocities.push(velocity);
+            if (this.velocities.length > 5) {
+              this.velocities.shift();
+            }
+          }
+        }
+      }
+
+      // 3. Use lite model for lower latency
+      hands.setOptions({
+        modelComplexity: 0  // 0 = lite, faster but less accurate
+      });
+
+      // 4. Skip processing on some frames
+      let frameCount = 0;
+      function processFrame() {
+        frameCount++;
+        if (frameCount % 2 === 0) {
+          return lastResult; // Reuse previous result
+        }
+        return detectHands();
+      }
+      ```
+    references:
+      - Real-time interaction latency
+
+  - id: model-loading-time
+    severity: MEDIUM
+    title: ML Models Take Forever to Load
+    description: Users stare at blank screen while model downloads/initializes
+    symptoms:
+      - 5+ seconds before tracking starts
+      - Users think it's broken and leave
+      - Mobile users on slow connections fail
+      - No feedback during loading
+    detection_pattern: "mediapipe|tensorflow|load.*model"
+    solution: |
+      Model Loading UX:
+
+      MediaPipe Hands model: ~5-10MB
+      First load: Can be 5-30 seconds on slow connections
+
+      Better loading experience:
+      ```javascript
+      // 1. Show meaningful progress
+      class ModelLoader {
+        constructor() {
+          this.onProgress = null;
+          this.onReady = null;
+        }
+
+        async load() {
+          // Show we're starting
+          this.onProgress?.({ stage: 'downloading', percent: 0 });
+
+          const hands = new Hands({
+            locateFile: (file) => {
+              // Could track download progress here
+              return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+            }
+          });
+
+          this.onProgress?.({ stage: 'initializing', percent: 50 });
+
+          await hands.initialize();
+
+          this.onProgress?.({ stage: 'warming_up', percent: 80 });
+
+          // Warm up with dummy inference
+          await this.warmUp(hands);
+
+          this.onProgress?.({ stage: 'ready', percent: 100 });
+          this.onReady?.();
+
+          return hands;
+        }
+
+        async warmUp(hands) {
+          // Run a few inferences to warm up GPU
+          const dummyCanvas = document.createElement('canvas');
+          dummyCanvas.width = 640;
+          dummyCanvas.height = 480;
+
+          for (let i = 0; i < 3; i++) {
+            await hands.send({ image: dummyCanvas });
+          }
+        }
+      }
+
+      // 2. Progressive UI
+      function renderLoadingUI(progress) {
+        const messages = {
+          downloading: 'Downloading hand tracking model...',
+          initializing: 'Preparing hand tracking...',
+          warming_up: 'Almost ready...',
+          ready: 'Hand tracking ready!'
+        };
+
+        showMessage(messages[progress.stage]);
+        showProgressBar(progress.percent);
+      }
+
+      // 3. Preload during idle time
+      // If you know user will need hand tracking,
+      // start loading it before they click the button
+      const preloadPromise = import('@mediapipe/hands')
+        .then(({ Hands }) => new Hands(config));
+      ```
+    references:
+      - ML model loading optimization
+
+  - id: browser-compatibility
+    severity: MEDIUM
+    title: WebGL/WASM Requirements Aren't Universal
+    description: Hand tracking needs WebGL2 and WASM - not everyone has them
+    symptoms:
+      - Black screen on older browsers
+      - "WebGL not supported" errors
+      - Crashes on iOS Safari versions
+      - Works on Chrome, breaks on Firefox
+    detection_pattern: "webgl|wasm|mediapipe"
+    solution: |
+      Check Before You Wreck:
+
+      Requirements:
+      - WebGL2 (or WebGL with extensions)
+      - WebAssembly (WASM)
+      - SharedArrayBuffer (for some models)
+      - Sufficient GPU memory
+
+      ```javascript
+      // Feature detection
+      function checkHandTrackingSupport() {
+        const issues = [];
+
+        // WebGL check
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl2') ||
+                   canvas.getContext('webgl');
+
+        if (!gl) {
+          issues.push('WebGL not supported');
+        } else if (!canvas.getContext('webgl2')) {
+          issues.push('WebGL2 not available - may have reduced performance');
+        }
+
+        // WASM check
+        if (typeof WebAssembly === 'undefined') {
+          issues.push('WebAssembly not supported');
+        }
+
+        // Camera check
+        if (!navigator.mediaDevices?.getUserMedia) {
+          issues.push('Camera access not available');
+        }
+
+        // SharedArrayBuffer (needed for SIMD)
+        if (typeof SharedArrayBuffer === 'undefined') {
+          // Might work, but slower
+          console.warn('SharedArrayBuffer not available - reduced performance');
+        }
+
+        return {
+          supported: issues.length === 0,
+          issues,
+          canFallback: issues.every(i => !i.includes('not supported'))
+        };
+      }
+
+      // Graceful degradation
+      async function initHandTracking() {
+        const support = checkHandTrackingSupport();
+
+        if (!support.supported) {
+          if (support.canFallback) {
+            showMessage('Limited hand tracking available');
+            return initLiteMode();
+          } else {
+            showMessage('Hand tracking not supported on this device');
+            showAlternativeInput();
+            return null;
+          }
+        }
+
+        return initFullMode();
+      }
+      ```
+
+      Browser-specific gotchas:
+      - Safari: Needs HTTPS for camera
+      - Firefox: Some WASM features slower
+      - Mobile Chrome: Check GPU memory
+      - iOS Safari: Version-dependent WASM support
+    references:
+      - WebGL browser compatibility

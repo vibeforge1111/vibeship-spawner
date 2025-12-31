@@ -1,0 +1,586 @@
+id: generative-art
+skill: Generative Art
+version: "1.0"
+
+sharp_edges:
+  - id: trait-rarity-distribution
+    severity: CRITICAL
+    title: Trait Rarity Can Cluster in Unexpected Ways
+    description: Rare traits can accidentally concentrate in certain seed ranges
+    symptoms:
+      - Rare items all have similar appearance
+      - Early mints have different rarity distribution than later ones
+      - Community notices patterns in "random" distribution
+      - Some traits never appear in final collection
+    detection_pattern: "random|rarity|weight|trait"
+    solution: |
+      Rarity Distribution Must Be Verified:
+
+      The problem:
+      - Pseudo-random generators have patterns
+      - Sequential seeds can produce similar results
+      - Traits might correlate unexpectedly
+
+      ```javascript
+      // 1. Use hash-based seed derivation
+      function deriveSeed(tokenId, salt) {
+        // Hash to break sequential patterns
+        const hash = keccak256(
+          ethers.utils.solidityPack(
+            ['uint256', 'string'],
+            [tokenId, salt]
+          )
+        );
+        return parseInt(hash.slice(2, 10), 16);
+      }
+
+      // 2. Verify distribution before mint
+      function analyzeDistribution(system, count) {
+        const traitCounts = {};
+
+        for (let i = 0; i < count; i++) {
+          const seed = deriveSeed(i, 'production');
+          const instance = new system(seed);
+          const features = instance.deriveFeatures();
+
+          for (const [trait, value] of Object.entries(features)) {
+            traitCounts[trait] = traitCounts[trait] || {};
+            traitCounts[trait][value] = (traitCounts[trait][value] || 0) + 1;
+          }
+        }
+
+        // Check expected vs actual
+        console.log('Trait Distribution:');
+        for (const [trait, counts] of Object.entries(traitCounts)) {
+          console.log(`  ${trait}:`);
+          for (const [value, count] of Object.entries(counts)) {
+            const pct = (count / count * 100).toFixed(1);
+            console.log(`    ${value}: ${count} (${pct}%)`);
+          }
+        }
+
+        return traitCounts;
+      }
+
+      // 3. Check for clustering
+      function checkClustering(traitCounts, windowSize = 100) {
+        // Sliding window analysis
+        // Alert if any window has 2x expected rarity
+      }
+
+      // 4. Force distribution with rejection sampling
+      function ensureDistribution(targetCounts) {
+        const remaining = { ...targetCounts };
+
+        return function generate(seed) {
+          let attempts = 0;
+          while (attempts < 100) {
+            const instance = new GenerativeSystem(seed + attempts);
+            const features = instance.deriveFeatures();
+
+            // Check if this combination is still allowed
+            let valid = true;
+            for (const [trait, value] of Object.entries(features)) {
+              if (remaining[trait][value] <= 0) {
+                valid = false;
+                break;
+              }
+            }
+
+            if (valid) {
+              // Decrement remaining
+              for (const [trait, value] of Object.entries(features)) {
+                remaining[trait][value]--;
+              }
+              return instance;
+            }
+
+            attempts++;
+          }
+
+          throw new Error('Cannot satisfy distribution');
+        };
+      }
+      ```
+    references:
+      - NFT rarity distribution
+
+  - id: color-banding
+    severity: HIGH
+    title: Gradients Show Ugly Banding on Many Displays
+    description: Smooth gradients become stepped on 8-bit displays
+    symptoms:
+      - Visible steps in gradient backgrounds
+      - "Posterization" effect
+      - Worse on mobile and cheaper monitors
+      - Print output looks different than screen
+    detection_pattern: "gradient|lerp|color.*transition"
+    solution: |
+      Gradient Banding Mitigation:
+
+      The problem: Most displays are 8-bit (256 levels per channel)
+      Smooth gradients need dithering to look smooth.
+
+      ```javascript
+      // 1. Add noise/dithering to gradients (p5.js)
+      function smoothGradient(c1, c2, y, height) {
+        const t = y / height;
+
+        // Base color
+        const r = lerp(red(c1), red(c2), t);
+        const g = lerp(green(c1), green(c2), t);
+        const b = lerp(blue(c1), blue(c2), t);
+
+        // Add subtle noise to break banding
+        const noise = (random() - 0.5) * 2; // -1 to 1
+        const noiseAmount = 3; // Adjust as needed
+
+        return color(
+          constrain(r + noise * noiseAmount, 0, 255),
+          constrain(g + noise * noiseAmount, 0, 255),
+          constrain(b + noise * noiseAmount, 0, 255)
+        );
+      }
+
+      // 2. GLSL shader dithering
+      const fragShader = `
+        // Bayer matrix dithering
+        float dither4x4(vec2 position, float brightness) {
+          int x = int(mod(position.x, 4.0));
+          int y = int(mod(position.y, 4.0));
+          int index = x + y * 4;
+
+          float limit = 0.0;
+          if (index == 0) limit = 0.0625;
+          else if (index == 1) limit = 0.5625;
+          // ... full Bayer matrix
+          else limit = 0.9375;
+
+          return brightness < limit ? 0.0 : 1.0;
+        }
+
+        void main() {
+          vec3 col = yourGradientColor();
+
+          // Add dithering
+          col += (dither4x4(gl_FragCoord.xy, 0.5) - 0.5) / 128.0;
+
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `;
+
+      // 3. Use more complex gradients
+      // Multi-stop gradients have less visible banding
+      function multiStopGradient(y, height) {
+        const stops = [
+          { pos: 0.0, color: color('#1a1a2e') },
+          { pos: 0.3, color: color('#16213e') },
+          { pos: 0.6, color: color('#0f3460') },
+          { pos: 1.0, color: color('#e94560') }
+        ];
+
+        const t = y / height;
+        for (let i = 0; i < stops.length - 1; i++) {
+          if (t <= stops[i + 1].pos) {
+            const localT = map(t, stops[i].pos, stops[i + 1].pos, 0, 1);
+            return lerpColor(stops[i].color, stops[i + 1].color, localT);
+          }
+        }
+      }
+      ```
+
+      Best practices:
+      - Always add subtle noise to large gradients
+      - Use more gradient stops
+      - Test on 8-bit displays
+      - Consider using texture/pattern instead of pure gradients
+    references:
+      - Gradient banding solutions
+
+  - id: resolution-dependency
+    severity: HIGH
+    title: Art Breaks at Different Resolutions
+    description: Piece looks different or broken at non-native sizes
+    symptoms:
+      - Thumbnails look different than full size
+      - Print output doesn't match screen
+      - Mobile view is broken
+      - 4K renders have different composition
+    detection_pattern: "width|height|canvas|resolution"
+    solution: |
+      Resolution-Independent Design:
+
+      ```javascript
+      // 1. Use relative units, not pixels
+      class ResponsiveSketch {
+        constructor(canvas) {
+          this.canvas = canvas;
+          this.w = canvas.width;
+          this.h = canvas.height;
+
+          // Base unit - 1% of smaller dimension
+          this.unit = Math.min(this.w, this.h) / 100;
+        }
+
+        // All sizes relative to unit
+        drawCircle(x, y, size) {
+          // x, y, size are in units (0-100)
+          const px = x * this.unit;
+          const py = y * this.unit;
+          const psize = size * this.unit;
+
+          ctx.beginPath();
+          ctx.arc(px, py, psize, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Stroke weight scales with resolution
+        setStroke(weight) {
+          ctx.lineWidth = weight * this.unit * 0.1;
+        }
+      }
+
+      // 2. p5.js resolution handling
+      function setup() {
+        // Create at base resolution
+        createCanvas(1000, 1000);
+        pixelDensity(1); // Consistent across devices
+
+        // Or scale for high-DPI
+        // pixelDensity(window.devicePixelRatio);
+      }
+
+      function draw() {
+        // Use width/height ratios, not absolute values
+        const margin = width * 0.1;
+        const gridSize = width / 20;
+
+        for (let x = margin; x < width - margin; x += gridSize) {
+          // ...
+        }
+      }
+
+      // 3. High-resolution export
+      function saveHighRes(scale = 4) {
+        const pg = createGraphics(width * scale, height * scale);
+
+        // Redraw at higher resolution
+        pg.scale(scale);
+        drawTo(pg); // Your drawing function
+
+        pg.save('highres.png');
+      }
+
+      // 4. Test at multiple resolutions
+      const testResolutions = [
+        { w: 500, h: 500, name: 'thumbnail' },
+        { w: 1000, h: 1000, name: 'standard' },
+        { w: 2000, h: 2000, name: 'retina' },
+        { w: 4000, h: 4000, name: 'print' }
+      ];
+
+      function testAllResolutions(generateFn, seed) {
+        for (const res of testResolutions) {
+          const canvas = createCanvas(res.w, res.h);
+          generateFn(seed);
+          saveCanvas(`${seed}_${res.name}`, 'png');
+        }
+      }
+      ```
+    references:
+      - Resolution-independent graphics
+
+  - id: determinism-across-platforms
+    severity: HIGH
+    title: Same Seed Produces Different Results on Different Devices
+    description: Browser/platform differences break reproducibility
+    symptoms:
+      - Piece looks different on iOS vs Android
+      - Firefox renders differently than Chrome
+      - Same seed, different visual output
+      - Collectors see different art than preview
+    detection_pattern: "random|seed|noise"
+    solution: |
+      Cross-Platform Determinism:
+
+      Sources of non-determinism:
+      - Math.sin() precision varies
+      - Canvas anti-aliasing differs
+      - Font rendering varies
+      - Float operations are platform-specific
+
+      ```javascript
+      // 1. Use integer-only RNG
+      function xorshift32(seed) {
+        let state = seed >>> 0;
+
+        return function() {
+          state ^= state << 13;
+          state ^= state >>> 17;
+          state ^= state << 5;
+          return (state >>> 0) / 0xffffffff;
+        };
+      }
+
+      // 2. Avoid Math.sin for noise (use lookup tables)
+      const SIN_TABLE = new Float32Array(360);
+      for (let i = 0; i < 360; i++) {
+        SIN_TABLE[i] = Math.sin(i * Math.PI / 180);
+      }
+
+      function deterministicSin(degrees) {
+        const idx = ((degrees % 360) + 360) % 360;
+        return SIN_TABLE[Math.floor(idx)];
+      }
+
+      // 3. Disable anti-aliasing for pixel-perfect
+      const ctx = canvas.getContext('2d', {
+        alpha: false,
+        desynchronized: true
+      });
+      ctx.imageSmoothingEnabled = false;
+
+      // 4. Use web-safe fonts or convert to paths
+      ctx.font = 'monospace'; // Available everywhere
+
+      // Or convert text to paths
+      function textToPath(text, x, y, size) {
+        // Use opentype.js to get path data
+      }
+
+      // 5. Fixed-point arithmetic for critical calculations
+      function fixedMul(a, b) {
+        return Math.round(a * b * 1000) / 1000;
+      }
+
+      // 6. Test automation
+      async function hashCanvas(canvas) {
+        const dataUrl = canvas.toDataURL();
+        const hash = await crypto.subtle.digest(
+          'SHA-256',
+          new TextEncoder().encode(dataUrl)
+        );
+        return Array.from(new Uint8Array(hash))
+          .map(b => b.toString(16).padStart(2, '0'))
+          .join('');
+      }
+
+      // Compare hashes across platforms
+      const expectedHash = '...'; // From reference platform
+      const actualHash = await hashCanvas(canvas);
+      if (expectedHash !== actualHash) {
+        console.error('Platform rendering mismatch!');
+      }
+      ```
+    references:
+      - Cross-platform rendering
+
+  - id: performance-animation
+    severity: MEDIUM
+    title: Complex Sketches Drop Frames
+    description: Animation becomes choppy as complexity increases
+    symptoms:
+      - Low FPS on mobile
+      - Animation stutters on load
+      - Browser becomes unresponsive
+      - Fans spin up on laptop
+    detection_pattern: "draw|loop|animate|requestAnimationFrame"
+    solution: |
+      Animation Performance:
+
+      ```javascript
+      // 1. Cache expensive calculations
+      let cachedNoise;
+
+      function setup() {
+        // Pre-calculate noise grid
+        cachedNoise = [];
+        for (let y = 0; y < height; y++) {
+          cachedNoise[y] = [];
+          for (let x = 0; x < width; x++) {
+            cachedNoise[y][x] = noise(x * 0.01, y * 0.01);
+          }
+        }
+      }
+
+      function draw() {
+        // Use cached values
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const n = cachedNoise[y][x];
+            // Fast lookup instead of recalculating
+          }
+        }
+      }
+
+      // 2. Use offscreen buffers
+      let staticLayer;
+
+      function setup() {
+        staticLayer = createGraphics(width, height);
+        drawStaticElements(staticLayer);
+      }
+
+      function draw() {
+        // Draw static layer (no recalculation)
+        image(staticLayer, 0, 0);
+
+        // Only animate dynamic elements
+        drawAnimatedElements();
+      }
+
+      // 3. Reduce draw calls
+      function draw() {
+        // BAD: Many small shapes
+        for (let i = 0; i < 10000; i++) {
+          fill(colors[i]);
+          rect(positions[i].x, positions[i].y, 10, 10);
+        }
+
+        // GOOD: Batch by color
+        for (const color of uniqueColors) {
+          fill(color);
+          beginShape();
+          for (const pos of positionsByColor[color]) {
+            vertex(pos.x, pos.y);
+            // ... other vertices
+          }
+          endShape();
+        }
+      }
+
+      // 4. Use WebGL mode for heavy graphics
+      function setup() {
+        createCanvas(800, 800, WEBGL);
+      }
+
+      // 5. Frame rate targeting
+      function setup() {
+        frameRate(30); // Target 30fps if 60 is too demanding
+      }
+
+      // 6. Performance monitoring
+      function draw() {
+        const start = performance.now();
+
+        // Your drawing code
+
+        const elapsed = performance.now() - start;
+        if (elapsed > 16) {
+          console.warn(`Slow frame: ${elapsed.toFixed(1)}ms`);
+        }
+      }
+      ```
+    references:
+      - Canvas performance optimization
+
+  - id: nft-metadata-standards
+    severity: MEDIUM
+    title: Incorrect Metadata Breaks Marketplace Display
+    description: Art doesn't display correctly on OpenSea, etc.
+    symptoms:
+      - Missing traits on marketplace
+      - Wrong image showing
+      - Animation not playing
+      - Rarity rankings incorrect
+    detection_pattern: "metadata|json|trait|attribute"
+    solution: |
+      NFT Metadata Standards:
+
+      ```javascript
+      // ERC-721 Metadata Standard
+      const metadata = {
+        // Required
+        name: "Piece #1234",
+        description: "A generative artwork from the collection.",
+        image: "ipfs://Qm.../1234.png",
+
+        // For animation
+        animation_url: "ipfs://Qm.../1234.html", // Interactive version
+
+        // OpenSea standard attributes
+        attributes: [
+          {
+            trait_type: "Background",
+            value: "Dark"
+          },
+          {
+            trait_type: "Palette",
+            value: "Warm"
+          },
+          {
+            // Numeric traits
+            trait_type: "Complexity",
+            value: 75,
+            max_value: 100,
+            display_type: "number"
+          },
+          {
+            // Boost percentage
+            trait_type: "Rarity Score",
+            value: 15,
+            display_type: "boost_percentage"
+          },
+          {
+            // Date
+            trait_type: "Generation Date",
+            value: 1672531200,
+            display_type: "date"
+          }
+        ],
+
+        // Optional but recommended
+        external_url: "https://yoursite.com/piece/1234",
+        background_color: "0a0a0a", // No # prefix
+
+        // For collections
+        properties: {
+          files: [
+            {
+              uri: "ipfs://Qm.../1234.png",
+              type: "image/png"
+            },
+            {
+              uri: "ipfs://Qm.../1234.glb",
+              type: "model/gltf-binary"
+            }
+          ],
+          category: "image", // or "video", "vr", etc.
+          creators: [
+            {
+              address: "0x...",
+              share: 100
+            }
+          ]
+        }
+      };
+
+      // Validation before upload
+      function validateMetadata(meta) {
+        const errors = [];
+
+        if (!meta.name) errors.push('Missing name');
+        if (!meta.image) errors.push('Missing image');
+        if (!meta.image.startsWith('ipfs://') &&
+            !meta.image.startsWith('ar://') &&
+            !meta.image.startsWith('https://')) {
+          errors.push('Invalid image URI');
+        }
+
+        if (meta.attributes) {
+          for (const attr of meta.attributes) {
+            if (!attr.trait_type) {
+              errors.push('Attribute missing trait_type');
+            }
+            if (attr.value === undefined) {
+              errors.push(`Attribute ${attr.trait_type} missing value`);
+            }
+          }
+        }
+
+        return errors;
+      }
+      ```
+    references:
+      - OpenSea metadata standards
+      - ERC-721 metadata standard

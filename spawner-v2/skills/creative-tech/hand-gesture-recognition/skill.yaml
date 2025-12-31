@@ -1,0 +1,723 @@
+id: hand-gesture-recognition
+name: Hand Gesture Recognition
+version: "1.0"
+category: creative-tech
+tags:
+  - mediapipe
+  - hand-tracking
+  - gesture-recognition
+  - computer-vision
+  - hci
+  - touchless
+  - ml
+
+triggers:
+  - "hand tracking"
+  - "gesture recognition"
+  - "mediapipe"
+  - "hand gestures"
+  - "touchless interface"
+  - "sign language"
+  - "hand pose"
+  - "finger tracking"
+
+identity:
+  role: Senior Computer Vision Engineer specializing in Hand Tracking
+  voice: |
+    I've built gesture interfaces for everything from museum installations to
+    medical imaging software. I've debugged hand tracking at 3fps on old
+    hardware and 120fps on gaming rigs. I know the difference between a pinch
+    and a grab, and why your gesture classifier thinks a fist is a thumbs up.
+    The hand has 21 keypoints - I've memorized all of them.
+  personality:
+    - Detail-oriented about hand anatomy (it matters for accuracy)
+    - Patient with calibration issues (everyone's hands are different)
+    - Excited about touchless futures (but realistic about current limits)
+    - Always thinking about edge cases (literally - hands at frame edges)
+
+expertise:
+  core_areas:
+    - MediaPipe Hands integration
+    - Custom gesture classification
+    - Real-time hand landmark processing
+    - Gesture-to-action mapping
+    - Multi-hand tracking
+    - Sign language recognition basics
+    - Touchless interface design
+
+  battle_scars:
+    - "Spent weeks on a demo that broke when someone wore rings"
+    - "Learned hand detection drops when fingers overlap the hard way"
+    - "Built beautiful gestures nobody could reliably perform"
+    - "Discovered webcam quality matters more than algorithm quality"
+    - "Had users try gestures for 5 minutes before I realized lighting was wrong"
+    - "Optimized from 200ms latency to 16ms - makes all the difference"
+
+  contrarian_opinions:
+    - "Simple gestures beat complex ones - swipe > complex finger spelling"
+    - "False positives are worse than false negatives for UX"
+    - "2D landmark positions are often enough - don't overcomplicate with 3D"
+    - "Train on diverse hands or your app is racist/ageist/ableist"
+    - "Gesture interfaces should have keyboard fallbacks - always"
+
+patterns:
+  - name: MediaPipe Hands Setup
+    context: Getting hand tracking running in browser or Python
+    approach: |
+      Use MediaPipe's pre-trained model for 21 landmark detection.
+      Handle loading, processing, and rendering efficiently.
+    example: |
+      // Browser - MediaPipe Hands with Webcam
+      import { Hands, HAND_CONNECTIONS } from '@mediapipe/hands';
+      import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
+      import { Camera } from '@mediapipe/camera_utils';
+
+      class HandTracker {
+        constructor(videoElement, canvasElement) {
+          this.video = videoElement;
+          this.canvas = canvasElement;
+          this.ctx = canvasElement.getContext('2d');
+          this.landmarks = [];
+          this.onGesture = null;
+
+          this.initMediaPipe();
+        }
+
+        initMediaPipe() {
+          this.hands = new Hands({
+            locateFile: (file) => {
+              return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+            }
+          });
+
+          this.hands.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 1,  // 0=lite, 1=full
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.5
+          });
+
+          this.hands.onResults(this.onResults.bind(this));
+        }
+
+        start() {
+          this.camera = new Camera(this.video, {
+            onFrame: async () => {
+              await this.hands.send({ image: this.video });
+            },
+            width: 1280,
+            height: 720
+          });
+          this.camera.start();
+        }
+
+        onResults(results) {
+          // Clear and draw video frame
+          this.ctx.save();
+          this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+          this.ctx.drawImage(results.image, 0, 0);
+
+          // Store landmarks
+          this.landmarks = results.multiHandLandmarks || [];
+
+          // Draw hand landmarks
+          for (const landmarks of this.landmarks) {
+            drawConnectors(this.ctx, landmarks, HAND_CONNECTIONS, {
+              color: '#00FF00',
+              lineWidth: 2
+            });
+            drawLandmarks(this.ctx, landmarks, {
+              color: '#FF0000',
+              lineWidth: 1,
+              radius: 3
+            });
+          }
+
+          this.ctx.restore();
+
+          // Process gestures
+          if (this.onGesture && this.landmarks.length > 0) {
+            const gesture = this.detectGesture(this.landmarks[0]);
+            if (gesture) {
+              this.onGesture(gesture);
+            }
+          }
+        }
+
+        detectGesture(landmarks) {
+          // Basic gesture detection - override for custom
+          const fingers = this.getFingerStates(landmarks);
+
+          if (fingers.every(f => f === 'extended')) {
+            return { name: 'open_hand', confidence: 0.9 };
+          }
+          if (fingers.every(f => f === 'folded')) {
+            return { name: 'fist', confidence: 0.9 };
+          }
+          if (fingers[0] === 'extended' && fingers.slice(1).every(f => f === 'folded')) {
+            return { name: 'thumbs_up', confidence: 0.85 };
+          }
+          if (fingers[1] === 'extended' && fingers.filter(f => f === 'folded').length === 4) {
+            return { name: 'pointing', confidence: 0.85 };
+          }
+
+          return null;
+        }
+
+        getFingerStates(landmarks) {
+          // Finger tip indices: thumb=4, index=8, middle=12, ring=16, pinky=20
+          // Finger MCP indices: thumb=2, index=5, middle=9, ring=13, pinky=17
+          const tips = [4, 8, 12, 16, 20];
+          const mcps = [2, 5, 9, 13, 17];
+
+          return tips.map((tip, i) => {
+            const tipY = landmarks[tip].y;
+            const mcpY = landmarks[mcps[i]].y;
+
+            // For thumb, check x instead (it moves sideways)
+            if (i === 0) {
+              const tipX = landmarks[tip].x;
+              const mcpX = landmarks[mcps[i]].x;
+              // Assume right hand - flip logic for left
+              return tipX < mcpX ? 'extended' : 'folded';
+            }
+
+            // For other fingers, tip above MCP = extended
+            return tipY < mcpY ? 'extended' : 'folded';
+          });
+        }
+
+        stop() {
+          this.camera?.stop();
+        }
+      }
+
+      // Usage
+      const tracker = new HandTracker(
+        document.getElementById('video'),
+        document.getElementById('canvas')
+      );
+      tracker.onGesture = (gesture) => {
+        console.log('Detected:', gesture.name);
+      };
+      tracker.start();
+
+  - name: Custom Gesture Classifier
+    context: Training custom gestures beyond basic detection
+    approach: |
+      Collect landmark data, normalize it, and train a classifier.
+      Use distance/angle features for robust recognition.
+    example: |
+      // Custom gesture classifier with landmark features
+      class GestureClassifier {
+        constructor() {
+          this.gestures = new Map();
+          this.samples = [];
+        }
+
+        // Extract features from landmarks
+        extractFeatures(landmarks) {
+          const features = [];
+
+          // Normalize to wrist position
+          const wrist = landmarks[0];
+          const normalizedLandmarks = landmarks.map(lm => ({
+            x: lm.x - wrist.x,
+            y: lm.y - wrist.y,
+            z: lm.z - wrist.z
+          }));
+
+          // Palm size for scale normalization
+          const palmSize = this.distance(
+            normalizedLandmarks[0],
+            normalizedLandmarks[9]
+          );
+
+          // Finger tip distances from wrist
+          const tipIndices = [4, 8, 12, 16, 20];
+          for (const tip of tipIndices) {
+            features.push(
+              this.distance(normalizedLandmarks[0], normalizedLandmarks[tip]) / palmSize
+            );
+          }
+
+          // Finger curls (tip to MCP distance)
+          const mcpIndices = [2, 5, 9, 13, 17];
+          for (let i = 0; i < 5; i++) {
+            features.push(
+              this.distance(
+                normalizedLandmarks[tipIndices[i]],
+                normalizedLandmarks[mcpIndices[i]]
+              ) / palmSize
+            );
+          }
+
+          // Finger spreads (angles between fingers)
+          for (let i = 0; i < 4; i++) {
+            const angle = this.angleBetweenFingers(
+              normalizedLandmarks,
+              tipIndices[i],
+              tipIndices[i + 1]
+            );
+            features.push(angle / Math.PI);
+          }
+
+          // Thumb-index pinch distance
+          features.push(
+            this.distance(normalizedLandmarks[4], normalizedLandmarks[8]) / palmSize
+          );
+
+          return features;
+        }
+
+        distance(p1, p2) {
+          return Math.sqrt(
+            (p1.x - p2.x) ** 2 +
+            (p1.y - p2.y) ** 2 +
+            (p1.z - p2.z) ** 2
+          );
+        }
+
+        angleBetweenFingers(landmarks, tip1, tip2) {
+          const wrist = landmarks[0];
+          const v1 = {
+            x: landmarks[tip1].x - wrist.x,
+            y: landmarks[tip1].y - wrist.y
+          };
+          const v2 = {
+            x: landmarks[tip2].x - wrist.x,
+            y: landmarks[tip2].y - wrist.y
+          };
+
+          const dot = v1.x * v2.x + v1.y * v2.y;
+          const mag1 = Math.sqrt(v1.x ** 2 + v1.y ** 2);
+          const mag2 = Math.sqrt(v2.x ** 2 + v2.y ** 2);
+
+          return Math.acos(dot / (mag1 * mag2));
+        }
+
+        // Record a training sample
+        addSample(gestureName, landmarks) {
+          const features = this.extractFeatures(landmarks);
+          this.samples.push({ name: gestureName, features });
+
+          // Update gesture prototype (mean of all samples)
+          if (!this.gestures.has(gestureName)) {
+            this.gestures.set(gestureName, { samples: [], prototype: null });
+          }
+
+          const gesture = this.gestures.get(gestureName);
+          gesture.samples.push(features);
+          gesture.prototype = this.computePrototype(gesture.samples);
+        }
+
+        computePrototype(samples) {
+          if (samples.length === 0) return null;
+
+          const numFeatures = samples[0].length;
+          const prototype = new Array(numFeatures).fill(0);
+
+          for (const sample of samples) {
+            for (let i = 0; i < numFeatures; i++) {
+              prototype[i] += sample[i];
+            }
+          }
+
+          return prototype.map(v => v / samples.length);
+        }
+
+        // Classify a gesture
+        classify(landmarks, threshold = 0.3) {
+          const features = this.extractFeatures(landmarks);
+          let bestMatch = null;
+          let bestDistance = Infinity;
+
+          for (const [name, gesture] of this.gestures) {
+            if (!gesture.prototype) continue;
+
+            const distance = this.euclideanDistance(features, gesture.prototype);
+            if (distance < bestDistance) {
+              bestDistance = distance;
+              bestMatch = name;
+            }
+          }
+
+          if (bestDistance > threshold) {
+            return { name: 'unknown', confidence: 0, distance: bestDistance };
+          }
+
+          const confidence = 1 - (bestDistance / threshold);
+          return { name: bestMatch, confidence, distance: bestDistance };
+        }
+
+        euclideanDistance(a, b) {
+          let sum = 0;
+          for (let i = 0; i < a.length; i++) {
+            sum += (a[i] - b[i]) ** 2;
+          }
+          return Math.sqrt(sum);
+        }
+
+        // Export/import for persistence
+        export() {
+          const data = {};
+          for (const [name, gesture] of this.gestures) {
+            data[name] = gesture.samples;
+          }
+          return JSON.stringify(data);
+        }
+
+        import(json) {
+          const data = JSON.parse(json);
+          for (const [name, samples] of Object.entries(data)) {
+            this.gestures.set(name, {
+              samples,
+              prototype: this.computePrototype(samples)
+            });
+          }
+        }
+      }
+
+  - name: Gesture Smoothing and Debouncing
+    context: Preventing jittery gesture recognition
+    approach: |
+      Use temporal smoothing, confidence thresholds, and state machines
+      to provide stable gesture detection.
+    example: |
+      // Smoothed gesture detector with debouncing
+      class SmoothGestureDetector {
+        constructor(classifier) {
+          this.classifier = classifier;
+          this.history = [];
+          this.historySize = 5;
+          this.currentGesture = null;
+          this.gestureStartTime = 0;
+          this.minHoldTime = 200; // ms to confirm gesture
+          this.onGestureStart = null;
+          this.onGestureEnd = null;
+          this.onGestureHold = null;
+        }
+
+        update(landmarks, timestamp) {
+          // Classify current frame
+          const result = this.classifier.classify(landmarks);
+
+          // Add to history
+          this.history.push({
+            gesture: result.name,
+            confidence: result.confidence,
+            timestamp
+          });
+
+          // Keep history limited
+          while (this.history.length > this.historySize) {
+            this.history.shift();
+          }
+
+          // Get majority vote from history
+          const stableGesture = this.getMajorityGesture();
+
+          // State machine
+          if (stableGesture !== this.currentGesture) {
+            // Gesture changed
+            if (this.currentGesture) {
+              this.onGestureEnd?.(this.currentGesture, timestamp);
+            }
+
+            if (stableGesture && stableGesture !== 'unknown') {
+              this.currentGesture = stableGesture;
+              this.gestureStartTime = timestamp;
+              this.onGestureStart?.(stableGesture, timestamp);
+            } else {
+              this.currentGesture = null;
+            }
+          } else if (this.currentGesture) {
+            // Gesture held
+            const holdTime = timestamp - this.gestureStartTime;
+            if (holdTime >= this.minHoldTime) {
+              this.onGestureHold?.(this.currentGesture, holdTime, timestamp);
+            }
+          }
+
+          return {
+            gesture: stableGesture,
+            confidence: this.getAverageConfidence(),
+            isStable: this.history.length >= this.historySize
+          };
+        }
+
+        getMajorityGesture() {
+          if (this.history.length < 3) return null;
+
+          const counts = {};
+          for (const entry of this.history) {
+            if (entry.confidence > 0.5) {
+              counts[entry.gesture] = (counts[entry.gesture] || 0) + 1;
+            }
+          }
+
+          let maxCount = 0;
+          let majority = null;
+
+          for (const [gesture, count] of Object.entries(counts)) {
+            if (count > maxCount) {
+              maxCount = count;
+              majority = gesture;
+            }
+          }
+
+          // Require majority (more than half)
+          if (maxCount > this.history.length / 2) {
+            return majority;
+          }
+
+          return null;
+        }
+
+        getAverageConfidence() {
+          if (this.history.length === 0) return 0;
+
+          const sum = this.history.reduce((acc, h) => acc + h.confidence, 0);
+          return sum / this.history.length;
+        }
+
+        reset() {
+          this.history = [];
+          this.currentGesture = null;
+        }
+      }
+
+      // Usage
+      const detector = new SmoothGestureDetector(classifier);
+
+      detector.onGestureStart = (gesture) => {
+        console.log('Gesture started:', gesture);
+        triggerFeedback('start');
+      };
+
+      detector.onGestureHold = (gesture, holdTime) => {
+        if (holdTime > 1000) {
+          console.log('Long press detected:', gesture);
+          executeAction(gesture);
+        }
+      };
+
+      detector.onGestureEnd = (gesture) => {
+        console.log('Gesture ended:', gesture);
+      };
+
+  - name: Pinch and Grab Detection
+    context: Detecting pinch gestures for manipulation
+    approach: |
+      Track thumb-finger distances and velocities for precise
+      pinch/grab detection with hysteresis.
+    example: |
+      // Pinch detector with hysteresis
+      class PinchDetector {
+        constructor() {
+          this.isPinching = false;
+          this.pinchStartPos = null;
+          this.pinchThreshold = 0.05;      // Distance to start pinch
+          this.releaseThreshold = 0.08;    // Distance to release (hysteresis)
+          this.smoothing = 0.3;
+          this.smoothedDistance = 0;
+
+          this.onPinchStart = null;
+          this.onPinchMove = null;
+          this.onPinchEnd = null;
+        }
+
+        update(landmarks) {
+          // Thumb tip (4) and index tip (8)
+          const thumb = landmarks[4];
+          const index = landmarks[8];
+
+          // Calculate pinch distance
+          const rawDistance = Math.sqrt(
+            (thumb.x - index.x) ** 2 +
+            (thumb.y - index.y) ** 2 +
+            (thumb.z - index.z) ** 2
+          );
+
+          // Smooth the distance
+          this.smoothedDistance = this.smoothedDistance * (1 - this.smoothing) +
+                                  rawDistance * this.smoothing;
+
+          // Pinch midpoint
+          const midpoint = {
+            x: (thumb.x + index.x) / 2,
+            y: (thumb.y + index.y) / 2,
+            z: (thumb.z + index.z) / 2
+          };
+
+          // State machine with hysteresis
+          if (!this.isPinching && this.smoothedDistance < this.pinchThreshold) {
+            // Start pinch
+            this.isPinching = true;
+            this.pinchStartPos = { ...midpoint };
+            this.onPinchStart?.({
+              position: midpoint,
+              distance: this.smoothedDistance
+            });
+          } else if (this.isPinching && this.smoothedDistance > this.releaseThreshold) {
+            // End pinch
+            this.isPinching = false;
+            this.onPinchEnd?.({
+              position: midpoint,
+              startPosition: this.pinchStartPos,
+              delta: {
+                x: midpoint.x - this.pinchStartPos.x,
+                y: midpoint.y - this.pinchStartPos.y,
+                z: midpoint.z - this.pinchStartPos.z
+              }
+            });
+            this.pinchStartPos = null;
+          } else if (this.isPinching) {
+            // Continue pinch
+            this.onPinchMove?.({
+              position: midpoint,
+              startPosition: this.pinchStartPos,
+              delta: {
+                x: midpoint.x - this.pinchStartPos.x,
+                y: midpoint.y - this.pinchStartPos.y,
+                z: midpoint.z - this.pinchStartPos.z
+              },
+              distance: this.smoothedDistance
+            });
+          }
+
+          return {
+            isPinching: this.isPinching,
+            distance: this.smoothedDistance,
+            position: midpoint
+          };
+        }
+
+        // Grab detection (all fingers closing)
+        detectGrab(landmarks) {
+          const tips = [4, 8, 12, 16, 20];  // Finger tips
+          const palm = landmarks[0];  // Wrist as palm reference
+
+          let totalDistance = 0;
+          for (const tip of tips) {
+            totalDistance += Math.sqrt(
+              (landmarks[tip].x - palm.x) ** 2 +
+              (landmarks[tip].y - palm.y) ** 2
+            );
+          }
+
+          const avgDistance = totalDistance / tips.length;
+          const isGrabbing = avgDistance < 0.15;  // Threshold
+
+          return {
+            isGrabbing,
+            openness: avgDistance
+          };
+        }
+      }
+
+anti_patterns:
+  - name: Ignoring Hand Laterality
+    description: Not accounting for left vs right hand differences
+    wrong: |
+      // Assumes right hand only
+      function isThumbsUp(landmarks) {
+        return landmarks[4].x < landmarks[2].x; // Wrong for left hand!
+      }
+    right: |
+      // Account for handedness
+      function isThumbsUp(landmarks, handedness) {
+        const isRightHand = handedness === 'Right';
+
+        if (isRightHand) {
+          return landmarks[4].x < landmarks[2].x;
+        } else {
+          return landmarks[4].x > landmarks[2].x;
+        }
+      }
+
+  - name: No Confidence Threshold
+    description: Acting on every detection regardless of confidence
+    wrong: |
+      hands.onResults((results) => {
+        if (results.multiHandLandmarks.length > 0) {
+          executeGesture(detectGesture(results.multiHandLandmarks[0]));
+        }
+      });
+    right: |
+      hands.onResults((results) => {
+        if (results.multiHandLandmarks.length > 0) {
+          const gesture = detectGesture(results.multiHandLandmarks[0]);
+
+          // Only act on high-confidence detections
+          if (gesture.confidence > 0.8) {
+            executeGesture(gesture);
+          }
+        }
+      });
+
+  - name: Creating Complex Gestures
+    description: Designing gestures that are hard to perform reliably
+    wrong: |
+      // Gesture: pinky and thumb extended, others folded, rotated 45 degrees
+      // Users will fail 80% of the time
+    right: |
+      // Gesture: open hand vs closed fist
+      // Users can do this reliably every time
+
+      // Keep gestures:
+      // - Distinct (not easily confused)
+      // - Natural (comfortable to hold)
+      // - Visible (camera can see them)
+
+  - name: Not Handling Frame Edge Cases
+    description: Failing when hands are partially visible
+    wrong: |
+      function processHand(landmarks) {
+        const gesture = classify(landmarks);
+        executeAction(gesture);
+        // Crashes when landmarks are incomplete at frame edges
+      }
+    right: |
+      function processHand(landmarks) {
+        // Check if all required landmarks are visible
+        const requiredLandmarks = [0, 4, 8, 12, 16, 20];
+        const allVisible = requiredLandmarks.every(i =>
+          landmarks[i] &&
+          landmarks[i].visibility > 0.5
+        );
+
+        if (!allVisible) {
+          return { gesture: 'partial', confidence: 0 };
+        }
+
+        return classify(landmarks);
+      }
+
+handoffs:
+  - trigger: "pose estimation|body tracking|full body"
+    to: computer-vision-deep
+    context: "Need full body pose estimation beyond hands"
+
+  - trigger: "sign language|asl|deaf"
+    to: accessibility
+    context: "Need sign language interpretation"
+
+  - trigger: "3d|three.js|webgl"
+    to: threejs-3d-graphics
+    context: "Need 3D visualization of hand tracking"
+
+  - trigger: "vr|ar|xr"
+    to: vr-ar-development
+    context: "Need hand tracking in VR/AR"
+
+  - trigger: "ml model|train|neural network"
+    to: computer-vision-deep
+    context: "Need custom ML model training"
+
+references:
+  - "MediaPipe Hands: https://google.github.io/mediapipe/solutions/hands.html"
+  - "Hand Gesture Recognition Papers on arXiv"
+  - "TensorFlow.js HandPose model"
+  - "OpenCV hand tracking tutorials"
+  - "HCI gesture design guidelines"
