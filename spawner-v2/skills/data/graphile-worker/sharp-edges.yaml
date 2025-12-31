@@ -1,0 +1,233 @@
+# Graphile Worker Sharp Edges
+# Production gotchas for PostgreSQL job queues
+
+sharp_edges:
+  - id: listen-notify-disabled
+    summary: Polling instead of LISTEN/NOTIFY causes latency
+    severity: high
+    situation: Jobs not picked up immediately, seconds of delay
+    why: |
+      Graphile Worker's speed comes from LISTEN/NOTIFY. When disabled,
+      it falls back to polling which adds 1-5 seconds of latency per job.
+      This defeats the main advantage of Graphile Worker.
+    solution: |
+      1. Ensure LISTEN/NOTIFY is enabled (default):
+         const runner = await run({
+           connectionString: process.env.DATABASE_URL,
+           // Don't set noHandleSignals or disable notify
+         });
+
+      2. If using connection pooler, ensure it supports LISTEN:
+         - PgBouncer: Use session mode, not transaction mode
+         - Supabase: Use direct connection, not pooler for worker
+
+      3. Verify LISTEN is working:
+         SELECT * FROM pg_stat_activity WHERE query LIKE '%LISTEN%';
+    symptoms:
+      - Jobs take seconds to start instead of milliseconds
+      - Worker logs show polling messages
+      - High CPU from frequent polling queries
+    detection_pattern: 'poll|noHandleSignals|LISTEN.*disabled'
+
+  - id: transaction-not-used
+    summary: Job queued outside data transaction causes inconsistency
+    severity: high
+    situation: Data saved but job not created, or vice versa
+    why: |
+      If you insert data and queue a job in separate transactions, one can
+      succeed while the other fails. You end up with orphaned data or
+      missing jobs. The atomicity guarantee is lost.
+    solution: |
+      1. Queue in same transaction as data:
+         await db.transaction(async (tx) => {
+           const order = await tx.orders.create({ ... });
+           await tx.$queryRaw`
+             SELECT graphile_worker.add_job(
+               'process_order',
+               ${JSON.stringify({ orderId: order.id })}::json
+             )
+           `;
+         });
+
+      2. Or use triggers for automatic queueing:
+         CREATE TRIGGER on_order_created
+           AFTER INSERT ON orders
+           FOR EACH ROW
+           EXECUTE FUNCTION queue_order_processing();
+
+      3. Use quickAddJob with transaction connection:
+         await quickAddJob({ pgPool: tx }, 'task', payload);
+    symptoms:
+      - Jobs reference data that doesn't exist
+      - Data exists but job never ran
+      - Inconsistent state after errors
+    detection_pattern: 'add_job.*outside.*transaction|separate.*commit'
+
+  - id: huge-payloads
+    summary: Large job payloads bloat database and slow processing
+    severity: medium
+    situation: Job data contains full objects instead of references
+    why: |
+      Job payloads are stored in PostgreSQL. Large payloads (files, full
+      documents, arrays of thousands of items) bloat the jobs table,
+      slow down queries, and increase backup sizes significantly.
+    solution: |
+      1. Store references, not data:
+         // Bad
+         await addJob('process', { document: hugeDocument });
+
+         // Good
+         await addJob('process', { documentId: doc.id });
+
+      2. For files, store in S3/R2 and pass URL:
+         const url = await uploadToS3(file);
+         await addJob('process-file', { fileUrl: url });
+
+      3. Monitor payload sizes:
+         SELECT pg_size_pretty(avg(length(payload::text)::int))
+         FROM graphile_worker.jobs;
+    symptoms:
+      - Job table grows faster than expected
+      - Slow job fetching and processing
+      - Large database backups
+    detection_pattern: 'payload.*size|large.*data|blob.*job'
+
+  - id: no-error-handling
+    summary: Errors swallowed in task handler, retries don't work
+    severity: high
+    situation: Tasks fail silently, no retries triggered
+    why: |
+      Graphile Worker retries failed jobs automatically, but only if the
+      error propagates. If you catch and swallow errors, the job appears
+      successful and won't retry. Silent failures accumulate.
+    solution: |
+      1. Let errors propagate:
+         // Bad
+         export const myTask: Task = async (payload) => {
+           try {
+             await riskyOperation();
+           } catch (e) {
+             console.error(e); // Error swallowed, job "succeeds"
+           }
+         };
+
+         // Good
+         export const myTask: Task = async (payload, helpers) => {
+           try {
+             await riskyOperation();
+           } catch (e) {
+             helpers.logger.error('Failed', { error: e });
+             throw e; // Error propagates, job retries
+           }
+         };
+
+      2. Use helpers.logger for context:
+         helpers.logger.info('Processing', { orderId: payload.id });
+
+      3. Check failed jobs regularly:
+         SELECT * FROM graphile_worker.jobs
+         WHERE attempts >= max_attempts;
+    symptoms:
+      - Jobs marked complete but work not done
+      - No retry attempts for failed operations
+      - Silent failures in logs
+    detection_pattern: 'catch.*console|swallow.*error|no.*throw'
+
+  - id: long-running-no-progress
+    summary: Long-running tasks appear stuck, no visibility
+    severity: medium
+    situation: Task takes minutes, no progress updates, worker seems frozen
+    why: |
+      Without progress reporting, monitoring is blind. The task might be
+      working fine but looks stuck. Other systems might kill the worker
+      thinking it's frozen. No way to estimate completion.
+    solution: |
+      1. Report progress for long tasks:
+         export const bigTask: Task = async (payload, helpers) => {
+           const items = await fetchItems();
+           for (let i = 0; i < items.length; i++) {
+             await processItem(items[i]);
+             await helpers.job.updateProgress(
+               Math.round((i / items.length) * 100)
+             );
+           }
+         };
+
+      2. Break into smaller jobs for very long operations:
+         // Instead of one 30-minute job
+         // Create 100 smaller jobs and aggregate
+
+      3. Set appropriate max_attempts and backoff:
+         SELECT graphile_worker.add_job(
+           'long_task',
+           payload,
+           max_attempts := 3,
+           backoff := '10 minutes'
+         );
+    symptoms:
+      - Workers appear frozen but are actually working
+      - No progress visibility in monitoring
+      - Premature task termination
+    detection_pattern: 'updateProgress|long.running|timeout'
+
+  - id: connection-pooler-listen
+    summary: LISTEN/NOTIFY doesn't work through connection pooler
+    severity: high
+    situation: Using PgBouncer in transaction mode, jobs delayed
+    why: |
+      LISTEN requires a persistent connection. Connection poolers in
+      transaction mode (PgBouncer default) don't maintain persistent
+      connections. LISTEN commands are lost when connection returns to pool.
+    solution: |
+      1. Use session mode for Graphile Worker:
+         # PgBouncer config for worker connection
+         [databases]
+         worker = host=db port=5432 dbname=app pool_mode=session
+
+      2. Or use direct connection for worker only:
+         // App uses pooler
+         const appPool = process.env.DATABASE_URL; // pooler
+
+         // Worker uses direct
+         const workerConn = process.env.DATABASE_URL_DIRECT; // direct
+
+      3. For Supabase, use direct connection string:
+         // Not the pooler URL (port 6543)
+         // Use direct URL (port 5432)
+    symptoms:
+      - Jobs take seconds to pick up
+      - LISTEN command has no effect
+      - Worker falls back to polling
+    detection_pattern: 'PgBouncer|transaction.mode|pooler.*LISTEN'
+
+  - id: cron-timezone-confusion
+    summary: Cron jobs run at wrong times due to timezone mismatch
+    severity: medium
+    situation: Scheduled jobs fire at unexpected hours
+    why: |
+      Cron schedules default to UTC. If you expect 9am local time but
+      the server is in UTC, the job runs at the wrong hour. Daylight
+      saving time changes make this worse.
+    solution: |
+      1. Always specify timezone in cron:
+         // crontab file
+         # 0 9 * * * {task} ?tz=America/New_York
+
+         // Or programmatically
+         parseCronItems([{
+           task: 'daily_report',
+           pattern: '0 9 * * *',
+           options: { tz: 'America/New_York' }
+         }]);
+
+      2. Use UTC and convert in task if needed:
+         # Always clear: 14:00 UTC
+         0 14 * * * daily_report
+
+      3. Test timezone handling:
+         SELECT NOW() AT TIME ZONE 'America/New_York';
+    symptoms:
+      - Jobs run at wrong local time
+      - Inconsistent timing during DST changes
+      - Confusion about when jobs will run
+    detection_pattern: 'timezone|cron.*tz|schedule.*UTC'

@@ -1,0 +1,239 @@
+# pg-boss Sharp Edges
+# Production gotchas for PostgreSQL job queues
+
+sharp_edges:
+  - id: no-expiration
+    summary: Jobs without expiration can get stuck forever
+    severity: high
+    situation: Worker crashes mid-job, job stays "active" indefinitely
+    why: |
+      Without expireInSeconds, a job taken by a crashed worker stays in
+      "active" state forever. No other worker can pick it up. It never
+      retries. It just sits there blocking progress.
+    solution: |
+      1. Always set expireInSeconds for jobs:
+         await boss.send('task', data, {
+           expireInSeconds: 300,  // 5 minutes
+           retryLimit: 3,
+         });
+
+      2. Set default at boss level:
+         const boss = new PgBoss({
+           connectionString: process.env.DATABASE_URL,
+           expireInDefault: 300,
+         });
+
+      3. Monitor stuck jobs:
+         SELECT * FROM pgboss.job
+         WHERE state = 'active'
+         AND startedon < NOW() - INTERVAL '1 hour';
+    symptoms:
+      - Jobs stuck in "active" state
+      - Worker crashed but job never retried
+      - Growing backlog with no errors
+    detection_pattern: 'expireInSeconds|expireIn|stuck.*active'
+
+  - id: connection-exhaustion
+    summary: Too many workers exhaust database connections
+    severity: high
+    situation: "FATAL: too many connections" during high load
+    why: |
+      Each pg-boss worker maintains database connections. With teamSize=10
+      and multiple worker processes, you quickly exhaust max_connections.
+      Supabase has strict connection limits (20-60 depending on plan).
+    solution: |
+      1. Size workers based on available connections:
+         // If max_connections = 50, reserve 30 for app, 20 for workers
+         await boss.work('queue', { teamSize: 5 }, handler);
+
+      2. Use connection pooler (PgBouncer/Supavisor):
+         const boss = new PgBoss({
+           connectionString: process.env.POOLER_URL,
+           // Pooler handles connection limits
+         });
+
+      3. Monitor connection usage:
+         SELECT count(*) FROM pg_stat_activity
+         WHERE application_name LIKE '%pg-boss%';
+
+      4. Set pool limits in pg-boss:
+         const boss = new PgBoss({
+           connectionString: process.env.DATABASE_URL,
+           max: 10,  // Max connections in internal pool
+         });
+    symptoms:
+      - "too many connections" errors
+      - Workers failing to start
+      - App connections rejected
+    detection_pattern: 'max_connections|teamSize|pool.*size'
+
+  - id: no-dead-letter
+    summary: Failed jobs disappear after retries, no visibility
+    severity: medium
+    situation: Jobs fail repeatedly and vanish, can't investigate
+    why: |
+      Without a dead letter queue, jobs that exhaust retries just go to
+      "failed" state and eventually archive. You lose the ability to
+      investigate, replay, or alert on persistent failures.
+    solution: |
+      1. Configure dead letter queue:
+         await boss.send('important-task', data, {
+           retryLimit: 3,
+           deadLetter: 'failed-important-tasks',
+         });
+
+      2. Process dead letter queue for alerting:
+         await boss.work('failed-important-tasks', async (job) => {
+           // Send to Slack/PagerDuty
+           await alertTeam({
+             queue: job.data.originalQueue,
+             error: job.data.error,
+           });
+           // Optionally store for later replay
+         });
+
+      3. Monitor dead letter queue:
+         SELECT name, COUNT(*) FROM pgboss.job
+         WHERE name LIKE 'failed-%'
+         AND state = 'created'
+         GROUP BY name;
+    symptoms:
+      - Failed jobs just disappear
+      - No alerting on persistent failures
+      - Can't replay failed jobs
+    detection_pattern: 'deadLetter|failed.*queue|DLQ'
+
+  - id: huge-job-data
+    summary: Large payloads bloat database and slow queries
+    severity: medium
+    situation: Job table grows huge, queries become slow
+    why: |
+      Job data is stored in PostgreSQL jsonb column. Large payloads
+      (files, full documents, arrays of thousands) bloat the table,
+      slow down job fetching, and increase backup sizes.
+    solution: |
+      1. Store references instead of data:
+         // Bad
+         await boss.send('process', { document: hugeBlob });
+
+         // Good
+         await boss.send('process', { documentId: doc.id });
+
+      2. For files, use external storage:
+         const url = await uploadToS3(file);
+         await boss.send('process', { fileUrl: url });
+
+      3. Check payload sizes:
+         SELECT pg_size_pretty(avg(length(data::text)::int))
+         FROM pgboss.job
+         WHERE name = 'my-queue';
+
+      4. Set up archiving to keep table lean:
+         const boss = new PgBoss({
+           archiveCompletedAfterSeconds: 7 * 24 * 3600,  // 7 days
+           deleteAfterSeconds: 30 * 24 * 3600,  // 30 days
+         });
+    symptoms:
+      - Job table gigabytes in size
+      - Slow job fetching
+      - Large database backups
+    detection_pattern: 'payload.*size|data.*large|jsonb.*size'
+
+  - id: archive-not-configured
+    summary: Completed jobs accumulate forever
+    severity: medium
+    situation: Jobs table grows unbounded, queries slow down
+    why: |
+      Without archiving, completed jobs stay in the main table forever.
+      The table grows linearly with job volume. Indexes become inefficient.
+      Even simple status queries slow down.
+    solution: |
+      1. Configure archiving in constructor:
+         const boss = new PgBoss({
+           connectionString: process.env.DATABASE_URL,
+           archiveCompletedAfterSeconds: 7 * 24 * 3600,  // 7 days
+           deleteAfterSeconds: 30 * 24 * 3600,  // 30 days
+         });
+
+      2. Monitor table size:
+         SELECT pg_size_pretty(pg_total_relation_size('pgboss.job'));
+         SELECT state, COUNT(*) FROM pgboss.job GROUP BY state;
+
+      3. For existing bloat, manual cleanup:
+         DELETE FROM pgboss.job
+         WHERE state IN ('completed', 'cancelled')
+         AND completedon < NOW() - INTERVAL '30 days';
+         VACUUM pgboss.job;
+    symptoms:
+      - Jobs table millions of rows
+      - Slow queue status queries
+      - Growing disk usage
+    detection_pattern: 'archiveCompleted|deleteAfter|archive.*config'
+
+  - id: supabase-connection-mode
+    summary: Wrong Supabase connection mode causes issues
+    severity: high
+    situation: Jobs not processing or connections failing with Supabase
+    why: |
+      Supabase offers two connection modes: session (port 5432) and
+      transaction (port 6543). pg-boss needs session mode for proper
+      connection handling. Transaction mode causes subtle issues.
+    solution: |
+      1. Use session mode connection string:
+         # Session mode (correct)
+         postgresql://user:pass@host:5432/db
+
+         # Transaction mode (problems)
+         postgresql://user:pass@host:6543/db
+
+      2. Or use direct connection (bypasses pooler):
+         const boss = new PgBoss({
+           connectionString: process.env.SUPABASE_DB_URL,  // Direct
+         });
+
+      3. If using Supavisor pooler:
+         // Append ?pgbouncer=true for some ORMs
+         // But pg-boss works better with direct connection
+    symptoms:
+      - Intermittent connection failures
+      - Jobs not picked up
+      - "prepared statement already exists"
+    detection_pattern: 'Supabase|port.*6543|connection.*mode'
+
+  - id: singleton-race-condition
+    summary: Singleton key doesn't prevent concurrent execution
+    severity: medium
+    situation: Same singleton job runs multiple times simultaneously
+    why: |
+      singletonKey prevents multiple jobs from being QUEUED, not from
+      running simultaneously. If job A is active and you queue job B
+      with same key, B waits. But if two workers grab the same job
+      before state updates, both run.
+    solution: |
+      1. Understand singleton semantics:
+         // singletonKey: Only one job with this key in queue
+         // Does NOT prevent concurrent execution of same work
+
+      2. For true mutual exclusion, use singletonKey + useSingletonQueue:
+         await boss.send('exclusive-task', data, {
+           singletonKey: 'my-exclusive-work',
+           useSingletonQueue: true,
+         });
+
+      3. Or implement locking in your task:
+         await boss.work('task', async (job) => {
+           const lock = await acquireLock(job.data.resourceId);
+           if (!lock) {
+             throw new Error('Could not acquire lock');
+           }
+           try {
+             await doWork();
+           } finally {
+             await releaseLock(lock);
+           }
+         });
+    symptoms:
+      - Same work done multiple times
+      - Race conditions in task logic
+      - Duplicate side effects
+    detection_pattern: 'singletonKey|singleton.*concurrent|mutex'

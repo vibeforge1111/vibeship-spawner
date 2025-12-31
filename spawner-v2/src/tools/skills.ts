@@ -725,9 +725,9 @@ const SKILL_PACKS: Record<string, {
     description: 'Core skills for building apps. Auto-installed on first use.',
     auto_install: true,
     skills: [
-      'development/backend', 'development/frontend', 'development/api-designer',
-      'development/auth-specialist', 'development/devops', 'development/security',
-      'development/code-reviewer', 'development/test-architect', 'development/docs-engineer',
+      'backend/backend', 'frontend/frontend', 'backend/api-designer',
+      'security/auth-specialist', 'devops/devops', 'security/security',
+      'testing/code-reviewer', 'testing/test-architect', 'development/docs-engineer',
       'data/postgres-wizard', 'ai/llm-architect',
       'frameworks/nextjs-app-router', 'frameworks/react-patterns', 'frameworks/supabase-backend',
       'frameworks/tailwind-ui', 'frameworks/typescript-strict',
@@ -747,7 +747,7 @@ const SKILL_PACKS: Record<string, {
     description: 'LLM architecture, ML systems, embeddings, causal inference.',
     skills: [
       'ai/llm-architect', 'ai/ml-memory', 'ai/causal-scientist',
-      'ai/art-consistency', 'development/ai-product',
+      'ai/art-consistency', 'ai-agents/ai-product',
     ],
   },
   startup: {
@@ -755,7 +755,7 @@ const SKILL_PACKS: Record<string, {
     description: 'YC playbook, fundraising, founder skills.',
     skills: [
       'startup/yc-playbook', 'startup/founder-mode', 'startup/burn-rate-management',
-      'communications/investor-updates', 'strategy/competitive-analysis', 'strategy/market-research',
+      'strategy/fundraising-strategy', 'strategy/competitive-intelligence', 'strategy/go-to-market',
     ],
   },
   marketing: {
@@ -782,10 +782,10 @@ const SKILL_PACKS: Record<string, {
     name: 'AI Agents',
     description: 'Build autonomous agents, multi-agent systems, and automation.',
     skills: [
-      'agents/autonomous-agents', 'agents/multi-agent-orchestration', 'agents/agent-memory-systems',
-      'agents/agent-tool-builder', 'agents/browser-automation', 'agents/computer-use-agents',
-      'agents/voice-agents', 'agents/workflow-automation', 'agents/zapier-make-patterns',
-      'agents/agent-evaluation',
+      'ai-agents/autonomous-agents', 'ai-agents/multi-agent-orchestration', 'ai-agents/agent-memory-systems',
+      'ai-agents/agent-tool-builder', 'ai-agents/browser-automation', 'ai-agents/computer-use-agents',
+      'ai-agents/voice-agents', 'ai-agents/workflow-automation', 'ai-agents/zapier-make-patterns',
+      'ai-agents/agent-evaluation',
     ],
   },
   enterprise: {
@@ -830,8 +830,8 @@ const SKILL_PACKS: Record<string, {
     name: 'DevOps & Infrastructure',
     description: 'CI/CD, infrastructure, observability, chaos engineering.',
     skills: [
-      'development/devops', 'development/infra-architect', 'development/observability-sre',
-      'development/chaos-engineer', 'development/performance-hunter',
+      'devops/devops', 'devops/infra-architect', 'devops/observability-sre',
+      'testing/chaos-engineer', 'development/performance-hunter',
     ],
   },
   frameworks: {

@@ -1,0 +1,147 @@
+# pg-boss Validations
+# Automated checks for job queue patterns
+
+validations:
+  - id: no-expiration-set
+    name: Job Without Expiration
+    severity: warning
+    type: regex
+    pattern:
+      - 'boss\.send\([^)]+\)(?!.*expireIn)'
+      - '\.send\([^,]+,[^,]+\)(?!.*expire)'
+    message: "Job without expiration. Stuck jobs won't retry if worker crashes."
+    fix_action: "Add expireInSeconds: await boss.send('q', data, { expireInSeconds: 300 })"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: no-retry-limit
+    name: Job Without Retry Limit
+    severity: info
+    type: regex
+    pattern:
+      - 'boss\.send\([^)]+\)(?!.*retryLimit)'
+      - '\.send\([^,]+,[^,]+\)(?!.*retry)'
+    message: "Job without retry limit. Default is 2, consider setting explicitly."
+    fix_action: "Add retryLimit: await boss.send('q', data, { retryLimit: 5 })"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: no-dead-letter
+    name: Critical Job Without Dead Letter Queue
+    severity: warning
+    type: regex
+    pattern:
+      - 'send\(["\'](?:payment|order|critical)[^"\']*["\'][^)]+\)(?!.*deadLetter)'
+    message: "Critical job without dead letter queue. Failed jobs will be lost."
+    fix_action: "Add deadLetter: { deadLetter: 'failed-critical-jobs' }"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: large-team-size
+    name: Team Size Too Large for Connection Pool
+    severity: warning
+    type: regex
+    pattern:
+      - 'teamSize\s*:\s*([2-9]\d|\d{3,})'
+      - 'teamSize\s*:\s*[5-9][0-9]'
+    message: "Large teamSize may exhaust database connections."
+    fix_action: "Keep teamSize reasonable (5-10), use connection pooler"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: no-archive-config
+    name: pg-boss Without Archive Configuration
+    severity: info
+    type: regex
+    pattern:
+      - 'new PgBoss\(\{[^}]+\}\)(?!.*archiveCompleted)'
+      - 'PgBoss\([^)]+\)(?!.*archive)'
+    message: "pg-boss without archive config. Completed jobs will accumulate."
+    fix_action: "Add archiveCompletedAfterSeconds and deleteAfterSeconds"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: error-swallowed
+    name: Error Swallowed in Job Handler
+    severity: error
+    type: regex
+    pattern:
+      - 'boss\.work.*catch\s*\([^)]*\)\s*\{[^}]*console'
+      - 'work.*async.*catch.*\}(?!.*throw)'
+    message: "Error swallowed in job handler. Job won't retry on failure."
+    fix_action: "Re-throw error after logging: catch (e) { log(e); throw e; }"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: no-graceful-shutdown
+    name: Worker Without Graceful Shutdown
+    severity: warning
+    type: regex
+    pattern:
+      - 'boss\.start\(\)(?!.*SIGTERM|stop)'
+      - 'await boss\.work(?!.*stop)'
+    message: "Worker without graceful shutdown. In-flight jobs may be lost."
+    fix_action: "Add: process.on('SIGTERM', async () => { await boss.stop(); })"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: sync-in-handler
+    name: Synchronous Blocking in Job Handler
+    severity: error
+    type: regex
+    pattern:
+      - 'boss\.work.*fs\.readFileSync'
+      - 'work.*execSync'
+      - 'work.*\.forEach\(async'
+    message: "Blocking operation in async handler. Use async alternatives."
+    fix_action: "Use fs.promises, promisified exec, for...of with await"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: supabase-wrong-port
+    name: Supabase Transaction Mode Connection
+    severity: warning
+    type: regex
+    pattern:
+      - 'PgBoss.*:6543'
+      - 'DATABASE_URL.*pooler.*supabase'
+    message: "Using Supabase transaction mode (6543). Use session mode or direct connection."
+    fix_action: "Use direct connection (port 5432) or session mode pooler"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/.env*"
+
+  - id: insert-without-batch
+    name: Multiple Insert Calls Instead of Batch
+    severity: info
+    type: regex
+    pattern:
+      - 'for.*boss\.send\('
+      - 'forEach.*await.*\.send\('
+      - 'map.*boss\.send'
+    message: "Multiple send calls in loop. Use boss.insert for batch efficiency."
+    fix_action: "Use boss.insert([{ name, data }, ...]) for batch inserts"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: missing-connection-config
+    name: pg-boss Without Connection Limits
+    severity: info
+    type: regex
+    pattern:
+      - 'new PgBoss\([^)]+\)(?!.*max\s*:)'
+    message: "pg-boss without max connection limit. May create too many connections."
+    fix_action: "Add max: 10 to limit internal connection pool"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"

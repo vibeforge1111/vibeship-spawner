@@ -1,0 +1,128 @@
+# Graphile Worker Validations
+# Automated checks for job queue patterns
+
+validations:
+  - id: job-payload-too-large
+    name: Large Object in Job Payload
+    severity: warning
+    type: regex
+    pattern:
+      - 'add_job\([^)]*JSON\.stringify\([^)]+\)\s*\)'
+      - 'quickAddJob\([^)]*\{[^}]{500,}\}'
+      - 'add_job.*json_build_object\([^)]{500,}\)'
+    message: "Large payload in job data. Store references instead of full objects."
+    fix_action: "Pass IDs/URLs, fetch data in task handler"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.sql"
+
+  - id: error-swallowed-in-task
+    name: Error Caught But Not Rethrown in Task
+    severity: error
+    type: regex
+    pattern:
+      - 'Task\s*=.*catch\s*\([^)]*\)\s*\{[^}]*console'
+      - 'Task.*catch.*\{[^}]*\}(?!.*throw)'
+    message: "Error swallowed in task handler. Job won't retry on failure."
+    fix_action: "Re-throw errors after logging: catch (e) { logger.error(e); throw e; }"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: add-job-outside-transaction
+    name: Job Added Outside Transaction
+    severity: warning
+    type: regex
+    pattern:
+      - 'await\s+\w+\.create\([^)]+\);\s*\n\s*await\s+.*add_job'
+      - 'insert.*commit.*add_job'
+      - 'addJob\([^)]+\);\s*\n\s*await\s+db\.'
+    message: "Job queued outside data transaction. Risk of inconsistent state."
+    fix_action: "Queue job in same transaction as data changes"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: polling-enabled
+    name: Polling Mode Instead of LISTEN/NOTIFY
+    severity: warning
+    type: regex
+    pattern:
+      - 'pollInterval\s*:'
+      - 'poll_interval\s*='
+      - 'noHandleSignals\s*:\s*true'
+    message: "Polling mode adds latency. Use LISTEN/NOTIFY for fast job pickup."
+    fix_action: "Remove polling config, ensure LISTEN/NOTIFY works"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: no-max-attempts
+    name: Job Without Max Attempts Limit
+    severity: info
+    type: regex
+    pattern:
+      - "add_job\\([^)]+\\)(?!.*max_attempts)"
+      - 'quickAddJob\([^)]+\)(?!.*maxAttempts)'
+    message: "Job without max_attempts may retry indefinitely on persistent failure."
+    fix_action: "Set max_attempts based on job type (e.g., 3-5 for API calls)"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.sql"
+
+  - id: cron-without-timezone
+    name: Cron Schedule Without Timezone
+    severity: warning
+    type: regex
+    pattern:
+      - 'parseCronItems\([^)]+\)(?!.*tz)'
+      - 'schedule.*pattern.*(?!.*tz)'
+      - 'crontab.*\d+\s+\d+\s+\*(?!.*\?tz)'
+    message: "Cron schedule without timezone. Jobs may run at unexpected times."
+    fix_action: "Add timezone: ?tz=America/New_York or options: { tz: '...' }"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/crontab"
+
+  - id: sync-in-task-handler
+    name: Synchronous Blocking in Async Task
+    severity: error
+    type: regex
+    pattern:
+      - 'Task.*fs\.readFileSync'
+      - 'Task.*execSync'
+      - 'Task.*\.forEach\(async'
+    message: "Blocking operation in async task handler. Use async alternatives."
+    fix_action: "Use fs.promises.readFile, exec with promisify, for...of with await"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: missing-graceful-shutdown
+    name: Worker Without Graceful Shutdown
+    severity: warning
+    type: regex
+    pattern:
+      - 'run\(\{[^}]+\}\)(?!.*SIGTERM|signal)'
+      - 'graphile-worker.*(?!.*stop\(\))'
+    message: "Worker without graceful shutdown. In-flight jobs may be lost."
+    fix_action: "Handle SIGTERM: process.on('SIGTERM', () => runner.stop())"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: task-file-not-exported
+    name: Task Function Not Exported
+    severity: error
+    type: regex
+    pattern:
+      - 'const\s+\w+:\s*Task\s*=(?!.*export)'
+      - 'function\s+\w+\s*\([^)]*helpers[^)]*\)(?!.*export)'
+    message: "Task function not exported. Graphile Worker won't find it."
+    fix_action: "Export the task: export const taskName: Task = ..."
+    applies_to:
+      - "**/tasks/**/*.ts"
+      - "**/tasks/**/*.js"
