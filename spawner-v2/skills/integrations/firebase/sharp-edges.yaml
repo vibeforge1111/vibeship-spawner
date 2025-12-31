@@ -416,6 +416,202 @@ sharp_edges:
       - orderBy on dates doesn't work
     detection_pattern: 'new Date\s*\(\s*\)|Date\.now\s*\(\s*\)'
 
+  - id: popup-blocked-no-fallback
+    summary: Popup auth fails silently when blocked
+    severity: high
+    situation: |
+      User clicks "Sign in with Google", nothing happens. No error shown.
+      Their browser or popup blocker silently prevented the popup.
+    why: |
+      Many browsers block popups by default. Safari blocks cross-origin popups.
+      Mobile browsers often block them. If you only use signInWithPopup,
+      a significant portion of users cannot sign in.
+    solution: |
+      # ALWAYS HAVE REDIRECT FALLBACK
+
+      async function signIn(provider) {
+        try {
+          return await signInWithPopup(auth, provider);
+        } catch (error) {
+          if (error.code === "auth/popup-blocked") {
+            // Fallback to redirect
+            await signInWithRedirect(auth, provider);
+            return null;
+          }
+          throw error;
+        }
+      }
+
+      // Or detect mobile and use redirect directly
+      if (/iPhone|iPad|Android/i.test(navigator.userAgent)) {
+        await signInWithRedirect(auth, provider);
+      } else {
+        await signInWithPopup(auth, provider);
+      }
+    symptoms:
+      - Sign in button does nothing on some browsers
+      - Works on desktop but not mobile
+      - Safari users cannot sign in
+
+  - id: account-exists-different-credential
+    summary: Same email with different providers causes confusing error
+    severity: high
+    situation: |
+      User signs up with Google (john@gmail.com). Later tries to sign in
+      with GitHub using same email. Gets cryptic error. Cannot sign in.
+      No guidance on what to do.
+    why: |
+      Firebase links accounts by email by default. When same email exists
+      with different provider, auth/account-exists-with-different-credential
+      is thrown. Users have no idea what this means.
+    solution: |
+      # HANDLE ACCOUNT LINKING
+
+      async function signIn(provider) {
+        try {
+          return await signInWithPopup(auth, provider);
+        } catch (error) {
+          if (error.code === "auth/account-exists-with-different-credential") {
+            const email = error.customData?.email;
+            const methods = await fetchSignInMethodsForEmail(auth, email);
+
+            // Tell user what to do
+            const existingProvider = methods[0];
+            alert("You already have an account with " + existingProvider + 
+                  ". Sign in with that to link your accounts.");
+
+            // Optionally auto-redirect to existing provider
+            return null;
+          }
+          throw error;
+        }
+      }
+    symptoms:
+      - Users report cannot sign in
+      - Error message about different credential
+      - Support tickets about account access
+
+  - id: apple-name-only-first-signin
+    summary: Apple only provides user name on first sign-in
+    severity: medium
+    situation: |
+      User signs in with Apple. You show their name. They sign out and
+      back in. Name is now null. Apple only sends name ONCE, on first auth.
+    why: |
+      Apple privacy feature - they only share name on initial authorization.
+      If you dont save it immediately to your database, its gone forever.
+      User would need to revoke app access in Apple settings and re-auth.
+    solution: |
+      # SAVE APPLE NAME IMMEDIATELY
+
+      async function signInWithApple() {
+        const result = await signInWithPopup(auth, appleProvider);
+
+        // Extract name from the credential (only available first time!)
+        const fullName = result._tokenResponse?.fullName;
+
+        if (fullName?.firstName) {
+          // Save to user profile immediately
+          await updateProfile(result.user, {
+            displayName: fullName.firstName + " " + fullName.lastName
+          });
+
+          // Also save to your database
+          await saveUserToDb(result.user.uid, {
+            name: fullName.firstName + " " + fullName.lastName,
+            email: result.user.email
+          });
+        }
+
+        return result.user;
+      }
+    symptoms:
+      - Apple users have no display name after second sign-in
+      - Name shows as null or undefined
+      - Cannot recover name without user revoking access
+
+  - id: token-not-refreshed
+    summary: Using stale token for API calls
+    severity: high
+    situation: |
+      User stays on page for 2 hours. Makes API call. Token expired.
+      Backend rejects with 401. User has to refresh page to fix it.
+    why: |
+      Firebase ID tokens expire after 1 hour. Firebase auto-refreshes
+      the token, but if you cached it (in a variable, cookie, or header),
+      youre sending the stale one.
+    solution: |
+      # ALWAYS GET FRESH TOKEN
+
+      // WRONG: Cache token once
+      const token = await user.getIdToken();
+      // ... later, token might be expired
+
+      // RIGHT: Get fresh token for each call
+      async function apiCall(url) {
+        const token = await getIdToken(auth.currentUser); // Auto-refreshes
+        return fetch(url, {
+          headers: { Authorization: "Bearer " + token }
+        });
+      }
+
+      // RIGHT: Handle 401 with force refresh
+      async function apiCall(url) {
+        let token = await getIdToken(auth.currentUser);
+        let res = await fetch(url, { headers: { Authorization: "Bearer " + token }});
+
+        if (res.status === 401) {
+          token = await getIdToken(auth.currentUser, true); // Force refresh
+          res = await fetch(url, { headers: { Authorization: "Bearer " + token }});
+        }
+        return res;
+      }
+    symptoms:
+      - API calls fail after user idle for 1+ hour
+      - 401 errors from backend
+      - Works after page refresh
+
+  - id: redirect-result-not-checked
+    summary: Redirect auth result never handled
+    severity: high
+    situation: |
+      User clicks sign in, gets redirected to Google, comes back to app.
+      Nothing happens. Theyre not signed in. The redirect result was ignored.
+    why: |
+      signInWithRedirect navigates away. When user returns, you must call
+      getRedirectResult to complete the sign-in. If you dont check on
+      page load, the auth flow is never completed.
+    solution: |
+      # CHECK REDIRECT RESULT ON LOAD
+
+      // In your app initialization
+      useEffect(() => {
+        async function checkRedirect() {
+          try {
+            const result = await getRedirectResult(auth);
+            if (result) {
+              // User just signed in via redirect
+              console.log("Signed in:", result.user.email);
+              // Navigate to dashboard, etc.
+            }
+          } catch (error) {
+            console.error("Redirect error:", error);
+          }
+        }
+        checkRedirect();
+      }, []);
+
+      // Or in Next.js
+      // pages/_app.js or app/layout.tsx
+      useEffect(() => {
+        getRedirectResult(auth).catch(console.error);
+      }, []);
+    symptoms:
+      - Redirect sign-in does not complete
+      - User returns to app but not signed in
+      - Works with popup but not redirect
+
+
 framework_specific:
   react:
     - id: no-usememo-on-queries

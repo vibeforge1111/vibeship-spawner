@@ -15,17 +15,37 @@ const OUTPUT_FILE = path.resolve(__dirname, '../web/src/lib/data/skills.json');
 
 // Category display names
 const CATEGORY_NAMES = {
-  ai: 'AI & Machine Learning',
-  communications: 'Communications',
-  data: 'Data & Databases',
-  design: 'Design',
-  development: 'Development',
-  frameworks: 'Frameworks',
-  integration: 'Integration',
-  marketing: 'Marketing',
-  product: 'Product',
-  startup: 'Startup',
-  strategy: 'Strategy'
+  'ai': 'AI & Machine Learning',
+  'ai-agents': 'AI Agents & Automation',
+  'backend': 'Backend & APIs',
+  'biotech': 'Biotech & Life Sciences',
+  'blockchain': 'Blockchain & Web3',
+  'climate': 'Climate & Sustainability',
+  'communications': 'Communications',
+  'creative': 'Creative & Fun',
+  'data': 'Data & Databases',
+  'design': 'Design & UX',
+  'development': 'Development',
+  'devops': 'DevOps & Infrastructure',
+  'enterprise': 'Enterprise Architecture',
+  'finance': 'Finance & Fintech',
+  'frameworks': 'Frameworks',
+  'frontend': 'Frontend & Mobile',
+  'game-dev': 'Game Development',
+  'hardware': 'Hardware & Robotics',
+  'integrations': 'Integrations',
+  'legal': 'Legal & Compliance',
+  'marketing': 'Marketing & Content',
+  'mind': 'Thinking & Decision Making',
+  'product': 'Product Management',
+  'science': 'Science & Research',
+  'security': 'Security & Auth',
+  'simulation': 'Simulation & Modeling',
+  'space': 'Space & Aerospace',
+  'startup': 'Startup & Founder',
+  'strategy': 'Strategy & Growth',
+  'testing': 'Testing & QA',
+  'trading': 'Trading & Quant'
 };
 
 // Simple YAML parser for skill files (handles our specific format)

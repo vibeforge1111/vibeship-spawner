@@ -518,6 +518,172 @@ patterns:
         });
       }
 
+  - name: Social Login (Google, GitHub, etc.)
+    description: OAuth provider setup and authentication flows
+    when: Social login implementation
+    example: |
+      # SOCIAL LOGIN WITH FIREBASE AUTH
+
+      import {
+        getAuth, signInWithPopup, signInWithRedirect,
+        GoogleAuthProvider, GithubAuthProvider, OAuthProvider
+      } from "firebase/auth";
+
+      const auth = getAuth();
+
+      // GOOGLE
+      const googleProvider = new GoogleAuthProvider();
+      googleProvider.addScope("email");
+      googleProvider.setCustomParameters({ prompt: "select_account" });
+
+      async function signInWithGoogle() {
+        try {
+          const result = await signInWithPopup(auth, googleProvider);
+          return result.user;
+        } catch (error) {
+          if (error.code === "auth/account-exists-with-different-credential") {
+            return handleAccountConflict(error);
+          }
+          throw error;
+        }
+      }
+
+      // GITHUB
+      const githubProvider = new GithubAuthProvider();
+      githubProvider.addScope("read:user");
+
+      // APPLE (Required for iOS apps!)
+      const appleProvider = new OAuthProvider("apple.com");
+      appleProvider.addScope("email");
+      appleProvider.addScope("name");
+
+  - name: Popup vs Redirect Auth
+    description: When to use popup vs redirect for OAuth
+    when: Choosing authentication flow
+    example: |
+      # Popup: Desktop, SPA (simpler, can be blocked)
+      # Redirect: Mobile, iOS Safari (always works)
+
+      async function signIn(provider) {
+        if (/iPhone|iPad|Android/i.test(navigator.userAgent)) {
+          return signInWithRedirect(auth, provider);
+        }
+        try {
+          return await signInWithPopup(auth, provider);
+        } catch (e) {
+          if (e.code === "auth/popup-blocked") {
+            return signInWithRedirect(auth, provider);
+          }
+          throw e;
+        }
+      }
+
+      // Check redirect result on page load
+      useEffect(() => {
+        getRedirectResult(auth).then(r => r && setUser(r.user));
+      }, []);
+
+  - name: Account Linking
+    description: Link multiple providers to one account
+    when: User has accounts with different providers
+    example: |
+      import { fetchSignInMethodsForEmail, linkWithCredential } from "firebase/auth";
+
+      async function handleAccountConflict(error) {
+        const email = error.customData?.email;
+        const pendingCred = OAuthProvider.credentialFromError(error);
+        const methods = await fetchSignInMethodsForEmail(auth, email);
+
+        if (methods.includes("google.com")) {
+          alert("Sign in with Google to link accounts");
+          const result = await signInWithPopup(auth, new GoogleAuthProvider());
+          await linkWithCredential(result.user, pendingCred);
+          return result.user;
+        }
+      }
+
+      // Link new provider
+      await linkWithPopup(auth.currentUser, new GithubAuthProvider());
+
+      // Unlink provider (keep at least one!)
+      await unlink(auth.currentUser, "github.com");
+
+  - name: Auth State Persistence
+    description: Control session lifetime
+    when: Managing user sessions
+    example: |
+      import { setPersistence, browserLocalPersistence, browserSessionPersistence } from "firebase/auth";
+
+      // LOCAL: survives browser close (default)
+      // SESSION: cleared on tab close
+
+      async function signInWithRememberMe(email, pass, remember) {
+        await setPersistence(auth, remember ? browserLocalPersistence : browserSessionPersistence);
+        return signInWithEmailAndPassword(auth, email, pass);
+      }
+
+      // React auth hook
+      function useAuth() {
+        const [user, setUser] = useState(null);
+        const [loading, setLoading] = useState(true);
+        useEffect(() => onAuthStateChanged(auth, u => { setUser(u); setLoading(false); }), []);
+        return { user, loading };
+      }
+
+  - name: Email Verification and Password Reset
+    description: Complete email auth flow
+    when: Email/password authentication
+    example: |
+      import { sendEmailVerification, sendPasswordResetEmail, reauthenticateWithCredential } from "firebase/auth";
+
+      // Sign up with verification
+      async function signUp(email, password) {
+        const result = await createUserWithEmailAndPassword(auth, email, password);
+        await sendEmailVerification(result.user);
+        return result.user;
+      }
+
+      // Password reset
+      await sendPasswordResetEmail(auth, email);
+
+      // Change password (requires recent auth)
+      const cred = EmailAuthProvider.credential(user.email, currentPass);
+      await reauthenticateWithCredential(user, cred);
+      await updatePassword(user, newPass);
+
+  - name: Token Management for APIs
+    description: Handle ID tokens for backend calls
+    when: Authenticating with backend APIs
+    example: |
+      import { getIdToken, onIdTokenChanged } from "firebase/auth";
+
+      // Get token (auto-refreshes if expired)
+      const token = await getIdToken(auth.currentUser);
+
+      // API helper with auto-retry
+      async function apiCall(url, opts = {}) {
+        const token = await getIdToken(auth.currentUser);
+        const res = await fetch(url, {
+          ...opts,
+          headers: { ...opts.headers, Authorization: "Bearer " + token }
+        });
+        if (res.status === 401) {
+          const newToken = await getIdToken(auth.currentUser, true);
+          return fetch(url, { ...opts, headers: { ...opts.headers, Authorization: "Bearer " + newToken }});
+        }
+        return res;
+      }
+
+      // Sync to cookie for SSR
+      onIdTokenChanged(auth, async u => {
+        document.cookie = u ? "__session=" + await u.getIdToken() : "__session=; max-age=0";
+      });
+
+      // Check admin claim
+      const { claims } = await auth.currentUser.getIdTokenResult();
+      const isAdmin = claims.admin === true;
+
+
 anti_patterns:
   - name: No Security Rules
     description: Leaving default rules or using allow all
