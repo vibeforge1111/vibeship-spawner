@@ -1,0 +1,172 @@
+# Inngest Validations
+# Automated checks to catch event-driven workflow mistakes
+
+validations:
+  - id: inngest-serve-handler
+    name: Inngest serve handler present
+    severity: critical
+    type: regex
+    pattern: "export const \\{ GET, POST, PUT \\} = serve"
+    message: "Inngest requires a serve handler to receive events"
+    fix_action: "Create app/api/inngest/route.ts with serve() export"
+    applies_to:
+      - "**/api/inngest/*.ts"
+      - "**/api/inngest/*.js"
+    inverse: true  # Should find this pattern
+
+  - id: inngest-function-registered
+    name: Functions registered with serve
+    severity: error
+    type: regex
+    pattern: "serve\\(\\{[^}]*functions:\\s*\\[[^\\]]+\\]"
+    message: "Ensure all Inngest functions are registered in the serve() call"
+    fix_action: "Add function to the functions array in serve()"
+    applies_to:
+      - "**/api/inngest/*.ts"
+      - "**/api/inngest/*.js"
+
+  - id: inngest-step-run-naming
+    name: Step.run has descriptive name
+    severity: warning
+    type: regex
+    pattern: "step\\.run\\(['\"][a-z0-9-]+['\"]"
+    message: "Step names should be kebab-case and descriptive"
+    fix_action: "Use descriptive step names like 'fetch-user' or 'send-email'"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: inngest-waitForEvent-timeout
+    name: waitForEvent has timeout
+    severity: error
+    type: regex
+    pattern: "step\\.waitForEvent\\([^)]+\\)(?!.*timeout)"
+    message: "waitForEvent should have a timeout to prevent infinite waits"
+    fix_action: "Add timeout option: { timeout: '24h' }"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: inngest-concurrency-limit
+    name: Function has concurrency limit
+    severity: warning
+    type: regex
+    pattern: "createFunction\\([^)]+\\)(?!.*concurrency)"
+    message: "Consider adding concurrency limits to protect downstream services"
+    fix_action: "Add concurrency: { limit: 10 } to function config"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: inngest-event-id-typed
+    name: Event types defined
+    severity: warning
+    type: regex
+    pattern: "new Inngest\\(\\{[^}]*id:"
+    message: "Inngest client should define event schemas for type safety"
+    fix_action: "Add schemas: new EventSchemas().fromRecord<Events>()"
+    applies_to:
+      - "**/inngest/client.ts"
+      - "**/inngest/index.ts"
+
+  - id: inngest-function-id
+    name: Function has unique ID
+    severity: critical
+    type: regex
+    pattern: "createFunction\\(\\{\\s*id:\\s*['\"][a-z0-9-]+['\"]"
+    message: "Every Inngest function must have a unique ID"
+    fix_action: "Add id: 'my-function-name' to function config"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+    inverse: true
+
+  - id: inngest-sleep-duration-string
+    name: Sleep uses duration string
+    severity: warning
+    type: regex
+    pattern: "step\\.sleep\\([^,]+,\\s*[0-9]+\\)"
+    message: "step.sleep should use duration strings like '1h' or '30m', not milliseconds"
+    fix_action: "Use duration string: step.sleep('wait', '1h')"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: inngest-retries-configured
+    name: Retry policy configured
+    severity: warning
+    type: regex
+    pattern: "createFunction\\([^)]+retries:"
+    message: "Consider configuring retry policy for failure handling"
+    fix_action: "Add retries: 3 or retries: { attempts: 3, backoff: { ... } }"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: inngest-idempotency-for-payments
+    name: Idempotency key for payment functions
+    severity: error
+    type: regex
+    pattern: "event:\\s*['\"](?:payment|order|charge|subscription)[/\\.][^'\"]+['\"].*(?!.*idempotency)"
+    message: "Payment-related functions should use idempotency keys"
+    fix_action: "Add idempotency: 'event.data.orderId' to function config"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: inngest-error-handling
+    name: Step has error handling
+    severity: warning
+    type: regex
+    pattern: "step\\.run\\([^)]+\\)(?![^;]*\\.catch)"
+    message: "Consider error handling for steps that may fail"
+    fix_action: "Wrap in try/catch or use onFailure handler"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: inngest-env-key-exposed
+    name: Inngest keys not hardcoded
+    severity: critical
+    type: regex
+    pattern: "signKey:\\s*['\"][a-zA-Z0-9]+"
+    message: "Inngest signing keys must not be hardcoded"
+    fix_action: "Use process.env.INNGEST_SIGNING_KEY"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  - id: inngest-cron-timezone
+    name: Cron schedule has timezone
+    severity: warning
+    type: regex
+    pattern: "cron:\\s*['\"][^'\"]+['\"](?![^}]*tz)"
+    message: "Cron schedules should specify timezone to avoid ambiguity"
+    fix_action: "Add tz: 'America/New_York' to cron config"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: inngest-large-payload-in-send
+    name: Large data in event payload
+    severity: warning
+    type: regex
+    pattern: "inngest\\.send\\([^)]*(?:content|body|document|file|data\\.(?:content|body))"
+    message: "Event payloads should be small - send IDs, not data"
+    fix_action: "Store large data externally and send only references/IDs"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: inngest-step-in-loop
+    name: Steps in tight loops
+    severity: warning
+    type: regex
+    pattern: "for\\s*\\([^)]+\\)\\s*\\{[^}]*step\\.(run|sleep)"
+    message: "Steps in loops create many checkpoints - consider batching"
+    fix_action: "Batch operations or use fan-out pattern with sendEvent"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"

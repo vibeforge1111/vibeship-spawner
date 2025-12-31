@@ -1,0 +1,765 @@
+# pg-boss Sharp Edges
+# Production-learned gotchas for PostgreSQL-backed job queues
+
+sharp_edges:
+  - id: connection-pool-exhaustion
+    title: Connection Pool Exhausted by Workers
+    severity: critical
+    situation: |
+      Running many pg-boss workers with high teamSize. Each worker needs database
+      connections. Under load, workers exhaust the PostgreSQL connection pool.
+    why: |
+      pg-boss uses PostgreSQL connections for polling, fetching, and completing jobs.
+      With teamSize=10 and teamConcurrency=2, you need 10+ connections per worker process.
+      Supabase free tier has 60 connections, Neon has similar limits. Poolers help but
+      have their own limits. Connection storm during startup makes it worse.
+    solution: |
+      Size workers based on available connections:
+
+      import PgBoss from 'pg-boss';
+
+      // Calculate safe concurrency based on pool size
+      const MAX_CONNECTIONS = parseInt(process.env.MAX_CONNECTIONS || '20');
+      const RESERVED_FOR_APP = 5;  // Leave room for API handlers
+      const AVAILABLE_FOR_WORKERS = MAX_CONNECTIONS - RESERVED_FOR_APP;
+
+      // Each worker needs ~2 connections (poll + work)
+      const SAFE_TEAM_SIZE = Math.floor(AVAILABLE_FOR_WORKERS / 2);
+
+      const boss = new PgBoss({
+        connectionString: process.env.DATABASE_URL,
+        // Use connection pooler for Supabase/Neon
+        poolSize: Math.min(10, SAFE_TEAM_SIZE),
+      });
+
+      await boss.start();
+
+      // Size teamSize based on available connections
+      await boss.work('process-order', {
+        teamSize: Math.min(5, SAFE_TEAM_SIZE),
+        teamConcurrency: 1,  // Keep low to reduce connection pressure
+      }, async (job) => {
+        await processOrder(job.data);
+      });
+
+      // Monitor connections
+      const monitorConnections = async () => {
+        const result = await boss.getQueueSize('__pgboss__maintenance');
+        console.log(`Queue health check: ${result} pending maintenance jobs`);
+      };
+
+      // For Supabase: Use session mode connection string for workers
+      // Transaction mode doesn't work well with pg-boss's polling
+    symptoms:
+      - '"too many connections" errors during job processing'
+      - Workers fail to start or crash immediately
+      - API handlers timeout waiting for connections
+      - Database CPU spikes from connection overhead
+    detection_pattern: "teamSize:\\s*(\\d{2,})|teamConcurrency:\\s*(\\d{2,})"
+
+  - id: job-timeout-zombie
+    title: Jobs Stuck in Active State (Zombie Jobs)
+    severity: critical
+    situation: |
+      Worker crashes mid-job or job takes longer than expected. Job stays in 'active'
+      state forever. No retry, no completion, just stuck.
+    why: |
+      pg-boss marks jobs 'active' when fetched. If worker crashes before completion,
+      job remains active. Without expireInSeconds, there's no timeout. The job blocks
+      the queue if using singletonKey, preventing retries.
+    solution: |
+      Always set expiration and handle stuck jobs:
+
+      import PgBoss from 'pg-boss';
+
+      const boss = new PgBoss({
+        connectionString: process.env.DATABASE_URL,
+        // Maintenance job checks for expired jobs
+        maintenanceIntervalSeconds: 30,
+      });
+
+      await boss.start();
+
+      // ALWAYS set expireInSeconds
+      await boss.send('long-task', { userId: '123' }, {
+        expireInSeconds: 300,  // 5 minutes max
+        retryLimit: 3,
+        retryDelay: 60,
+        deadLetter: 'failed-long-tasks',
+      });
+
+      // Worker with explicit timeout handling
+      await boss.work('long-task', {
+        teamSize: 3,
+      }, async (job) => {
+        const timeout = setTimeout(() => {
+          throw new Error('Job timeout exceeded');
+        }, 240000);  // 4 min internal timeout (less than expireInSeconds)
+
+        try {
+          await processLongTask(job.data);
+        } finally {
+          clearTimeout(timeout);
+        }
+      });
+
+      // Monitor for stuck jobs
+      async function findZombieJobs() {
+        const zombies = await boss.fetch(`
+          SELECT id, name, startedon, data
+          FROM pgboss.job
+          WHERE state = 'active'
+            AND startedon < NOW() - INTERVAL '1 hour'
+        `);
+        if (zombies.length > 0) {
+          console.error('Found zombie jobs:', zombies);
+          // Alert or auto-expire
+        }
+      }
+    symptoms:
+      - Jobs disappear without completion or failure
+      - Queue appears empty but jobs never processed
+      - singletonKey jobs never run again after crash
+      - Memory of failed jobs lost
+    detection_pattern: "boss\\.send\\([^)]+\\)(?!.*expireIn)|send\\([^{]*\\{[^}]*\\}\\s*\\)(?!.*expire)"
+
+  - id: retry-storm
+    title: Exponential Retry Storm Under Failures
+    severity: critical
+    situation: |
+      External service goes down. All jobs fail. retryBackoff creates exponential
+      wave of retries. When service recovers, massive retry storm overwhelms it again.
+    why: |
+      With retryBackoff=true, retries spread out exponentially. But all jobs that failed
+      at the same time retry at the same time. If you have 1000 failed jobs, they all
+      retry together. This can take down the recovering service immediately.
+    solution: |
+      Add jitter and circuit breaker pattern:
+
+      import PgBoss from 'pg-boss';
+
+      const boss = new PgBoss(process.env.DATABASE_URL);
+      await boss.start();
+
+      // Add jitter to retry delay
+      function getRetryDelay(attempt: number): number {
+        const baseDelay = 60;  // 1 minute
+        const exponentialDelay = baseDelay * Math.pow(2, attempt);
+        const jitter = Math.random() * 30;  // 0-30 seconds random jitter
+        return exponentialDelay + jitter;
+      }
+
+      // Circuit breaker state
+      let circuitOpen = false;
+      let failures = 0;
+      const FAILURE_THRESHOLD = 5;
+      const CIRCUIT_RESET_MS = 60000;
+
+      await boss.work('external-api-call', {
+        teamSize: 5,
+      }, async (job) => {
+        // Circuit breaker check
+        if (circuitOpen) {
+          throw new Error('Circuit breaker open - service unavailable');
+        }
+
+        try {
+          await callExternalService(job.data);
+          failures = 0;  // Reset on success
+        } catch (error) {
+          failures++;
+          if (failures >= FAILURE_THRESHOLD) {
+            circuitOpen = true;
+            setTimeout(() => {
+              circuitOpen = false;
+              failures = 0;
+            }, CIRCUIT_RESET_MS);
+          }
+          throw error;
+        }
+      });
+
+      // Queue jobs with calculated retry delay
+      await boss.send('external-api-call', data, {
+        retryLimit: 5,
+        retryDelay: getRetryDelay(0),  // Start with base + jitter
+        expireInSeconds: 600,
+        deadLetter: 'failed-api-calls',
+      });
+
+      // Use throttling to limit concurrent processing
+      await boss.send('rate-limited-task', data, {
+        singletonKey: 'api-batch',
+        singletonSeconds: 1,  // Only 1 job per second
+      });
+    symptoms:
+      - External service recovers then immediately fails again
+      - Spike pattern in API calls to external services
+      - All retries hit at exact same time
+      - Service oscillates between up and down
+    detection_pattern: "retryBackoff:\\s*true(?!.*jitter)|retryDelay:\\s*\\d+(?!.*random|Math\\.random)"
+
+  - id: dead-letter-ignored
+    title: Dead Letter Queue Growing Unnoticed
+    severity: high
+    situation: |
+      Jobs fail after all retries and go to dead letter queue. Nobody monitors DLQ.
+      Important jobs silently disappear. Users complain about missing orders/emails.
+    why: |
+      deadLetter option moves permanently failed jobs to another queue. But pg-boss
+      doesn't alert you - it's just another queue. Without monitoring, failed jobs
+      accumulate silently. By the time you notice, damage is done.
+    solution: |
+      Monitor and process dead letter queues:
+
+      import PgBoss from 'pg-boss';
+
+      const boss = new PgBoss(process.env.DATABASE_URL);
+      await boss.start();
+
+      // Configure dead letter for critical jobs
+      await boss.send('send-order-confirmation', { orderId: '123' }, {
+        retryLimit: 3,
+        deadLetter: 'dlq-order-confirmations',
+        expireInSeconds: 300,
+      });
+
+      // DLQ processor - alert and optionally replay
+      await boss.work('dlq-order-confirmations', {
+        teamSize: 1,
+      }, async (job) => {
+        // Alert immediately
+        await alertOps({
+          type: 'DEAD_LETTER_JOB',
+          queue: 'send-order-confirmation',
+          jobId: job.id,
+          data: job.data,
+          error: job.output,  // Contains last error
+        });
+
+        // Log for investigation
+        console.error('Dead letter job:', {
+          originalQueue: 'send-order-confirmation',
+          data: job.data,
+          failedAt: new Date(),
+        });
+
+        // Optionally: Try manual fix and replay
+        // await boss.send('send-order-confirmation', job.data);
+      });
+
+      // Monitor DLQ size
+      async function monitorDeadLetters() {
+        const dlqQueues = [
+          'dlq-order-confirmations',
+          'dlq-payment-processing',
+          'dlq-email-sending',
+        ];
+
+        for (const queue of dlqQueues) {
+          const size = await boss.getQueueSize(queue);
+          if (size > 0) {
+            console.warn(`DLQ ${queue} has ${size} failed jobs`);
+            // Send to monitoring (Datadog, etc.)
+          }
+        }
+      }
+
+      // Run monitor every 5 minutes
+      setInterval(monitorDeadLetters, 5 * 60 * 1000);
+    symptoms:
+      - Users report missing confirmations/notifications
+      - Jobs "disappear" after failures
+      - No alerts when critical processes fail
+      - Discovery of hundreds of failed jobs weeks later
+    detection_pattern: "deadLetter:\\s*['\"][^'\"]+['\"](?!.*dlq.*work|monitor.*dlq)"
+
+  - id: clock-skew-scheduling
+    title: Scheduled Jobs Fire at Wrong Times Due to Clock Skew
+    severity: high
+    situation: |
+      Using pg-boss schedule() or startAfter with multiple workers on different servers.
+      Jobs fire early, late, or multiple times due to clock differences.
+    why: |
+      pg-boss uses PostgreSQL server time for scheduling. But startAfter in job options
+      uses client time. If app server clock differs from database server, scheduled
+      jobs fire at unexpected times. Worse with distributed workers on different machines.
+    solution: |
+      Always use database time for scheduling:
+
+      import PgBoss from 'pg-boss';
+
+      const boss = new PgBoss(process.env.DATABASE_URL);
+      await boss.start();
+
+      // BAD: Uses client time
+      await boss.send('reminder', { userId: '123' }, {
+        startAfter: new Date(Date.now() + 3600000),  // Client's "1 hour from now"
+      });
+
+      // GOOD: Use seconds offset (pg-boss adds to DB time)
+      await boss.send('reminder', { userId: '123' }, {
+        startAfter: 3600,  // 3600 seconds from NOW (database time)
+      });
+
+      // GOOD: For cron schedules, pg-boss uses DB time automatically
+      await boss.schedule('daily-report', '0 9 * * *', {
+        tz: 'America/New_York',  // Explicit timezone
+      });
+
+      // Verify time sync
+      async function checkTimeSkew() {
+        const result = await boss.db.executeSql('SELECT NOW() as db_time');
+        const dbTime = new Date(result.rows[0].db_time);
+        const localTime = new Date();
+        const skewMs = Math.abs(dbTime.getTime() - localTime.getTime());
+
+        if (skewMs > 5000) {  // More than 5 seconds
+          console.warn(`Clock skew detected: ${skewMs}ms`);
+        }
+      }
+
+      // For precise scheduling, query database time
+      async function scheduleAtExactTime(queue: string, data: any, targetTime: Date) {
+        const result = await boss.db.executeSql('SELECT NOW() as db_time');
+        const dbNow = new Date(result.rows[0].db_time);
+        const delaySeconds = Math.max(0, (targetTime.getTime() - dbNow.getTime()) / 1000);
+
+        await boss.send(queue, data, {
+          startAfter: delaySeconds,
+        });
+      }
+    symptoms:
+      - Scheduled jobs run early or late
+      - Cron jobs fire at unexpected times
+      - Same scheduled job runs multiple times
+      - Jobs scheduled for "1 hour" run immediately
+    detection_pattern: "startAfter:\\s*new Date|startAfter:\\s*Date\\.now"
+
+  - id: singleton-starvation
+    title: Singleton Jobs Starve on High Volume
+    severity: high
+    situation: |
+      Using singletonKey to prevent duplicate processing (one job per user/order).
+      High job volume means singleton check becomes bottleneck. Jobs queue up waiting.
+    why: |
+      singletonKey uses database constraint to ensure uniqueness. Every insert checks
+      for existing active job with same key. Under high volume, this becomes a hot
+      row lock. Jobs block each other waiting for lock release.
+    solution: |
+      Use singleton wisely and consider alternatives:
+
+      import PgBoss from 'pg-boss';
+
+      const boss = new PgBoss(process.env.DATABASE_URL);
+      await boss.start();
+
+      // Singleton for idempotency - use singletonSeconds to allow retry
+      await boss.send('process-user-sync', { userId: '123' }, {
+        singletonKey: `user-sync-${userId}`,
+        singletonSeconds: 300,  // Allow new job after 5 min
+        expireInSeconds: 300,
+      });
+
+      // For high-volume: Debounce at application level instead
+      const pendingUserSyncs = new Map<string, NodeJS.Timeout>();
+
+      function queueUserSync(userId: string) {
+        // Clear existing debounce
+        if (pendingUserSyncs.has(userId)) {
+          clearTimeout(pendingUserSyncs.get(userId)!);
+        }
+
+        // Debounce: only queue after 5 seconds of no new requests
+        const timeout = setTimeout(async () => {
+          pendingUserSyncs.delete(userId);
+          await boss.send('process-user-sync', { userId });
+        }, 5000);
+
+        pendingUserSyncs.set(userId, timeout);
+      }
+
+      // For uniqueness: Use database upsert pattern
+      await boss.work('process-order', async (job) => {
+        const { orderId } = job.data;
+
+        // Idempotency at processing level, not queue level
+        const processed = await db.query(`
+          INSERT INTO processed_orders (order_id, processed_at)
+          VALUES ($1, NOW())
+          ON CONFLICT (order_id) DO NOTHING
+          RETURNING order_id
+        `, [orderId]);
+
+        if (processed.rowCount === 0) {
+          console.log(`Order ${orderId} already processed, skipping`);
+          return;  // Already processed
+        }
+
+        await processOrder(orderId);
+      });
+
+      // Partition high-volume singletons
+      function getPartitionedKey(userId: string): string {
+        // Spread load across multiple singleton keys
+        const partition = parseInt(userId, 16) % 10;
+        return `user-sync-partition-${partition}`;
+      }
+    symptoms:
+      - Job insertion becomes slow under load
+      - Database shows lock waits on pgboss.job table
+      - Singleton jobs pile up in created state
+      - Throughput drops as volume increases
+    detection_pattern: "singletonKey:.*\\$\\{.*\\}(?!.*singletonSeconds)"
+
+  - id: archive-table-bloat
+    title: Archive Table Grows Without Bounds
+    severity: medium
+    situation: |
+      pg-boss archives completed jobs to pgboss.archive table. Table grows to millions
+      of rows. Queries slow down. Disk fills up. Vacuum takes forever.
+    why: |
+      archiveCompletedAfterSeconds moves completed jobs to archive. But deleteAfterSeconds
+      defaults to 7 days. High-volume systems can generate millions of archived jobs.
+      Archive table isn't auto-vacuumed aggressively. It just grows and grows.
+    solution: |
+      Configure aggressive cleanup and partition if needed:
+
+      import PgBoss from 'pg-boss';
+
+      const boss = new PgBoss({
+        connectionString: process.env.DATABASE_URL,
+        // Move to archive quickly
+        archiveCompletedAfterSeconds: 60 * 60,  // 1 hour
+        // Delete from archive aggressively
+        deleteAfterSeconds: 60 * 60 * 24,  // 1 day (not default 7)
+        // Run maintenance more frequently
+        maintenanceIntervalSeconds: 60,
+      });
+
+      await boss.start();
+
+      // For high volume: Manual cleanup job
+      await boss.schedule('cleanup-archives', '0 */6 * * *');  // Every 6 hours
+
+      await boss.work('cleanup-archives', async () => {
+        // Delete old archives in batches
+        let deleted = 0;
+        do {
+          const result = await boss.db.executeSql(`
+            DELETE FROM pgboss.archive
+            WHERE archivedon < NOW() - INTERVAL '1 day'
+            LIMIT 10000
+          `);
+          deleted = result.rowCount;
+          if (deleted > 0) {
+            await new Promise(r => setTimeout(r, 100));  // Rate limit
+          }
+        } while (deleted > 0);
+      });
+
+      // Monitor archive size
+      async function checkArchiveSize() {
+        const result = await boss.db.executeSql(`
+          SELECT
+            pg_size_pretty(pg_total_relation_size('pgboss.archive')) as size,
+            count(*) as rows
+          FROM pgboss.archive
+        `);
+        console.log('Archive table:', result.rows[0]);
+      }
+
+      // For very high volume: Consider partitioning archive table
+      // Or use external log aggregation instead of relying on archive
+    symptoms:
+      - Disk usage grows steadily
+      - VACUUM on pgboss.archive takes hours
+      - Queries on archive table timeout
+      - pg_stat_user_tables shows archive as largest table
+    detection_pattern: "deleteAfterSeconds:\\s*(\\d{7,})|archiveCompletedAfterSeconds(?!.*deleteAfter)"
+
+  - id: graceful-shutdown-lost-jobs
+    title: Jobs Lost During Deployment/Restart
+    severity: medium
+    situation: |
+      Deploying new version or restarting workers. Active jobs get abandoned.
+      Some jobs partially completed, data in inconsistent state.
+    why: |
+      pg-boss workers fetch jobs and mark them active. On SIGTERM, if you don't
+      call boss.stop(), active jobs stay in 'active' state until they expire.
+      If worker is processing mid-job, that job may be partially done.
+    solution: |
+      Implement proper graceful shutdown:
+
+      import PgBoss from 'pg-boss';
+
+      const boss = new PgBoss(process.env.DATABASE_URL);
+      await boss.start();
+
+      // Track in-flight jobs for graceful shutdown
+      let isShuttingDown = false;
+      let activeJobs = 0;
+
+      await boss.work('important-task', {
+        teamSize: 5,
+      }, async (job) => {
+        if (isShuttingDown) {
+          // Reject new jobs during shutdown
+          throw new Error('Worker shutting down');
+        }
+
+        activeJobs++;
+        try {
+          await processTask(job.data);
+        } finally {
+          activeJobs--;
+        }
+      });
+
+      // Graceful shutdown handler
+      async function shutdown(signal: string) {
+        console.log(`Received ${signal}, starting graceful shutdown`);
+        isShuttingDown = true;
+
+        // Stop accepting new jobs
+        await boss.offWork('important-task');
+
+        // Wait for active jobs to complete (with timeout)
+        const shutdownTimeout = 30000;  // 30 seconds
+        const startTime = Date.now();
+
+        while (activeJobs > 0 && (Date.now() - startTime) < shutdownTimeout) {
+          console.log(`Waiting for ${activeJobs} active jobs to complete...`);
+          await new Promise(r => setTimeout(r, 1000));
+        }
+
+        if (activeJobs > 0) {
+          console.warn(`Forcing shutdown with ${activeJobs} jobs still active`);
+        }
+
+        // Stop pg-boss (releases connections, cancels polling)
+        await boss.stop({ graceful: true, timeout: 10000 });
+
+        console.log('Shutdown complete');
+        process.exit(0);
+      }
+
+      process.on('SIGTERM', () => shutdown('SIGTERM'));
+      process.on('SIGINT', () => shutdown('SIGINT'));
+
+      // Make jobs idempotent for safety
+      await boss.work('process-order', async (job) => {
+        const { orderId } = job.data;
+
+        // Check if already processed (idempotency)
+        const existing = await db.query(
+          'SELECT status FROM order_processing WHERE order_id = $1',
+          [orderId]
+        );
+
+        if (existing.rows[0]?.status === 'completed') {
+          console.log(`Order ${orderId} already processed`);
+          return;
+        }
+
+        // Process with checkpoints
+        await db.query(
+          'INSERT INTO order_processing (order_id, status) VALUES ($1, $2) ON CONFLICT (order_id) DO UPDATE SET status = $2',
+          [orderId, 'processing']
+        );
+
+        await processOrder(orderId);
+
+        await db.query(
+          'UPDATE order_processing SET status = $1 WHERE order_id = $2',
+          ['completed', orderId]
+        );
+      });
+    symptoms:
+      - Jobs reprocess after restart
+      - Partially completed operations
+      - Data inconsistency after deploys
+      - "Job already completed" errors
+    detection_pattern: "process\\.on.*SIGTERM(?!.*boss\\.stop)|SIGINT(?!.*stop)"
+
+  - id: no-worker-heartbeat
+    title: No Heartbeat for Long-Running Jobs
+    severity: medium
+    situation: |
+      Job takes 10 minutes to process. expireInSeconds set to 15 minutes.
+      If job actually takes 20 minutes due to slow external service, it expires
+      and gets retried while still running. Two workers process same job.
+    why: |
+      pg-boss doesn't have automatic job extension/heartbeat. The expireInSeconds
+      is fixed at job creation. If actual processing exceeds this, job expires
+      and becomes available for another worker. Now you have duplicate processing.
+    solution: |
+      Implement heartbeat pattern for long jobs:
+
+      import PgBoss from 'pg-boss';
+
+      const boss = new PgBoss(process.env.DATABASE_URL);
+      await boss.start();
+
+      // Short initial expiration with heartbeat extension
+      await boss.send('long-processing', { taskId: '123' }, {
+        expireInSeconds: 60,  // Short initial timeout
+        retryLimit: 3,
+      });
+
+      await boss.work('long-processing', async (job) => {
+        // Heartbeat interval - extend before expiration
+        const heartbeatInterval = setInterval(async () => {
+          try {
+            // Extend job expiration by updating keepUntil
+            await boss.db.executeSql(`
+              UPDATE pgboss.job
+              SET keepuntil = NOW() + INTERVAL '60 seconds'
+              WHERE id = $1 AND state = 'active'
+            `, [job.id]);
+            console.log(`Extended job ${job.id} expiration`);
+          } catch (error) {
+            console.error('Failed to extend job:', error);
+          }
+        }, 30000);  // Every 30 seconds
+
+        try {
+          await longRunningProcess(job.data);
+        } finally {
+          clearInterval(heartbeatInterval);
+        }
+      });
+
+      // Alternative: Break into smaller jobs
+      await boss.work('long-task-orchestrator', async (job) => {
+        const { taskId, steps } = job.data;
+
+        for (let i = 0; i < steps.length; i++) {
+          // Queue each step as separate job
+          await boss.send('long-task-step', {
+            taskId,
+            stepIndex: i,
+            stepData: steps[i],
+          }, {
+            expireInSeconds: 60,  // Each step has short timeout
+          });
+        }
+      });
+
+      // Track progress externally
+      await boss.work('long-processing', async (job) => {
+        const { taskId } = job.data;
+
+        // Use external progress tracking
+        await redis.hset(`task:${taskId}`, {
+          status: 'processing',
+          workerId: process.pid,
+          startedAt: Date.now(),
+        });
+
+        try {
+          await longRunningProcess(job.data);
+          await redis.hset(`task:${taskId}`, 'status', 'completed');
+        } catch (error) {
+          await redis.hset(`task:${taskId}`, 'status', 'failed');
+          throw error;
+        }
+      });
+    symptoms:
+      - Same job processed by multiple workers
+      - Duplicate side effects (emails sent twice, etc.)
+      - Jobs expire while legitimately processing
+      - Inconsistent results for long operations
+    detection_pattern: "expireInSeconds:\\s*(\\d{3,})(?!.*heartbeat|extend|keepuntil)"
+
+  - id: transaction-boundary-mismatch
+    title: Job Completion Outside Database Transaction
+    severity: medium
+    situation: |
+      Job updates database within a transaction, but job completion is separate.
+      Transaction rolls back, but job marked complete. Or job fails, but database
+      changes already committed.
+    why: |
+      pg-boss job completion is a separate database operation from your business logic.
+      If you commit business changes then job completion fails, you have processed
+      the job but it will retry. If job completes but business logic rolls back,
+      you've lost the work.
+    solution: |
+      Include job completion in business transaction:
+
+      import PgBoss from 'pg-boss';
+      import { Pool } from 'pg';
+
+      const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+      const boss = new PgBoss(process.env.DATABASE_URL);
+      await boss.start();
+
+      // Use pg-boss's built-in transaction support
+      await boss.work('process-payment', async (job) => {
+        const { orderId, amount } = job.data;
+
+        // Get a client from the pool for transaction
+        const client = await pool.connect();
+
+        try {
+          await client.query('BEGIN');
+
+          // Business logic within transaction
+          await client.query(
+            'UPDATE orders SET status = $1, paid_amount = $2 WHERE id = $3',
+            ['paid', amount, orderId]
+          );
+
+          await client.query(
+            'INSERT INTO payments (order_id, amount, created_at) VALUES ($1, $2, NOW())',
+            [orderId, amount]
+          );
+
+          // Complete job within same transaction
+          await client.query(
+            `UPDATE pgboss.job SET state = 'completed', completedon = NOW() WHERE id = $1`,
+            [job.id]
+          );
+
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;  // Job will retry
+        } finally {
+          client.release();
+        }
+      });
+
+      // Alternative: Use the response for completion
+      await boss.work('idempotent-task', {
+        includeMetadata: true,
+      }, async (job) => {
+        const { taskId } = job.data;
+
+        // Idempotency check first
+        const existing = await pool.query(
+          'SELECT result FROM task_results WHERE task_id = $1',
+          [taskId]
+        );
+
+        if (existing.rows.length > 0) {
+          // Already processed, return cached result
+          return existing.rows[0].result;
+        }
+
+        // Process and store result atomically
+        const result = await processTask(job.data);
+
+        await pool.query(
+          'INSERT INTO task_results (task_id, result, created_at) VALUES ($1, $2, NOW())',
+          [taskId, JSON.stringify(result)]
+        );
+
+        return result;
+      });
+    symptoms:
+      - Jobs retry after successful business logic
+      - Database shows completed work but job retries
+      - Duplicate entries from "completed" jobs
+      - Inconsistent state between job queue and business data
+    detection_pattern: "BEGIN.*complete.*COMMIT|work.*await.*(?:INSERT|UPDATE)(?!.*BEGIN)"

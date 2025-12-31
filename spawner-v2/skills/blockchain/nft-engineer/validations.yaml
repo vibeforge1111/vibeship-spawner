@@ -1,0 +1,485 @@
+id: nft-engineer
+skill: NFT Engineer
+version: "1.0"
+
+validations:
+  # CRITICAL: Security Checks
+  - id: check-safemint-reentrancy
+    name: SafeMint Reentrancy Protection
+    description: Verify state updates happen BEFORE _safeMint calls to prevent reentrancy
+    pattern: "_safeMint\\s*\\([^)]+\\)[^}]*\\n[^}]*(minted\\[|claimed\\[|numberMinted\\[|hasMinted\\[)"
+    file_glob: "**/*.sol"
+    match: present
+    message: "CRITICAL: State update after _safeMint - reentrancy vulnerability! Update state BEFORE minting."
+    severity: error
+    autofix: false
+
+  - id: check-transfer-usage
+    name: Avoid transfer() for ETH
+    description: Using .transfer() can fail for contracts and multi-sigs
+    pattern: "\\.transfer\\s*\\(|payable\\([^)]+\\)\\.send\\s*\\("
+    file_glob: "**/*.sol"
+    match: present
+    message: "Use .call{value:}('') instead of .transfer() - transfer can fail for multi-sigs"
+    severity: error
+    autofix: false
+
+  - id: check-blockhash-randomness
+    name: Avoid Blockhash for Randomness
+    description: Blockhash can be manipulated by miners
+    pattern: "blockhash\\s*\\([^)]*\\)\\s*%|uint256\\s*\\(\\s*blockhash"
+    file_glob: "**/*.sol"
+    match: present
+    message: "Blockhash randomness can be manipulated - use commit-reveal or Chainlink VRF"
+    severity: warning
+    autofix: false
+
+  # HIGH: Gas and UX Checks
+  - id: check-batch-limit
+    name: Batch Mint Limit Required
+    description: Mint functions should have a maximum quantity per transaction
+    pattern: "function\\s+(public)?mint\\s*\\([^)]*quantity[^)]*\\)\\s*[^{]*\\{(?!.*require.*quantity\\s*<=|.*if\\s*\\(quantity\\s*>)"
+    file_glob: "**/*.sol"
+    match: present
+    message: "Add batch size limit: require(quantity <= MAX_PER_TX) to prevent gas limit failures"
+    severity: warning
+    autofix: false
+
+  - id: check-supply-limit
+    name: Supply Limit Check
+    description: Mint functions should verify max supply isn't exceeded
+    pattern: "function.*mint.*\\{(?!.*(MAX_SUPPLY|maxSupply|totalSupply\\s*\\(\\s*\\)\\s*\\+|_totalMinted))"
+    file_glob: "**/*.sol"
+    match: present
+    message: "Add max supply check in mint function to prevent over-minting"
+    severity: error
+    autofix: false
+
+  - id: check-zero-quantity
+    name: Zero Quantity Check
+    description: Mint functions should reject zero quantity mints
+    pattern: "function.*mint.*quantity.*\\{(?!.*require.*quantity.*>\\s*0|.*if.*quantity.*==.*0)"
+    file_glob: "**/*.sol"
+    match: present
+    message: "Add zero quantity check: require(quantity > 0)"
+    severity: warning
+    autofix: false
+
+  # MEDIUM: Metadata and Standards
+  - id: check-token-exists
+    name: Token Existence Check in tokenURI
+    description: tokenURI should verify the token has been minted
+    pattern: "function\\s+tokenURI\\s*\\([^)]*\\)[^{]*\\{(?!.*(_exists|_ownerOf|ownerOf|require))"
+    file_glob: "**/*.sol"
+    match: present
+    message: "tokenURI should check token exists before returning URI"
+    severity: warning
+    autofix: false
+
+  - id: check-metadata-freeze
+    name: Metadata Freeze Capability
+    description: Contracts with setBaseURI should have a freeze mechanism
+    pattern: "function\\s+setBaseURI"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "frozen|metadataFrozen|freeze|immutable"
+    context_match: absent
+    message: "Consider adding metadata freeze functionality for collector trust"
+    severity: info
+    autofix: false
+
+  - id: check-royalty-interface
+    name: ERC-2981 Royalty Interface
+    description: NFT contracts should implement ERC-2981 for royalty support
+    pattern: "(ERC721A?|ERC1155)\\s*(,|\\{)"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "ERC2981|royaltyInfo|_setDefaultRoyalty"
+    context_match: absent
+    message: "Consider implementing ERC-2981 for marketplace royalty support"
+    severity: info
+    autofix: false
+
+  - id: check-supports-interface
+    name: supportsInterface Override
+    description: Contracts implementing multiple interfaces should override supportsInterface
+    pattern: "(ERC2981|ERC721A?Royalty)"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "function\\s+supportsInterface"
+    context_match: absent
+    message: "Override supportsInterface to include all implemented interfaces"
+    severity: warning
+    autofix: false
+
+  # Metadata File Checks
+  - id: check-ipfs-protocol
+    name: IPFS Protocol URL
+    description: Use ipfs:// protocol instead of gateway-specific URLs
+    pattern: "https?://(gateway\\.pinata\\.cloud|ipfs\\.io|cloudflare-ipfs|dweb\\.link|nftstorage\\.link)"
+    file_glob: "**/*.json"
+    match: present
+    message: "Use ipfs:// protocol URL instead of gateway URL for resilience"
+    severity: warning
+    autofix: false
+
+  - id: check-metadata-name
+    name: Metadata Name Field
+    description: NFT metadata must include a name field
+    pattern: "\"name\"\\s*:\\s*\""
+    file_glob: "**/metadata/**/*.json"
+    match: absent
+    message: "Metadata must include 'name' field"
+    severity: error
+    autofix: false
+
+  - id: check-metadata-image
+    name: Metadata Image Field
+    description: NFT metadata must include an image field
+    pattern: "\"image\"\\s*:\\s*\""
+    file_glob: "**/metadata/**/*.json"
+    match: absent
+    message: "Metadata must include 'image' field"
+    severity: error
+    autofix: false
+
+  - id: check-attributes-format
+    name: OpenSea Attributes Format
+    description: Attributes should use trait_type/value format
+    pattern: "\"attributes\"\\s*:\\s*\\["
+    file_glob: "**/metadata/**/*.json"
+    match: present
+    context_pattern: "\"trait_type\"\\s*:\\s*\"[^\"]+\"\\s*,\\s*\"value\""
+    context_match: absent
+    message: "Attributes must use OpenSea format: {trait_type, value}"
+    severity: warning
+    autofix: false
+
+  # Withdrawal Safety
+  - id: check-withdraw-exists
+    name: Withdraw Function Exists
+    description: Payable contracts should have a withdraw function
+    pattern: "function\\s+mint[^}]+payable"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "function\\s+withdraw"
+    context_match: absent
+    message: "Contract receives ETH but has no withdraw function - funds may be stuck"
+    severity: error
+    autofix: false
+
+  - id: check-withdraw-owner-only
+    name: Withdraw Access Control
+    description: Withdraw function should be owner-only
+    pattern: "function\\s+withdraw\\s*\\([^)]*\\)\\s*(external|public)(?!.*onlyOwner)"
+    file_glob: "**/*.sol"
+    match: present
+    message: "Withdraw function should be restricted to owner"
+    severity: error
+    autofix: false
+
+  # ERC-1155 Specific
+  - id: check-erc1155-supply
+    name: ERC-1155 Supply Tracking
+    description: ERC-1155 contracts should use ERC1155Supply for supply tracking
+    pattern: "is\\s+ERC1155[^S]|is\\s+ERC1155\\s*\\{"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "ERC1155Supply|totalSupply\\s*\\(\\s*uint256"
+    context_match: absent
+    message: "Use ERC1155Supply extension for supply tracking"
+    severity: warning
+    autofix: false
+
+  # Merkle Tree Checks
+  - id: check-merkle-verification
+    name: Merkle Proof Verification
+    description: Merkle proofs should be properly verified
+    pattern: "merkleRoot|merkle_root"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "MerkleProof\\.verify|MerkleProofLib\\.verify"
+    context_match: absent
+    message: "Ensure merkle proofs are verified using MerkleProof library"
+    severity: error
+    autofix: false
+
+  - id: check-allowlist-claimed
+    name: Allowlist Double-Claim Prevention
+    description: Allowlist mints should track claimed status
+    pattern: "function\\s+(allowlist|whitelist|presale)Mint"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "(claimed\\[|hasMinted\\[|allowlistMinted\\[)"
+    context_match: absent
+    message: "Track claimed status to prevent double-claiming allowlist"
+    severity: error
+    autofix: false
+
+  # Event Emission
+  - id: check-mint-events
+    name: Mint Event Emission
+    description: Minting should emit Transfer events (handled by ERC721)
+    pattern: "function.*mint.*_mint\\s*\\("
+    file_glob: "**/*.sol"
+    match: present
+    message: "Ensure mint function uses _mint or _safeMint which emit Transfer events"
+    severity: info
+    autofix: false
+
+  - id: check-metadata-update-event
+    name: Metadata Update Event
+    description: setBaseURI should emit BatchMetadataUpdate (EIP-4906)
+    pattern: "function\\s+setBaseURI"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "BatchMetadataUpdate|MetadataUpdate"
+    context_match: absent
+    message: "Consider emitting EIP-4906 BatchMetadataUpdate event for marketplace refresh"
+    severity: info
+    autofix: false
+
+  # Reveal Mechanics
+  - id: check-reveal-safety
+    name: Reveal Randomness Source
+    description: Reveal should use secure randomness
+    pattern: "function\\s+reveal"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "blockhash\\s*\\([^)]*block\\.number[^)]*\\)"
+    context_match: present
+    message: "Using current block's blockhash is predictable - use commit-reveal or Chainlink VRF"
+    severity: warning
+    autofix: false
+
+  - id: check-pre-reveal-uri
+    name: Pre-Reveal URI Check
+    description: tokenURI should handle unrevealed state
+    pattern: "function\\s+tokenURI"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "revealed|preReveal|unrevealed"
+    context_match: absent_optional
+    message: "Consider handling pre-reveal state in tokenURI if using reveal mechanics"
+    severity: info
+    autofix: false
+
+pre_commit:
+  - id: metadata-json-validation
+    name: Validate Metadata JSON
+    command: "node scripts/validate-metadata.js"
+    description: Verify all metadata files are valid JSON with required fields
+
+  - id: solidity-compile
+    name: Compile Contracts
+    command: "forge build --force"
+    description: Verify all Solidity contracts compile without errors
+
+  - id: contract-size-check
+    name: Check Contract Size
+    command: "forge build --sizes"
+    description: Verify contracts don't exceed 24KB limit
+
+  - id: gas-snapshot
+    name: Gas Snapshot
+    command: "forge snapshot"
+    description: Generate gas usage snapshot for comparison
+
+ci_checks:
+  - id: full-test-suite
+    name: Run All Tests
+    command: "forge test -vvv"
+    description: Run complete test suite with verbosity
+    required: true
+
+  - id: coverage-check
+    name: Code Coverage
+    command: "forge coverage"
+    description: Generate coverage report (aim for >80%)
+    required: false
+
+  - id: slither-analysis
+    name: Slither Static Analysis
+    command: "slither . --exclude naming-convention,solc-version"
+    description: Run Slither for security analysis
+    required: true
+
+  - id: metadata-verification
+    name: Verify Metadata Availability
+    command: "node scripts/check-metadata-availability.js"
+    description: Verify all metadata URIs return valid responses
+    required: true
+
+  - id: gas-comparison
+    name: Compare Gas Usage
+    command: "forge snapshot --check"
+    description: Ensure gas usage hasn't regressed
+    required: false
+
+  - id: ipfs-pinning-check
+    name: Verify IPFS Pinning
+    command: "node scripts/verify-ipfs-pins.js"
+    description: Verify metadata is pinned on multiple IPFS providers
+    required: true
+
+test_patterns:
+  - id: mint-test
+    name: Mint Function Tests
+    description: Essential tests for mint functionality
+    template: |
+      function test_mint_success() public {
+          uint256 quantity = 3;
+          uint256 cost = nft.PRICE() * quantity;
+
+          vm.deal(user, cost);
+          vm.prank(user);
+          nft.mint{value: cost}(quantity);
+
+          assertEq(nft.balanceOf(user), quantity);
+      }
+
+      function test_mint_exceeds_max_per_tx() public {
+          uint256 quantity = nft.MAX_PER_TX() + 1;
+          uint256 cost = nft.PRICE() * quantity;
+
+          vm.deal(user, cost);
+          vm.prank(user);
+          vm.expectRevert();
+          nft.mint{value: cost}(quantity);
+      }
+
+      function test_mint_insufficient_payment() public {
+          vm.prank(user);
+          vm.expectRevert();
+          nft.mint{value: 0.01 ether}(1);
+      }
+
+      function test_mint_exceeds_supply() public {
+          // Mint to max supply first
+          // Then try one more
+      }
+
+  - id: reentrancy-test
+    name: Reentrancy Attack Test
+    description: Test for safeMint reentrancy
+    template: |
+      contract ReentrantReceiver is IERC721Receiver {
+          INFT public nft;
+          uint256 public attackCount;
+
+          constructor(address _nft) {
+              nft = INFT(_nft);
+          }
+
+          function attack() external payable {
+              nft.mint{value: msg.value}(1);
+          }
+
+          function onERC721Received(
+              address, address, uint256, bytes calldata
+          ) external returns (bytes4) {
+              if (attackCount < 5) {
+                  attackCount++;
+                  // Try to re-enter
+                  nft.mint{value: 0.05 ether}(1);
+              }
+              return this.onERC721Received.selector;
+          }
+      }
+
+      function test_reentrancy_protection() public {
+          ReentrantReceiver attacker = new ReentrantReceiver(address(nft));
+          vm.deal(address(attacker), 10 ether);
+
+          // Should revert or only allow 1 mint
+          vm.expectRevert();
+          attacker.attack{value: 0.05 ether}();
+      }
+
+  - id: allowlist-test
+    name: Allowlist Mint Tests
+    description: Test merkle-based allowlist minting
+    template: |
+      function test_allowlist_valid_proof() public {
+          bytes32[] memory proof = _getProof(user);
+
+          vm.prank(user);
+          nft.allowlistMint{value: 0.05 ether}(1, proof);
+
+          assertEq(nft.balanceOf(user), 1);
+      }
+
+      function test_allowlist_invalid_proof() public {
+          bytes32[] memory badProof = new bytes32[](1);
+          badProof[0] = bytes32(0);
+
+          vm.prank(user);
+          vm.expectRevert();
+          nft.allowlistMint{value: 0.05 ether}(1, badProof);
+      }
+
+      function test_allowlist_double_claim() public {
+          bytes32[] memory proof = _getProof(user);
+
+          vm.startPrank(user);
+          nft.allowlistMint{value: 0.05 ether}(1, proof);
+
+          vm.expectRevert();
+          nft.allowlistMint{value: 0.05 ether}(1, proof);
+          vm.stopPrank();
+      }
+
+  - id: royalty-test
+    name: Royalty Configuration Tests
+    description: Test ERC-2981 royalty implementation
+    template: |
+      function test_royalty_info() public {
+          (address receiver, uint256 royaltyAmount) = nft.royaltyInfo(1, 1 ether);
+
+          assertEq(receiver, owner);
+          assertEq(royaltyAmount, 0.05 ether); // 5%
+      }
+
+      function test_royalty_update() public {
+          address newReceiver = address(0x123);
+
+          vm.prank(owner);
+          nft.setRoyaltyInfo(newReceiver, 1000); // 10%
+
+          (address receiver, uint256 royaltyAmount) = nft.royaltyInfo(1, 1 ether);
+          assertEq(receiver, newReceiver);
+          assertEq(royaltyAmount, 0.1 ether);
+      }
+
+  - id: withdraw-test
+    name: Withdrawal Tests
+    description: Test fund withdrawal functionality
+    template: |
+      function test_withdraw_success() public {
+          // First mint to add funds
+          vm.deal(user, 1 ether);
+          vm.prank(user);
+          nft.mint{value: 1 ether}(1);
+
+          uint256 balanceBefore = owner.balance;
+
+          vm.prank(owner);
+          nft.withdraw();
+
+          assertEq(owner.balance, balanceBefore + 1 ether);
+          assertEq(address(nft).balance, 0);
+      }
+
+      function test_withdraw_only_owner() public {
+          vm.deal(user, 1 ether);
+          vm.prank(user);
+          nft.mint{value: 1 ether}(1);
+
+          vm.prank(user);
+          vm.expectRevert();
+          nft.withdraw();
+      }
+
+      function test_withdraw_to_contract() public {
+          // Test withdraw works with contract recipients (multi-sig)
+      }

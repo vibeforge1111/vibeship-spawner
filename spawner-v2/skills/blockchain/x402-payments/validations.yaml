@@ -1,0 +1,265 @@
+id: x402-payments
+skill: HTTP 402 Payment Protocol
+version: "1.0"
+
+validations:
+  - id: check-payment-verification
+    name: Payment Verification Before Serving
+    description: Ensure payment is verified before content delivery
+    pattern: "(res\\.send|res\\.json|return.*content)(?!.*await.*verify)"
+    file_glob: "**/*.{ts,js}"
+    match: present
+    context_pattern: "402|payment|paywall|gate"
+    message: "Verify payment before serving content - never serve first and verify later"
+    severity: critical
+    autofix: false
+
+  - id: check-402-status-code
+    name: Proper 402 Status Code Usage
+    description: Use HTTP 402 for payment required responses
+    pattern: "status\\(402\\)|402.*Payment.*Required"
+    file_glob: "**/*.{ts,js}"
+    match: absent_in_context
+    context_pattern: "payment.*required|paywall|gate.*content"
+    message: "Use HTTP 402 Payment Required status for payment-gated content"
+    severity: error
+    autofix: false
+
+  - id: check-payment-header-format
+    name: L402 Authentication Header
+    description: Use proper WWW-Authenticate header for 402 responses
+    pattern: "WWW-Authenticate.*L402|Authorization.*L402"
+    file_glob: "**/*.{ts,js}"
+    match: absent_in_context
+    context_pattern: "402|payment.*header"
+    message: "Include WWW-Authenticate: L402 header in 402 responses"
+    severity: warning
+    autofix: false
+
+  - id: check-macaroon-secret
+    name: Macaroon Secret in Environment
+    description: Macaroon secret should not be hardcoded
+    pattern: "(macaroon|MACAROON).*(secret|SECRET|key|KEY).*['\"][a-zA-Z0-9]{20,}['\"]"
+    file_glob: "**/*.{ts,js}"
+    match: present
+    message: "Macaroon secrets must be in environment variables, not hardcoded"
+    severity: critical
+    autofix: false
+
+  - id: check-invoice-expiry
+    name: Lightning Invoice Expiry Handling
+    description: Check for invoice expiration before processing
+    pattern: "expir(y|es)|creation_date.*\\+.*expiry"
+    file_glob: "**/*.{ts,js}"
+    match: absent_in_context
+    context_pattern: "invoice|bolt11|lnbc"
+    message: "Always check invoice expiration before accepting payment"
+    severity: error
+    autofix: false
+
+  - id: check-preimage-logging
+    name: Preimage Not Logged
+    description: Never log payment preimages
+    pattern: "(console|logger|log)\\.(log|info|debug|warn|error).*preimage"
+    file_glob: "**/*.{ts,js}"
+    match: present
+    message: "CRITICAL: Never log preimages - they are payment proof secrets"
+    severity: critical
+    autofix: false
+
+  - id: check-preimage-storage
+    name: Preimage Storage Safety
+    description: Store hashed preimages, not raw values
+    pattern: "preimage.*=.*save|store.*preimage|insert.*preimage"
+    file_glob: "**/*.{ts,js}"
+    match: present
+    message: "Store sha256(preimage) not raw preimage - raw preimages are payment proof"
+    severity: error
+    autofix: false
+
+  - id: check-idempotency-key
+    name: Payment Idempotency Handling
+    description: Prevent double-processing of payments
+    pattern: "idempoten|setnx|unique.*constraint|upsert"
+    file_glob: "**/*.{ts,js}"
+    match: absent_in_context
+    context_pattern: "payment|webhook|process"
+    message: "Implement idempotency to prevent double-processing payments"
+    severity: error
+    autofix: false
+
+  - id: check-exchange-rate-lock
+    name: Exchange Rate Locking
+    description: Lock exchange rates at quote time
+    pattern: "rate.*lock|quote.*expire|price.*valid"
+    file_glob: "**/*.{ts,js}"
+    match: absent_in_context
+    context_pattern: "exchange|convert|price.*crypto"
+    message: "Lock exchange rates at quote time to prevent rate manipulation"
+    severity: warning
+    autofix: false
+
+  - id: check-testnet-detection
+    name: Testnet Configuration Detection
+    description: Detect accidental testnet usage in production
+    pattern: "testnet|signet|lntb|sepolia|goerli|84532"
+    file_glob: "**/*.{ts,js,env}"
+    match: present
+    context_pattern: "production|mainnet|PROD"
+    message: "Testnet configuration detected - verify this is intentional"
+    severity: warning
+    autofix: false
+
+  - id: check-webhook-signature
+    name: Webhook Signature Verification
+    description: Verify webhook signatures before processing
+    pattern: "verify.*signature|signature.*verify|hmac"
+    file_glob: "**/*.{ts,js}"
+    match: absent_in_context
+    context_pattern: "webhook|callback|notify"
+    message: "Always verify webhook signatures before processing payment events"
+    severity: critical
+    autofix: false
+
+  - id: check-amount-validation
+    name: Payment Amount Validation
+    description: Validate payment amounts match expected values
+    pattern: "amount.*>=|amount.*===|validateAmount"
+    file_glob: "**/*.{ts,js}"
+    match: absent_in_context
+    context_pattern: "payment|invoice|verify"
+    message: "Validate payment amount matches expected value"
+    severity: error
+    autofix: false
+
+  - id: check-refund-address
+    name: Refund Address Collection
+    description: Collect refund address for non-Lightning payments
+    pattern: "refund.*address|return.*address"
+    file_glob: "**/*.{ts,js}"
+    match: absent_in_context
+    context_pattern: "l2|erc20|usdc|eth.*payment"
+    message: "Consider collecting refund address for L2 payments"
+    severity: info
+    autofix: false
+
+  - id: check-timeout-handling
+    name: Payment Timeout Handling
+    description: Handle payment verification timeouts gracefully
+    pattern: "timeout|AbortController|Promise\\.race"
+    file_glob: "**/*.{ts,js}"
+    match: absent_in_context
+    context_pattern: "payment.*verif|check.*paid"
+    message: "Implement timeout handling for payment verification"
+    severity: warning
+    autofix: false
+
+  - id: check-chain-id-validation
+    name: Chain ID Validation for L2 Payments
+    description: Validate user is on correct chain
+    pattern: "chainId|chain_id|getChainId"
+    file_glob: "**/*.{ts,js}"
+    match: absent_in_context
+    context_pattern: "l2|layer.*2|connect.*wallet"
+    message: "Validate chain ID to prevent payments on wrong network"
+    severity: error
+    autofix: false
+
+  - id: check-confirmation-wait
+    name: Transaction Confirmation Waiting
+    description: Wait for sufficient confirmations on L2
+    pattern: "waitForTransaction|confirmations|blockNumber"
+    file_glob: "**/*.{ts,js}"
+    match: absent_in_context
+    context_pattern: "l2.*payment|onchain.*verify"
+    message: "Wait for transaction confirmations before granting access"
+    severity: error
+    autofix: false
+
+  - id: check-dust-limit
+    name: Minimum Payment Amount
+    description: Enforce minimum payment amounts
+    pattern: "minimum|MIN_AMOUNT|dust|too.*small"
+    file_glob: "**/*.{ts,js}"
+    match: absent_in_context
+    context_pattern: "payment.*amount|create.*invoice"
+    message: "Enforce minimum payment amounts to avoid dust transactions"
+    severity: warning
+    autofix: false
+
+  - id: check-rate-limiting
+    name: Payment Request Rate Limiting
+    description: Rate limit invoice/quote generation
+    pattern: "rateLimit|rate.*limit|throttle"
+    file_glob: "**/*.{ts,js}"
+    match: absent_in_context
+    context_pattern: "generate.*invoice|create.*quote|402.*response"
+    message: "Rate limit payment request generation to prevent abuse"
+    severity: warning
+    autofix: false
+
+pre_commit:
+  - id: payment-flow-test
+    name: Payment Flow Integration Test
+    command: "npm run test:payment"
+    description: Run payment integration tests
+
+  - id: secret-scan
+    name: Scan for Exposed Secrets
+    command: "grep -rn 'macaroon.*=.*[a-zA-Z0-9]\\{32\\}' --include='*.ts' --include='*.js' || true"
+    description: Check for hardcoded payment secrets
+
+  - id: testnet-check
+    name: Testnet Reference Check
+    command: "grep -rn 'testnet\\|lntb\\|sepolia' --include='*.ts' --include='*.js' --include='*.env' || true"
+    description: Flag testnet references for review
+
+ci_checks:
+  - id: payment-integration
+    name: Payment Integration Tests
+    command: "npm run test:integration:payments"
+    description: Full payment flow tests with test invoices
+    required: true
+
+  - id: 402-response-format
+    name: 402 Response Format Tests
+    command: "npm run test:402-format"
+    description: Verify 402 responses include required headers
+    required: true
+
+  - id: macaroon-validation
+    name: Macaroon Creation Tests
+    command: "npm run test:macaroons"
+    description: Test macaroon creation, caveat verification
+
+  - id: lightning-invoice
+    name: Lightning Invoice Tests
+    command: "npm run test:lightning"
+    description: Test invoice generation and verification
+
+  - id: l2-payment
+    name: L2 Payment Tests
+    command: "npm run test:l2"
+    description: Test L2 payment flow on testnet
+
+  - id: exchange-rate
+    name: Exchange Rate Tests
+    command: "npm run test:exchange"
+    description: Test rate locking and conversion
+
+code_quality:
+  - id: payment-types
+    name: Payment Type Definitions
+    pattern: "interface.*Payment|type.*Payment"
+    file_glob: "**/*.ts"
+    message: "Define strict types for all payment objects"
+    severity: info
+
+  - id: error-handling
+    name: Payment Error Types
+    pattern: "PaymentError|InvoiceError|VerificationError"
+    file_glob: "**/*.ts"
+    match: absent_in_context
+    context_pattern: "payment|invoice|verify"
+    message: "Use typed payment errors for better debugging"
+    severity: info

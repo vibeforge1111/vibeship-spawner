@@ -1,0 +1,688 @@
+id: nft-engineer
+skill: NFT Engineer
+version: "1.0"
+
+sharp_edges:
+  - id: safemint-reentrancy
+    severity: CRITICAL
+    title: "_safeMint Reentrancy Attack Vector"
+    description: |
+      _safeMint calls onERC721Received on the recipient before returning.
+      If state updates happen after the mint, attackers can re-enter and
+      bypass limits. This has caused millions in losses across NFT projects.
+    symptoms:
+      - Users minting more than maxPerWallet
+      - Total supply exceeded
+      - Allowlist quotas bypassed
+      - Unexplained token ID gaps
+    detection_pattern: "_safeMint.*\\n.*(?:minted|claimed|numberMinted)\\["
+    solution: |
+      // The fix is simple but MUST be done correctly:
+
+      // BAD - state after mint
+      function mint(uint256 qty) external {
+          for (uint i = 0; i < qty; i++) {
+              _safeMint(msg.sender, tokenId++);  // Callback here!
+          }
+          minted[msg.sender] += qty;  // Too late - already re-entered
+      }
+
+      // GOOD - state before mint
+      function mint(uint256 qty) external {
+          require(minted[msg.sender] + qty <= MAX_PER_WALLET);
+          minted[msg.sender] += qty;  // Update FIRST
+          _mint(msg.sender, qty);     // Then mint (use _mint, not _safeMint)
+      }
+
+      // BEST - ReentrancyGuard
+      import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+
+      function mint(uint256 qty) external nonReentrant {
+          // Now safe even if you mess up the order
+      }
+
+      // Pro tip: Use _mint instead of _safeMint for EOAs
+      // Only contracts need the callback - most minters are wallets
+    references:
+      - https://blog.openzeppelin.com/reentrancy-after-istanbul/
+      - https://consensys.github.io/smart-contract-best-practices/attacks/reentrancy/
+
+  - id: metadata-404-indexing
+    severity: CRITICAL
+    title: "Metadata 404s During Marketplace Indexing"
+    description: |
+      Marketplaces (OpenSea, Blur) cache metadata when they first see a token.
+      If tokenURI returns 404 during this initial indexing, the NFT may be
+      permanently broken or require manual intervention to fix.
+    symptoms:
+      - NFTs show "content not available" on OpenSea
+      - Images don't load after mint
+      - Collection gets flagged or delisted
+      - Support tickets about missing metadata
+    detection_pattern: "tokenURI|baseURI|setBaseURI"
+    solution: |
+      // CRITICAL: Upload ALL metadata BEFORE deploying contract
+
+      // Pre-deployment checklist:
+      // 1. Generate all metadata JSON files (0.json to 9999.json)
+      // 2. Upload to IPFS as a CAR file (single CID for whole directory)
+      // 3. Pin with multiple providers (Pinata + nft.storage + Filebase)
+      // 4. Wait for propagation (test with public gateways)
+      // 5. Verify EVERY token URI returns 200
+
+      // Verification script (run before deploy):
+      async function verifyMetadata(baseURI, totalSupply) {
+          const failed = [];
+          for (let i = 0; i < totalSupply; i++) {
+              try {
+                  const res = await fetch(`${baseURI}${i}.json`);
+                  if (!res.ok) failed.push(i);
+                  const json = await res.json();
+                  if (!json.name || !json.image) failed.push(i);
+              } catch (e) {
+                  failed.push(i);
+              }
+          }
+          if (failed.length > 0) {
+              throw new Error(`Failed tokens: ${failed.join(', ')}`);
+          }
+          console.log('All metadata verified!');
+      }
+
+      // For unrevealed collections:
+      // - Use a SINGLE placeholder URI that returns valid JSON
+      // - NOT tokenId-specific URIs that might 404
+      function tokenURI(uint256 tokenId) public view override returns (string memory) {
+          if (!revealed) {
+              return placeholderURI;  // Single URI, not baseURI + tokenId
+          }
+          return string(abi.encodePacked(baseURI, _toString(tokenId), ".json"));
+      }
+    references:
+      - https://docs.opensea.io/docs/metadata-standards
+      - https://support.opensea.io/en/articles/8866977-how-do-i-refresh-my-nft-s-metadata
+
+  - id: ipfs-gateway-single-point
+    severity: CRITICAL
+    title: "IPFS Gateway Dependency Creates Single Point of Failure"
+    description: |
+      Using gateway-specific URLs (https://gateway.pinata.cloud/ipfs/...)
+      instead of protocol URLs (ipfs://...) means your NFTs break when
+      that gateway has an outage. Gateways go down more than you think.
+    symptoms:
+      - Images break during gateway outages
+      - Different images on different gateways (content addressing failure)
+      - Collection appears dead when provider has issues
+    detection_pattern: "ipfs\\.io|gateway\\.pinata|cloudflare-ipfs|dweb\\.link"
+    solution: |
+      // BAD - gateway-specific URL
+      {
+          "image": "https://gateway.pinata.cloud/ipfs/QmXxx..."
+      }
+
+      // GOOD - protocol URL (marketplaces resolve)
+      {
+          "image": "ipfs://QmXxx..."
+      }
+
+      // BEST - protocol URL + multiple pinning services
+      // Pin to ALL of these for redundancy:
+      // - Pinata (https://pinata.cloud)
+      // - nft.storage (https://nft.storage) - FREE
+      // - Filebase (https://filebase.com)
+      // - Web3.storage (https://web3.storage)
+
+      // Use the SAME CID - content addressing means identical content
+      // The more places it's pinned, the more resilient it is
+
+      // For images in contract (on-chain):
+      // Use data URIs or base64 - no external dependencies
+      "image": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0..."
+
+      // Validate in setBaseURI:
+      function setBaseURI(string calldata _uri) external onlyOwner {
+          bytes memory uriBytes = bytes(_uri);
+          require(
+              (uriBytes.length >= 7 && keccak256(abi.encodePacked(uriBytes[0], uriBytes[1], uriBytes[2], uriBytes[3], uriBytes[4], uriBytes[5], uriBytes[6])) == keccak256("ipfs://")) ||
+              (uriBytes.length >= 5 && keccak256(abi.encodePacked(uriBytes[0], uriBytes[1], uriBytes[2], uriBytes[3], uriBytes[4])) == keccak256("ar://")),
+              "Must use ipfs:// or ar:// protocol"
+          );
+          baseURI = _uri;
+      }
+    references:
+      - https://docs.ipfs.tech/concepts/ipfs-gateway/
+      - https://nft.storage/docs/concepts/decentralized-storage/
+
+  - id: reveal-frontrunning
+    severity: HIGH
+    title: "Reveal Randomness Can Be Front-Run or Manipulated"
+    description: |
+      Using blockhash, block.timestamp, or other on-chain data for reveal
+      randomness allows miners to manipulate outcomes or MEV bots to front-run.
+      All rares can end up in a few wallets.
+    symptoms:
+      - Rare traits concentrated in small number of wallets
+      - Sniper bots profit from reveals
+      - Community accuses team of insider trading
+      - Legal liability for unfair distribution
+    detection_pattern: "reveal|randomOffset|blockhash|block\\.timestamp|block\\.number"
+    solution: |
+      // BAD - predictable randomness
+      function reveal() external onlyOwner {
+          offset = uint256(blockhash(block.number - 1)) % totalSupply;
+          // Miners can see this before block is mined
+      }
+
+      // GOOD - commit-reveal scheme
+      bytes32 public commitment;
+      uint256 public revealBlock;
+
+      // Step 1: Commit (during mint)
+      function setCommitment(bytes32 _commitment) external onlyOwner {
+          commitment = _commitment;
+          revealBlock = block.number + 100;  // 100 blocks in future
+      }
+
+      // Step 2: Reveal (after mint closes)
+      function reveal(uint256 seed) external onlyOwner {
+          require(block.number > revealBlock, "Too early");
+          require(block.number < revealBlock + 256, "Blockhash expired");
+          require(keccak256(abi.encodePacked(seed)) == commitment, "Invalid seed");
+
+          offset = uint256(keccak256(abi.encodePacked(
+              seed,
+              blockhash(revealBlock)
+          ))) % totalSupply;
+      }
+
+      // BEST - Chainlink VRF
+      import "@chainlink/contracts/src/v0.8/vrf/VRFConsumerBaseV2.sol";
+
+      // VRF provides cryptographically provable randomness
+      // No one (including miners) can predict or manipulate
+
+      // Cost: ~0.25 LINK per request on mainnet
+      // Worth it for any collection with >$10k in value
+    references:
+      - https://docs.chain.link/vrf/v2/introduction
+      - https://blog.chain.link/random-number-generation-solidity/
+
+  - id: royalty-bypass-reality
+    severity: HIGH
+    title: "Royalties Are Not Enforceable On-Chain"
+    description: |
+      ERC-2981 is informational only - it tells marketplaces what royalties
+      you want, but doesn't enforce them. Wrapper contracts, private sales,
+      and non-compliant marketplaces bypass royalties entirely.
+    symptoms:
+      - Royalty revenue drops after initial hype
+      - Wrapper contracts created for your collection
+      - Private sales on Discord/Twitter with no royalties
+      - Blur/X2Y2 royalties are 0%
+    detection_pattern: "royaltyInfo|ERC2981|_setDefaultRoyalty"
+    solution: |
+      // Accept reality: royalties are voluntary
+
+      // Option 1: Operator filter (blocks known bypasses)
+      import "operator-filter-registry/src/DefaultOperatorFilterer.sol";
+
+      contract NFT is ERC721A, DefaultOperatorFilterer {
+          function setApprovalForAll(address operator, bool approved)
+              public override onlyAllowedOperatorApproval(operator)
+          {
+              super.setApprovalForAll(operator, approved);
+          }
+          // Also override approve, transferFrom, safeTransferFrom
+      }
+      // CAVEAT: Blur bypassed this. It's an arms race you'll lose.
+
+      // Option 2: Accept 0% enforcement, focus on utility
+      // Build value that requires HOLDING the NFT:
+      // - Token-gated access
+      // - Staking rewards
+      // - Holder-only mints
+      // - Physical merchandise claims
+
+      // Option 3: Hybrid approach
+      // - ERC-2981 for compliant marketplaces (OpenSea enforces)
+      // - Operator filter for additional protection
+      // - Strong utility to make holding valuable
+      // - Accept that some sales = 0 royalty
+
+      // Communicate honestly with collectors:
+      // "Royalties are 5% on OpenSea, 0.5% on Blur, voluntary on private sales"
+    references:
+      - https://github.com/ProjectOpenSea/operator-filter-registry
+      - https://eips.ethereum.org/EIPS/eip-2981
+
+  - id: gas-limit-batch-failure
+    severity: HIGH
+    title: "Large Batch Mints Hit Gas Limit and Fail"
+    description: |
+      Without a max batch size, users can submit mints that exceed block gas
+      limits. The transaction fails but they still pay gas. This causes
+      support nightmares and refund requests.
+    symptoms:
+      - Transactions fail with "out of gas"
+      - Users lose 0.1+ ETH on failed mints
+      - Support flooded with complaints
+      - Bad reviews and Twitter drama
+    detection_pattern: "function.*mint.*quantity.*\\{(?!.*MAX|.*max)"
+    solution: |
+      // Know your gas costs (measure with forge test --gas-report):
+      // - ERC721: ~80k gas per token
+      // - ERC721A: ~52k first token, ~4k each additional
+      // - Block gas limit: 30M on mainnet
+
+      // Safe limits:
+      uint256 public constant MAX_PER_TX = 10;  // Safe for ERC721
+      // uint256 public constant MAX_PER_TX = 20; // Safe for ERC721A
+
+      function mint(uint256 quantity) external payable {
+          require(quantity > 0, "Zero quantity");
+          require(quantity <= MAX_PER_TX, "Exceeds max per tx");
+          // ...
+      }
+
+      // Better UX: Tell users BEFORE they submit
+      // Frontend should:
+      // 1. Estimate gas for their quantity
+      // 2. Show warning if estimate > 50% of block limit
+      // 3. Suggest splitting into smaller batches
+
+      // Test your limits:
+      function testMaxBatchGas() public {
+          uint256 gasBefore = gasleft();
+          nft.mint{value: 10 ether}(MAX_PER_TX);
+          uint256 gasUsed = gasBefore - gasleft();
+          assertLt(gasUsed, 10_000_000, "Too much gas");
+      }
+    references:
+      - https://www.erc721a.org/
+      - https://ethereum.org/en/developers/docs/gas/
+
+  - id: metadata-mutability-trust
+    severity: HIGH
+    title: "Mutable Metadata Destroys Collector Trust"
+    description: |
+      If baseURI can be changed forever, collectors can't trust their NFT
+      won't be rugged. Legal liability exists if images are changed to
+      something offensive. Freeze mechanism is essential.
+    symptoms:
+      - "Can you rug us?" questions in Discord
+      - Lower floor prices than comparable frozen collections
+      - Collectors avoiding minting
+      - Post-rug legal action risk
+    detection_pattern: "setBaseURI|setTokenURI"
+    solution: |
+      bool public metadataFrozen;
+
+      event MetadataFrozen(string baseURI);
+      event BatchMetadataUpdate(uint256 _fromTokenId, uint256 _toTokenId);
+
+      modifier whenNotFrozen() {
+          require(!metadataFrozen, "Metadata is frozen");
+          _;
+      }
+
+      function freezeMetadata() external onlyOwner {
+          require(!metadataFrozen, "Already frozen");
+          metadataFrozen = true;
+          emit MetadataFrozen(baseURI);
+          // EIP-4906: Signal marketplaces to refresh
+          emit BatchMetadataUpdate(0, type(uint256).max);
+      }
+
+      function setBaseURI(string calldata _uri) external onlyOwner whenNotFrozen {
+          baseURI = _uri;
+          emit BatchMetadataUpdate(0, type(uint256).max);
+      }
+
+      // IMPORTANT: Communicate timeline
+      // "Metadata will be frozen 7 days after reveal completes"
+      // Then ACTUALLY freeze it. Trust is built by actions.
+    references:
+      - https://eips.ethereum.org/EIPS/eip-4906
+      - https://docs.opensea.io/docs/metadata-standards
+
+  - id: withdraw-transfer-failure
+    severity: HIGH
+    title: "Withdraw Function Using transfer() Can Brick Funds"
+    description: |
+      Using .transfer() or .send() for ETH withdrawals only forwards 2300 gas.
+      This fails for multi-sigs (Gnosis Safe), some contracts, and can change
+      with EVM updates. Funds become permanently stuck.
+    symptoms:
+      - Withdraw transactions fail
+      - Funds stuck in contract forever
+      - Multi-sig can't receive payments
+      - "Out of gas" on withdraw attempts
+    detection_pattern: "\\.transfer\\(|\\.send\\("
+    solution: |
+      // BAD - 2300 gas stipend
+      function withdraw() external onlyOwner {
+          payable(owner()).transfer(address(this).balance);  // WILL FAIL
+      }
+
+      // GOOD - call with success check
+      function withdraw() external onlyOwner {
+          (bool success, ) = owner().call{value: address(this).balance}("");
+          require(success, "Withdraw failed");
+      }
+
+      // BEST - pull pattern for multiple recipients
+      mapping(address => uint256) public pendingWithdrawals;
+
+      function releasePayment(address recipient) external {
+          uint256 amount = pendingWithdrawals[recipient];
+          require(amount > 0, "Nothing to withdraw");
+
+          pendingWithdrawals[recipient] = 0;  // Clear BEFORE transfer
+
+          (bool success, ) = recipient.call{value: amount}("");
+          require(success, "Transfer failed");
+      }
+
+      // For team splits:
+      import "@openzeppelin/contracts/finance/PaymentSplitter.sol";
+      // Handles all the complexity for you
+    references:
+      - https://consensys.github.io/smart-contract-best-practices/development-recommendations/general/external-calls/
+      - https://docs.openzeppelin.com/contracts/4.x/api/finance#PaymentSplitter
+
+  - id: merkle-root-timing
+    severity: MEDIUM
+    title: "Merkle Root Can Be Changed During Active Mint"
+    description: |
+      If merkle root can be updated while mint is active, users who were
+      on the allowlist might suddenly have invalid proofs. Their transactions
+      fail after they've waited in line or paid gas to submit.
+    symptoms:
+      - Valid proofs suddenly rejected
+      - Community outrage about being removed
+      - Gas wasted on failed transactions
+      - Accusations of manipulation
+    detection_pattern: "merkleRoot|setMerkleRoot"
+    solution: |
+      // Option 1: Lock during mint window
+      uint256 public mintStartTime;
+      uint256 public mintEndTime;
+      bool public merkleRootLocked;
+
+      function setMerkleRoot(bytes32 _root) external onlyOwner {
+          require(
+              block.timestamp < mintStartTime ||
+              block.timestamp > mintEndTime ||
+              !merkleRootLocked,
+              "Cannot change during active mint"
+          );
+          merkleRoot = _root;
+      }
+
+      function lockMerkleRoot() external onlyOwner {
+          merkleRootLocked = true;
+          emit MerkleRootLocked(merkleRoot);
+      }
+
+      // Option 2: Multiple roots for phases
+      mapping(uint8 => bytes32) public phaseRoots;
+      uint8 public activePhase;
+
+      function setPhaseRoot(uint8 phase, bytes32 root) external onlyOwner {
+          require(phase != activePhase, "Cannot change active phase");
+          phaseRoots[phase] = root;
+      }
+
+      // Option 3: Append-only merkle forest
+      // Never remove, only add new trees for additions
+    references:
+      - https://www.rareskills.io/post/merkle-tree-solidity
+
+  - id: opensea-metadata-schema
+    severity: MEDIUM
+    title: "Metadata Doesn't Match OpenSea Schema"
+    description: |
+      OpenSea has specific requirements for metadata structure. Missing or
+      incorrectly formatted fields cause traits to not display, rarity tools
+      to fail, and collection to look broken.
+    symptoms:
+      - Traits don't show on OpenSea
+      - Rarity.tools can't parse collection
+      - "Properties" section empty
+      - Animation_url content doesn't play
+    detection_pattern: "attributes|trait_type|value"
+    solution: |
+      // Required OpenSea metadata format:
+      {
+          "name": "My NFT #1",
+          "description": "Description of the NFT",
+          "image": "ipfs://QmXxx...",
+          "external_url": "https://myproject.com/token/1",
+          "attributes": [
+              {
+                  "trait_type": "Background",
+                  "value": "Blue"
+              },
+              {
+                  "trait_type": "Rarity Score",
+                  "value": 85,
+                  "display_type": "number"
+              },
+              {
+                  "trait_type": "Level",
+                  "value": 5,
+                  "max_value": 10,
+                  "display_type": "number"
+              },
+              {
+                  "trait_type": "Power",
+                  "value": 40,
+                  "display_type": "boost_percentage"
+              },
+              {
+                  "trait_type": "Birthday",
+                  "value": 1609459200,
+                  "display_type": "date"
+              }
+          ],
+          "animation_url": "ipfs://QmXxx..."
+      }
+
+      // Common mistakes:
+      // 1. "attributes": {"Background": "Blue"}  // WRONG - must be array
+      // 2. Missing trait_type or value
+      // 3. Numeric values as strings for number display_type
+      // 4. Wrong date format (must be Unix timestamp)
+
+      // Validation script:
+      const REQUIRED_FIELDS = ['name', 'description', 'image'];
+      function validateMetadata(metadata) {
+          for (const field of REQUIRED_FIELDS) {
+              if (!metadata[field]) throw new Error(`Missing ${field}`);
+          }
+          if (metadata.attributes) {
+              for (const attr of metadata.attributes) {
+                  if (!attr.trait_type || attr.value === undefined) {
+                      throw new Error('Invalid attribute format');
+                  }
+              }
+          }
+      }
+    references:
+      - https://docs.opensea.io/docs/metadata-standards
+      - https://docs.opensea.io/docs/part-4-viewing-and-interacting-with-your-collection
+
+  - id: erc1155-missing-supply
+    severity: MEDIUM
+    title: "ERC-1155 Without Total Supply Tracking"
+    description: |
+      Base ERC-1155 doesn't track total supply per token ID. Marketplaces
+      can't show scarcity, rarity tools break, and you can't verify limited
+      editions are actually limited.
+    symptoms:
+      - Marketplaces show "?" for supply
+      - Can't prove scarcity
+      - Collectors don't trust edition limits
+      - Rarity calculations impossible
+    detection_pattern: "ERC1155(?!Supply)"
+    solution: |
+      // BAD - no supply tracking
+      contract MyNFT is ERC1155 {
+          function mint(address to, uint256 id, uint256 amount) external {
+              _mint(to, id, amount, "");
+          }
+      }
+
+      // GOOD - with supply extension
+      import "@openzeppelin/contracts/token/ERC1155/extensions/ERC1155Supply.sol";
+
+      contract MyNFT is ERC1155Supply {
+          uint256 public constant MAX_SUPPLY_PER_ID = 100;
+
+          function mint(address to, uint256 id, uint256 amount) external {
+              require(
+                  totalSupply(id) + amount <= MAX_SUPPLY_PER_ID,
+                  "Exceeds max supply"
+              );
+              _mint(to, id, amount, "");
+          }
+
+          // Now available:
+          // totalSupply(id) - tokens minted for this ID
+          // exists(id) - whether any tokens exist for ID
+      }
+
+      // For 1-of-1s with ERC-1155 (unusual but valid):
+      function mintUnique(address to, uint256 id) external {
+          require(!exists(id), "Token already exists");
+          _mint(to, id, 1, "");
+      }
+    references:
+      - https://docs.openzeppelin.com/contracts/4.x/api/token/erc1155#ERC1155Supply
+
+  - id: startTokenId-assumption
+    severity: MEDIUM
+    title: "Assuming Token IDs Start at 0"
+    description: |
+      ERC721A and some implementations start token IDs at 1, not 0. Hardcoding
+      assumptions about starting ID breaks enumeration, reveals, and frontend
+      display.
+    symptoms:
+      - Token 0 doesn't exist errors
+      - Off-by-one bugs in reveal offset
+      - Enumeration misses first token
+      - Frontend shows wrong tokens
+    detection_pattern: "tokenId.*0|for.*0.*<.*totalSupply"
+    solution: |
+      // ERC721A default: starts at 0
+      // But can be overridden:
+      function _startTokenId() internal pure override returns (uint256) {
+          return 1;  // Start at 1 instead
+      }
+
+      // ALWAYS use _startTokenId() not hardcoded 0:
+      function getAllTokenIds(address owner) public view returns (uint256[] memory) {
+          uint256 balance = balanceOf(owner);
+          uint256[] memory tokens = new uint256[](balance);
+          uint256 index = 0;
+
+          // Use actual start and end
+          for (uint256 i = _startTokenId(); i < _nextTokenId(); i++) {
+              if (_exists(i) && ownerOf(i) == owner) {
+                  tokens[index++] = i;
+              }
+          }
+          return tokens;
+      }
+
+      // For reveal offset:
+      function tokenURI(uint256 tokenId) public view returns (string memory) {
+          uint256 startId = _startTokenId();
+          uint256 totalMinted = _totalMinted();
+
+          // Normalize to 0-based for offset calculation
+          uint256 normalizedId = tokenId - startId;
+          uint256 metadataId = (normalizedId + revealOffset) % totalMinted;
+
+          return string(abi.encodePacked(baseURI, metadataId.toString(), ".json"));
+      }
+    references:
+      - https://github.com/chiru-labs/ERC721A/blob/main/contracts/ERC721A.sol
+
+  - id: tokenURI-nonexistent
+    severity: MEDIUM
+    title: "tokenURI Returns Data for Non-Existent Tokens"
+    description: |
+      If tokenURI doesn't check token existence, it returns valid-looking URIs
+      for tokens that haven't been minted. Indexers get confused, and people
+      can "preview" unrevealed tokens.
+    symptoms:
+      - Metadata for unminted tokens visible
+      - Indexers show ghost tokens
+      - Reveals can be front-run
+    detection_pattern: "function tokenURI.*\\{(?!.*_exists|.*_ownerOf|.*require)"
+    solution: |
+      // BAD - no existence check
+      function tokenURI(uint256 tokenId) public view returns (string memory) {
+          return string(abi.encodePacked(baseURI, tokenId.toString(), ".json"));
+      }
+
+      // GOOD - explicit check
+      function tokenURI(uint256 tokenId) public view override returns (string memory) {
+          if (!_exists(tokenId)) revert URIQueryForNonexistentToken();
+          return string(abi.encodePacked(baseURI, _toString(tokenId), ".json"));
+      }
+
+      // For ERC721A, use their built-in error:
+      error URIQueryForNonexistentToken();
+
+      // For OpenZeppelin ERC721:
+      function tokenURI(uint256 tokenId) public view override returns (string memory) {
+          require(_exists(tokenId), "ERC721: URI query for nonexistent token");
+          // ...
+      }
+    references:
+      - https://docs.openzeppelin.com/contracts/4.x/api/token/erc721#IERC721Metadata-tokenURI-uint256-
+
+  - id: timestamp-dependence
+    severity: LOW
+    title: "Block Timestamp Can Be Manipulated"
+    description: |
+      Miners can manipulate block.timestamp by a few seconds. For time-sensitive
+      operations like Dutch auctions or timed reveals, this creates edge cases.
+    symptoms:
+      - Price changes at unexpected times
+      - Reveals happen slightly early/late
+      - Edge case exploits in auctions
+    detection_pattern: "block\\.timestamp.*price|block\\.timestamp.*start|block\\.timestamp.*end"
+    solution: |
+      // For Dutch auctions, manipulation is minimal risk:
+      // Miners can only shift by ~15 seconds
+      // If your price drops are 10+ minutes, impact is negligible
+
+      // For critical timing, use block numbers instead:
+      uint256 public revealBlock;
+
+      function setRevealBlock(uint256 _block) external onlyOwner {
+          require(_block > block.number + 10, "Too soon");
+          revealBlock = _block;
+      }
+
+      function reveal() external {
+          require(block.number >= revealBlock, "Not yet");
+          // ...
+      }
+
+      // Blocks are ~12 seconds on Ethereum mainnet
+      // 100 blocks = ~20 minutes = safe buffer for reveals
+
+      // For auctions, add buffer zones:
+      function currentPrice() public view returns (uint256) {
+          uint256 elapsed = block.timestamp - startTime;
+          // Add 30-second buffer between price tiers
+          // Prevents manipulation at tier boundaries
+          uint256 adjustedElapsed = elapsed + 30;
+          // ...
+      }
+    references:
+      - https://ethereum.stackexchange.com/questions/5924/how-do-ethereum-mining-nodes-maintain-a-time-consistent-with-the-network

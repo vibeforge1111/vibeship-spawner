@@ -1,0 +1,239 @@
+# BullMQ Specialist Validations
+# Automated checks for proper queue handling and job processing patterns
+
+validations:
+  - id: missing-maxretriesperrequest
+    name: Redis connection missing maxRetriesPerRequest
+    description: BullMQ requires maxRetriesPerRequest null for proper reconnection handling
+    severity: error
+    pattern: "new (Queue|Worker|FlowProducer)\\s*\\("
+    negative_pattern: "maxRetriesPerRequest\\s*:\\s*null"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "BullMQ queue/worker created without maxRetriesPerRequest: null on Redis connection. This will cause workers to stop on Redis connection issues."
+    fix_hint: "Create ioredis connection with maxRetriesPerRequest: null and pass it to Queue/Worker"
+
+  - id: missing-stalled-handler
+    name: No stalled job event handler
+    description: Workers should handle stalled events to detect crashed workers
+    severity: warning
+    pattern: "new Worker\\s*\\([^)]+\\)"
+    negative_pattern: "\\.on\\(['\"]stalled"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "Worker created without 'stalled' event handler. Stalled jobs indicate worker crashes and should be monitored."
+    fix_hint: "Add worker.on('stalled', (jobId) => { /* alert */ })"
+
+  - id: missing-failed-handler
+    name: No failed job event handler
+    description: Workers should handle failed events for monitoring and alerting
+    severity: warning
+    pattern: "new Worker\\s*\\([^)]+\\)"
+    negative_pattern: "\\.on\\(['\"]failed"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "Worker created without 'failed' event handler. Failed jobs should be logged and monitored."
+    fix_hint: "Add worker.on('failed', (job, err) => { /* log/alert */ })"
+
+  - id: missing-graceful-shutdown
+    name: No graceful shutdown handling
+    description: Workers should gracefully shut down on SIGTERM/SIGINT
+    severity: warning
+    pattern: "new Worker\\s*\\([^)]+\\)"
+    negative_pattern: "SIGTERM|SIGINT|graceful|shutdown"
+    file_patterns:
+      - "**/worker*.ts"
+      - "**/worker*.js"
+      - "**/queue*.ts"
+      - "**/jobs/**/*.ts"
+    message: "Worker file without graceful shutdown handling. Jobs may be orphaned on deployment."
+    fix_hint: "Add process.on('SIGTERM', async () => { await worker.close(); })"
+
+  - id: sync-queue-add-in-request
+    name: Awaiting queue.add in request handler
+    description: Queue additions should be fire-and-forget in request handlers
+    severity: info
+    pattern: "await\\s+queue\\.add\\s*\\("
+    file_patterns:
+      - "**/api/**/*.ts"
+      - "**/routes/**/*.ts"
+      - "**/pages/api/**/*.ts"
+      - "**/app/**/route.ts"
+    message: "Queue.add awaited in request handler. Consider fire-and-forget for faster response."
+    fix_hint: "Use queue.add() without await, or use void queue.add() to indicate intentional fire-and-forget"
+
+  - id: large-job-payload
+    name: Potentially large data in job payload
+    description: Job data should be small - pass IDs not full objects
+    severity: warning
+    pattern: "queue\\.add\\([^)]*\\{[^}]{200,}\\}"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "Job appears to have large inline data. Pass IDs instead of full objects to keep Redis memory low."
+    fix_hint: "Store large data in database/S3, pass only IDs: { documentId: id } instead of { document: {...} }"
+
+  - id: missing-job-timeout
+    name: Job without timeout configuration
+    description: Jobs should have timeouts to prevent infinite execution
+    severity: info
+    pattern: "queue\\.add\\s*\\([^)]+\\{[^}]*\\}\\s*\\)"
+    negative_pattern: "timeout\\s*:"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "Job added without explicit timeout. Consider adding timeout to prevent stuck jobs."
+    fix_hint: "Add { timeout: 60000 } to job options for 60 second timeout"
+
+  - id: missing-backoff-strategy
+    name: Retry without backoff strategy
+    description: Retries should use exponential backoff to avoid thundering herd
+    severity: warning
+    pattern: "attempts\\s*:\\s*[2-9]|attempts\\s*:\\s*\\d{2,}"
+    negative_pattern: "backoff\\s*:"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "Job has retry attempts but no backoff strategy. Use exponential backoff to prevent thundering herd."
+    fix_hint: "Add backoff: { type: 'exponential', delay: 1000 } to job options"
+
+  - id: repeatable-without-timezone
+    name: Repeatable job without explicit timezone
+    description: Repeatable jobs should specify timezone to avoid DST issues
+    severity: warning
+    pattern: "repeat\\s*:\\s*\\{[^}]*pattern\\s*:"
+    negative_pattern: "tz\\s*:"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "Repeatable job without explicit timezone. Will use server local time which can drift with DST."
+    fix_hint: "Add tz: 'America/New_York' or tz: 'UTC' to repeat options"
+
+  - id: high-concurrency-warning
+    name: Potentially high worker concurrency
+    description: High concurrency can overwhelm downstream services
+    severity: info
+    pattern: "concurrency\\s*:\\s*(50|[6-9]\\d|[1-9]\\d{2,})"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "Worker concurrency is high. Ensure downstream services can handle this load (DB connections, API rate limits)."
+    fix_hint: "Start with concurrency: 5-10, measure, then scale up. Use rate limiter for external APIs."
+
+  - id: missing-remove-on-complete
+    name: No removeOnComplete configuration
+    description: Completed jobs should be cleaned up to prevent memory bloat
+    severity: warning
+    pattern: "new Queue\\s*\\([^)]+\\)"
+    negative_pattern: "removeOnComplete"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "Queue without removeOnComplete configuration. Completed jobs will accumulate in Redis."
+    fix_hint: "Add defaultJobOptions: { removeOnComplete: { count: 1000 } } to queue options"
+
+  - id: missing-remove-on-fail
+    name: No removeOnFail configuration
+    description: Failed jobs cleanup should be configured for visibility
+    severity: info
+    pattern: "new Queue\\s*\\([^)]+\\)"
+    negative_pattern: "removeOnFail"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "Queue without removeOnFail configuration. Consider keeping failed jobs for debugging."
+    fix_hint: "Add defaultJobOptions: { removeOnFail: { count: 5000, age: 604800 } } to keep 7 days of failures"
+
+  - id: queue-without-prefix
+    name: Queue without prefix in cluster mode
+    description: Redis Cluster requires hash tag prefix for rate limiting to work
+    severity: warning
+    pattern: "Redis\\.Cluster|cluster\\s*:"
+    negative_pattern: "prefix\\s*:\\s*['\"]\\{"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "Using Redis Cluster but queue may not have hash tag prefix. Rate limiting may not work correctly."
+    fix_hint: "Add prefix: '{myapp}' to queue options for cluster compatibility"
+
+  - id: event-listener-in-handler
+    name: Event listener added in request handler
+    description: Adding listeners in request handlers causes memory leaks
+    severity: error
+    pattern: "(queue|worker)\\.on\\s*\\(['\"]"
+    file_patterns:
+      - "**/api/**/*.ts"
+      - "**/routes/**/*.ts"
+      - "**/pages/api/**/*.ts"
+      - "**/app/**/route.ts"
+    exclude_patterns:
+      - "**/*.test.*"
+      - "**/*.spec.*"
+    message: "Event listener added in request handler. This causes memory leaks - listeners accumulate per request."
+    fix_hint: "Move event listeners to module-level initialization, not inside request handlers"
+
+  - id: job-processor-no-error-handling
+    name: Job processor without try-catch
+    description: Job processors should handle errors explicitly
+    severity: warning
+    pattern: "new Worker\\s*\\([^,]+,\\s*async\\s*\\([^)]*\\)\\s*=>\\s*\\{"
+    negative_pattern: "try\\s*\\{|catch\\s*\\("
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "Job processor without apparent error handling. Wrap in try-catch for proper error context."
+    fix_hint: "Add try-catch in processor to log errors with job context before rethrowing"
+
+  - id: hardcoded-redis-url
+    name: Hardcoded Redis connection URL
+    description: Redis URLs should come from environment variables
+    severity: warning
+    pattern: "new (Redis|IORedis)\\s*\\(['\"]redis://|localhost:\\d+"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    exclude_patterns:
+      - "**/*.test.*"
+      - "**/*.spec.*"
+      - "**/*.example.*"
+    message: "Redis URL appears hardcoded. Use environment variable for flexibility."
+    fix_hint: "Use process.env.REDIS_URL or similar"
+
+  - id: missing-queue-events
+    name: Using job.waitUntilFinished without QueueEvents
+    description: waitUntilFinished requires QueueEvents instance
+    severity: error
+    pattern: "waitUntilFinished\\s*\\("
+    negative_pattern: "QueueEvents|queueEvents"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "Using waitUntilFinished but QueueEvents not visible. Ensure QueueEvents is instantiated."
+    fix_hint: "Create QueueEvents instance: const queueEvents = new QueueEvents('my-queue', { connection })"
+
+  - id: flow-producer-without-proper-setup
+    name: FlowProducer without queue name validation
+    description: FlowProducer jobs must reference existing queues
+    severity: info
+    pattern: "FlowProducer.*add\\s*\\("
+    negative_pattern: "queueName.*Queue|queue.*name"
+    file_patterns:
+      - "**/*.ts"
+      - "**/*.js"
+    message: "FlowProducer used - ensure all queueName references match actual Queue instances."
+    fix_hint: "Verify each child job's queueName has a corresponding Queue and Worker"
+
+  - id: blocking-operation-in-processor
+    name: Potentially blocking operation in job processor
+    description: Avoid sync operations that block the event loop
+    severity: warning
+    pattern: "readFileSync|writeFileSync|execSync|spawnSync|JSON\\.parse\\([^)]{500,}"
+    file_patterns:
+      - "**/worker*.ts"
+      - "**/processor*.ts"
+      - "**/jobs/**/*.ts"
+    message: "Potentially blocking operation in worker. Use async variants to avoid blocking other jobs."
+    fix_hint: "Use async fs methods, child_process with promises, or spawn separate process for CPU work"

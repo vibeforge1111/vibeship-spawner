@@ -1,0 +1,525 @@
+# Validations - RWA Tokenization
+# Automated code checks for compliance, security, and best practices
+
+id: rwa-tokenization
+version: "1.0.0"
+
+validations:
+  # CRITICAL - Must fix before deployment
+  - id: missing-transfer-compliance-check
+    severity: critical
+    title: "Transfer Without Compliance Check"
+    description: |
+      Security token transfers MUST check compliance before execution.
+      Transfers without compliance checks violate securities laws.
+    pattern: |
+      function\s+transfer\s*\([^)]*\)\s*(?:public|external)[^{]*\{(?:(?!compliance|canTransfer|isCompliant|checkCompliance)[^}])*\}
+    languages:
+      - solidity
+    message: |
+      CRITICAL: Transfer function lacks compliance check.
+
+      Security tokens must verify compliance before every transfer:
+      - Identity verification (is recipient verified?)
+      - Investor qualification (are they eligible?)
+      - Transfer restrictions (holding period, jurisdiction, limits)
+
+      Fix: Add compliance check before transfer
+      ```solidity
+      function transfer(address _to, uint256 _amount) public returns (bool) {
+          require(compliance.canTransfer(msg.sender, _to, _amount), "Transfer not compliant");
+          return super.transfer(_to, _amount);
+      }
+      ```
+    fix_example: |
+      require(compliance.canTransfer(msg.sender, _to, _amount), "Transfer not compliant");
+
+  - id: missing-identity-verification
+    severity: critical
+    title: "Transfer Without Identity Verification"
+    description: |
+      Both sender and recipient must have verified identities for
+      security token transfers. Anonymous transfers are prohibited.
+    pattern: |
+      function\s+transfer\s*\([^)]*\)\s*(?:public|external)[^{]*\{(?:(?!identityRegistry|isVerified|identity)[^}])*\}
+    languages:
+      - solidity
+    message: |
+      CRITICAL: Transfer function lacks identity verification.
+
+      All parties in a security token transfer must be verified:
+      - Sender identity verified
+      - Recipient identity verified
+      - Identity not expired
+
+      Fix: Check identity registry before transfer
+      ```solidity
+      require(identityRegistry.isVerified(msg.sender), "Sender not verified");
+      require(identityRegistry.isVerified(_to), "Recipient not verified");
+      ```
+
+  - id: permissionless-minting
+    severity: critical
+    title: "Permissionless Token Minting"
+    description: |
+      Security tokens represent real-world assets. Minting must be
+      controlled and tied to actual asset issuance.
+    pattern: |
+      function\s+mint\s*\([^)]*\)\s*(?:public|external)\s*(?!.*only|.*require\s*\(\s*msg\.sender)
+    languages:
+      - solidity
+    message: |
+      CRITICAL: Mint function appears to be permissionless.
+
+      Security token minting must be:
+      - Restricted to authorized issuers
+      - Tied to actual asset issuance
+      - Recorded with proper documentation
+
+      Fix: Add access control
+      ```solidity
+      function mint(address _to, uint256 _amount) external onlyIssuer {
+          require(identityRegistry.isVerified(_to), "Recipient not verified");
+          _mint(_to, _amount);
+      }
+      ```
+
+  - id: no-forced-transfer
+    severity: critical
+    title: "Missing Forced Transfer Capability"
+    description: |
+      Securities must support forced transfers for court orders,
+      estate settlements, and regulatory requirements.
+    pattern: |
+      contract\s+\w+[^{]*\{(?:(?!forcedTransfer|forceTransfer|recoverTokens)[^}])*\}
+    languages:
+      - solidity
+    file_pattern: "Token.sol|SecurityToken.sol|RWA.sol"
+    message: |
+      CRITICAL: Contract lacks forced transfer mechanism.
+
+      Legal requirements may mandate token recovery/transfer:
+      - Court orders
+      - Estate settlements
+      - Regulatory seizures
+      - Lost key recovery
+
+      Fix: Implement forced transfer with proper controls
+      ```solidity
+      function forcedTransfer(
+          address _from,
+          address _to,
+          uint256 _amount,
+          bytes32 _legalOrderHash
+      ) external onlyAgent {
+          require(_legalOrderHash != bytes32(0), "Legal order required");
+          emit ForcedTransfer(_from, _to, _amount, _legalOrderHash);
+          _transfer(_from, _to, _amount);
+      }
+      ```
+
+  # HIGH - Serious issues requiring attention
+  - id: no-holding-period-check
+    severity: high
+    title: "Missing Holding Period Enforcement"
+    description: |
+      Reg D, Reg S, and Rule 144 require holding periods before
+      resale. Transfers must check holding period compliance.
+    pattern: |
+      function\s+(?:transfer|canTransfer)\s*\([^)]*\)[^{]*\{(?:(?!holdingPeriod|acquisitionDate|lockup|vestingEnd)[^}])*\}
+    languages:
+      - solidity
+    message: |
+      HIGH: Transfer logic lacks holding period enforcement.
+
+      Securities laws require holding periods:
+      - Reg D 506(b/c): 12 months
+      - Reg S: 40 days (distribution compliance period)
+      - Rule 144: 6-12 months
+
+      Fix: Track and enforce holding periods
+      ```solidity
+      require(
+          block.timestamp - acquisitionDate[_from] >= HOLDING_PERIOD,
+          "Holding period not met"
+      );
+      ```
+
+  - id: oracle-no-staleness-check
+    severity: high
+    title: "Oracle Without Staleness Check"
+    description: |
+      Oracle data can become stale. Using stale data for asset
+      valuations creates arbitrage opportunities.
+    pattern: |
+      oracle\.(?:getPrice|getValuation|getValue)\s*\([^)]*\)(?:(?!lastUpdated|staleness|timestamp|fresh)[^;]*);
+    languages:
+      - solidity
+    message: |
+      HIGH: Oracle call without staleness check.
+
+      Stale oracle data is dangerous:
+      - Arbitrage attacks
+      - Incorrect NAV calculations
+      - Wrong dividend amounts
+
+      Fix: Always check oracle freshness
+      ```solidity
+      (uint256 value, uint256 timestamp) = oracle.getValuation(assetId);
+      require(block.timestamp - timestamp < STALENESS_THRESHOLD, "Oracle data stale");
+      ```
+
+  - id: kyc-no-expiration
+    severity: high
+    title: "KYC Verification Without Expiration"
+    description: |
+      KYC/accreditation status changes over time. Verifications
+      must have expiration dates and be rechecked.
+    pattern: |
+      isVerified\s*\[\s*\w+\s*\]\s*=\s*true\s*;(?:(?!expir|validUntil)[^;]*);
+    languages:
+      - solidity
+    message: |
+      HIGH: KYC verification set without expiration.
+
+      Investor status changes:
+      - Accreditation can be lost
+      - Sanctions lists update
+      - PEP status changes
+
+      Fix: Include expiration in verification
+      ```solidity
+      verifications[_investor] = Verification({
+          isValid: true,
+          verifiedAt: block.timestamp,
+          expiresAt: block.timestamp + 90 days
+      });
+      ```
+
+  - id: no-investor-limit-check
+    severity: high
+    title: "Missing Investor Count Limits"
+    description: |
+      Reg D 506(b) limits non-accredited investors to 35.
+      Section 12(g) triggers at 2000 investors. Must enforce limits.
+    pattern: |
+      function\s+(?:transfer|onboard|whitelist)\s*\([^)]*\)[^{]*\{(?:(?!investorCount|holderCount|maxInvestors)[^}])*\}
+    languages:
+      - solidity
+    file_pattern: "Compliance.sol|Token.sol|Whitelist.sol"
+    message: |
+      HIGH: No investor count limit enforcement.
+
+      Regulatory limits:
+      - Reg D 506(b): 35 non-accredited
+      - Section 12(g): 2000 total triggers registration
+
+      Fix: Track and enforce investor limits
+      ```solidity
+      if (balanceOf(_to) == 0) {
+          require(investorCount < MAX_INVESTORS, "Investor limit reached");
+          investorCount++;
+      }
+      ```
+
+  - id: no-jurisdiction-check
+    severity: high
+    title: "Missing Jurisdiction Verification"
+    description: |
+      Different jurisdictions have different rules. Must verify
+      investor jurisdiction and apply appropriate restrictions.
+    pattern: |
+      function\s+canTransfer\s*\([^)]*\)[^{]*\{(?:(?!country|jurisdiction|region)[^}])*\}
+    languages:
+      - solidity
+    message: |
+      HIGH: Compliance check lacks jurisdiction verification.
+
+      Jurisdiction matters:
+      - US: Reg D, Reg S, Reg A+ rules
+      - EU: MiCA requirements
+      - Singapore: MAS rules
+      - Sanctions: OFAC blocked countries
+
+      Fix: Check jurisdiction in compliance
+      ```solidity
+      uint16 country = identityRegistry.getCountry(_to);
+      require(!blockedCountries[country], "Jurisdiction blocked");
+      require(jurisdictionCompliance[country].isCompliant(_to), "Jurisdiction not compliant");
+      ```
+
+  - id: integer-division-dividend
+    severity: high
+    title: "Integer Division in Dividend Calculation"
+    description: |
+      Integer division without precision handling causes rounding
+      errors that accumulate across many investors.
+    pattern: |
+      (?:dividend|distribution|amount)\s*[=/]\s*\w+\s*\/\s*(?:totalSupply|supply|holders)
+    languages:
+      - solidity
+    message: |
+      HIGH: Integer division in dividend calculation.
+
+      At scale, rounding errors are material:
+      - 10,000 investors with $0.01 error each = $100 per distribution
+      - Compounds over time
+
+      Fix: Use high precision with proper rounding
+      ```solidity
+      uint256 constant PRECISION = 1e18;
+
+      function calculateDividend(address _holder) internal view returns (uint256) {
+          uint256 preciseAmount = (totalDividend * PRECISION) / totalSupply;
+          return (preciseAmount * balanceOf(_holder)) / PRECISION;
+      }
+      ```
+
+  # MEDIUM - Should fix but not blocking
+  - id: no-transfer-event-reason
+    severity: medium
+    title: "Transfer Rejection Without Reason"
+    description: |
+      When transfers are rejected, emit specific reason codes for
+      audit trail and debugging.
+    pattern: |
+      revert\s*\(\s*\)\s*;|require\s*\([^,]+\)\s*;(?:(?!,)[^;])*$
+    languages:
+      - solidity
+    message: |
+      MEDIUM: Transfer rejection lacks reason code.
+
+      Audit trails require:
+      - Why was transfer rejected?
+      - Which compliance rule failed?
+      - What can investor do to resolve?
+
+      Fix: Include reason in rejection
+      ```solidity
+      require(isVerified[_to], "RECIPIENT_NOT_VERIFIED");
+      require(holdingPeriodMet[_from], "HOLDING_PERIOD_NOT_MET");
+      require(!sanctioned[_to], "RECIPIENT_SANCTIONED");
+      ```
+
+  - id: no-compliance-event
+    severity: medium
+    title: "Compliance Action Without Event"
+    description: |
+      All compliance actions should emit events for audit trail.
+      Silent state changes make auditing impossible.
+    pattern: |
+      function\s+(?:verify|whitelist|blacklist|freeze|unfreeze)\s*\([^)]*\)[^{]*\{(?:(?!emit)[^}])*\}
+    languages:
+      - solidity
+    message: |
+      MEDIUM: Compliance action lacks event emission.
+
+      Audit requirements:
+      - All verifications logged
+      - All freezes with reason
+      - All compliance changes traceable
+
+      Fix: Emit event for compliance actions
+      ```solidity
+      function verify(address _investor) external onlyAgent {
+          isVerified[_investor] = true;
+          emit InvestorVerified(_investor, msg.sender, block.timestamp);
+      }
+      ```
+
+  - id: upgrade-without-timelock
+    severity: medium
+    title: "Upgradeable Contract Without Timelock"
+    description: |
+      Compliance modules should have timelocks on upgrades to prevent
+      instant rule changes that could harm investors.
+    pattern: |
+      function\s+(?:upgrade|setCompliance|setModule)\s*\([^)]*\)\s*(?:external|public)[^{]*\{(?:(?!timelock|delay)[^}])*\}
+    languages:
+      - solidity
+    message: |
+      MEDIUM: Upgrade function lacks timelock.
+
+      Investor protection requires:
+      - Advance notice of rule changes
+      - Time to exit if they disagree
+      - Governance oversight
+
+      Fix: Add timelock to upgrades
+      ```solidity
+      uint256 public constant UPGRADE_DELAY = 48 hours;
+
+      function proposeUpgrade(address _newModule) external onlyOwner {
+          pendingUpgrade = _newModule;
+          upgradeTime = block.timestamp + UPGRADE_DELAY;
+          emit UpgradeProposed(_newModule, upgradeTime);
+      }
+
+      function executeUpgrade() external {
+          require(block.timestamp >= upgradeTime, "Timelock not expired");
+          complianceModule = pendingUpgrade;
+          emit UpgradeExecuted(pendingUpgrade);
+      }
+      ```
+
+  - id: single-admin-control
+    severity: medium
+    title: "Single Admin Controls Critical Functions"
+    description: |
+      Critical compliance functions should require multi-sig or
+      governance, not single admin control.
+    pattern: |
+      modifier\s+onlyOwner|require\s*\(\s*msg\.sender\s*==\s*owner\s*\)
+    languages:
+      - solidity
+    file_pattern: "Compliance.sol|Identity.sol|Token.sol"
+    message: |
+      MEDIUM: Single admin controls compliance functions.
+
+      Risk of:
+      - Single point of failure
+      - Insider abuse
+      - Key compromise
+
+      Fix: Use multi-sig or DAO governance
+      ```solidity
+      modifier onlyGovernance() {
+          require(
+              governance.hasRole(msg.sender, COMPLIANCE_ADMIN),
+              "Not authorized"
+          );
+          _;
+      }
+      ```
+
+  # LOW - Best practice recommendations
+  - id: missing-natspec
+    severity: low
+    title: "Missing NatSpec Documentation"
+    description: |
+      Compliance functions should have thorough NatSpec documentation
+      for legal review and audit purposes.
+    pattern: |
+      ^\s*function\s+(?!_)\w+\s*\([^)]*\)[^{/]*\{
+    languages:
+      - solidity
+    file_pattern: "Compliance.sol|Token.sol|Identity.sol"
+    message: |
+      LOW: Function lacks NatSpec documentation.
+
+      Documentation helps:
+      - Legal review understanding
+      - Audit clarity
+      - Maintenance
+
+      Fix: Add NatSpec
+      ```solidity
+      /// @notice Verifies an investor's identity and qualification
+      /// @dev Only callable by authorized verification agents
+      /// @param _investor Address of the investor to verify
+      /// @param _country ISO 3166-1 numeric country code
+      /// @param _qualification Type of investor qualification
+      function verify(
+          address _investor,
+          uint16 _country,
+          QualificationType _qualification
+      ) external onlyAgent {
+          // ...
+      }
+      ```
+
+  - id: magic-numbers
+    severity: low
+    title: "Magic Numbers in Compliance Logic"
+    description: |
+      Compliance thresholds and limits should be named constants
+      for clarity and maintainability.
+    pattern: |
+      (?:require|if)\s*\([^)]*(?:365|90|35|2000)\s*(?:days|)\s*[^)]*\)
+    languages:
+      - solidity
+    message: |
+      LOW: Magic number in compliance logic.
+
+      Use named constants for:
+      - Clarity of intent
+      - Easy updates
+      - Audit clarity
+
+      Fix: Use named constants
+      ```solidity
+      uint256 public constant REG_D_HOLDING_PERIOD = 365 days;
+      uint256 public constant KYC_VALIDITY_PERIOD = 90 days;
+      uint256 public constant MAX_NON_ACCREDITED = 35;
+      uint256 public constant SEC_12G_THRESHOLD = 2000;
+      ```
+
+file_patterns:
+  must_validate:
+    - "**/*Token*.sol"
+    - "**/*Compliance*.sol"
+    - "**/*Identity*.sol"
+    - "**/*Registry*.sol"
+    - "**/*Oracle*.sol"
+    - "**/contracts/**/*.sol"
+
+  excluded:
+    - "**/node_modules/**"
+    - "**/test/**"
+    - "**/mocks/**"
+
+integration_tests:
+  - name: "Full Transfer Compliance Flow"
+    description: |
+      Test that transfers correctly check all compliance layers:
+      identity, qualification, jurisdiction, holding period.
+    test_cases:
+      - "Verified sender can transfer to verified recipient"
+      - "Unverified sender cannot transfer"
+      - "Unverified recipient cannot receive"
+      - "Expired KYC blocks transfer"
+      - "Holding period violation blocks transfer"
+      - "Jurisdiction mismatch blocks transfer"
+      - "Investor limit blocks new investors"
+
+  - name: "Forced Transfer Authorization"
+    description: |
+      Test that forced transfers require proper authorization
+      and documentation.
+    test_cases:
+      - "Agent can execute forced transfer"
+      - "Non-agent cannot execute forced transfer"
+      - "Forced transfer requires legal order hash"
+      - "Forced transfer emits proper event"
+
+  - name: "Dividend Distribution"
+    description: |
+      Test dividend calculation and distribution accuracy.
+    test_cases:
+      - "Dividends calculated correctly for all holders"
+      - "Record date snapshot is accurate"
+      - "Tax withholding applied correctly"
+      - "Claim period enforced"
+      - "Unclaimed dividends recoverable after deadline"
+
+deployment_checklist:
+  pre_deployment:
+    - "[ ] Securities counsel has reviewed smart contracts"
+    - "[ ] Transfer agent integration tested"
+    - "[ ] Identity provider integration tested"
+    - "[ ] Oracle staleness thresholds configured"
+    - "[ ] Holding periods match offering documents"
+    - "[ ] Jurisdiction restrictions match exemption"
+    - "[ ] Investor limits match exemption"
+    - "[ ] Multi-sig governance configured"
+    - "[ ] Timelock delays set"
+    - "[ ] Emergency pause capability tested"
+
+  post_deployment:
+    - "[ ] Transfer agent connected to contract"
+    - "[ ] Identity registry populated"
+    - "[ ] Compliance modules activated"
+    - "[ ] Oracle feeds verified"
+    - "[ ] Test transfer executed"
+    - "[ ] Freeze/unfreeze tested"
+    - "[ ] Forced transfer tested (testnet)"

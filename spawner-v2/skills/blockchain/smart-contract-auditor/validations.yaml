@@ -1,0 +1,473 @@
+id: smart-contract-auditor
+skill: Smart Contract Auditor
+version: "1.0"
+
+validations:
+  # CRITICAL: Reentrancy Patterns
+  - id: check-reentrancy-eth-transfer
+    name: Potential Reentrancy via ETH Transfer
+    description: External ETH transfers before state updates are reentrancy vectors
+    pattern: "call\\{.*value.*\\}.*\\n(?:(?!\\b(balances|_balance|amount|withdrawn)\\b.*(-=|= 0|= false)).)*$"
+    file_glob: "**/*.sol"
+    match: present
+    message: "CRITICAL: ETH transfer detected. Verify state is updated BEFORE external call (CEI pattern)"
+    severity: error
+    autofix: false
+
+  - id: check-reentrancy-callback
+    name: External Call with Callback Risk
+    description: Calls to untrusted addresses may trigger callbacks
+    pattern: "\\.call\\(|\\.delegatecall\\(|\\.staticcall\\("
+    file_glob: "**/*.sol"
+    match: present
+    message: "External call detected. Consider reentrancy guard and CEI pattern"
+    severity: warning
+    autofix: false
+
+  - id: check-nonreentrant-missing
+    name: Missing Reentrancy Guard
+    description: Functions with external calls should have reentrancy protection
+    pattern: "function.*external.*\\{[^}]*call\\{.*value"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "nonReentrant|ReentrancyGuard"
+    context_match: absent
+    message: "External payable call without nonReentrant modifier"
+    severity: error
+    autofix: false
+
+  # CRITICAL: Access Control
+  - id: check-selfdestruct-unprotected
+    name: Unprotected Selfdestruct
+    description: Selfdestruct without access control
+    pattern: "selfdestruct\\(|SELFDESTRUCT"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "onlyOwner|require.*msg\\.sender|onlyRole"
+    context_match: absent
+    message: "CRITICAL: selfdestruct without access control"
+    severity: error
+    autofix: false
+
+  - id: check-ownership-transfer
+    name: Single-Step Ownership Transfer
+    description: Direct ownership transfers can lock out owner
+    pattern: "owner\\s*=\\s*\\w+|_transferOwnership\\("
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "pendingOwner|acceptOwnership|Ownable2Step"
+    context_match: absent
+    message: "Consider two-step ownership transfer to prevent lockout"
+    severity: warning
+    autofix: false
+
+  - id: check-tx-origin
+    name: tx.origin Authentication
+    description: tx.origin for auth is vulnerable to phishing
+    pattern: "require.*tx\\.origin|tx\\.origin\\s*==|==\\s*tx\\.origin"
+    file_glob: "**/*.sol"
+    match: present
+    message: "CRITICAL: tx.origin for authentication is vulnerable to phishing attacks. Use msg.sender"
+    severity: error
+    autofix: false
+
+  # HIGH: Return Value Checks
+  - id: check-unchecked-transfer
+    name: Unchecked ERC20 Transfer Return
+    description: ERC20 transfer may fail silently
+    pattern: "IERC20.*\\.transfer\\(|token\\.transfer\\("
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "require.*transfer|safeTransfer|SafeERC20"
+    context_match: absent
+    message: "ERC20 transfer without return value check. Use SafeERC20.safeTransfer"
+    severity: error
+    autofix: false
+
+  - id: check-unchecked-transferfrom
+    name: Unchecked ERC20 TransferFrom Return
+    description: ERC20 transferFrom may fail silently
+    pattern: "IERC20.*\\.transferFrom\\(|token\\.transferFrom\\("
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "require.*transferFrom|safeTransferFrom|SafeERC20"
+    context_match: absent
+    message: "ERC20 transferFrom without return value check. Use SafeERC20.safeTransferFrom"
+    severity: error
+    autofix: false
+
+  - id: check-unchecked-approve
+    name: Unchecked ERC20 Approve
+    description: ERC20 approve may fail or behave unexpectedly
+    pattern: "IERC20.*\\.approve\\(|token\\.approve\\("
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "safeApprove|forceApprove|SafeERC20"
+    context_match: absent
+    message: "ERC20 approve without SafeERC20. Some tokens require 0 approval first"
+    severity: warning
+    autofix: false
+
+  - id: check-low-level-call-return
+    name: Unchecked Low-Level Call
+    description: Low-level call return value must be checked
+    pattern: "\\.(call|delegatecall|staticcall)\\([^)]*\\);\\s*$"
+    file_glob: "**/*.sol"
+    match: present
+    message: "Low-level call without return value check"
+    severity: error
+    autofix: false
+
+  # HIGH: Oracle and Price Manipulation
+  - id: check-oracle-stale-price
+    name: Missing Oracle Freshness Check
+    description: Oracle prices should be validated for freshness
+    pattern: "latestRoundData\\(\\)|latestAnswer\\(\\)"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "updatedAt|timestamp|stale|freshness"
+    context_match: absent
+    message: "Oracle used without freshness check. Stale prices can cause losses"
+    severity: warning
+    autofix: false
+
+  - id: check-spot-price-usage
+    name: Spot Price Manipulation Risk
+    description: Spot prices from AMMs are manipulable via flash loans
+    pattern: "getReserves\\(\\)|slot0\\(\\)|price0CumulativeLast|getCurrentPrice"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "TWAP|twap|cumulative|observe"
+    context_match: absent
+    message: "Spot price usage detected. Consider TWAP to prevent flash loan manipulation"
+    severity: warning
+    autofix: false
+
+  - id: check-oracle-price-validation
+    name: Missing Oracle Price Validation
+    description: Oracle prices should have sanity bounds
+    pattern: "latestRoundData|getPrice|fetchPrice"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "require.*price.*>|price.*>.*0|MIN_PRICE|MAX_PRICE"
+    context_match: absent
+    message: "Oracle price without sanity validation. Check for zero/negative/extreme values"
+    severity: warning
+    autofix: false
+
+  # HIGH: Integer Operations
+  - id: check-unchecked-user-input
+    name: Unchecked Arithmetic with User Input
+    description: User-controlled values in unchecked blocks can overflow
+    pattern: "unchecked\\s*\\{[^}]*\\+[^}]*\\}"
+    file_glob: "**/*.sol"
+    match: present
+    message: "Verify unchecked arithmetic uses only bounded/validated values"
+    severity: warning
+    autofix: false
+
+  - id: check-unsafe-downcast
+    name: Unsafe Integer Downcast
+    description: Casting to smaller types can silently truncate
+    pattern: "uint(8|16|32|64|128)\\s*\\([^)]+\\)|int(8|16|32|64|128)\\s*\\([^)]+\\)"
+    file_glob: "**/*.sol"
+    match: present
+    message: "Integer downcast detected. Verify value fits in target type"
+    severity: warning
+    autofix: false
+
+  # HIGH: Signature Security
+  - id: check-ecrecover-zero
+    name: Unchecked ecrecover Result
+    description: ecrecover returns zero on invalid signature
+    pattern: "ecrecover\\("
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "!=\\s*address\\(0\\)|recovered.*!=.*0|signer.*!=.*address\\(0\\)"
+    context_match: absent
+    message: "ecrecover without zero address check. Invalid signatures return address(0)"
+    severity: error
+    autofix: false
+
+  - id: check-signature-replay
+    name: Missing Nonce in Signature
+    description: Signatures without nonces can be replayed
+    pattern: "ecrecover|ECDSA\\.recover|SignatureChecker"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "nonce|Nonce|NONCE"
+    context_match: absent
+    message: "Signature verification without nonce. Vulnerable to replay attacks"
+    severity: warning
+    autofix: false
+
+  - id: check-signature-chain-id
+    name: Missing Chain ID in Signature
+    description: Signatures should include chain ID for cross-chain safety
+    pattern: "DOMAIN_SEPARATOR|EIP712"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "chainid|chainId|block\\.chainid"
+    context_match: absent
+    message: "Domain separator without chain ID. Signatures may replay on forks"
+    severity: warning
+    autofix: false
+
+  # MEDIUM: Front-Running and MEV
+  - id: check-swap-no-slippage
+    name: Swap Without Slippage Protection
+    description: Swaps without minimum output are sandwich targets
+    pattern: "swap.*0,|amountOutMin.*=.*0|minAmountOut.*0"
+    file_glob: "**/*.sol"
+    match: present
+    message: "Swap with zero slippage protection. Will be sandwiched by MEV bots"
+    severity: error
+    autofix: false
+
+  - id: check-swap-no-deadline
+    name: Swap Without Deadline
+    description: Swaps without deadline can be held by validators
+    pattern: "swap|trade|exchange"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "deadline|block\\.timestamp|expires"
+    context_match: absent
+    message: "Swap without deadline parameter. Transaction can be delayed indefinitely"
+    severity: warning
+    autofix: false
+
+  # MEDIUM: Denial of Service
+  - id: check-unbounded-loop
+    name: Unbounded Loop Over Array
+    description: Loops over dynamic arrays can exceed gas limit
+    pattern: "for.*<.*\\.length|while.*\\.length"
+    file_glob: "**/*.sol"
+    match: present
+    message: "Loop over dynamic array. Ensure bounded or use pagination"
+    severity: warning
+    autofix: false
+
+  - id: check-push-unbounded
+    name: Unbounded Array Push
+    description: Unlimited array growth leads to DoS
+    pattern: "\\.push\\("
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "MAX_|maxLength|require.*length.*<"
+    context_match: absent
+    message: "Array push without length limit. Can grow unbounded causing DoS"
+    severity: warning
+    autofix: false
+
+  - id: check-external-call-in-loop
+    name: External Call in Loop
+    description: External calls in loops allow griefing
+    pattern: "for.*\\{[^}]*(\\.call|\\.transfer|\\.send|transfer\\(|safeTransfer)"
+    file_glob: "**/*.sol"
+    match: present
+    message: "External call inside loop. Single failure blocks all. Use pull pattern"
+    severity: warning
+    autofix: false
+
+  # MEDIUM: Proxy and Upgrade Patterns
+  - id: check-delegatecall-untrusted
+    name: Delegatecall to Non-Constant Address
+    description: Delegatecall to variable address risks storage collision
+    pattern: "delegatecall\\("
+    file_glob: "**/*.sol"
+    match: present
+    message: "Delegatecall detected. Verify target is trusted and storage compatible"
+    severity: warning
+    autofix: false
+
+  - id: check-initializer-missing
+    name: Missing Initializer Modifier
+    description: Initializer functions can be called multiple times
+    pattern: "function\\s+initialize\\s*\\("
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "initializer|initialized|Initializable"
+    context_match: absent
+    message: "Initialize function without initializer modifier. Can be called multiple times"
+    severity: error
+    autofix: false
+
+  - id: check-constructor-in-proxy
+    name: Constructor in Upgradeable Contract
+    description: Constructors don't run in proxy context
+    pattern: "constructor\\s*\\("
+    file_glob: "**/*Upgradeable*.sol"
+    match: present
+    message: "Constructor in upgradeable contract. State set here won't exist in proxy"
+    severity: warning
+    autofix: false
+
+  # INFO: Gas and Best Practices
+  - id: check-floating-pragma
+    name: Floating Pragma Version
+    description: Contracts should lock pragma for consistent compilation
+    pattern: "pragma solidity \\^|pragma solidity >=|pragma solidity >="
+    file_glob: "**/*.sol"
+    match: present
+    message: "Floating pragma. Lock to specific version for production"
+    severity: info
+    autofix: false
+
+  - id: check-magic-numbers
+    name: Magic Numbers in Code
+    description: Unexplained numbers make auditing harder
+    pattern: "\\b(1000|10000|100000|86400|3600|1e18|1e6)\\b"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "constant|CONSTANT|//.*"
+    context_match: absent
+    message: "Magic number detected. Consider using named constants"
+    severity: info
+    autofix: false
+
+  - id: check-assembly-present
+    name: Assembly Block Detected
+    description: Assembly requires careful security review
+    pattern: "assembly\\s*\\{"
+    file_glob: "**/*.sol"
+    match: present
+    message: "Assembly block requires thorough security review"
+    severity: info
+    autofix: false
+
+  - id: check-inline-yul
+    name: Inline Yul Code
+    description: Yul bypasses Solidity safety features
+    pattern: "assembly.*\\{[^}]*sload|assembly.*\\{[^}]*sstore|assembly.*\\{[^}]*mstore"
+    file_glob: "**/*.sol"
+    match: present
+    message: "Direct storage/memory manipulation in assembly. Extra scrutiny needed"
+    severity: warning
+    autofix: false
+
+  # TOKEN-SPECIFIC
+  - id: check-approve-race
+    name: ERC20 Approve Race Condition
+    description: approve() has known race condition
+    pattern: "\\.approve\\([^,]+,\\s*[^0)]"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "increaseAllowance|safeIncreaseAllowance|forceApprove"
+    context_match: absent
+    message: "Direct approve() has race condition. Consider increaseAllowance or set to 0 first"
+    severity: info
+    autofix: false
+
+  - id: check-permit-support
+    name: Missing Permit Support
+    description: Modern tokens should support gasless approvals
+    pattern: "ERC20|IERC20"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "permit|ERC20Permit|IERC2612"
+    context_match: absent
+    message: "Consider ERC20Permit for gasless approvals"
+    severity: info
+    autofix: false
+
+pre_commit:
+  - id: slither-analysis
+    name: Slither Static Analysis
+    command: "slither . --exclude-dependencies --exclude-informational"
+    description: Run Slither to detect vulnerabilities
+
+  - id: mythril-analysis
+    name: Mythril Analysis
+    command: "myth analyze contracts/*.sol --execution-timeout 300"
+    description: Run Mythril symbolic execution
+
+  - id: forge-test
+    name: Forge Test Suite
+    command: "forge test -vvv"
+    description: Run all tests with verbose output
+
+  - id: coverage-check
+    name: Test Coverage
+    command: "forge coverage --report summary"
+    description: Verify test coverage meets minimum
+
+ci_checks:
+  - id: slither-ci
+    name: Slither CI Check
+    command: "slither . --exclude-dependencies --json slither-report.json"
+    description: Slither with JSON output for CI parsing
+    required: true
+
+  - id: echidna-fuzz
+    name: Echidna Fuzzing
+    command: "echidna . --contract ${CONTRACT} --config echidna.yaml"
+    description: Fuzz test invariants
+    required: false
+
+  - id: halmos-formal
+    name: Halmos Formal Verification
+    command: "halmos"
+    description: Formal verification of properties
+    required: false
+
+  - id: aderyn-analysis
+    name: Aderyn Static Analysis
+    command: "aderyn ."
+    description: Rust-based static analyzer (Cyfrin)
+    required: false
+
+  - id: 4naly3er-report
+    name: 4naly3er Report
+    command: "4naly3er ."
+    description: Generate comprehensive analysis report
+    required: false
+
+  - id: gas-snapshot-diff
+    name: Gas Snapshot Comparison
+    command: "forge snapshot --diff"
+    description: Detect gas regressions
+    required: false
+
+audit_checklist:
+  - id: reentrancy-review
+    name: Reentrancy Review
+    description: "Check all external calls for reentrancy risks"
+    items:
+      - All external calls use nonReentrant or CEI pattern
+      - Read-only reentrancy considered for view functions
+      - Cross-function reentrancy analyzed
+
+  - id: access-control-review
+    name: Access Control Review
+    description: "Verify all privileged functions are protected"
+    items:
+      - All admin functions have access modifiers
+      - Role hierarchy is documented
+      - Two-step ownership transfer for critical roles
+
+  - id: oracle-review
+    name: Oracle Integration Review
+    description: "Validate all price feed usage"
+    items:
+      - Freshness checks on all oracle reads
+      - Fallback oracles configured
+      - Sanity bounds on prices
+      - Flash loan resistance (TWAP or multi-oracle)
+
+  - id: token-review
+    name: Token Integration Review
+    description: "Handle all token edge cases"
+    items:
+      - SafeERC20 used for all transfers
+      - Fee-on-transfer tokens considered
+      - Rebasing tokens handled
+      - ERC-777 callback risks mitigated
+
+  - id: economic-review
+    name: Economic Security Review
+    description: "Analyze economic attack vectors"
+    items:
+      - Flash loan attack vectors analyzed
+      - Sandwich attack mitigations in place
+      - Precision loss dust accumulation
+      - First depositor attack prevented

@@ -1,0 +1,289 @@
+# Graphile Worker Validations
+# Automated checks for PostgreSQL job queue patterns with LISTEN/NOTIFY
+
+validations:
+  - id: missing-graceful-shutdown
+    name: Worker Without Graceful Shutdown
+    severity: error
+    type: regex
+    pattern:
+      - "run\\(\\{[^}]+\\}\\)(?!.*SIGTERM.*stop)"
+      - "import.*graphile-worker(?!.*process\\.on.*stop)"
+    message: "Graphile Worker started without graceful shutdown. Active jobs may be abandoned on restart."
+    fix_action: "Add SIGTERM/SIGINT handlers that call runner.stop() before process.exit()"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: missing-migration-call
+    name: Worker Started Without Running Migrations
+    severity: error
+    type: regex
+    pattern:
+      - "run\\(\\{(?!.*runMigrations)"
+      - "from ['\"]graphile-worker['\"](?!.*runMigrations)"
+    message: "Worker may start without schema migrations. Schema mismatch causes crashes."
+    fix_action: "Call runMigrations() before run() or use --schema-only CLI flag in deployment"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: transaction-mode-pooler
+    name: Using Transaction Mode Pooler with Graphile Worker
+    severity: error
+    type: regex
+    pattern:
+      - "connectionString.*:6543(?!.*pgbouncer=true)"
+      - "transaction.*mode.*graphile"
+      - "supavisor.*graphile-worker"
+    message: "Transaction mode pooler breaks LISTEN/NOTIFY. Jobs won't be picked up instantly."
+    fix_action: "Use session mode connection (port 5432 for Supabase) or add ?pgbouncer=true"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+      - "**/.env*"
+
+  - id: sql-injection-payload
+    name: SQL Injection Risk in Job Payload
+    severity: error
+    type: regex
+    pattern:
+      - "add_job\\([^)]*'\\{.*\\|\\|.*\\}'"
+      - "add_job.*\\+\\s*['\"]"
+      - "'\\{\".*'\\s*\\|\\|\\s*\\w+\\s*\\|\\|"
+    message: "Building JSON payload with string concatenation. Use json_build_object() instead."
+    fix_action: "Replace string concatenation with json_build_object() or to_json()"
+    applies_to:
+      - "**/*.sql"
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: task-name-mismatch
+    name: Task Name Uses CamelCase Instead of snake_case
+    severity: warning
+    type: regex
+    pattern:
+      - "add_job\\(['\"][a-z]+[A-Z][a-zA-Z]*['\"]"
+      - "export const [a-z]+[A-Z].*Task\\s*="
+    message: "Task names should use snake_case to match PostgreSQL conventions. CamelCase may cause lookup failures."
+    fix_action: "Use snake_case for task names: send_email instead of sendEmail"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+      - "**/*.sql"
+
+  - id: non-serializable-payload
+    name: Non-JSON-Serializable Data in Payload
+    severity: warning
+    type: regex
+    pattern:
+      - "quickAddJob.*new Date\\("
+      - "add_job.*BigInt\\("
+      - "quickAddJob.*Buffer\\.from"
+    message: "Payload contains non-serializable data (Date, BigInt, Buffer). Convert to strings first."
+    fix_action: "Use .toISOString() for Date, .toString() for BigInt, .toString('base64') for Buffer"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: no-error-handling-task
+    name: Task Without Error Handling
+    severity: warning
+    type: regex
+    pattern:
+      - "export const \\w+:\\s*Task\\s*=\\s*async\\s*\\([^)]*\\)\\s*=>\\s*\\{(?!.*try|catch)"
+      - "taskList.*async\\s*\\([^)]*\\)\\s*=>\\s*\\{(?!.*try)"
+    message: "Task function without explicit error handling. Unhandled errors have unclear failure messages."
+    fix_action: "Wrap task logic in try/catch for better error reporting and cleanup"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: large-payload-direct
+    name: Passing Large Data Directly in Payload
+    severity: warning
+    type: regex
+    pattern:
+      - "add_job\\([^,]+,\\s*\\{[^}]{500,}\\}"
+      - "quickAddJob.*(?:records|items|data|payload|list|content|body|html)\\s*:"
+    message: "Job payload may be too large. Store data elsewhere and pass references."
+    fix_action: "Store large data in S3/database and pass IDs/references in job payload"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: cron-without-job-key
+    name: Cron Schedule Without Overlap Prevention
+    severity: warning
+    type: regex
+    pattern:
+      - "parseCronItems\\(\\[(?!.*jobKey)"
+      - "crontab(?!.*jobKey)"
+    message: "Cron job without jobKey can run multiple instances simultaneously if previous is slow."
+    fix_action: "Add jobKey and jobKeyMode to prevent cron job overlap"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+      - "**/crontab"
+
+  - id: trigger-before-instead-of-after
+    name: BEFORE Trigger with add_job
+    severity: warning
+    type: regex
+    pattern:
+      - "BEFORE INSERT.*RETURNS TRIGGER.*add_job"
+      - "BEFORE UPDATE.*add_job"
+    message: "BEFORE trigger with add_job may queue job for data that doesn't get committed."
+    fix_action: "Use AFTER trigger or DEFERRABLE INITIALLY DEFERRED for job queuing"
+    applies_to:
+      - "**/*.sql"
+
+  - id: no-poll-interval-fallback
+    name: No Poll Interval Fallback
+    severity: warning
+    type: regex
+    pattern:
+      - "run\\(\\{[^}]*connectionString[^}]*\\}\\)(?!.*pollInterval)"
+    message: "No pollInterval configured. If LISTEN/NOTIFY fails, jobs won't be picked up."
+    fix_action: "Add pollInterval (e.g., 1000ms) as fallback for LISTEN/NOTIFY failures"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: high-concurrency-no-pool
+    name: High Concurrency Without Connection Pool Configuration
+    severity: warning
+    type: regex
+    pattern:
+      - "concurrency:\\s*(1[0-9]|[2-9][0-9]|\\d{3,})(?!.*pgPool|maxPoolSize)"
+    message: "High concurrency may exhaust database connections. Consider explicit pool configuration."
+    fix_action: "Configure pgPool or maxPoolSize to match available database connections"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: returning-large-result
+    name: Task Returning Large Result
+    severity: warning
+    type: regex
+    pattern:
+      - "return\\s+(?:report|data|results|content|response|body)\\s*;"
+      - "return\\s+await\\s+\\w+\\s*;"
+    message: "Returning large objects from tasks stores them in database. Return minimal data."
+    fix_action: "Store large results in S3/database and return only status/reference"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: non-idempotent-task
+    name: Potentially Non-Idempotent Task
+    severity: warning
+    type: regex
+    pattern:
+      - "Task.*=.*INSERT(?!.*ON CONFLICT)"
+      - "Task.*\\.create\\((?!.*skipDuplicates)"
+      - "Task.*sendEmail|sendNotification(?!.*idempotency)"
+    message: "Task may not be idempotent. Jobs retry on failure, which can cause duplicate operations."
+    fix_action: "Make tasks idempotent: check for existing work, use upserts, track processed IDs"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: task-directory-relative
+    name: Task Directory Using Relative Path
+    severity: info
+    type: regex
+    pattern:
+      - "taskDirectory:\\s*['\"](?!\\/|[A-Z]:)[^'\"]+['\"]"
+      - "taskDirectory:\\s*['\"]\\.[^'\"]+['\"]"
+    message: "Relative taskDirectory path may break in different working directories."
+    fix_action: "Use absolute path with __dirname or path.resolve() for taskDirectory"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: no-health-check
+    name: Worker Without Health Check Endpoint
+    severity: info
+    type: regex
+    pattern:
+      - "run\\(\\{(?!.*health|ready)"
+    message: "No health check endpoint detected. Orchestrators can't monitor worker health."
+    fix_action: "Add /health and /ready endpoints for Kubernetes/Docker health checks"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: hardcoded-connection-string
+    name: Hardcoded Database Connection String
+    severity: info
+    type: regex
+    pattern:
+      - "connectionString:\\s*['\"]postgres://[^'\"]+['\"]"
+      - "run\\(\\{.*postgres://.*\\}\\)"
+    message: "Hardcoded connection string. Use environment variables for different environments."
+    fix_action: "Use process.env.DATABASE_URL instead of hardcoded connection string"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: missing-job-key-dedup
+    name: Add Job Without Deduplication
+    severity: info
+    type: regex
+    pattern:
+      - "add_job\\([^)]+\\)(?!.*job_key)"
+      - "quickAddJob\\([^)]+\\)(?!.*jobKey)"
+    message: "Job queued without deduplication. Same job may be queued multiple times."
+    fix_action: "Consider adding jobKey for deduplication if duplicate jobs are a concern"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+      - "**/*.sql"
+
+  - id: direct-table-manipulation
+    name: Direct graphile_worker Table Manipulation
+    severity: info
+    type: regex
+    pattern:
+      - "UPDATE\\s+graphile_worker\\."
+      - "DELETE\\s+FROM\\s+graphile_worker\\."
+      - "INSERT\\s+INTO\\s+graphile_worker\\.(?!add_job)"
+    message: "Direct manipulation of graphile_worker tables. Use API functions when possible."
+    fix_action: "Use graphile_worker.add_job() and other API functions instead of direct SQL"
+    applies_to:
+      - "**/*.sql"
+      - "**/*.ts"
+      - "**/*.js"

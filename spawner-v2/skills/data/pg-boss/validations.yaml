@@ -1,0 +1,231 @@
+# pg-boss Validations
+# Automated checks for PostgreSQL job queue patterns
+
+validations:
+  - id: missing-expiration
+    name: Job Without Expiration
+    severity: error
+    type: regex
+    pattern:
+      - "boss\\.send\\([^)]+\\)(?!.*expireIn)"
+      - "\\.send\\(['\"][^'\"]+['\"],\\s*\\{[^}]+\\}\\s*\\)(?!.*expire)"
+    message: "Job sent without expireInSeconds. Jobs can get stuck forever if worker crashes."
+    fix_action: "Add expireInSeconds appropriate for job type (e.g., 300 for 5 minutes)"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: missing-dead-letter
+    name: Critical Job Without Dead Letter Queue
+    severity: error
+    type: regex
+    pattern:
+      - "send\\(['\"](?:order|payment|invoice|subscription|user)[^'\"]*['\"].*\\)(?!.*deadLetter)"
+      - "boss\\.send\\(['\"](?:critical|important)[^'\"]*['\"].*\\)(?!.*deadLetter)"
+    message: "Critical job without dead letter queue. Failed jobs will be lost after retries."
+    fix_action: "Add deadLetter option to capture permanently failed jobs for investigation"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: no-graceful-shutdown
+    name: Missing Graceful Shutdown Handler
+    severity: error
+    type: regex
+    pattern:
+      - "boss\\.start\\(\\)(?!.*SIGTERM.*stop|SIGINT.*stop)"
+      - "new PgBoss\\([^)]+\\)(?!.*process\\.on.*stop)"
+    message: "pg-boss started without graceful shutdown handler. Active jobs may be abandoned on restart."
+    fix_action: "Add SIGTERM/SIGINT handlers that call boss.stop() before process.exit()"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: high-team-size
+    name: Excessive Worker Concurrency
+    severity: warning
+    type: regex
+    pattern:
+      - "teamSize:\\s*(1\\d|[2-9]\\d|\\d{3,})"
+      - "teamConcurrency:\\s*([5-9]|\\d{2,})"
+    message: "High teamSize/teamConcurrency can exhaust database connections. Consider pool limits."
+    fix_action: "Size workers based on available connections. teamSize * teamConcurrency should not exceed pool size"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: no-retry-config
+    name: Job Without Retry Configuration
+    severity: warning
+    type: regex
+    pattern:
+      - "boss\\.send\\([^)]+\\)(?!.*retryLimit|retryDelay)"
+      - "\\.send\\(['\"][^'\"]+['\"],\\s*\\{[^}]*\\}\\s*,\\s*\\{[^}]*\\}\\s*\\)(?!.*retry)"
+    message: "Job without retry configuration. Consider adding retryLimit and retryDelay."
+    fix_action: "Add retryLimit and retryDelay for transient failure resilience"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: large-job-data
+    name: Potentially Large Job Payload
+    severity: warning
+    type: regex
+    pattern:
+      - "boss\\.send\\([^,]+,\\s*\\{[^}]{500,}\\}"
+      - "\\.send\\([^,]+,\\s*(?:records|items|data|payload|list)\\s*[,)]"
+    message: "Job data may be too large. Store references, not full data, in job payloads."
+    fix_action: "Store IDs/references in job data. Fetch actual data in worker to keep jobs table lean"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: singleton-without-timeout
+    name: Singleton Key Without Expiration
+    severity: warning
+    type: regex
+    pattern:
+      - "singletonKey:\\s*['\"][^'\"]+['\"](?!.*singletonSeconds)"
+      - "singletonKey:.*(?!.*expire|timeout)"
+    message: "singletonKey without singletonSeconds. Crashed jobs may block the singleton forever."
+    fix_action: "Add singletonSeconds to allow new jobs after the singleton expires"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: client-time-scheduling
+    name: Using Client Time for Scheduling
+    severity: warning
+    type: regex
+    pattern:
+      - "startAfter:\\s*new Date\\("
+      - "startAfter:\\s*Date\\.now\\("
+      - "startAfter:.*\\.getTime\\("
+    message: "Using client time for job scheduling. Clock skew can cause jobs to run at wrong times."
+    fix_action: "Use numeric seconds offset (startAfter: 3600) instead of Date objects"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: work-without-error-handling
+    name: Worker Without Error Handling
+    severity: warning
+    type: regex
+    pattern:
+      - "boss\\.work\\([^,]+,\\s*async\\s*\\([^)]*\\)\\s*=>\\s*\\{(?!.*try|catch)"
+      - "\\.work\\([^,]+,\\s*\\{[^}]+\\},\\s*async[^{]+\\{(?!.*try)"
+    message: "Worker function without explicit error handling. Unhandled errors may cause unclear failures."
+    fix_action: "Wrap worker logic in try/catch for better error reporting and cleanup"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: missing-archive-config
+    name: Missing Archive Configuration
+    severity: info
+    type: regex
+    pattern:
+      - "new PgBoss\\(\\{[^}]*connectionString[^}]*\\}\\)(?!.*archive|delete)"
+      - "new PgBoss\\(['\"][^'\"]+['\"]\\)"
+    message: "pg-boss created without archive/delete configuration. Completed jobs may accumulate."
+    fix_action: "Configure archiveCompletedAfterSeconds and deleteAfterSeconds to keep tables lean"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: insert-without-options
+    name: Bulk Insert Without Job Options
+    severity: info
+    type: regex
+    pattern:
+      - "boss\\.insert\\([^)]+\\)(?!.*expire|retry)"
+      - "\\.insert\\(.*\\.map\\([^)]+\\)\\)(?!.*options)"
+    message: "Bulk insert without default job options. Each job should have expiration and retry config."
+    fix_action: "Include expireInSeconds and retryLimit in bulk insert job definitions"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: no-queue-monitoring
+    name: No Queue Monitoring Setup
+    severity: info
+    type: regex
+    pattern:
+      - "boss\\.start\\(\\)(?!.*getQueueSize|monitor|health)"
+    message: "No queue monitoring detected. Consider monitoring queue depth and failed jobs."
+    fix_action: "Add periodic queue size checks and dead letter queue monitoring"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: direct-table-access
+    name: Direct pgboss Table Access
+    severity: info
+    type: regex
+    pattern:
+      - "FROM\\s+pgboss\\.job(?!.*maintenance|monitor|debug)"
+      - "UPDATE\\s+pgboss\\.job"
+      - "DELETE\\s+FROM\\s+pgboss\\."
+    message: "Direct access to pgboss tables. Use pg-boss API methods when possible."
+    fix_action: "Use pg-boss methods (getQueueSize, fetch, etc.) instead of direct SQL when available"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+      - "**/*.sql"
+
+  - id: non-idempotent-worker
+    name: Potentially Non-Idempotent Job Handler
+    severity: warning
+    type: regex
+    pattern:
+      - "boss\\.work.*INSERT(?!.*ON CONFLICT|UPSERT)"
+      - "\\.work.*\\.create\\((?!.*skipDuplicates)"
+      - "boss\\.work.*sendEmail|sendNotification(?!.*idempotency|dedup)"
+    message: "Job handler may not be idempotent. Jobs can run multiple times due to retries or failures."
+    fix_action: "Make handlers idempotent: use upserts, check for existing records, or track processed IDs"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+  - id: schedule-without-timezone
+    name: Cron Schedule Without Timezone
+    severity: warning
+    type: regex
+    pattern:
+      - "boss\\.schedule\\([^)]+\\)(?!.*tz:)"
+      - "\\.schedule\\(['\"][^'\"]+['\"],\\s*['\"][^'\"]+['\"]\\s*\\)"
+    message: "Cron schedule without explicit timezone. Schedule may run at unexpected times."
+    fix_action: "Add tz option to specify timezone (e.g., tz: 'America/New_York')"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"

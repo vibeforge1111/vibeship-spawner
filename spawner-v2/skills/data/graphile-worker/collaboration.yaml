@@ -1,0 +1,445 @@
+# Graphile Worker Specialist Collaboration Patterns
+# How this skill integrates with database, backend, and queue-related workflows
+
+collaboration:
+  # Lead role - Graphile Worker Specialist drives these workflows
+  leads:
+    - workflow: postgres-trigger-job-architecture
+      description: Designing reactive job systems triggered by database changes
+      involves:
+        - postgres-wizard: Database triggers and LISTEN/NOTIFY optimization
+        - backend: Business logic for job handlers
+        - infra-architect: Worker deployment and scaling
+      handoff_points:
+        - to: postgres-wizard
+          when: Optimizing triggers, LISTEN/NOTIFY performance, or connection issues
+          context_to_share: Trigger patterns, job volume, notification latency
+        - to: backend
+          when: Implementing actual task business logic
+          context_to_share: Payload structure, expected behavior, error handling
+        - to: infra-architect
+          when: Scaling workers or configuring deployment
+          context_to_share: Concurrency requirements, resource usage, health checks
+
+    - workflow: transactional-job-system
+      description: Jobs that must be atomic with database transactions
+      involves:
+        - postgres-wizard: Transaction isolation and consistency
+        - backend: Data operations that trigger jobs
+      handoff_points:
+        - to: postgres-wizard
+          when: Need transactional guarantees for job creation
+          context_to_share: Transaction boundaries, isolation requirements
+        - to: backend
+          when: Defining what data changes trigger which jobs
+          context_to_share: add_job integration points, payload design
+
+    - workflow: cron-job-scheduling
+      description: Implementing recurring scheduled tasks
+      involves:
+        - backend: Business logic for scheduled operations
+        - observability-sre: Monitoring for scheduled job health
+      handoff_points:
+        - to: backend
+          when: Implementing scheduled task logic
+          context_to_share: Schedule frequency, job duration, overlap handling
+        - to: observability-sre
+          when: Need alerting for missed or failed schedules
+          context_to_share: Cron patterns, expected completion times
+
+    - workflow: high-performance-queue
+      description: Low-latency job processing via LISTEN/NOTIFY
+      involves:
+        - postgres-wizard: Connection pooling and LISTEN/NOTIFY tuning
+        - infra-architect: Worker topology for latency requirements
+      handoff_points:
+        - to: postgres-wizard
+          when: LISTEN/NOTIFY latency issues or connection problems
+          context_to_share: Connection mode, pooler configuration, notification patterns
+        - to: infra-architect
+          when: Need sub-10ms job pickup latency
+          context_to_share: Worker count, deployment topology, connection requirements
+
+  # Support role - Graphile Worker Specialist assists these workflows
+  supports:
+    - workflow: email-sending-system
+      led_by: email-systems
+      contribution: Reliable email queue with transactional guarantees
+      when_called: Need to queue emails within database transactions
+
+    - workflow: payment-processing
+      led_by: stripe-integration
+      contribution: Atomic job creation with payment data
+      when_called: Need payment jobs queued in same transaction as order
+
+    - workflow: user-onboarding
+      led_by: backend
+      contribution: Trigger-based welcome flows (emails, setup tasks)
+      when_called: New user insert should automatically trigger onboarding jobs
+
+    - workflow: webhook-processing
+      led_by: backend
+      contribution: Queue webhooks for reliable processing with retries
+      when_called: Need to decouple webhook receipt from processing
+
+    - workflow: supabase-backend-jobs
+      led_by: supabase-backend
+      contribution: Background job integration with Supabase PostgreSQL
+      when_called: Need background jobs with Supabase database
+
+    - workflow: data-sync-operations
+      led_by: data-engineer
+      contribution: Trigger-based sync jobs when data changes
+      when_called: Data changes should automatically trigger downstream sync
+
+    - workflow: graphql-mutations
+      led_by: graphql-architect
+      contribution: Background jobs for expensive mutations
+      when_called: PostGraphile/GraphQL mutations need async processing
+
+  # Escalation patterns
+  escalations:
+    - situation: LISTEN/NOTIFY not working with pooler
+      escalate_to: postgres-wizard
+      with_context: Connection string, pooler mode, notification behavior
+      reason: Need PostgreSQL connection pooling expertise
+
+    - situation: Trigger jobs have race conditions with data
+      escalate_to: postgres-wizard
+      with_context: Trigger timing, transaction isolation, job visibility
+      reason: Need transaction and trigger expertise
+
+    - situation: Workers consuming too many connections
+      escalate_to: postgres-wizard
+      with_context: Worker count, connection pool settings, database limits
+      reason: Need connection pooling configuration
+
+    - situation: Need Redis queue instead
+      escalate_to: bullmq-specialist
+      with_context: Why Graphile Worker isn't suitable, requirements
+      reason: Redis may be better fit for use case
+
+    - situation: Need simpler PostgreSQL queue
+      escalate_to: pg-boss
+      with_context: Why trigger integration isn't needed
+      reason: pg-boss is simpler if LISTEN/NOTIFY speed not required
+
+    - situation: Need serverless queue without workers
+      escalate_to: upstash-qstash
+      with_context: Serverless constraints, webhook requirements
+      reason: Serverless architecture needs different approach
+
+    - situation: Complex workflow orchestration needed
+      escalate_to: temporal-craftsman
+      with_context: Workflow complexity, saga requirements, long-running processes
+      reason: Graphile Worker not designed for complex orchestration
+
+    - situation: Job failures affecting user experience
+      escalate_to: backend
+      with_context: Failure patterns, user impact, error handling
+      reason: Need application-level error handling strategy
+
+    - situation: Supabase-specific connection issues
+      escalate_to: supabase-backend
+      with_context: Connection string, pooler mode, edge function integration
+      reason: Supabase has specific requirements for Graphile Worker
+
+  # Integration contracts
+  contracts:
+    with_postgres_wizard:
+      graphile_worker_provides:
+        - Schema structure (graphile_worker.*)
+        - LISTEN/NOTIFY channel patterns
+        - Connection requirements for workers
+        - Trigger functions for job creation
+      postgres_wizard_provides:
+        - Optimized triggers for job queuing
+        - Connection pooler configuration (session mode)
+        - Index optimization for job tables
+        - LISTEN/NOTIFY troubleshooting
+      interface_example: |
+        -- Graphile Worker creates this schema
+        -- graphile_worker.jobs: Active jobs
+        -- graphile_worker.job_queues: Queue metadata
+        -- graphile_worker.known_crontabs: Cron schedules
+
+        -- Postgres Wizard helps with trigger
+        CREATE OR REPLACE FUNCTION queue_order_job()
+        RETURNS TRIGGER AS $$
+        BEGIN
+          PERFORM graphile_worker.add_job(
+            'process_order',
+            json_build_object('order_id', NEW.id)
+          );
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+
+        CREATE TRIGGER on_order_insert
+          AFTER INSERT ON orders
+          FOR EACH ROW
+          EXECUTE FUNCTION queue_order_job();
+
+        -- Connection for LISTEN/NOTIFY (session mode)
+        -- postgres://user:pass@host:5432/db  (not :6543 pooler)
+
+    with_pg_boss:
+      graphile_worker_provides:
+        - LISTEN/NOTIFY for millisecond pickup
+        - SQL API via add_job()
+        - Trigger integration for reactive jobs
+        - Transactional job creation
+      pg_boss_provides:
+        - Simpler Node.js API
+        - Built-in dead letter queues
+        - Easier job management without triggers
+        - Better for polling-based workloads
+      interface_example: |
+        // When to choose Graphile Worker vs pg-boss:
+
+        // Choose Graphile Worker when:
+        // - Need millisecond job pickup (LISTEN/NOTIFY)
+        // - Jobs triggered by database triggers
+        // - Using PostGraphile already
+        // - Need transactional job creation
+
+        // Choose pg-boss when:
+        // - Don't need trigger integration
+        // - Prefer simpler Node.js API
+        // - Built-in dead letter handling important
+        // - Polling latency acceptable
+
+        // Migration from pg-boss to Graphile Worker:
+        // 1. Install graphile-worker
+        // 2. Convert work() to Task functions
+        // 3. Replace send() with add_job()
+        // 4. Add triggers for reactive jobs
+
+    with_backend:
+      graphile_worker_provides:
+        - Job queue configuration
+        - Task function registration
+        - Error handling patterns
+        - Retry configuration
+      backend_provides:
+        - API endpoints that queue jobs
+        - Business logic for task handlers
+        - User-facing job status
+      interface_example: |
+        // Backend queues job via SQL (in transaction)
+        app.post('/api/orders', async (req, res) => {
+          await db.transaction(async (tx) => {
+            const order = await tx.orders.create({ ... });
+
+            // Queue in same transaction - atomic!
+            await tx.$queryRaw`
+              SELECT graphile_worker.add_job(
+                'process_order',
+                ${JSON.stringify({ orderId: order.id })}::json
+              )
+            `;
+
+            res.json({ orderId: order.id, status: 'processing' });
+          });
+        });
+
+        // Graphile Worker task (provided by this skill)
+        export const process_order: Task = async (payload, helpers) => {
+          // Backend provides business logic
+          await processOrder(payload.orderId);
+        };
+
+    with_supabase_backend:
+      graphile_worker_provides:
+        - Connection configuration for Supabase
+        - Worker setup with session mode pooler
+        - Edge function integration patterns
+      supabase_backend_provides:
+        - Supabase project configuration
+        - Session mode connection string
+        - Edge function deployment
+      interface_example: |
+        // Supabase connection for Graphile Worker
+        import { run, runMigrations } from 'graphile-worker';
+
+        // IMPORTANT: Use session mode or direct connection
+        // Transaction mode (default on :6543) breaks LISTEN/NOTIFY
+        const connectionString = process.env.SUPABASE_DB_URL
+          .replace(':6543', ':5432');  // Direct connection
+
+        // Or use session mode on pooler
+        // postgres://...@...:6543/postgres?pgbouncer=true
+
+        await runMigrations({ connectionString });
+
+        const runner = await run({
+          connectionString,
+          taskDirectory: './tasks',
+          concurrency: 5,
+        });
+
+        // Queue from Edge Function via database
+        // (Edge Functions can't run workers, only queue jobs)
+        await supabase.rpc('queue_job', {
+          task_name: 'send_welcome_email',
+          payload: { user_id: userId }
+        });
+
+    with_email_systems:
+      graphile_worker_provides:
+        - Reliable email queue with retry
+        - Transactional email queuing
+        - Rate limiting via job scheduling
+      email_systems_provides:
+        - Email template rendering
+        - SMTP/provider configuration
+        - Delivery tracking
+      interface_example: |
+        // Queue email in same transaction as user creation
+        CREATE OR REPLACE FUNCTION notify_new_user()
+        RETURNS TRIGGER AS $$
+        BEGIN
+          PERFORM graphile_worker.add_job(
+            'send_welcome_email',
+            json_build_object(
+              'user_id', NEW.id,
+              'email', NEW.email,
+              'name', NEW.name
+            )
+          );
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+
+        CREATE TRIGGER on_user_created
+          AFTER INSERT ON users
+          FOR EACH ROW
+          EXECUTE FUNCTION notify_new_user();
+
+        // Task uses email service
+        export const send_welcome_email: Task = async (payload, helpers) => {
+          await emailService.sendWelcome({
+            to: payload.email,
+            name: payload.name,
+          });
+        };
+
+    with_observability_sre:
+      graphile_worker_provides:
+        - Key metrics (job latency, queue depth, failure rate)
+        - SQL queries for monitoring
+        - Health check endpoints
+      observability_sre_provides:
+        - Grafana dashboards
+        - AlertManager rules
+        - Incident response procedures
+      interface_example: |
+        -- Metrics for Prometheus/Grafana
+        SELECT
+          task_identifier,
+          count(*) FILTER (WHERE locked_at IS NULL) as pending,
+          count(*) FILTER (WHERE locked_at IS NOT NULL) as running,
+          count(*) as total
+        FROM graphile_worker.jobs
+        GROUP BY task_identifier;
+
+        -- Job latency (pickup time)
+        SELECT
+          task_identifier,
+          AVG(EXTRACT(EPOCH FROM (locked_at - created_at))) as avg_pickup_seconds
+        FROM graphile_worker.jobs
+        WHERE locked_at IS NOT NULL
+        GROUP BY task_identifier;
+
+        -- Failed jobs alert query
+        SELECT task_identifier, count(*)
+        FROM graphile_worker.jobs
+        WHERE last_error IS NOT NULL
+          AND created_at > NOW() - INTERVAL '1 hour'
+        GROUP BY task_identifier
+        HAVING count(*) > 10;
+
+    with_infra_architect:
+      graphile_worker_provides:
+        - Worker resource requirements
+        - Scaling recommendations
+        - Health check endpoints
+        - Connection requirements
+      infra_architect_provides:
+        - Kubernetes deployment manifests
+        - Horizontal pod autoscaling
+        - Resource limits
+      interface_example: |
+        // Health check for Kubernetes
+        import { run, Runner } from 'graphile-worker';
+        import express from 'express';
+
+        const app = express();
+        let runner: Runner;
+
+        app.get('/health', (req, res) => {
+          res.json({ status: 'healthy' });
+        });
+
+        app.get('/ready', async (req, res) => {
+          try {
+            // Check if runner is processing
+            res.json({ status: 'ready' });
+          } catch {
+            res.status(503).json({ status: 'not ready' });
+          }
+        });
+
+        // Graceful shutdown for K8s
+        process.on('SIGTERM', async () => {
+          await runner.stop();
+          process.exit(0);
+        });
+
+        // Kubernetes deployment notes:
+        // - replicas: 2+ for high availability
+        // - Each replica needs separate DB connection
+        // - Session mode connection required
+        // - terminationGracePeriodSeconds: 30+
+
+# Prerequisites for using this skill effectively
+prerequisites:
+  skills:
+    - postgres-wizard  # For trigger and LISTEN/NOTIFY expertise
+  knowledge:
+    - PostgreSQL triggers and functions
+    - LISTEN/NOTIFY mechanism
+    - Connection pooling (session vs transaction mode)
+    - Node.js async patterns
+    - Job queue concepts (retry, idempotency)
+  tools:
+    - graphile-worker npm package
+    - PostgreSQL 10+ database
+    - Node.js runtime
+
+# When to delegate to this skill
+delegation_triggers:
+  - phrase: "graphile worker"
+    confidence: high
+  - phrase: "graphile-worker"
+    confidence: high
+  - phrase: "postgraphile worker"
+    confidence: high
+  - phrase: "postgres trigger job"
+    confidence: high
+  - phrase: "listen notify job"
+    confidence: high
+  - phrase: "database trigger queue"
+    confidence: high
+  - phrase: "transactional job queue"
+    confidence: high
+  - phrase: "millisecond job pickup"
+    confidence: high
+  - phrase: "postgres reactive job"
+    confidence: medium
+  - phrase: "add_job postgres"
+    confidence: medium
+  - phrase: "sql job queue"
+    confidence: medium
+  - phrase: "trigger background task"
+    confidence: medium

@@ -1,0 +1,180 @@
+# Trigger.dev Integration Validations
+# Automated checks to catch background job implementation mistakes
+
+validations:
+  - id: trigger-task-no-logging
+    name: Task without logging
+    severity: warning
+    type: regex
+    pattern: "task\\(\\{[^}]*run:\\s*async[^}]*\\}\\)(?![\\s\\S]*logger\\.)"
+    message: "Task has no logging. Add logger.log() calls for debugging in production."
+    fix_action: "Import { logger } from '@trigger.dev/sdk/v3' and add log statements"
+    applies_to:
+      - "**/trigger/**/*.ts"
+      - "**/jobs/**/*.ts"
+      - "**/tasks/**/*.ts"
+
+  - id: trigger-task-no-error-handling
+    name: Task without error handling
+    severity: error
+    type: regex
+    pattern: "task\\(\\{[^}]*run:\\s*async[^}]*\\}\\)(?![\\s\\S]*try[\\s\\S]*catch)"
+    message: "Task lacks explicit error handling. Unhandled errors may cause unclear failures."
+    fix_action: "Wrap task logic in try/catch and log errors with context"
+    applies_to:
+      - "**/trigger/**/*.ts"
+      - "**/jobs/**/*.ts"
+      - "**/tasks/**/*.ts"
+
+  - id: trigger-no-concurrency-limit
+    name: Task without concurrency limit
+    severity: warning
+    type: regex
+    pattern: "task\\(\\{[^}]*\\}\\)(?![\\s\\S]*concurrencyLimit)"
+    message: "Task has no concurrency limit. High load may overwhelm downstream services."
+    fix_action: "Add queue: { concurrencyLimit: 10 } to protect APIs and databases"
+    applies_to:
+      - "**/trigger/**/*.ts"
+      - "**/jobs/**/*.ts"
+      - "**/tasks/**/*.ts"
+
+  - id: trigger-date-in-payload
+    name: Date object in trigger payload
+    severity: error
+    type: regex
+    pattern: "\\.trigger\\([^)]*new Date\\("
+    message: "Date objects are serialized to strings. Use ISO string format instead."
+    fix_action: "Use date.toISOString() instead of new Date()"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+
+  - id: trigger-class-in-payload
+    name: Class instance in trigger payload
+    severity: error
+    type: regex
+    pattern: "\\.trigger\\([^)]*new [A-Z][a-zA-Z]+\\("
+    message: "Class instances lose methods when serialized. Use plain objects."
+    fix_action: "Convert class instance to plain object before triggering"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+
+  - id: trigger-missing-task-id
+    name: Task without explicit ID
+    severity: error
+    type: regex
+    pattern: "task\\(\\{(?![^}]*id:)"
+    message: "Task must have an explicit id property for registration."
+    fix_action: "Add id: 'my-task-name' to task definition"
+    applies_to:
+      - "**/trigger/**/*.ts"
+      - "**/jobs/**/*.ts"
+      - "**/tasks/**/*.ts"
+
+  - id: trigger-api-key-hardcoded
+    name: Trigger.dev API key hardcoded
+    severity: critical
+    type: regex
+    pattern: "tr_[a-zA-Z0-9_]+"
+    message: "Trigger.dev API key should not be hardcoded - use TRIGGER_SECRET_KEY env var"
+    fix_action: "Remove hardcoded key and use process.env.TRIGGER_SECRET_KEY"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.tsx"
+
+  - id: trigger-raw-sdk-openai
+    name: Using raw OpenAI SDK instead of integration
+    severity: warning
+    type: regex
+    pattern: "import.*from\\s*['\"]openai['\"]"
+    message: "Consider using @trigger.dev/openai for automatic retries and rate limiting"
+    fix_action: "Replace with: import { openai } from '@trigger.dev/openai'"
+    applies_to:
+      - "**/trigger/**/*.ts"
+      - "**/jobs/**/*.ts"
+      - "**/tasks/**/*.ts"
+
+  - id: trigger-raw-sdk-anthropic
+    name: Using raw Anthropic SDK instead of integration
+    severity: warning
+    type: regex
+    pattern: "import.*from\\s*['\"]@anthropic-ai/sdk['\"]"
+    message: "Consider using @trigger.dev/anthropic for automatic retries and rate limiting"
+    fix_action: "Replace with: import { anthropic } from '@trigger.dev/anthropic'"
+    applies_to:
+      - "**/trigger/**/*.ts"
+      - "**/jobs/**/*.ts"
+      - "**/tasks/**/*.ts"
+
+  - id: trigger-wait-in-loop
+    name: wait.for inside loop
+    severity: warning
+    type: regex
+    pattern: "for\\s*\\([^)]*\\)\\s*\\{[\\s\\S]*?wait\\.for"
+    message: "wait.for in loops creates many checkpoints. Consider batching instead."
+    fix_action: "Batch items and use fewer waits, or split into subtasks"
+    applies_to:
+      - "**/trigger/**/*.ts"
+      - "**/jobs/**/*.ts"
+      - "**/tasks/**/*.ts"
+
+  - id: trigger-no-retry-config
+    name: Task without retry configuration
+    severity: info
+    type: regex
+    pattern: "task\\(\\{[^}]*\\}\\)(?![\\s\\S]*retry:)"
+    message: "Task uses default retry config. Consider explicit retry settings."
+    fix_action: "Add retry: { maxAttempts: 3, minTimeoutInMs: 1000 } for explicit control"
+    applies_to:
+      - "**/trigger/**/*.ts"
+      - "**/jobs/**/*.ts"
+      - "**/tasks/**/*.ts"
+
+  - id: trigger-schedule-no-timezone
+    name: Scheduled task without timezone
+    severity: warning
+    type: regex
+    pattern: "schedules\\.task\\([^)]*cron:[^}]*\\}(?![\\s\\S]*timezone)"
+    message: "Scheduled task has no timezone. Will use UTC by default."
+    fix_action: "Add timezone option if specific timezone is needed"
+    applies_to:
+      - "**/trigger/**/*.ts"
+      - "**/jobs/**/*.ts"
+      - "**/tasks/**/*.ts"
+
+  - id: trigger-large-payload-warning
+    name: Large object in trigger payload
+    severity: warning
+    type: regex
+    pattern: "\\.trigger\\(\\{[^}]{500,}\\}\\)"
+    message: "Large payloads slow task processing. Pass IDs and fetch data in task."
+    fix_action: "Store large data externally and pass only identifiers"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.tsx"
+
+  - id: trigger-sync-call-in-task
+    name: Synchronous blocking operation in task
+    severity: warning
+    type: regex
+    pattern: "run:\\s*async[^}]*\\{[\\s\\S]*?(fs\\.readFileSync|fs\\.writeFileSync|execSync)"
+    message: "Synchronous operations block the task. Use async alternatives."
+    fix_action: "Use fs.promises or util.promisify for async operations"
+    applies_to:
+      - "**/trigger/**/*.ts"
+      - "**/jobs/**/*.ts"
+      - "**/tasks/**/*.ts"
+
+  - id: trigger-env-direct-access
+    name: Direct env access without validation
+    severity: warning
+    type: regex
+    pattern: "process\\.env\\.[A-Z_]+(?![!?])"
+    message: "Environment variables should be validated. Missing vars cause runtime errors."
+    fix_action: "Add non-null assertion or validate at startup: process.env.KEY!"
+    applies_to:
+      - "**/trigger/**/*.ts"
+      - "**/jobs/**/*.ts"
+      - "**/tasks/**/*.ts"

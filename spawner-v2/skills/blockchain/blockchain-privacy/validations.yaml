@@ -1,0 +1,275 @@
+id: blockchain-privacy
+skill: Blockchain Privacy
+version: "1.0"
+
+validations:
+  - id: check-trusted-setup-usage
+    name: Trusted Setup Verification
+    description: Flag use of Groth16 or trusted setup ZK systems
+    pattern: "groth16|Groth16|GROTH16|trusted.*setup|ceremony"
+    file_glob: "**/*.{sol,ts,js,circom}"
+    match: present
+    message: "Using trusted setup ZK system - verify ceremony had 100+ participants and transcripts are public"
+    severity: warning
+    autofix: false
+
+  - id: check-timing-protection
+    name: Timing Attack Protection
+    description: Check for minimum delay enforcement in privacy pools
+    pattern: "MIN_DELAY|minimum.*delay|24.*hours|block\\.timestamp.*\\+"
+    file_glob: "**/*.sol"
+    match: absent_in_context
+    context_pattern: "withdraw|deposit"
+    message: "Privacy pool should enforce minimum delay between deposit and withdrawal"
+    severity: warning
+    autofix: false
+
+  - id: check-fixed-denomination
+    name: Fixed Denomination Enforcement
+    description: Verify privacy pools use fixed denominations
+    pattern: "DENOMINATION|denomination|0\\.1 ether|1 ether|10 ether|100 ether"
+    file_glob: "**/*.sol"
+    match: absent_in_context
+    context_pattern: "deposit.*payable|private.*pool|mixer"
+    message: "Privacy pools should use fixed denominations to prevent amount correlation"
+    severity: error
+    autofix: false
+
+  - id: check-nullifier-uniqueness
+    name: Nullifier Uniqueness Check
+    description: Verify nullifiers include position/path data for uniqueness
+    pattern: "pathIndices|leafIndex|position"
+    file_glob: "**/*.circom"
+    match: absent_in_context
+    context_pattern: "nullifier"
+    message: "Nullifier derivation should include Merkle tree position to ensure uniqueness"
+    severity: error
+    autofix: false
+
+  - id: check-range-proofs
+    name: Range Proof for Confidential Values
+    description: Verify range proofs are used with hidden amounts
+    pattern: "range.*proof|bulletproof|Num2Bits|range.*check"
+    file_glob: "**/*.{sol,circom}"
+    match: absent_in_context
+    context_pattern: "confidential|hidden.*amount|pedersen"
+    message: "Confidential transactions require range proofs to prevent negative amounts"
+    severity: error
+    autofix: false
+
+  - id: check-weak-randomness
+    name: Weak Randomness Detection
+    description: Detect use of predictable randomness for secrets
+    pattern: "block\\.timestamp|block\\.number|block\\.difficulty|blockhash|prevrandao"
+    file_glob: "**/*.sol"
+    match: present
+    context_pattern: "secret|random|commitment|nullifier"
+    message: "Do not use block data for cryptographic randomness in privacy systems"
+    severity: error
+    autofix: false
+
+  - id: check-nullifier-storage
+    name: Nullifier Double-Spend Check
+    description: Verify nullifiers are stored and checked before withdrawal
+    pattern: "nullifiers\\[.*\\]|nullifierHashes\\[.*\\]|spentNullifiers"
+    file_glob: "**/*.sol"
+    match: absent_in_context
+    context_pattern: "withdraw"
+    message: "Withdrawal must check and store nullifier to prevent double-spend"
+    severity: error
+    autofix: false
+
+  - id: check-merkle-root-validation
+    name: Merkle Root Validation
+    description: Verify Merkle roots are validated in withdrawal
+    pattern: "isKnownRoot|validRoots|roots\\[|merkleRoot.*valid"
+    file_glob: "**/*.sol"
+    match: absent_in_context
+    context_pattern: "withdraw.*proof|verify.*proof"
+    message: "Withdrawal must validate Merkle root is from a known tree state"
+    severity: error
+    autofix: false
+
+  - id: check-relayer-authentication
+    name: Relayer Parameter in Proof
+    description: Verify relayer address is included in ZK proof to prevent front-running
+    pattern: "relayer.*proof|proof.*relayer"
+    file_glob: "**/*.{sol,circom}"
+    match: absent_in_context
+    context_pattern: "withdraw.*relayer|relayer.*withdraw"
+    message: "Include relayer address in ZK proof to prevent relayer front-running"
+    severity: warning
+    autofix: false
+
+  - id: check-fee-in-proof
+    name: Fee Amount in Proof
+    description: Verify fee is constrained in ZK proof to prevent manipulation
+    pattern: "fee.*proof|proof.*fee"
+    file_glob: "**/*.{sol,circom}"
+    match: absent_in_context
+    context_pattern: "relayer.*fee|fee.*relayer"
+    message: "Include fee amount in ZK proof to prevent fee manipulation by relayers"
+    severity: warning
+    autofix: false
+
+  - id: check-poseidon-hash
+    name: ZK-Friendly Hash Function
+    description: Check for use of ZK-friendly hash functions
+    pattern: "Poseidon|MiMC|Pedersen.*hash"
+    file_glob: "**/*.circom"
+    match: absent
+    message: "Use ZK-friendly hash functions (Poseidon, MiMC) instead of keccak256 in circuits"
+    severity: info
+    autofix: false
+
+  - id: check-commitment-scheme
+    name: Commitment Scheme Validation
+    description: Verify commitment includes secret, nullifier, and amount
+    pattern: "hash.*secret.*nullifier|Poseidon\\(3\\)|commitment.*=.*hash"
+    file_glob: "**/*.{sol,circom}"
+    match: absent_in_context
+    context_pattern: "deposit|commitment"
+    message: "Commitment should bind secret, nullifier, and amount together"
+    severity: warning
+    autofix: false
+
+  - id: check-private-rpc
+    name: Private RPC Usage
+    description: Check for use of privacy-preserving RPC endpoints
+    pattern: "flashbots|mevblocker|localhost:8545"
+    file_glob: "**/*.{ts,js}"
+    match: absent_in_context
+    context_pattern: "provider|rpc|JsonRpcProvider"
+    message: "Consider using private RPC (Flashbots, MEV Blocker) for privacy transactions"
+    severity: info
+    autofix: false
+
+  - id: check-verifier-audit
+    name: Verifier Contract Source
+    description: Check for use of audited verifier contracts
+    pattern: "snarkjs|groth16Verify|plonkVerify"
+    file_glob: "**/*.sol"
+    match: present
+    message: "Ensure verifier contract is from trusted source (snarkjs export) and audited"
+    severity: info
+    autofix: false
+
+  - id: check-circuit-constraints
+    name: Circuit Constraint Completeness
+    description: Verify circuits have equality constraints for public inputs
+    pattern: "===|signal.*public"
+    file_glob: "**/*.circom"
+    match: absent
+    message: "Circuits must have equality constraints (===) for public inputs"
+    severity: error
+    autofix: false
+
+  - id: check-field-overflow
+    name: Field Overflow Protection
+    description: Check for range constraints in circuit arithmetic
+    pattern: "Num2Bits|LessThan|GreaterThan|range.*check"
+    file_glob: "**/*.circom"
+    match: absent_in_context
+    context_pattern: "\\+|\\*|signal.*input"
+    message: "Add range checks to prevent field overflow in arithmetic operations"
+    severity: warning
+    autofix: false
+
+  - id: check-anonymity-set-warning
+    name: Anonymity Set Size Check
+    description: Look for anonymity set size validation
+    pattern: "anonymity.*set|totalDeposits|minimum.*deposits"
+    file_glob: "**/*.{ts,js,sol}"
+    match: absent_in_context
+    context_pattern: "withdraw|privacy|pool"
+    message: "Consider warning users about anonymity set size before withdrawal"
+    severity: info
+    autofix: false
+
+  - id: check-stealth-scanning
+    name: Stealth Address Scanning Key
+    description: Verify proper scanning key handling for stealth addresses
+    pattern: "viewingKey|scanningKey|ephemeralPub"
+    file_glob: "**/*.{ts,js,sol}"
+    match: absent_in_context
+    context_pattern: "stealth.*address|EIP.*5564"
+    message: "Stealth address implementations need proper scanning key management"
+    severity: warning
+    autofix: false
+
+  - id: check-no-ens-stealth
+    name: ENS with Stealth Address Warning
+    description: Warn against ENS registration for privacy addresses
+    pattern: "ens|ENS|resolver|setAddr"
+    file_glob: "**/*.{ts,js,sol}"
+    match: present
+    context_pattern: "stealth|private|anonymous"
+    message: "WARNING: Do not register ENS for stealth/private addresses - breaks privacy"
+    severity: error
+    autofix: false
+
+  - id: check-withdrawal-recipient-in-proof
+    name: Recipient in ZK Proof
+    description: Verify recipient is constrained in the ZK proof
+    pattern: "recipient.*hash|hash.*recipient|recipient.*constraint"
+    file_glob: "**/*.circom"
+    match: absent_in_context
+    context_pattern: "withdraw|recipient"
+    message: "Include recipient address hash in ZK proof to prevent front-running"
+    severity: warning
+    autofix: false
+
+pre_commit:
+  - id: circom-compile
+    name: Compile Circom Circuits
+    command: "circom circuits/*.circom --r1cs --wasm --sym"
+    description: Verify circuits compile without errors
+
+  - id: circuit-constraints
+    name: Check Circuit Constraints
+    command: "npx snarkjs r1cs info circuit.r1cs | grep 'Constraints:'"
+    description: Display circuit constraint count
+
+  - id: verify-powers-of-tau
+    name: Verify Powers of Tau
+    command: "npx snarkjs powersoftau verify pot_final.ptau"
+    description: Verify trusted setup ceremony files
+
+  - id: solidity-compile
+    name: Compile Verifier
+    command: "forge build"
+    description: Compile generated verifier contracts
+
+ci_checks:
+  - id: circuit-tests
+    name: Circuit Test Suite
+    command: "npm run test:circuits"
+    description: Run ZK circuit test suite
+    required: true
+
+  - id: verifier-tests
+    name: Verifier Contract Tests
+    command: "forge test --match-contract Verifier"
+    description: Test verifier contract integration
+    required: true
+
+  - id: proof-generation
+    name: End-to-End Proof Generation
+    command: "npm run test:e2e-proofs"
+    description: Test full proof generation and verification
+    required: true
+
+  - id: security-audit-prep
+    name: Security Audit Preparation
+    command: "slither . && mythril analyze contracts/PrivacyPool.sol"
+    description: Run security analysis tools
+
+  - id: gas-benchmark
+    name: Verification Gas Benchmark
+    command: "forge test --match-test testVerificationGas --gas-report"
+    description: Measure gas costs for proof verification
+
+  - id: circuit-size-check
+    name: Circuit Size Check
+    command: "npx snarkjs r1cs info circuit.r1cs | grep -E 'Constraints|Wires'"
+    description: Check circuit is not too large for practical use

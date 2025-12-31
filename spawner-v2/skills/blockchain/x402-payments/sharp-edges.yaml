@@ -1,0 +1,707 @@
+id: x402-payments
+skill: HTTP 402 Payment Protocol
+version: "1.0"
+
+sharp_edges:
+  - id: payment-verification-timing
+    severity: CRITICAL
+    title: Payment Verification Before Content Delivery
+    description: Content served before payment is fully confirmed leads to theft
+    symptoms:
+      - Users receiving content without payment completing
+      - Payment disputes where service was delivered
+      - Revenue leakage on every transaction
+      - "It worked in testing but not in production"
+    detection_pattern: "res\\.send|return.*content|serve.*before.*verif"
+    solution: |
+      // NEVER serve content before verification is complete
+
+      // Bad: Serve immediately, verify later
+      app.get('/content', (req, res) => {
+        res.send(content); // WRONG!
+        verifyPayment(req.token); // Too late
+      });
+
+      // Bad: Fire and forget verification
+      app.get('/content', async (req, res) => {
+        verifyPayment(req.token); // No await!
+        res.send(content);
+      });
+
+      // Good: Verify completely before serving
+      app.get('/content', async (req, res) => {
+        try {
+          const receipt = await verifyPayment(req.token);
+          if (!receipt.valid) {
+            return res.status(402).json(paymentRequired);
+          }
+          // Only now serve content
+          res.send(content);
+        } catch (error) {
+          res.status(402).json(paymentRequired);
+        }
+      });
+    references:
+      - https://lightning.engineering/posts/2023-12-14-l402/
+
+  - id: double-spend-race-condition
+    severity: CRITICAL
+    title: Double-Spend and Token Replay Attacks
+    description: Same payment token used multiple times to access content
+    symptoms:
+      - Single payment accessing multiple resources
+      - Tokens shared between users
+      - Payment hash collisions
+      - Unusual traffic patterns from same token
+    detection_pattern: "payment.*token|auth.*header|bearer|l402"
+    solution: |
+      // Implement token consumption tracking
+
+      // 1. Single-use tokens
+      const consumedTokens = new Set<string>();
+
+      async function verifyAndConsume(token: string): Promise<boolean> {
+        // Check if already used
+        if (consumedTokens.has(token)) {
+          return false;
+        }
+
+        // Verify the payment
+        const isValid = await verifyPaymentProof(token);
+        if (!isValid) return false;
+
+        // Mark as consumed ATOMICALLY
+        // Use Redis SETNX or DB unique constraint
+        const consumed = await redis.setnx(`token:${token}`, Date.now());
+        if (!consumed) return false; // Race condition - someone else got it
+
+        consumedTokens.add(token);
+        return true;
+      }
+
+      // 2. Bounded-use tokens (macaroons with usage caveats)
+      function verifyMacaroon(macaroon: Macaroon) {
+        // Caveat: requests_remaining = N
+        // Each use decrements in DB
+        const usage = await db.incrementTokenUsage(macaroon.id);
+        if (usage > macaroon.maxRequests) {
+          throw new TokenExhaustedError();
+        }
+      }
+
+      // 3. Time-bounded tokens
+      // Caveat: expires = timestamp
+      if (macaroon.expires < Date.now()) {
+        throw new TokenExpiredError();
+      }
+    references:
+      - https://docs.lightning.engineering/the-lightning-network/l402
+
+  - id: invoice-expiration-handling
+    severity: CRITICAL
+    title: Lightning Invoice Expiration Race Condition
+    description: Payment made to expired invoice causes fund loss or service denial
+    symptoms:
+      - "Payment succeeded but invoice expired" errors
+      - Funds stuck in payment channels
+      - Customer complaints about lost payments
+      - Inconsistent payment state
+    detection_pattern: "invoice|payment.*request|bolt11|lnbc"
+    solution: |
+      // 1. Use short but sufficient expiry times
+      const invoice = await lnd.addInvoice({
+        value: satoshis,
+        expiry: 600, // 10 minutes - balance between UX and security
+        // Too short: User can't pay in time
+        // Too long: Exchange rate risk, resource consumption
+      });
+
+      // 2. Grace period for in-flight payments
+      function isInvoiceAcceptable(invoice: Invoice): boolean {
+        const now = Date.now() / 1000;
+        const expiry = invoice.creation_date + invoice.expiry;
+
+        // Accept if not expired OR within grace period
+        // Grace period accounts for payment routing time
+        const GRACE_PERIOD = 60; // 1 minute
+        return now < expiry + GRACE_PERIOD;
+      }
+
+      // 3. Handle late payments gracefully
+      lndSubscribe('invoice', async (invoice) => {
+        if (invoice.state === 'SETTLED') {
+          const wasExpired = invoice.settle_date > invoice.expiry;
+
+          if (wasExpired) {
+            // Log for analysis
+            logger.warn('Late payment received', { invoice });
+
+            // Still honor the payment - better for UX
+            await grantAccess(invoice.payment_hash);
+
+            // But alert for pattern detection
+            if (isFrequentLatePayer(invoice.payer)) {
+              // Potential gaming of the system
+            }
+          }
+        }
+      });
+    references:
+      - https://github.com/lightning/bolts/blob/master/11-payment-encoding.md
+
+  - id: exchange-rate-volatility
+    severity: HIGH
+    title: Exchange Rate Volatility During Payment Flow
+    description: Price changes between quote and settlement cause disputes
+    symptoms:
+      - Customers paying more than expected
+      - Revenue loss from favorable rate movements
+      - Pricing inconsistency complaints
+      - Arbitrage by sophisticated users
+    detection_pattern: "price|rate|convert|exchange|btc.*usd"
+    solution: |
+      // Lock exchange rates at quote time
+
+      interface PriceQuote {
+        id: string;
+        usd_amount: number;
+        crypto_amount: string;
+        currency: 'BTC' | 'ETH' | 'USDC';
+        rate: number;
+        locked_at: number;
+        expires_at: number;
+      }
+
+      async function createQuote(usdAmount: number): Promise<PriceQuote> {
+        const rate = await getExchangeRate('BTC', 'USD');
+
+        const quote: PriceQuote = {
+          id: generateQuoteId(),
+          usd_amount: usdAmount,
+          crypto_amount: (usdAmount / rate).toFixed(8),
+          currency: 'BTC',
+          rate: rate,
+          locked_at: Date.now(),
+          expires_at: Date.now() + 5 * 60 * 1000, // 5 minute lock
+        };
+
+        // Store quote for verification
+        await redis.setex(
+          `quote:${quote.id}`,
+          300, // 5 minutes
+          JSON.stringify(quote)
+        );
+
+        return quote;
+      }
+
+      async function verifyPaymentAmount(
+        quoteId: string,
+        paidAmount: string
+      ): Promise<boolean> {
+        const quote = await redis.get(`quote:${quoteId}`);
+        if (!quote) {
+          throw new QuoteExpiredError('Quote expired, request new pricing');
+        }
+
+        const parsed = JSON.parse(quote);
+
+        // Allow small variance for network fees
+        const TOLERANCE = 0.01; // 1%
+        const expected = parseFloat(parsed.crypto_amount);
+        const actual = parseFloat(paidAmount);
+
+        return actual >= expected * (1 - TOLERANCE);
+      }
+
+      // For volatile periods, use stablecoins
+      if (volatility > VOLATILITY_THRESHOLD) {
+        return generateStablecoinPaymentOptions(usdAmount);
+      }
+    references:
+      - https://www.coinbase.com/en-gb/developer-platform/products/commerce
+
+  - id: ux-friction-kills-conversion
+    severity: HIGH
+    title: Payment UX Friction Destroys Conversion Rate
+    description: Complex payment flows cause users to abandon purchases
+    symptoms:
+      - Low payment completion rates
+      - High cart abandonment
+      - Users requesting refunds due to confusion
+      - Support tickets about payment process
+    detection_pattern: "wallet|connect|sign|confirm|approve"
+    solution: |
+      // Minimize clicks and cognitive load
+
+      // 1. One-click payments for returning users
+      const savedPaymentMethods = await getUserPaymentMethods(userId);
+      if (savedPaymentMethods.length > 0) {
+        // Pre-select last used method
+        // Single click to pay
+      }
+
+      // 2. WebLN for instant Lightning payments
+      if (typeof window.webln !== 'undefined') {
+        try {
+          await window.webln.enable();
+          // User has Lightning wallet - use it!
+          const result = await window.webln.sendPayment(invoice);
+          // Done in one click!
+          return result.preimage;
+        } catch {
+          // Fall back to QR code
+        }
+      }
+
+      // 3. Pre-approve spending limits
+      async function setupSpendingAllowance(
+        user: User,
+        monthlyLimit: number
+      ) {
+        // One-time approval, then auto-pay up to limit
+        const approval = await wallet.approve({
+          token: USDC,
+          spender: PAYMENT_CONTRACT,
+          amount: monthlyLimit,
+        });
+        // Future payments are instant
+      }
+
+      // 4. Progressive disclosure
+      // Show simplest option first (QR code)
+      // Reveal advanced options on demand
+      <PaymentModal>
+        <LightningQR invoice={invoice} />
+        <Collapsible title="Other payment options">
+          <WalletConnect />
+          <CreditCardFallback />
+        </Collapsible>
+      </PaymentModal>
+    references:
+      - https://www.webln.guide/
+
+  - id: wallet-compatibility-issues
+    severity: HIGH
+    title: Browser Wallet Extension Compatibility
+    description: Payment flow breaks due to wallet conflicts or CSP
+    symptoms:
+      - "Wallet not detected" errors
+      - Multiple wallet extensions conflicting
+      - Content Security Policy blocking wallet
+      - Mobile browser wallet issues
+    detection_pattern: "window\\.ethereum|injected.*provider|wallet.*connect"
+    solution: |
+      // 1. Detect wallet availability safely
+      function getAvailableWallets() {
+        const wallets = [];
+
+        // Check for injected providers
+        if (typeof window.ethereum !== 'undefined') {
+          // Handle multiple injected wallets
+          if (window.ethereum.providers) {
+            wallets.push(...window.ethereum.providers.map(detectWallet));
+          } else {
+            wallets.push(detectWallet(window.ethereum));
+          }
+        }
+
+        // Check for WebLN (Lightning)
+        if (typeof window.webln !== 'undefined') {
+          wallets.push({ type: 'lightning', provider: window.webln });
+        }
+
+        return wallets;
+      }
+
+      // 2. CSP-compatible wallet connection
+      // Add to Content-Security-Policy header:
+      // connect-src 'self' wss://*.walletconnect.com wss://*.bridge.walletconnect.org;
+
+      // 3. WalletConnect as fallback (works everywhere)
+      import { createWeb3Modal, defaultWagmiConfig } from '@web3modal/wagmi';
+
+      const config = defaultWagmiConfig({
+        projectId: WALLET_CONNECT_PROJECT_ID,
+        chains: [mainnet, base, optimism],
+      });
+
+      // 4. Mobile deep linking
+      function openMobileWallet(invoice: string) {
+        // Lightning
+        const lightningUrl = `lightning:${invoice}`;
+
+        // Universal Links for specific wallets
+        const walletUrls = {
+          'phoenix': `phoenix://pay?invoice=${invoice}`,
+          'muun': `muun://pay?invoice=${invoice}`,
+          'wallet_of_satoshi': `wos://pay?invoice=${invoice}`,
+        };
+
+        // Try preferred wallet, fall back to generic
+        window.location.href = userPreferredWallet
+          ? walletUrls[userPreferredWallet]
+          : lightningUrl;
+      }
+    references:
+      - https://docs.walletconnect.com/
+
+  - id: payment-webhook-reliability
+    severity: HIGH
+    title: Payment Webhook Delivery Failures
+    description: Missed payment notifications cause service delivery failures
+    symptoms:
+      - Payments confirmed but service not delivered
+      - Duplicate deliveries on webhook retry
+      - Inconsistent state between payment and service
+      - "I paid but didn't get access" complaints
+    detection_pattern: "webhook|callback|notify|event.*payment"
+    solution: |
+      // 1. Idempotent webhook processing
+      async function handlePaymentWebhook(event: PaymentEvent) {
+        // Idempotency key from payment
+        const key = event.payment_id;
+
+        // Check if already processed
+        const existing = await db.webhookEvents.findOne({ key });
+        if (existing) {
+          return { status: 'already_processed' };
+        }
+
+        // Process in transaction
+        await db.transaction(async (tx) => {
+          // Mark as processing
+          await tx.webhookEvents.insert({
+            key,
+            status: 'processing',
+            received_at: Date.now(),
+          });
+
+          // Grant access
+          await grantAccess(event.user_id, event.product_id);
+
+          // Mark as complete
+          await tx.webhookEvents.update(key, { status: 'complete' });
+        });
+
+        return { status: 'processed' };
+      }
+
+      // 2. Acknowledge quickly, process async
+      app.post('/webhook/payment', async (req, res) => {
+        // Verify signature first
+        if (!verifyWebhookSignature(req)) {
+          return res.status(401).send('Invalid signature');
+        }
+
+        // Queue for processing
+        await queue.add('payment-webhook', req.body);
+
+        // Respond immediately
+        res.status(200).send('OK');
+      });
+
+      // 3. Reconciliation job for missed webhooks
+      cron.schedule('*/5 * * * *', async () => {
+        // Find payments without matching delivery
+        const unmatched = await findUnmatchedPayments();
+
+        for (const payment of unmatched) {
+          // Check payment status directly
+          const status = await checkPaymentStatus(payment.id);
+          if (status === 'confirmed') {
+            await grantAccess(payment.user_id, payment.product_id);
+          }
+        }
+      });
+    references:
+      - https://stripe.com/docs/webhooks/best-practices
+
+  - id: preimage-leakage
+    severity: HIGH
+    title: Lightning Preimage Exposure
+    description: Exposing preimage allows payment proof forgery
+    symptoms:
+      - Preimage visible in logs
+      - Preimage in URL parameters
+      - Preimage stored in plain text
+      - Third parties able to prove payment they didn't make
+    detection_pattern: "preimage|payment.*secret|proof"
+    solution: |
+      // 1. Never log preimages
+      function logPayment(payment: Payment) {
+        logger.info('Payment received', {
+          payment_hash: payment.hash, // OK
+          amount: payment.amount,     // OK
+          // preimage: payment.preimage  // NEVER!
+        });
+      }
+
+      // 2. Hash preimage for storage
+      function storePaymentProof(preimage: string) {
+        const hashedProof = sha256(preimage);
+        await db.payments.update({
+          proof_hash: hashedProof,
+          // Don't store preimage at all
+        });
+      }
+
+      // 3. Verify without storing
+      function verifyPreimage(
+        preimage: string,
+        expectedHash: string
+      ): boolean {
+        const hash = sha256(hexToBytes(preimage));
+        return hash === expectedHash;
+        // Preimage not stored, just verified
+      }
+
+      // 4. Use short-lived macaroons instead of raw preimages
+      function createAccessToken(preimage: string, paymentHash: string) {
+        // Verify preimage matches
+        if (sha256(preimage) !== paymentHash) {
+          throw new Error('Invalid preimage');
+        }
+
+        // Create macaroon with expiry
+        return createMacaroon({
+          id: paymentHash,
+          expires: Date.now() + 3600000, // 1 hour
+          caveats: ['single_use=true'],
+        });
+      }
+    references:
+      - https://github.com/lightning/bolts/blob/master/04-onion-routing.md
+
+  - id: refund-complexity
+    severity: MEDIUM
+    title: Crypto Payment Refund Complexity
+    description: Refunding crypto payments is harder than traditional payments
+    symptoms:
+      - No automatic refund mechanism
+      - Need user address for refunds
+      - Exchange rate differences on refund
+      - User complaining about refund value
+    detection_pattern: "refund|reverse|return.*payment"
+    solution: |
+      // 1. Collect refund address at payment time
+      interface PaymentRequest {
+        amount: number;
+        invoice: string;
+        refund_address?: string; // Optional refund destination
+      }
+
+      // For L2 payments, use sender address automatically
+      async function handleL2Payment(tx: Transaction) {
+        const refundAddress = tx.from; // Sender's address
+        await storeRefundInfo(tx.hash, refundAddress);
+      }
+
+      // 2. Clear refund policy
+      const REFUND_POLICY = {
+        eligible_period_hours: 72,
+        refund_currency: 'original', // or 'usd_equivalent'
+        exchange_rate: 'time_of_refund', // or 'time_of_purchase'
+        processing_fee_percent: 1,
+      };
+
+      // 3. Refund in stablecoins to avoid rate issues
+      async function processRefund(payment: Payment) {
+        if (payment.currency === 'BTC' || payment.currency === 'ETH') {
+          // Convert to USDC at current rate for refund
+          const usdValue = payment.amount * getCurrentRate(payment.currency);
+          await refundInUSDC(payment.refund_address, usdValue);
+        } else {
+          // Stablecoin: refund same amount
+          await refundSameToken(payment);
+        }
+      }
+
+      // 4. Consider credit system instead of refunds
+      async function issueCredit(user: User, amount: number) {
+        // Credit can be used for future purchases
+        // Avoids refund complexity entirely
+        await db.credits.upsert({
+          user_id: user.id,
+          balance: sql`balance + ${amount}`,
+        });
+      }
+    references:
+      - https://www.coinbase.com/blog/understanding-crypto-refunds
+
+  - id: testnet-mainnet-confusion
+    severity: MEDIUM
+    title: Testnet vs Mainnet Configuration Mismatch
+    description: Production deployment using testnet configuration
+    symptoms:
+      - Payments on wrong network
+      - Testnet invoices in production
+      - "Invoice not found" errors
+      - Funds sent to wrong network
+    detection_pattern: "testnet|signet|devnet|sepolia|goerli"
+    solution: |
+      // 1. Environment-based configuration
+      const config = {
+        development: {
+          lightning_network: 'testnet',
+          l2_chain_id: 84532, // Base Sepolia
+          usdc_address: '0x...',
+          invoice_prefix: 'lntb', // testnet
+        },
+        production: {
+          lightning_network: 'mainnet',
+          l2_chain_id: 8453, // Base mainnet
+          usdc_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          invoice_prefix: 'lnbc', // mainnet
+        },
+      };
+
+      // 2. Validate invoice network
+      function validateInvoiceNetwork(invoice: string) {
+        const prefix = invoice.substring(0, 4);
+        const expectedPrefix = config[NODE_ENV].invoice_prefix;
+
+        if (prefix !== expectedPrefix) {
+          throw new NetworkMismatchError(
+            `Expected ${expectedPrefix} invoice, got ${prefix}`
+          );
+        }
+      }
+
+      // 3. Chain ID validation
+      async function validateChainId(userChainId: number) {
+        const expectedChainId = config[NODE_ENV].l2_chain_id;
+
+        if (userChainId !== expectedChainId) {
+          throw new WrongNetworkError(
+            `Please switch to ${getNetworkName(expectedChainId)}`
+          );
+        }
+      }
+
+      // 4. Deployment checklist
+      /*
+      Pre-production checklist:
+      [ ] NODE_ENV=production
+      [ ] Using mainnet RPC endpoints
+      [ ] Using mainnet LN node
+      [ ] USDC address is mainnet
+      [ ] Chain IDs are mainnet
+      [ ] Invoice prefix is 'lnbc'
+      [ ] Webhook URLs point to production
+      [ ] No testnet secrets in production
+      */
+    references:
+      - https://chainlist.org/
+
+  - id: privacy-payment-correlation
+    severity: MEDIUM
+    title: Payment Privacy and Transaction Correlation
+    description: Payments can be correlated to deanonymize users
+    symptoms:
+      - User activity trackable across payments
+      - Payment patterns revealing identity
+      - Linking on-chain activity to users
+      - Privacy-conscious users refusing to pay
+    detection_pattern: "address|pubkey|identity|kyc"
+    solution: |
+      // 1. Use unique payment addresses
+      async function generatePaymentAddress() {
+        // HD wallet: new address for each payment
+        const index = await getNextAddressIndex();
+        const address = deriveAddress(MASTER_KEY, index);
+        return address;
+      }
+
+      // 2. Lightning provides better privacy
+      // - Onion routing hides sender
+      // - Invoices are single-use
+      // - No on-chain correlation
+
+      // 3. Don't require accounts for micropayments
+      app.get('/content', async (req, res) => {
+        // Anonymous access with valid payment
+        const token = req.headers.authorization;
+        if (await verifyPayment(token)) {
+          // No user account needed!
+          return res.send(content);
+        }
+        // Return 402
+      });
+
+      // 4. Separate payment identity from service identity
+      interface AnonymousPayment {
+        content_hash: string;    // What they're paying for
+        payment_proof: string;   // Proof of payment
+        // NO user ID, NO email, NO IP
+      }
+
+      // 5. Consider privacy-preserving options
+      // - Tornado Cash (for where legal)
+      // - Aztec Network (ZK L2)
+      // - Railgun (shielded ERC20)
+    references:
+      - https://bitcoin.design/guide/how-it-works/privacy/
+
+  - id: micropayment-dust
+    severity: MEDIUM
+    title: Micropayment Dust and Minimum Viable Amounts
+    description: Payments too small to be economically viable
+    symptoms:
+      - Transaction fees exceed payment amount
+      - Payments stuck due to dust limits
+      - Negative unit economics on small payments
+      - Users confused about minimum amounts
+    detection_pattern: "amount|minimum|dust|fee"
+    solution: |
+      // 1. Enforce minimum payment thresholds
+      const MINIMUMS = {
+        lightning: 1, // 1 sat minimum
+        l2_eth: 0.0001, // ~$0.25 at $2500/ETH
+        l2_usdc: 0.01, // 1 cent
+      };
+
+      function validatePaymentAmount(
+        amount: number,
+        method: PaymentMethod
+      ) {
+        if (amount < MINIMUMS[method]) {
+          throw new AmountTooSmallError(
+            `Minimum ${method} payment: ${MINIMUMS[method]}`
+          );
+        }
+      }
+
+      // 2. Batch small payments
+      interface PaymentBatch {
+        user_id: string;
+        pending_amount: number;
+        payments: MicroPayment[];
+        last_settled: number;
+      }
+
+      async function addToTab(userId: string, amount: number) {
+        // Accumulate until threshold
+        await db.batch.upsert({
+          user_id: userId,
+          pending_amount: sql`pending_amount + ${amount}`,
+        });
+
+        const batch = await db.batch.get(userId);
+        if (batch.pending_amount >= SETTLEMENT_THRESHOLD) {
+          await settleBatch(batch);
+        }
+      }
+
+      // 3. Use streaming payments for continuous access
+      // Pay once, stream for duration
+      // More efficient than many tiny payments
+
+      // 4. Pre-paid credits for power users
+      async function purchaseCredits(amount: number) {
+        // One larger payment
+        // Use credits for many small actions
+        // Zero marginal transaction cost
+      }
+    references:
+      - https://lightning.engineering/posts/2023-03-21-dual-funded-channels/

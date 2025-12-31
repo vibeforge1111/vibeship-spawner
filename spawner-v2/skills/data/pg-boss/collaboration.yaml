@@ -1,0 +1,335 @@
+# pg-boss Specialist Collaboration Patterns
+# How this skill integrates with database, backend, and queue-related workflows
+
+collaboration:
+  # Lead role - pg-boss Specialist drives these workflows
+  leads:
+    - workflow: background-job-architecture
+      description: Designing PostgreSQL-backed job queue system
+      involves:
+        - postgres-wizard: Database optimization for job tables
+        - backend: API endpoints that queue jobs
+        - infra-architect: Worker deployment and scaling
+      handoff_points:
+        - to: postgres-wizard
+          when: Job table queries slow down or need index optimization
+          context_to_share: Query patterns, job volume, table sizes
+        - to: backend
+          when: Defining API endpoints that trigger background jobs
+          context_to_share: Job payload structure, queue names, expected latency
+        - to: infra-architect
+          when: Need to scale workers or configure deployment
+          context_to_share: Worker resource requirements, concurrency settings
+
+    - workflow: scheduled-tasks
+      description: Implementing cron-like scheduled jobs in PostgreSQL
+      involves:
+        - postgres-wizard: Database time and scheduling queries
+        - backend: Business logic for scheduled tasks
+      handoff_points:
+        - to: backend
+          when: Implementing the actual scheduled task logic
+          context_to_share: Schedule frequency, expected duration, failure handling
+
+    - workflow: job-monitoring
+      description: Setting up monitoring for job queues
+      involves:
+        - observability-sre: Dashboards and alerting
+        - postgres-wizard: SQL queries for job metrics
+      handoff_points:
+        - to: observability-sre
+          when: Need Grafana dashboards or alerting rules
+          context_to_share: Key metrics (queue depth, failure rate, latency)
+        - to: postgres-wizard
+          when: Need custom monitoring queries
+          context_to_share: pgboss schema, important columns
+
+    - workflow: dead-letter-processing
+      description: Handling and recovering failed jobs
+      involves:
+        - backend: Business logic for failure recovery
+        - auth-specialist: User notification of failures
+      handoff_points:
+        - to: backend
+          when: Need manual intervention logic for failed jobs
+          context_to_share: Failure patterns, job data structure
+        - to: auth-specialist
+          when: Need to notify users of persistent failures
+          context_to_share: User context from job data
+
+  # Support role - pg-boss Specialist assists these workflows
+  supports:
+    - workflow: email-sending-system
+      led_by: email-systems
+      contribution: Reliable email queue with retry and dead letter handling
+      when_called: Need background email processing with delivery guarantees
+
+    - workflow: payment-processing
+      led_by: stripe-integration
+      contribution: Job queue for async payment operations
+      when_called: Need to process payments asynchronously with retry
+
+    - workflow: user-onboarding
+      led_by: backend
+      contribution: Background jobs for onboarding tasks (emails, setup)
+      when_called: Need reliable execution of post-signup tasks
+
+    - workflow: data-sync
+      led_by: data-engineer
+      contribution: Job-based sync between systems
+      when_called: Need reliable data synchronization jobs
+
+    - workflow: webhook-processing
+      led_by: backend
+      contribution: Queue incoming webhooks for reliable processing
+      when_called: Need to decouple webhook receipt from processing
+
+    - workflow: report-generation
+      led_by: backend
+      contribution: Background job for long-running reports
+      when_called: Reports take too long for synchronous API response
+
+  # Escalation patterns
+  escalations:
+    - situation: Job table growing too large, queries slow
+      escalate_to: postgres-wizard
+      with_context: Table sizes, index usage, query patterns
+      reason: Need PostgreSQL optimization expertise
+
+    - situation: Workers consuming too many connections
+      escalate_to: postgres-wizard
+      with_context: Connection pool settings, worker count, pool size
+      reason: Need connection pooling expertise (PgBouncer, Supabase pooler)
+
+    - situation: Need Redis-based queue instead
+      escalate_to: bullmq-specialist
+      with_context: Why pg-boss isn't suitable, requirements
+      reason: Redis queue may be better fit for use case
+
+    - situation: Need serverless queue without workers
+      escalate_to: upstash-qstash
+      with_context: Serverless constraints, webhook requirements
+      reason: Serverless architecture needs different approach
+
+    - situation: Complex workflow orchestration needed
+      escalate_to: temporal-craftsman
+      with_context: Workflow complexity, saga requirements
+      reason: pg-boss not designed for complex workflow orchestration
+
+    - situation: Job failures affecting user experience
+      escalate_to: backend
+      with_context: Failure patterns, user impact, retry behavior
+      reason: Need application-level error handling strategy
+
+    - situation: Supabase-specific issues
+      escalate_to: supabase-backend
+      with_context: Connection string, pooler mode, edge function integration
+      reason: Supabase has specific requirements for pg-boss
+
+  # Integration contracts
+  contracts:
+    with_postgres_wizard:
+      pg_boss_specialist_provides:
+        - Job table structure and indexes used
+        - Query patterns for job processing
+        - Connection requirements for workers
+      postgres_wizard_provides:
+        - Index optimization for job queries
+        - Connection pooling configuration
+        - Vacuum and maintenance strategies
+      interface_example: |
+        # pg-boss creates these tables
+        -- pgboss.job: Active and pending jobs
+        -- pgboss.archive: Completed jobs
+        -- pgboss.schedule: Cron schedules
+
+        # Postgres Wizard optimizes with:
+        CREATE INDEX CONCURRENTLY idx_job_queue_state
+        ON pgboss.job (name, state)
+        WHERE state IN ('created', 'retry');
+
+        # Monitor with:
+        SELECT name, state, count(*)
+        FROM pgboss.job
+        GROUP BY name, state;
+
+    with_backend:
+      pg_boss_specialist_provides:
+        - Job queue configuration
+        - Worker setup patterns
+        - Error handling strategies
+      backend_provides:
+        - API endpoints that queue jobs
+        - Business logic for job handlers
+        - User-facing status tracking
+      interface_example: |
+        // Backend queues job from API
+        app.post('/api/orders/:id/process', async (req, res) => {
+          const { id } = req.params;
+
+          await boss.send('process-order', {
+            orderId: id,
+            userId: req.user.id,
+          }, {
+            expireInSeconds: 300,
+            retryLimit: 3,
+            deadLetter: 'dlq-orders',
+          });
+
+          res.json({ status: 'processing' });
+        });
+
+        // pg-boss Specialist configures worker
+        await boss.work('process-order', {
+          teamSize: 5,
+        }, async (job) => {
+          // Backend provides business logic
+          await processOrder(job.data.orderId);
+        });
+
+    with_email_systems:
+      pg_boss_specialist_provides:
+        - Reliable email queue with retry
+        - Dead letter handling for failed emails
+        - Rate limiting via singleton keys
+      email_systems_provides:
+        - Email template and content
+        - SMTP/provider configuration
+        - Delivery tracking requirements
+      interface_example: |
+        // Queue email with pg-boss guarantees
+        await boss.send('send-email', {
+          to: user.email,
+          template: 'welcome',
+          data: { name: user.name },
+        }, {
+          expireInSeconds: 300,
+          retryLimit: 5,
+          retryDelay: 60,
+          deadLetter: 'dlq-emails',
+        });
+
+        // Worker calls email service
+        await boss.work('send-email', async (job) => {
+          await emailService.send(job.data);
+        });
+
+    with_supabase_backend:
+      pg_boss_specialist_provides:
+        - Connection string configuration for Supabase
+        - Worker setup compatible with Supabase pooler
+        - Edge function integration patterns
+      supabase_backend_provides:
+        - Supabase project configuration
+        - Connection string (session vs transaction mode)
+        - Edge function triggers
+      interface_example: |
+        // Use Supabase session mode for pg-boss
+        const boss = new PgBoss({
+          connectionString: process.env.SUPABASE_DB_URL,
+          // Session mode required for pg-boss polling
+          // Transaction mode breaks LISTEN/NOTIFY
+        });
+
+        // Queue from Supabase Edge Function
+        // Use direct database insert or API call
+        await supabase.from('pgboss.job').insert({
+          name: 'sync-user',
+          data: { userId },
+          state: 'created',
+          // ... other required fields
+        });
+
+    with_observability_sre:
+      pg_boss_specialist_provides:
+        - Key metrics to monitor (queue depth, failure rate)
+        - SQL queries for metrics
+        - Alert thresholds
+      observability_sre_provides:
+        - Grafana dashboards
+        - AlertManager rules
+        - Incident response procedures
+      interface_example: |
+        -- Metrics for Prometheus/Grafana
+        SELECT
+          name as queue,
+          state,
+          count(*) as count
+        FROM pgboss.job
+        GROUP BY name, state;
+
+        -- Alert on queue depth
+        SELECT name, count(*) as depth
+        FROM pgboss.job
+        WHERE state IN ('created', 'retry')
+        GROUP BY name
+        HAVING count(*) > 1000;
+
+        -- Alert on dead letters
+        SELECT name, count(*) as failed
+        FROM pgboss.job
+        WHERE name LIKE 'dlq-%'
+          AND createdon > NOW() - INTERVAL '1 hour'
+        GROUP BY name;
+
+    with_infra_architect:
+      pg_boss_specialist_provides:
+        - Worker resource requirements
+        - Scaling recommendations
+        - Health check endpoints
+      infra_architect_provides:
+        - Kubernetes deployment manifests
+        - Horizontal pod autoscaling
+        - Resource limits and requests
+      interface_example: |
+        // Health check endpoint for K8s
+        app.get('/health', async (req, res) => {
+          try {
+            await boss.getQueueSize('__pgboss__maintenance');
+            res.json({ status: 'healthy' });
+          } catch (error) {
+            res.status(503).json({ status: 'unhealthy', error: error.message });
+          }
+        });
+
+        // Graceful shutdown for K8s
+        process.on('SIGTERM', async () => {
+          await boss.stop({ graceful: true, timeout: 30000 });
+          process.exit(0);
+        });
+
+# Prerequisites for using this skill effectively
+prerequisites:
+  skills:
+    - postgres-wizard  # For database optimization
+  knowledge:
+    - PostgreSQL basics (connections, transactions)
+    - Node.js async patterns
+    - Job queue concepts (retry, dead letter, idempotency)
+  tools:
+    - pg-boss npm package
+    - PostgreSQL 11+ database
+    - Node.js runtime
+
+# When to delegate to this skill
+delegation_triggers:
+  - phrase: "pg-boss"
+    confidence: high
+  - phrase: "postgres job queue"
+    confidence: high
+  - phrase: "postgresql background job"
+    confidence: high
+  - phrase: "supabase background task"
+    confidence: high
+  - phrase: "neon job queue"
+    confidence: high
+  - phrase: "database job scheduling"
+    confidence: high
+  - phrase: "scheduled job postgres"
+    confidence: high
+  - phrase: "delayed job postgresql"
+    confidence: medium
+  - phrase: "background job without redis"
+    confidence: medium
+  - phrase: "cron job database"
+    confidence: medium

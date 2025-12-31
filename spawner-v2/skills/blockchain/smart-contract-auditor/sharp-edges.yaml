@@ -1,0 +1,817 @@
+id: smart-contract-auditor
+skill: Smart Contract Auditor
+version: "1.0"
+
+sharp_edges:
+  - id: classic-reentrancy
+    severity: CRITICAL
+    title: Classic Reentrancy Attack
+    description: External calls before state updates allow recursive exploitation
+    symptoms:
+      - Funds drained in single transaction
+      - Balance checks pass multiple times
+      - State unchanged after multiple withdrawals
+    detection_pattern: "call\\{.*value.*\\}|transfer\\(|send\\("
+    solution: |
+      // The attacker contract:
+      contract Attacker {
+          Vault victim;
+          uint256 count;
+
+          receive() external payable {
+              if (count < 10 && address(victim).balance >= 1 ether) {
+                  count++;
+                  victim.withdraw(1 ether);  // Re-enters!
+              }
+          }
+      }
+
+      // FIX 1: Checks-Effects-Interactions
+      function withdraw(uint256 amount) external {
+          require(balances[msg.sender] >= amount);
+          balances[msg.sender] -= amount;  // Update BEFORE call
+          (bool success, ) = msg.sender.call{value: amount}("");
+          require(success);
+      }
+
+      // FIX 2: Reentrancy Guard (preferred)
+      bool private locked;
+      modifier nonReentrant() {
+          require(!locked, "Reentrant");
+          locked = true;
+          _;
+          locked = false;
+      }
+
+      // FIX 3: Transient storage guard (Solidity 0.8.24+)
+      modifier nonReentrantTransient() {
+          assembly {
+              if tload(0) { revert(0, 0) }
+              tstore(0, 1)
+          }
+          _;
+          assembly { tstore(0, 0) }
+      }
+    references:
+      - https://swcregistry.io/docs/SWC-107
+      - https://github.com/pcaversaccio/reentrancy-attacks
+
+  - id: read-only-reentrancy
+    severity: CRITICAL
+    title: Read-Only Reentrancy
+    description: View functions return stale state during reentrancy window
+    symptoms:
+      - Price oracles return incorrect values during callbacks
+      - Other protocols get wrong balances mid-transaction
+      - LP token pricing exploited during deposits/withdrawals
+    detection_pattern: "balanceOf|totalSupply|getReserves|slot0"
+    solution: |
+      // VULNERABLE: Curve pool read-only reentrancy
+      // During remove_liquidity, callback happens BEFORE state update
+      // Other protocols reading balances get stale values
+
+      // FIX 1: Use reentrancy guard on view functions too
+      function getVirtualPrice() external view nonReentrant returns (uint256) {
+          return _calculateVirtualPrice();
+      }
+
+      // FIX 2: Check for reentrancy in consuming protocols
+      contract SafeConsumer {
+          function getPrice(address pool) external returns (uint256) {
+              // Call a mutative function to trigger reentrancy guard
+              ICurve(pool).claim_admin_fees();  // Will revert if mid-reentrancy
+              return ICurve(pool).get_virtual_price();
+          }
+      }
+
+      // FIX 3: Use time-weighted average prices
+      // TWAP resists single-block manipulation including reentrancy
+    references:
+      - https://chainsecurity.com/curve-lp-oracle-manipulation-post-mortem/
+      - https://blog.openzeppelin.com/read-only-reentrancy
+
+  - id: cross-function-reentrancy
+    severity: CRITICAL
+    title: Cross-Function Reentrancy
+    description: Attacker reenters via different function sharing same state
+    symptoms:
+      - Reentrancy guard on one function bypassed via another
+      - State corruption across related functions
+      - Invariants broken mid-transaction
+    detection_pattern: "external.*call|callback|hook"
+    solution: |
+      // VULNERABLE: Guard on withdraw but not transfer
+      function withdraw(uint256 amount) external nonReentrant {
+          require(balances[msg.sender] >= amount);
+          (bool success, ) = msg.sender.call{value: amount}("");  // Callback here
+          require(success);
+          balances[msg.sender] -= amount;
+      }
+
+      function transfer(address to, uint256 amount) external {  // NO GUARD!
+          require(balances[msg.sender] >= amount);
+          balances[msg.sender] -= amount;
+          balances[to] += amount;
+      }
+
+      // Attacker receives callback, calls transfer() to move funds
+
+      // FIX: Apply guard to ALL state-modifying functions
+      // Or use a contract-wide guard that covers all entries
+      uint256 private constant NOT_ENTERED = 1;
+      uint256 private constant ENTERED = 2;
+      uint256 private _status = NOT_ENTERED;
+
+      modifier globalNonReentrant() {
+          require(_status != ENTERED, "Reentrant");
+          _status = ENTERED;
+          _;
+          _status = NOT_ENTERED;
+      }
+
+      // Apply to ALL external functions that touch shared state
+    references:
+      - https://inspex.co/blog/cross-function-reentrancy
+
+  - id: delegatecall-storage-collision
+    severity: CRITICAL
+    title: Delegatecall Storage Collision
+    description: Implementation storage layout differs from proxy
+    symptoms:
+      - Admin address overwritten after upgrade
+      - Random state corruption
+      - Implementation address changed unexpectedly
+      - Proxy becomes unusable
+    detection_pattern: "delegatecall|proxy|implementation|upgrade"
+    solution: |
+      // VULNERABLE: Different storage layouts
+      contract ProxyV1 {
+          address public implementation;  // slot 0
+          address public admin;           // slot 1
+      }
+
+      contract ImplementationV1 {
+          uint256 public value;  // slot 0 - COLLIDES with implementation!
+          address public owner;  // slot 1 - COLLIDES with admin!
+      }
+
+      // FIX 1: Use EIP-1967 random slots
+      contract SafeProxy {
+          // Random slot: keccak256("eip1967.proxy.implementation") - 1
+          bytes32 constant IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+
+          function _getImplementation() internal view returns (address impl) {
+              assembly { impl := sload(IMPL_SLOT) }
+          }
+
+          function _setImplementation(address newImpl) internal {
+              assembly { sstore(IMPL_SLOT, newImpl) }
+          }
+      }
+
+      // FIX 2: Inherit storage layout from proxy in implementation
+      abstract contract ProxyStorage {
+          address internal _implementation;
+          address internal _admin;
+      }
+
+      contract Implementation is ProxyStorage {
+          // Add new storage AFTER inherited slots
+          uint256 public value;  // Now at slot 2
+      }
+
+      // FIX 3: Use unstructured storage for all proxy state
+    references:
+      - https://eips.ethereum.org/EIPS/eip-1967
+      - https://blog.openzeppelin.com/proxy-patterns
+
+  - id: oracle-price-manipulation
+    severity: CRITICAL
+    title: Oracle Price Manipulation via Flash Loans
+    description: Spot prices manipulated within single transaction
+    symptoms:
+      - Abnormal trades during price spikes
+      - Liquidations at manipulated prices
+      - Arbitrage profits from artificial spreads
+    detection_pattern: "getReserves|slot0|latestAnswer|getPrice"
+    solution: |
+      // VULNERABLE: Spot price from AMM
+      function getPrice() public view returns (uint256) {
+          (uint112 reserve0, uint112 reserve1, ) = pair.getReserves();
+          return reserve1 * 1e18 / reserve0;  // Manipulable!
+      }
+
+      // ATTACK FLOW:
+      // 1. Flash loan huge amount of token0
+      // 2. Swap into pair, skewing reserves
+      // 3. Call victim contract (uses manipulated price)
+      // 4. Swap back
+      // 5. Repay flash loan with profit
+
+      // FIX 1: Time-Weighted Average Price (TWAP)
+      function getTWAP(address pair, uint32 period) public view returns (uint256) {
+          (uint256 price0Cumulative, uint256 price1Cumulative, uint32 blockTimestamp) =
+              UniswapV2OracleLibrary.currentCumulativePrices(pair);
+
+          uint32 timeElapsed = blockTimestamp - lastUpdateTime;
+          require(timeElapsed >= period, "TWAP period not elapsed");
+
+          return (price0Cumulative - price0CumulativeLast) / timeElapsed;
+      }
+
+      // FIX 2: Multiple oracle sources
+      function getPrice() public view returns (uint256) {
+          uint256 chainlinkPrice = getChainlinkPrice();
+          uint256 twapPrice = getTWAP();
+
+          // Require prices within tolerance
+          uint256 deviation = chainlinkPrice > twapPrice
+              ? (chainlinkPrice - twapPrice) * 100 / chainlinkPrice
+              : (twapPrice - chainlinkPrice) * 100 / twapPrice;
+
+          require(deviation <= MAX_DEVIATION, "Price mismatch");
+          return (chainlinkPrice + twapPrice) / 2;
+      }
+
+      // FIX 3: Validate against historical bounds
+      require(price >= lastPrice * 95 / 100, "Price dropped too fast");
+      require(price <= lastPrice * 105 / 100, "Price rose too fast");
+    references:
+      - https://samczsun.com/so-you-want-to-use-a-price-oracle/
+      - https://www.euler.finance/blog/euler-notes-2-price-oracles
+
+  - id: signature-replay
+    severity: CRITICAL
+    title: Signature Replay Attack
+    description: Same signature valid multiple times or across contexts
+    symptoms:
+      - Transaction replayed after completion
+      - Signature works on multiple chains
+      - Same permit used multiple times
+    detection_pattern: "ecrecover|signature|permit|EIP712|signTypedData"
+    solution: |
+      // VULNERABLE: Missing nonce
+      function executeWithSig(address to, uint256 amount, bytes calldata sig) external {
+          bytes32 hash = keccak256(abi.encode(to, amount));
+          address signer = ECDSA.recover(hash, sig);
+          require(signer == authorizedSigner);
+          // Execute... but sig can be replayed!
+      }
+
+      // VULNERABLE: Missing chain ID (cross-chain replay)
+      // Same signature works on Mainnet AND Arbitrum
+
+      // COMPREHENSIVE FIX:
+      contract SecureSignature {
+          mapping(address => uint256) public nonces;
+          bytes32 public immutable DOMAIN_SEPARATOR;
+
+          bytes32 constant EXECUTE_TYPEHASH = keccak256(
+              "Execute(address to,uint256 amount,uint256 nonce,uint256 deadline)"
+          );
+
+          constructor() {
+              DOMAIN_SEPARATOR = keccak256(abi.encode(
+                  keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                  keccak256(bytes("SecureContract")),
+                  keccak256(bytes("1")),
+                  block.chainid,      // Chain-specific
+                  address(this)       // Contract-specific
+              ));
+          }
+
+          function executeWithSig(
+              address to,
+              uint256 amount,
+              uint256 deadline,
+              uint8 v, bytes32 r, bytes32 s
+          ) external {
+              require(block.timestamp <= deadline, "Expired");
+
+              bytes32 structHash = keccak256(abi.encode(
+                  EXECUTE_TYPEHASH,
+                  to,
+                  amount,
+                  nonces[msg.sender]++,  // Nonce prevents replay
+                  deadline
+              ));
+
+              bytes32 digest = keccak256(abi.encodePacked(
+                  "\x19\x01",
+                  DOMAIN_SEPARATOR,
+                  structHash
+              ));
+
+              address signer = ecrecover(digest, v, r, s);
+              require(signer != address(0) && signer == msg.sender, "Invalid sig");
+
+              // Execute...
+          }
+      }
+    references:
+      - https://eips.ethereum.org/EIPS/eip-712
+      - https://swcregistry.io/docs/SWC-117
+
+  - id: front-running
+    severity: HIGH
+    title: Front-Running / Sandwich Attacks
+    description: Transaction ordering exploited by MEV bots
+    symptoms:
+      - Worse-than-expected swap rates
+      - Transactions fail with slippage errors
+      - Unusual activity before large trades
+    detection_pattern: "swap|trade|exchange|amountOut|slippage"
+    solution: |
+      // VULNERABLE: No slippage protection
+      function swap(uint256 amountIn) external {
+          router.swap(amountIn, 0, path, msg.sender, block.timestamp + 1000);
+          // Bot sees this, front-runs with own swap, sandwiches victim
+      }
+
+      // FIX 1: User-specified slippage
+      function swap(uint256 amountIn, uint256 minAmountOut, uint256 deadline) external {
+          require(block.timestamp <= deadline, "Expired");
+          uint256 out = router.swap(amountIn, minAmountOut, path, msg.sender, deadline);
+          require(out >= minAmountOut, "Slippage");
+      }
+
+      // FIX 2: Private mempool (Flashbots Protect)
+      // Submit transactions directly to block builders
+
+      // FIX 3: Commit-reveal scheme for sensitive operations
+      mapping(bytes32 => uint256) public commits;
+
+      function commitTrade(bytes32 commitment) external {
+          commits[commitment] = block.number;
+      }
+
+      function revealAndExecute(
+          uint256 amountIn,
+          uint256 minOut,
+          bytes32 salt
+      ) external {
+          bytes32 commitment = keccak256(abi.encode(msg.sender, amountIn, minOut, salt));
+          require(commits[commitment] != 0, "No commit");
+          require(block.number > commits[commitment] + 1, "Too soon");
+          delete commits[commitment];
+          // Execute trade
+      }
+
+      // FIX 4: Use batch auctions (CoW Protocol style)
+      // Trades settled at uniform clearing price, no ordering advantage
+    references:
+      - https://docs.flashbots.net/flashbots-protect/overview
+      - https://www.paradigm.xyz/2020/08/ethereum-is-a-dark-forest
+
+  - id: governance-flash-loan-attack
+    severity: HIGH
+    title: Flash Loan Governance Attack
+    description: Borrow voting power to pass malicious proposals
+    symptoms:
+      - Proposals pass with sudden vote spike
+      - Whale-level votes from empty wallets
+      - Treasury drained via governance
+    detection_pattern: "propose|vote|execute|governance|delegate"
+    solution: |
+      // VULNERABLE: Snapshot at proposal time
+      function propose(uint256 proposalId) external {
+          uint256 votes = token.balanceOf(msg.sender);  // Can be flash loaned!
+          require(votes >= proposalThreshold);
+          // Create proposal...
+      }
+
+      // ATTACK:
+      // 1. Flash loan governance tokens
+      // 2. Delegate to self
+      // 3. Create proposal to drain treasury
+      // 4. Vote immediately
+      // 5. Return flash loan
+
+      // FIX 1: Time-locked voting power
+      function getVotes(address account) public view returns (uint256) {
+          // Use checkpoint from previous block
+          return token.getPastVotes(account, block.number - 1);
+      }
+
+      // FIX 2: Voting delay + snapshot at proposal creation
+      function propose() external returns (uint256) {
+          uint256 proposalId = proposalCount++;
+          Proposal storage p = proposals[proposalId];
+          p.startBlock = block.number + votingDelay;  // Delay before voting
+          p.snapshotBlock = block.number;             // Votes locked at creation
+          p.endBlock = p.startBlock + votingPeriod;
+          return proposalId;
+      }
+
+      function castVote(uint256 proposalId) external {
+          Proposal storage p = proposals[proposalId];
+          require(block.number >= p.startBlock, "Too early");
+          require(block.number <= p.endBlock, "Too late");
+
+          // Use historical votes from snapshot
+          uint256 votes = token.getPastVotes(msg.sender, p.snapshotBlock);
+          // Record vote...
+      }
+
+      // FIX 3: Require token lock during voting period
+      // FIX 4: Use vote escrow (veToken) model
+    references:
+      - https://www.paradigm.xyz/2020/08/ethereum-is-a-dark-forest
+      - https://blog.tally.xyz/how-to-design-governance
+
+  - id: unchecked-return-values
+    severity: HIGH
+    title: Unchecked External Call Return Values
+    description: Ignoring failure of external calls leads to false accounting
+    symptoms:
+      - Balance discrepancies
+      - State updated but funds not moved
+      - Silent failures in batch operations
+    detection_pattern: "\\.transfer\\(|\\.send\\(|call\\(|call\\{"
+    solution: |
+      // VULNERABLE: Ignoring return values
+      payable(user).send(amount);  // Returns false on failure
+      token.transfer(user, amount);  // Some tokens don't revert
+
+      // VULNERABLE: Low-level call without check
+      (bool success, ) = target.call(data);
+      // success ignored!
+
+      // FIX 1: Check return values
+      bool sent = payable(user).send(amount);
+      require(sent, "Send failed");
+
+      // FIX 2: Use transfer() for ETH (but has 2300 gas limit issues)
+      // Better: Use call with check
+      (bool success, ) = payable(user).call{value: amount}("");
+      require(success, "ETH transfer failed");
+
+      // FIX 3: SafeERC20 for tokens
+      import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+      using SafeERC20 for IERC20;
+
+      token.safeTransfer(user, amount);  // Reverts on failure
+      token.safeTransferFrom(from, to, amount);
+      token.safeApprove(spender, amount);  // Handles weird approval tokens
+    references:
+      - https://swcregistry.io/docs/SWC-104
+      - https://github.com/d-xo/weird-erc20
+
+  - id: integer-overflow-underflow
+    severity: HIGH
+    title: Integer Overflow/Underflow
+    description: Arithmetic operations wrap around without reverting
+    symptoms:
+      - Huge balances appearing from small operations
+      - Negative values becoming max uint256
+      - Unexpected calculation results
+    detection_pattern: "unchecked|uint8|uint16|uint32|Solidity.*0\\.[0-7]"
+    solution: |
+      // Solidity 0.8+ has automatic overflow checks
+      // BUT unchecked blocks disable them!
+
+      // VULNERABLE: Unchecked with user input
+      function addReward(uint256 amount) external {
+          unchecked {
+              // If totalRewards is near max, this wraps to small number!
+              totalRewards += amount;
+          }
+      }
+
+      // SAFE: Unchecked only for loop counters
+      for (uint256 i = 0; i < length; ) {
+          // Process item
+          unchecked { ++i; }  // Safe: i < length guarantees no overflow
+      }
+
+      // VULNERABLE: Casting down
+      uint256 bigNumber = type(uint256).max;
+      uint128 smallNumber = uint128(bigNumber);  // Silent truncation!
+
+      // SAFE: Check before casting
+      require(bigNumber <= type(uint128).max, "Value too large");
+      uint128 smallNumber = uint128(bigNumber);
+
+      // Pre-0.8.0: Use SafeMath everywhere
+      using SafeMath for uint256;
+      totalRewards = totalRewards.add(amount);  // Reverts on overflow
+    references:
+      - https://swcregistry.io/docs/SWC-101
+      - https://docs.soliditylang.org/en/latest/control-structures.html#checked-or-unchecked-arithmetic
+
+  - id: access-control-missing
+    severity: HIGH
+    title: Missing or Incorrect Access Control
+    description: Privileged functions callable by unauthorized users
+    symptoms:
+      - Admin functions called by random addresses
+      - Owner changed by attacker
+      - Funds withdrawn without authorization
+    detection_pattern: "onlyOwner|require.*msg\\.sender|access|role"
+    solution: |
+      // VULNERABLE: Missing access control
+      function withdrawAll() external {
+          payable(msg.sender).transfer(address(this).balance);
+          // Anyone can drain!
+      }
+
+      // VULNERABLE: Incorrect check
+      function setOwner(address newOwner) external {
+          require(msg.sender != owner);  // WRONG OPERATOR!
+          owner = newOwner;
+      }
+
+      // FIX 1: Simple owner pattern
+      address public owner;
+
+      modifier onlyOwner() {
+          require(msg.sender == owner, "Not owner");
+          _;
+      }
+
+      function withdrawAll() external onlyOwner {
+          payable(owner).transfer(address(this).balance);
+      }
+
+      // FIX 2: Role-based access (OpenZeppelin)
+      import "@openzeppelin/contracts/access/AccessControl.sol";
+
+      contract Vault is AccessControl {
+          bytes32 public constant WITHDRAWER_ROLE = keccak256("WITHDRAWER");
+
+          function withdraw() external onlyRole(WITHDRAWER_ROLE) {
+              // Only authorized withdrawers
+          }
+      }
+
+      // FIX 3: Two-step ownership transfer
+      address public pendingOwner;
+
+      function transferOwnership(address newOwner) external onlyOwner {
+          pendingOwner = newOwner;
+      }
+
+      function acceptOwnership() external {
+          require(msg.sender == pendingOwner, "Not pending owner");
+          emit OwnershipTransferred(owner, pendingOwner);
+          owner = pendingOwner;
+          pendingOwner = address(0);
+      }
+    references:
+      - https://swcregistry.io/docs/SWC-105
+      - https://docs.openzeppelin.com/contracts/4.x/access-control
+
+  - id: denial-of-service
+    severity: HIGH
+    title: Denial of Service Vulnerabilities
+    description: Contract functions can be made permanently unusable
+    symptoms:
+      - Functions revert for all users
+      - State transition impossible
+      - Funds locked permanently
+    detection_pattern: "for.*length|while|push|array\\[|external.*loop"
+    solution: |
+      // VULNERABLE: Unbounded loop
+      function distributeRewards() external {
+          for (uint i = 0; i < stakers.length; i++) {
+              // If stakers grows too large, exceeds gas limit
+              stakers[i].transfer(rewards[i]);
+          }
+      }
+
+      // VULNERABLE: External call in loop
+      function refundAll() external {
+          for (uint i = 0; i < users.length; i++) {
+              // One malicious contract can block everyone
+              payable(users[i]).transfer(refunds[i]);
+          }
+      }
+
+      // FIX 1: Pull pattern
+      mapping(address => uint256) public pendingRewards;
+
+      function claimReward() external {
+          uint256 reward = pendingRewards[msg.sender];
+          require(reward > 0, "No reward");
+          pendingRewards[msg.sender] = 0;
+          payable(msg.sender).transfer(reward);
+      }
+
+      // FIX 2: Paginated processing
+      function distributeRewards(uint256 start, uint256 end) external {
+          require(end <= stakers.length);
+          for (uint i = start; i < end; i++) {
+              pendingRewards[stakers[i]] += calculateReward(i);
+          }
+      }
+
+      // FIX 3: Gas-bounded loops
+      function processQueue() external {
+          uint256 gasStart = gasleft();
+          while (queue.length > 0 && gasleft() > gasStart / 2) {
+              processNext();
+          }
+      }
+    references:
+      - https://swcregistry.io/docs/SWC-128
+      - https://consensys.github.io/smart-contract-best-practices/attacks/denial-of-service/
+
+  - id: precision-loss
+    severity: MEDIUM
+    title: Precision Loss in Calculations
+    description: Integer division rounds down, accumulating errors
+    symptoms:
+      - Small deposits receive 0 shares
+      - Fees lower than expected
+      - Dust amounts accumulating in contract
+    detection_pattern: "\\/ [0-9]|division|precision|shares"
+    solution: |
+      // VULNERABLE: Division before multiplication
+      function calculateFee(uint256 amount) public view returns (uint256) {
+          return amount / 10000 * feeBps;  // Loses precision!
+          // If amount = 500, feeBps = 30: returns 0 instead of 1
+      }
+
+      // FIX 1: Multiply before divide
+      function calculateFee(uint256 amount) public view returns (uint256) {
+          return amount * feeBps / 10000;  // Much more precise
+      }
+
+      // VULNERABLE: Share calculation with small deposits
+      function deposit(uint256 assets) external returns (uint256 shares) {
+          shares = assets * totalShares / totalAssets;  // Could be 0!
+          // Attacker can donate assets to make shares worthless
+      }
+
+      // FIX 2: Use minimum share/asset amounts
+      uint256 constant MINIMUM_SHARES = 1000;
+
+      function deposit(uint256 assets) external returns (uint256 shares) {
+          if (totalShares == 0) {
+              shares = assets - MINIMUM_SHARES;  // Lock minimum
+              _mint(address(0), MINIMUM_SHARES);  // Dead shares
+          } else {
+              shares = assets * totalShares / totalAssets;
+          }
+          require(shares > 0, "Zero shares");
+      }
+
+      // FIX 3: Use higher precision internally
+      uint256 constant PRECISION = 1e18;
+
+      function calculateReward(uint256 stake) internal view returns (uint256) {
+          return stake * rewardRate * PRECISION / totalStaked / PRECISION;
+      }
+    references:
+      - https://blog.openzeppelin.com/a-]udit-of-yearn-finance-vault-contracts
+      - https://ethereum.stackexchange.com/questions/55701
+
+  - id: reentrancy-via-erc777
+    severity: MEDIUM
+    title: ERC-777 Token Callback Reentrancy
+    description: ERC-777 tokens call hooks before balance updates
+    symptoms:
+      - Reentrancy despite no ETH transfers
+      - Exploits in ERC-20-looking code
+      - Callbacks during token transfers
+    detection_pattern: "IERC20|transfer|transferFrom|ERC20|token"
+    solution: |
+      // ERC-777 tokens look like ERC-20 but have callbacks!
+      // tokensReceived() called BEFORE balance updated
+
+      // VULNERABLE: Assumes ERC-20 behavior
+      function deposit(IERC20 token, uint256 amount) external {
+          uint256 before = token.balanceOf(address(this));
+          token.transferFrom(msg.sender, address(this), amount);
+          uint256 after = token.balanceOf(address(this));
+          // If ERC-777, callback in transferFrom can reenter here
+          // with balance already updated but deposit not recorded
+          deposited[msg.sender] += after - before;
+      }
+
+      // FIX 1: Reentrancy guard on all token operations
+      function deposit(IERC20 token, uint256 amount) external nonReentrant {
+          // Safe even with ERC-777
+      }
+
+      // FIX 2: Check-Effects-Interactions for tokens too
+      function deposit(IERC20 token, uint256 amount) external {
+          deposited[msg.sender] += amount;  // Effect first
+          token.safeTransferFrom(msg.sender, address(this), amount);
+      }
+
+      // FIX 3: Whitelist known-safe tokens only
+      mapping(address => bool) public allowedTokens;
+
+      function deposit(IERC20 token, uint256 amount) external {
+          require(allowedTokens[address(token)], "Token not allowed");
+          // ...
+      }
+    references:
+      - https://eips.ethereum.org/EIPS/eip-777
+      - https://blog.openzeppelin.com/exploiting-uniswap-from-reentrancy-to-actual-profit
+
+  - id: centralization-risks
+    severity: MEDIUM
+    title: Centralization and Trust Assumptions
+    description: Single points of failure in "decentralized" protocols
+    symptoms:
+      - Owner can rug users
+      - Admin keys can pause/drain
+      - Upgrades can change any logic
+    detection_pattern: "owner|admin|pause|upgrade|setImplementation|mint\\("
+    solution: |
+      // RED FLAGS:
+      // - Single owner can pause, withdraw, or upgrade
+      // - Minting function without cap
+      // - No timelock on critical operations
+      // - Upgradeable without governance
+
+      // FIX 1: Multi-sig for admin operations
+      // Use Gnosis Safe with 3/5 or 4/7 threshold
+
+      // FIX 2: Timelock for critical changes
+      uint256 constant TIMELOCK_DELAY = 2 days;
+      mapping(bytes32 => uint256) public timelocks;
+
+      function queueUpgrade(address newImpl) external onlyOwner {
+          bytes32 id = keccak256(abi.encode(newImpl));
+          timelocks[id] = block.timestamp + TIMELOCK_DELAY;
+          emit UpgradeQueued(newImpl, timelocks[id]);
+      }
+
+      function executeUpgrade(address newImpl) external onlyOwner {
+          bytes32 id = keccak256(abi.encode(newImpl));
+          require(timelocks[id] != 0 && timelocks[id] <= block.timestamp);
+          delete timelocks[id];
+          _upgradeTo(newImpl);
+      }
+
+      // FIX 3: Immutable critical parameters
+      uint256 public immutable MAX_FEE = 500;  // Can never exceed 5%
+      address public immutable TREASURY;       // Can never change
+
+      // FIX 4: Renounce ownership when stable
+      function renounceOwnership() external onlyOwner {
+          owner = address(0);
+          // Now no one can change critical parameters
+      }
+
+      // DOCUMENT: All trust assumptions in README/audit report
+    references:
+      - https://docs.openzeppelin.com/contracts/4.x/governance
+      - https://blog.trailofbits.com/2020/05/21/reinventing-the-weel/
+
+  - id: chainid-hardcoding
+    severity: MEDIUM
+    title: Hardcoded Chain ID Breaks on Forks
+    description: Chain ID should be computed, not stored
+    symptoms:
+      - Signatures valid on wrong chain after fork
+      - Contract unusable on forked chain
+      - Replay attacks across chains
+    detection_pattern: "chainId|block\\.chainid|DOMAIN_SEPARATOR"
+    solution: |
+      // VULNERABLE: Stored chain ID
+      contract Permit {
+          uint256 public immutable CHAIN_ID;
+          bytes32 public immutable DOMAIN_SEPARATOR;
+
+          constructor() {
+              CHAIN_ID = block.chainid;
+              DOMAIN_SEPARATOR = computeDomainSeparator();
+          }
+      }
+      // After fork, CHAIN_ID doesn't match block.chainid
+      // Signatures valid on both chains!
+
+      // FIX: Compute dynamically
+      contract SafePermit {
+          bytes32 private immutable INITIAL_DOMAIN_SEPARATOR;
+          uint256 private immutable INITIAL_CHAIN_ID;
+
+          constructor() {
+              INITIAL_CHAIN_ID = block.chainid;
+              INITIAL_DOMAIN_SEPARATOR = computeDomainSeparator();
+          }
+
+          function DOMAIN_SEPARATOR() public view returns (bytes32) {
+              if (block.chainid == INITIAL_CHAIN_ID) {
+                  return INITIAL_DOMAIN_SEPARATOR;  // Gas optimization
+              }
+              return computeDomainSeparator();  // Recompute if chain changed
+          }
+
+          function computeDomainSeparator() internal view returns (bytes32) {
+              return keccak256(abi.encode(
+                  TYPE_HASH,
+                  keccak256(bytes(name())),
+                  keccak256(bytes("1")),
+                  block.chainid,  // Current chain ID
+                  address(this)
+              ));
+          }
+      }
+    references:
+      - https://eips.ethereum.org/EIPS/eip-2612
+      - https://github.com/transmissions11/solmate/blob/main/src/tokens/ERC20.sol

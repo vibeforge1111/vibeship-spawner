@@ -1,0 +1,748 @@
+# Graphile Worker Sharp Edges
+# Production-learned gotchas for PostgreSQL job queues with LISTEN/NOTIFY
+
+sharp_edges:
+  - id: listen-notify-connection-limit
+    title: LISTEN/NOTIFY Requires Dedicated Connection
+    severity: critical
+    situation: |
+      Running Graphile Worker with connection pooler (PgBouncer, Supabase pooler)
+      in transaction mode. Workers fail to pick up jobs or have massive delays.
+    why: |
+      LISTEN/NOTIFY requires a persistent connection. Connection poolers in transaction
+      mode multiplex connections - your LISTEN gets dropped after each transaction.
+      Jobs pile up because workers only see them on poll intervals, not instantly.
+      This defeats Graphile Worker's millisecond job pickup advantage.
+    solution: |
+      Use session mode or direct connection for workers:
+
+      import { run } from 'graphile-worker';
+
+      // BAD: Transaction mode pooler (Supabase default, PgBouncer transaction)
+      // Jobs won't be picked up via LISTEN/NOTIFY
+
+      // GOOD: Session mode or direct connection
+      const runner = await run({
+        // Use session mode connection string for Supabase
+        connectionString: process.env.DATABASE_URL.replace(':6543', ':5432'),
+        // Or explicit session mode pooler
+        // connectionString: 'postgres://...?pgbouncer=true&connection_limit=1',
+        concurrency: 5,
+        taskDirectory: './tasks',
+      });
+
+      // Alternative: Use separate connections
+      const runner = await run({
+        // Direct connection for LISTEN/NOTIFY
+        connectionString: process.env.DIRECT_DATABASE_URL,
+        // Pool uses transaction mode for actual work
+        pgPool: transactionModePool,
+        concurrency: 5,
+        taskDirectory: './tasks',
+      });
+
+      // For Supabase specifically:
+      // - Port 5432: Direct connection (use for workers)
+      // - Port 6543: Supavisor pooler (transaction mode by default)
+      // Add ?pgbouncer=true to use session mode on 6543
+    symptoms:
+      - Jobs take seconds to start instead of milliseconds
+      - Worker logs show polling instead of instant pickup
+      - Jobs pile up then process in bursts
+      - "LISTEN" commands appear to do nothing
+    detection_pattern: "connectionString.*:6543(?!.*pgbouncer=true)|transaction.*mode.*graphile"
+
+  - id: task-not-registered
+    title: Task Function Not Found at Runtime
+    severity: critical
+    situation: |
+      Jobs queued with add_job() but workers log "Unknown task" errors.
+      Jobs fail immediately or sit in queue forever.
+    why: |
+      Graphile Worker matches job names to task files/functions. If task is
+      queued as 'send_email' but file is 'sendEmail.ts' or function is exported
+      differently, worker can't find it. Underscores vs camelCase is a common trap.
+      Also, task directory path issues cause all tasks to be missing.
+    solution: |
+      Ensure task names match exactly:
+
+      // Task file: tasks/send_email.ts (underscore naming)
+      import type { Task } from 'graphile-worker';
+
+      // Export name MUST match job name
+      export const send_email: Task = async (payload, helpers) => {
+        helpers.logger.info('Processing send_email');
+        await sendEmail(payload);
+      };
+
+      // When queuing, use exact same name
+      SELECT graphile_worker.add_job('send_email', '{"to": "user@example.com"}');
+
+      // Programmatic verification
+      import { run, TaskList } from 'graphile-worker';
+
+      const taskList: TaskList = {
+        send_email: async (payload, helpers) => { ... },
+        process_order: async (payload, helpers) => { ... },
+      };
+
+      const runner = await run({
+        connectionString: process.env.DATABASE_URL,
+        taskList,  // Explicit task list - no file system magic
+        concurrency: 5,
+      });
+
+      // Log registered tasks on startup
+      console.log('Registered tasks:', Object.keys(taskList));
+
+      // Common fixes:
+      // 1. Use underscores in both SQL and TS: send_email, not sendEmail
+      // 2. Check taskDirectory path is correct (relative to cwd or absolute)
+      // 3. Use taskList instead of taskDirectory for explicit control
+      // 4. Verify exports: module.exports = { task_name: fn } or named export
+    symptoms:
+      - "No task registered for 'task_name'" errors
+      - Jobs immediately fail with "unknown task"
+      - Some tasks work, others don't (naming inconsistency)
+      - Tasks work locally but not in production (path issues)
+    detection_pattern: "add_job\\(['\"][a-z]+[A-Z]|taskDirectory.*(?!tasks|src)"
+
+  - id: job-payload-serialization
+    title: Job Payload Not JSON Serializable
+    severity: critical
+    situation: |
+      Queuing jobs with complex objects (Date, Buffer, BigInt, circular refs).
+      Jobs fail to insert or arrive corrupted at the worker.
+    why: |
+      Graphile Worker stores payloads as JSONB in PostgreSQL. JSON.stringify()
+      can't handle Date objects (becomes string), BigInt (throws), Buffer (becomes
+      object), or circular references (throws). Your carefully crafted payload
+      arrives as garbage or job creation fails silently.
+    solution: |
+      Serialize carefully and validate:
+
+      import { quickAddJob } from 'graphile-worker';
+
+      // BAD: Non-serializable data
+      await quickAddJob(pool, 'process_order', {
+        orderId: 123,
+        createdAt: new Date(),          // Becomes "2024-01-01T..." string
+        amount: BigInt(1000),           // Throws!
+        file: Buffer.from('data'),      // Becomes {type: 'Buffer', data: [...]}
+      });
+
+      // GOOD: Explicit serialization
+      await quickAddJob(pool, 'process_order', {
+        orderId: 123,
+        createdAt: new Date().toISOString(),  // Explicit string
+        amount: '1000',                        // String for big numbers
+        fileBase64: Buffer.from('data').toString('base64'),
+      });
+
+      // In task, deserialize
+      export const process_order: Task = async (payload, helpers) => {
+        const data = {
+          ...payload,
+          createdAt: new Date(payload.createdAt),
+          amount: BigInt(payload.amount),
+          file: Buffer.from(payload.fileBase64, 'base64'),
+        };
+        await processOrder(data);
+      };
+
+      // Create type-safe payload helpers
+      interface OrderPayload {
+        orderId: number;
+        createdAt: string;  // ISO string, not Date
+        amount: string;     // String, not BigInt
+      }
+
+      function serializeOrderPayload(order: Order): OrderPayload {
+        return {
+          orderId: order.id,
+          createdAt: order.createdAt.toISOString(),
+          amount: order.amount.toString(),
+        };
+      }
+
+      // Validate before queuing
+      function validatePayload(payload: unknown): void {
+        const json = JSON.stringify(payload);
+        const parsed = JSON.parse(json);
+        // If this succeeds, payload is safe
+      }
+    symptoms:
+      - Jobs silently have wrong data
+      - BigInt errors on job creation
+      - Dates become strings unexpectedly
+      - Buffer data corrupted
+    detection_pattern: "add_job.*new Date\\(|add_job.*BigInt|quickAddJob.*Buffer\\.from"
+
+  - id: migration-schema-mismatch
+    title: Worker Schema Migrations Out of Sync
+    severity: critical
+    situation: |
+      Upgraded graphile-worker package but didn't run migrations. Worker crashes
+      on startup or jobs behave unexpectedly. Downgrade causes schema conflicts.
+    why: |
+      Graphile Worker manages its own schema (graphile_worker.*). Version upgrades
+      often require schema changes. If you upgrade the package without running
+      migrations, the worker code expects columns/tables that don't exist.
+      Downgrades are worse - newer schema with older code.
+    solution: |
+      Always migrate schema with package upgrades:
+
+      // Run migrations before starting worker
+      import { runMigrations, run } from 'graphile-worker';
+
+      async function main() {
+        // ALWAYS run migrations first
+        await runMigrations({
+          connectionString: process.env.DATABASE_URL,
+        });
+
+        console.log('Migrations complete');
+
+        const runner = await run({
+          connectionString: process.env.DATABASE_URL,
+          taskDirectory: './tasks',
+          concurrency: 5,
+        });
+      }
+
+      // Or via CLI before deployment
+      // npx graphile-worker --connection $DATABASE_URL --schema-only
+
+      // For deployments, run migration as init container or pre-deploy step
+      // NOT in the worker process (race condition with multiple workers)
+
+      // Check current schema version
+      async function checkSchemaVersion(pool: Pool) {
+        const result = await pool.query(`
+          SELECT value FROM graphile_worker.migrations
+          ORDER BY id DESC LIMIT 1
+        `);
+        console.log('Current schema version:', result.rows[0]?.value);
+      }
+
+      // Safe upgrade process:
+      // 1. Stop all workers
+      // 2. Run migrations (single process)
+      // 3. Deploy new worker code
+      // 4. Start workers
+
+      // For zero-downtime, new worker version must be backward compatible
+      // with old schema during migration window
+    symptoms:
+      - Worker crashes immediately on startup
+      - "column does not exist" errors
+      - "relation graphile_worker.* does not exist"
+      - Jobs work but with missing features
+    detection_pattern: "run\\(\\{(?!.*runMigrations)|graphile-worker.*--watch(?!.*--schema)"
+
+  - id: trigger-transaction-isolation
+    title: Trigger Jobs Not Visible Until COMMIT
+    severity: high
+    situation: |
+      Database trigger queues job via add_job(). Job starts processing before
+      the triggering transaction commits. Worker sees old data or fails.
+    why: |
+      When a trigger calls add_job(), the job row is inserted in the same transaction.
+      LISTEN/NOTIFY fires, worker wakes up, but the job isn't visible until COMMIT.
+      Even if visible, the data the job needs to read might not be committed yet.
+      Worker either can't find the job or processes stale data.
+    solution: |
+      Design for transaction boundaries:
+
+      -- Option 1: Deferred trigger (PostgreSQL 9.5+)
+      CREATE CONSTRAINT TRIGGER queue_job_on_insert
+        AFTER INSERT ON orders
+        DEFERRABLE INITIALLY DEFERRED
+        FOR EACH ROW
+        EXECUTE FUNCTION queue_process_order();
+
+      -- Option 2: Use AFTER trigger (not BEFORE)
+      CREATE OR REPLACE FUNCTION queue_process_order()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        -- AFTER INSERT means row is inserted, but still in transaction
+        PERFORM graphile_worker.add_job(
+          'process_order',
+          json_build_object('order_id', NEW.id),
+          run_at := NOW() + INTERVAL '1 second'  -- Small delay for commit
+        );
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      -- Option 3: Queue with delay
+      SELECT graphile_worker.add_job(
+        'process_order',
+        '{"order_id": 123}'::json,
+        run_at := NOW() + INTERVAL '5 seconds'  -- Wait for commit
+      );
+
+      // In worker, verify data exists
+      export const process_order: Task = async (payload, helpers) => {
+        const { order_id } = payload;
+
+        // Retry if data not yet visible
+        const order = await db.orders.findUnique({ where: { id: order_id } });
+        if (!order) {
+          // Data not committed yet, reschedule
+          helpers.logger.warn(`Order ${order_id} not found, rescheduling`);
+          throw new Error('Order not found - will retry');
+        }
+
+        await processOrder(order);
+      };
+    symptoms:
+      - Jobs fail with "record not found" intermittently
+      - Works fine with manual testing, fails under load
+      - Jobs succeed on retry but fail first attempt
+      - Race condition between trigger and worker
+    detection_pattern: "BEFORE INSERT.*add_job|RETURNS TRIGGER.*add_job(?!.*AFTER)"
+
+  - id: concurrency-starvation
+    title: Low Priority Jobs Starved by High Volume Queue
+    severity: high
+    situation: |
+      Multiple job types in same queue. High-volume jobs (e.g., notifications)
+      starve low-volume but important jobs (e.g., payments). Priority doesn't help.
+    why: |
+      Graphile Worker processes jobs in priority then run_at order. But with high
+      concurrency on one job type, workers stay busy with that type. Even higher
+      priority jobs of other types wait. Single queue becomes bottleneck.
+    solution: |
+      Use queue partitioning and worker pools:
+
+      import { run } from 'graphile-worker';
+
+      // Separate workers for different priorities
+      const criticalRunner = await run({
+        connectionString: process.env.DATABASE_URL,
+        taskList: {
+          process_payment: paymentHandler,
+          send_invoice: invoiceHandler,
+        },
+        concurrency: 5,  // Dedicated capacity for critical
+      });
+
+      const bulkRunner = await run({
+        connectionString: process.env.DATABASE_URL,
+        taskList: {
+          send_notification: notificationHandler,
+          sync_analytics: analyticsHandler,
+        },
+        concurrency: 10,  // Higher for bulk
+      });
+
+      // Or use job_key prefixes for routing
+      // Queue critical jobs with priority
+      SELECT graphile_worker.add_job(
+        'process_payment',
+        '{"order_id": 123}',
+        priority := 0,  -- Highest priority (lower = higher)
+        queue_name := 'critical'  -- Dedicated queue
+      );
+
+      // Queue bulk jobs with lower priority
+      SELECT graphile_worker.add_job(
+        'send_notification',
+        '{"user_id": 456}',
+        priority := 100,
+        queue_name := 'bulk'
+      );
+
+      // Worker subscribes to specific queue
+      const runner = await run({
+        connectionString: process.env.DATABASE_URL,
+        taskDirectory: './tasks',
+        concurrency: 5,
+        // Only process jobs from 'critical' queue
+        // (requires custom job fetching or queue filtering)
+      });
+    symptoms:
+      - Critical jobs delayed despite higher priority
+      - Bulk jobs consume all worker capacity
+      - Uneven processing times across job types
+      - SLA breaches for important jobs
+    detection_pattern: "concurrency:\\s*(\\d{2,})(?!.*queue_name)|add_job(?!.*queue_name|priority)"
+
+  - id: cron-overlap
+    title: Cron Jobs Overlap When Previous Still Running
+    severity: high
+    situation: |
+      Cron job scheduled every 5 minutes. Job takes 7 minutes. Next cron fires
+      while previous still running. Multiple instances of same job run simultaneously.
+    why: |
+      Graphile Worker's cron uses job_key to prevent duplicates, but only checks
+      at scheduling time. If previous job is still running, new one is blocked.
+      But if you're not using job_key, or using replaceable cron, you get overlap.
+    solution: |
+      Configure cron to prevent overlap:
+
+      import { run, parseCronItems } from 'graphile-worker';
+
+      const runner = await run({
+        connectionString: process.env.DATABASE_URL,
+        taskDirectory: './tasks',
+        parsedCronItems: parseCronItems([
+          {
+            task: 'daily_report',
+            pattern: '0 3 * * *',  // 3am daily
+            options: {
+              // Prevent overlap with unique key
+              jobKey: 'daily-report-singleton',
+              jobKeyMode: 'preserve_run_at',  // Skip if already queued
+            },
+          },
+          {
+            task: 'hourly_sync',
+            pattern: '0 * * * *',
+            options: {
+              jobKey: 'hourly-sync',
+              jobKeyMode: 'replace',  // Replace if stuck (dangerous!)
+            },
+          },
+        ]),
+        concurrency: 5,
+      });
+
+      // In long-running cron task, track state
+      export const daily_report: Task = async (payload, helpers) => {
+        // Check if another instance is running
+        const running = await db.query(`
+          SELECT 1 FROM graphile_worker.jobs
+          WHERE task_identifier = 'daily_report'
+            AND locked_at IS NOT NULL
+            AND id != $1
+          LIMIT 1
+        `, [helpers.job.id]);
+
+        if (running.rows.length > 0) {
+          helpers.logger.warn('Another daily_report is running, skipping');
+          return;  // Exit cleanly, don't retry
+        }
+
+        await generateDailyReport();
+      };
+
+      // Crontab file format with options
+      // # Prevent overlap with job key
+      // 0 3 * * * daily_report ?jobKey=daily-report&jobKeyMode=preserve_run_at
+    symptoms:
+      - Same cron job runs multiple times simultaneously
+      - Database locks from concurrent access
+      - Report generated multiple times
+      - Resource exhaustion from parallel jobs
+    detection_pattern: "parseCronItems(?!.*jobKey)|crontab(?!.*jobKey)"
+
+  - id: large-result-memory
+    title: Large Job Results Cause Memory Pressure
+    severity: high
+    situation: |
+      Task returns large result object. Worker memory spikes. With high concurrency,
+      workers run out of memory and crash.
+    why: |
+      Graphile Worker stores job output (return value) in the database. Large
+      results stay in Node.js memory during serialization, then in PostgreSQL.
+      With many concurrent jobs returning large results, both worker and database
+      suffer. Archive table grows huge.
+    solution: |
+      Return minimal results, store data elsewhere:
+
+      import type { Task } from 'graphile-worker';
+
+      // BAD: Returning large results
+      export const generate_report: Task = async (payload, helpers) => {
+        const report = await generateLargeReport();
+        return report;  // 10MB object serialized to database
+      };
+
+      // GOOD: Store result elsewhere, return reference
+      export const generate_report: Task = async (payload, helpers) => {
+        const report = await generateLargeReport();
+
+        // Store in appropriate storage
+        const key = `reports/${payload.reportId}/${Date.now()}.json`;
+        await s3.putObject({
+          Bucket: 'reports',
+          Key: key,
+          Body: JSON.stringify(report),
+        });
+
+        // Return only reference
+        return {
+          status: 'complete',
+          location: `s3://reports/${key}`,
+          generatedAt: new Date().toISOString(),
+        };
+      };
+
+      // For progress tracking without large results
+      export const long_task: Task = async (payload, helpers) => {
+        // Update progress in separate table, not job result
+        await db.query(`
+          INSERT INTO task_progress (task_id, progress, updated_at)
+          VALUES ($1, $2, NOW())
+          ON CONFLICT (task_id) DO UPDATE SET progress = $2, updated_at = NOW()
+        `, [helpers.job.id, 50]);
+
+        const result = await doWork();
+
+        // Minimal return
+        return { success: true, itemsProcessed: result.count };
+      };
+    symptoms:
+      - Worker memory grows over time
+      - Out of memory crashes under load
+      - Job completion slow (serialization)
+      - Archive table bloats quickly
+    detection_pattern: "return\\s+(?:report|data|result|response)\\s*;(?!.*\\{)"
+
+  - id: no-graceful-shutdown
+    title: Jobs Lost on Worker Shutdown
+    severity: high
+    situation: |
+      Deploying new version or restarting worker. Active jobs abandoned mid-processing.
+      Some jobs partially complete, leaving inconsistent state.
+    why: |
+      Without graceful shutdown, worker process terminates with jobs in progress.
+      Jobs stay locked until lock timeout, then retry. But work may be half done.
+      Data left in inconsistent state. Duplicate processing on retry.
+    solution: |
+      Implement proper graceful shutdown:
+
+      import { run, Runner } from 'graphile-worker';
+
+      let runner: Runner;
+
+      async function main() {
+        runner = await run({
+          connectionString: process.env.DATABASE_URL,
+          taskDirectory: './tasks',
+          concurrency: 5,
+        });
+
+        console.log('Worker started');
+      }
+
+      async function shutdown(signal: string) {
+        console.log(`Received ${signal}, starting graceful shutdown`);
+
+        if (runner) {
+          // Stop accepting new jobs
+          await runner.stop();
+          console.log('Worker stopped gracefully');
+        }
+
+        process.exit(0);
+      }
+
+      process.on('SIGTERM', () => shutdown('SIGTERM'));
+      process.on('SIGINT', () => shutdown('SIGINT'));
+
+      // In tasks, make work idempotent
+      export const process_order: Task = async (payload, helpers) => {
+        const { orderId } = payload;
+
+        // Check if already processed
+        const existing = await db.query(
+          'SELECT status FROM order_processing WHERE order_id = $1',
+          [orderId]
+        );
+
+        if (existing.rows[0]?.status === 'complete') {
+          helpers.logger.info(`Order ${orderId} already processed`);
+          return { skipped: true };
+        }
+
+        // Mark as processing
+        await db.query(
+          `INSERT INTO order_processing (order_id, status, started_at)
+           VALUES ($1, 'processing', NOW())
+           ON CONFLICT (order_id) DO UPDATE SET status = 'processing', started_at = NOW()`,
+          [orderId]
+        );
+
+        try {
+          await processOrder(orderId);
+
+          await db.query(
+            'UPDATE order_processing SET status = $1, completed_at = NOW() WHERE order_id = $2',
+            ['complete', orderId]
+          );
+        } catch (error) {
+          await db.query(
+            'UPDATE order_processing SET status = $1, error = $2 WHERE order_id = $3',
+            ['failed', error.message, orderId]
+          );
+          throw error;
+        }
+      };
+
+      main().catch(console.error);
+    symptoms:
+      - Jobs reprocess after restart
+      - Partial data on restart
+      - Duplicate side effects (emails, charges)
+      - Lock timeout delays after restart
+    detection_pattern: "run\\(\\{(?!.*SIGTERM|stop)|runner(?!.*stop\\()"
+
+  - id: sql-api-injection
+    title: SQL Injection in add_job Payload
+    severity: high
+    situation: |
+      Building job payload from user input in SQL trigger or function.
+      Attacker injects malicious JSON that breaks job processing.
+    why: |
+      add_job() takes JSON payload. If you build JSON by string concatenation
+      with user input, attacker can inject malformed JSON or escape quotes.
+      Job fails to process, or worse, payload contains unexpected data.
+    solution: |
+      Always use json_build_object or parameterized queries:
+
+      -- BAD: String concatenation
+      CREATE OR REPLACE FUNCTION queue_user_job()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        -- SQL injection vulnerability!
+        PERFORM graphile_worker.add_job(
+          'process_user',
+          '{"name": "' || NEW.name || '", "email": "' || NEW.email || '"}'
+        );
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      -- User input: name = '", "admin": true, "name": "hacked'
+      -- Results in: {"name": "", "admin": true, "name": "hacked", "email": "..."}
+
+      -- GOOD: Use json_build_object (safe)
+      CREATE OR REPLACE FUNCTION queue_user_job()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        PERFORM graphile_worker.add_job(
+          'process_user',
+          json_build_object(
+            'user_id', NEW.id,
+            'name', NEW.name,
+            'email', NEW.email
+          )
+        );
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      -- GOOD: Use to_json (safe)
+      CREATE OR REPLACE FUNCTION queue_user_job()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        PERFORM graphile_worker.add_job(
+          'process_user',
+          to_json(NEW)::json
+        );
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      // In TypeScript, also validate/sanitize
+      import { quickAddJob } from 'graphile-worker';
+
+      async function queueUserJob(userInput: unknown) {
+        // Validate input
+        const validated = userSchema.parse(userInput);
+
+        // Now safe to queue
+        await quickAddJob(pool, 'process_user', {
+          userId: validated.id,
+          name: validated.name,
+        });
+      }
+    symptoms:
+      - Jobs fail with JSON parse errors
+      - Unexpected fields in job payload
+      - Security audit flags SQL concatenation
+      - Jobs process wrong data
+    detection_pattern: "add_job\\([^)]*'\\{.*\\|\\|.*\\}'|add_job.*\\+.*\\+|json_build_object(?!.*add_job)"
+
+  - id: worker-single-point-failure
+    title: Single Worker Instance as Single Point of Failure
+    severity: medium
+    situation: |
+      Running one worker instance. Worker crashes or host fails. Jobs queue up
+      until worker restarts. No processing during downtime.
+    why: |
+      Single worker means single point of failure. If it dies, all job processing
+      stops. With LISTEN/NOTIFY, there's no polling fallback - jobs wait for
+      notification that never comes (until worker restarts).
+    solution: |
+      Run multiple worker instances with health monitoring:
+
+      import { run, Runner } from 'graphile-worker';
+      import express from 'express';
+
+      const app = express();
+      let runner: Runner;
+      let isHealthy = true;
+
+      async function main() {
+        runner = await run({
+          connectionString: process.env.DATABASE_URL,
+          taskDirectory: './tasks',
+          concurrency: 5,
+          // Enable polling as fallback
+          pollInterval: 1000,  // 1 second poll if LISTEN/NOTIFY fails
+        });
+
+        runner.events.on('pool:error', (error) => {
+          console.error('Pool error:', error);
+          isHealthy = false;
+        });
+
+        runner.events.on('worker:error', (error) => {
+          console.error('Worker error:', error);
+        });
+      }
+
+      // Health check endpoint for orchestrator
+      app.get('/health', (req, res) => {
+        if (isHealthy) {
+          res.json({ status: 'healthy' });
+        } else {
+          res.status(503).json({ status: 'unhealthy' });
+        }
+      });
+
+      // Readiness check
+      app.get('/ready', async (req, res) => {
+        try {
+          // Verify database connection
+          await runner.promise;  // Resolves when stopped, check if running
+          res.json({ status: 'ready' });
+        } catch {
+          res.status(503).json({ status: 'not ready' });
+        }
+      });
+
+      app.listen(3000);
+
+      // Kubernetes deployment example:
+      // replicas: 3  # Multiple instances
+      // livenessProbe:
+      //   httpGet:
+      //     path: /health
+      //     port: 3000
+      // readinessProbe:
+      //   httpGet:
+      //     path: /ready
+      //     port: 3000
+
+      main().catch(console.error);
+    symptoms:
+      - Jobs queue up during worker downtime
+      - No processing after worker crash until manual restart
+      - Single host failure stops all background processing
+      - No visibility into worker health
+    detection_pattern: "run\\(\\{(?!.*pollInterval)|concurrency:.*(?!.*replicas)"

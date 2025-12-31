@@ -1,0 +1,484 @@
+# Inngest Sharp Edges
+# Event-driven serverless pitfalls that cause production headaches
+
+sharp_edges:
+  - id: step-function-timeout
+    summary: Step functions have execution time limits
+    severity: critical
+    situation: |
+      Long-running step takes 2+ hours. Inngest kills the function mid-execution.
+      Work is lost. No partial progress saved. User sees mysterious failure.
+    why: |
+      Inngest step functions have execution limits (varies by plan: 1hr free, 2hr Pro).
+      A single step that exceeds this limit gets terminated. Unlike traditional
+      serverless, the timeout applies to total execution, not individual requests.
+    solution: |
+      # Break long work into smaller steps:
+      ```typescript
+      // WRONG - single long step
+      await step.run('process-all', async () => {
+        for (const item of items) {  // 10,000 items = hours
+          await processItem(item);
+        }
+      });
+
+      // RIGHT - batch into steps
+      const BATCH_SIZE = 100;
+      for (let i = 0; i < items.length; i += BATCH_SIZE) {
+        const batch = items.slice(i, i + BATCH_SIZE);
+        await step.run(`process-batch-${i}`, async () => {
+          for (const item of batch) {
+            await processItem(item);
+          }
+        });
+      }
+      ```
+
+      # For truly long work:
+      - Fan out to child events
+      - Use step.sendEvent() to spawn parallel workers
+      - Each worker handles a chunk
+    symptoms:
+      - Function terminated without error
+      - "Exceeded maximum duration" in logs
+      - Partial work completed, rest lost
+      - Works locally, fails in production
+    detection_pattern: "step\\.run\\([^)]+for\\s*\\("
+    version_range: ">=1.0.0"
+
+  - id: event-payload-size-limit
+    summary: Event payloads have a 512KB limit
+    severity: high
+    situation: |
+      Sending large document content in event payload. Event rejected.
+      Or worse: payload accepted but causes slow processing and memory issues.
+    why: |
+      Inngest stores events and replays them for retries. Large payloads consume
+      storage, slow down the dashboard, and hit the 512KB limit. Events should
+      describe what happened, not carry data.
+    solution: |
+      # Store data externally, pass references:
+      ```typescript
+      // WRONG - data in payload
+      await inngest.send({
+        name: 'document/uploaded',
+        data: {
+          content: largeDocumentString,  // 2MB of text
+          metadata: { ... }
+        }
+      });
+
+      // RIGHT - reference in payload
+      await inngest.send({
+        name: 'document/uploaded',
+        data: {
+          documentId: doc.id,  // Just the ID
+          storageUrl: doc.url, // Where to fetch it
+        }
+      });
+
+      // In function, fetch when needed:
+      const document = await step.run('fetch-document', async () => {
+        return await storage.get(event.data.documentId);
+      });
+      ```
+
+      # Use step.run() to fetch large data:
+      - Data fetched in step is not stored in event
+      - Only the step result is checkpointed
+      - Keep step results small too
+    symptoms:
+      - "Payload too large" error
+      - Slow event ingestion
+      - Dashboard loads slowly
+      - Memory pressure on workers
+    detection_pattern: "inngest\\.send\\([^)]+content:|inngest\\.send\\([^)]+body:"
+    version_range: ">=1.0.0"
+
+  - id: retry-not-idempotent
+    summary: Step operations not safe for retry
+    severity: critical
+    situation: |
+      Step sends email. Function fails later. Retry runs. Email sent again.
+      User gets duplicate emails. Or worse: duplicate charges.
+    why: |
+      Inngest retries the entire function from the last checkpoint. If a step
+      succeeded but wasn't checkpointed (crash right after), it runs again.
+      Any side effects happen twice unless you handle idempotency.
+    solution: |
+      # Use Inngest's built-in idempotency:
+      ```typescript
+      export const processPayment = inngest.createFunction(
+        {
+          id: 'process-payment',
+          // Deduplicate by order ID
+          idempotency: 'event.data.orderId',
+        },
+        { event: 'order/created' },
+        async ({ event, step }) => { ... }
+      );
+      ```
+
+      # For step-level idempotency:
+      ```typescript
+      await step.run('charge-card', async () => {
+        // Use Stripe's idempotency
+        return await stripe.charges.create(
+          { amount: 1000 },
+          { idempotencyKey: `order_${event.data.orderId}` }
+        );
+      });
+      ```
+
+      # For emails/notifications:
+      ```typescript
+      await step.run('send-email', async () => {
+        // Check if already sent
+        const sent = await db.emailLog.findFirst({
+          where: { orderId: event.data.orderId, type: 'confirmation' }
+        });
+        if (sent) return { skipped: true };
+
+        await resend.emails.send({ ... });
+        await db.emailLog.create({ orderId: event.data.orderId, type: 'confirmation' });
+      });
+      ```
+    symptoms:
+      - Duplicate emails sent
+      - Duplicate charges created
+      - Duplicate database records
+      - Side effects happen multiple times
+    detection_pattern: null
+    version_range: ">=1.0.0"
+
+  - id: step-result-too-large
+    summary: Step results are stored and have size limits
+    severity: high
+    situation: |
+      Step fetches 50MB of data and returns it. Function slows to a crawl.
+      Eventually hits memory limits or storage quotas.
+    why: |
+      Every step result is durably stored for resume capability. Large results
+      consume storage, slow serialization, and can exceed limits. Step results
+      should be minimal - IDs, status, small summaries.
+    solution: |
+      # Return minimal data from steps:
+      ```typescript
+      // WRONG - returning large data
+      const data = await step.run('fetch-data', async () => {
+        return await db.records.findMany();  // 100K records
+      });
+
+      // RIGHT - return IDs, fetch later
+      const recordIds = await step.run('get-record-ids', async () => {
+        const records = await db.records.findMany({ select: { id: true } });
+        return records.map(r => r.id);
+      });
+
+      // Process in batches with small results
+      for (const batchIds of chunk(recordIds, 100)) {
+        await step.run(`process-${batchIds[0]}`, async () => {
+          const records = await db.records.findMany({
+            where: { id: { in: batchIds } }
+          });
+          // Process and return status only
+          return { processed: batchIds.length };
+        });
+      }
+      ```
+
+      # Use external storage for large intermediate data:
+      - Store in S3/database
+      - Pass reference between steps
+    symptoms:
+      - Function runs slowly
+      - High memory usage
+      - "Step output too large" error
+      - Dashboard shows large step data
+    detection_pattern: null
+    version_range: ">=1.0.0"
+
+  - id: cold-start-on-vercel
+    summary: Vercel function cold starts can delay Inngest execution
+    severity: medium
+    situation: |
+      Inngest function on Vercel has 2-5 second cold start. User expects
+      near-instant processing. Perceived as slow or broken.
+    why: |
+      Inngest invokes your function via HTTP. If your Vercel function is cold,
+      the first step has cold start latency. For time-sensitive operations,
+      this matters. Heavy dependencies make it worse.
+    solution: |
+      # Reduce cold start time:
+      ```typescript
+      // 1. Use edge runtime if possible
+      export const runtime = 'edge';
+
+      // 2. Minimize dependencies
+      // Don't import heavy libs at top level
+      // Use dynamic imports inside steps
+
+      // 3. Keep function bundles small
+      // Check with: npx @next/bundle-analyzer
+
+      // 4. Warm functions with cron
+      export const warmUp = inngest.createFunction(
+        { id: 'warm-up' },
+        { cron: '*/5 * * * *' },  // Every 5 minutes
+        async ({ step }) => {
+          // Just return - keeps function warm
+          return { status: 'warm' };
+        }
+      );
+      ```
+
+      # Accept cold starts for background work:
+      - Background jobs don't need instant response
+      - 2-second delay on a 10-minute job is fine
+      - Only optimize if user-facing latency matters
+    symptoms:
+      - First execution slow, subsequent fast
+      - "Function took 3 seconds to start"
+      - Timeout on functions that should be quick
+    detection_pattern: null
+    version_range: ">=1.0.0"
+
+  - id: missing-serve-handler
+    summary: Forgot to export the serve handler or register functions
+    severity: critical
+    situation: |
+      Functions defined but never execute. Events sent, nothing happens.
+      Dashboard shows events but no function runs.
+    why: |
+      Inngest functions must be registered with serve() and exported as HTTP
+      handlers. Missing the serve export means Inngest can't invoke your
+      functions. Missing function registration means it won't run.
+    solution: |
+      # Complete setup for Next.js App Router:
+      ```typescript
+      // lib/inngest/client.ts
+      import { Inngest } from 'inngest';
+      export const inngest = new Inngest({ id: 'my-app' });
+
+      // lib/inngest/functions.ts
+      import { inngest } from './client';
+      export const myFunction = inngest.createFunction(...);
+
+      // app/api/inngest/route.ts - THE CRITICAL FILE
+      import { serve } from 'inngest/next';
+      import { inngest } from '@/lib/inngest/client';
+      import { myFunction } from '@/lib/inngest/functions';
+
+      export const { GET, POST, PUT } = serve({
+        client: inngest,
+        functions: [myFunction],  // Must list ALL functions!
+      });
+      ```
+
+      # Common mistakes:
+      - Forgot to create app/api/inngest/route.ts
+      - Created file but didn't export GET, POST, PUT
+      - Exported but forgot to include function in array
+      - Function in array but wrong import path
+    symptoms:
+      - Events sent but no function executes
+      - "Function not found" in Inngest dashboard
+      - Dev server shows no Inngest routes
+      - inngest dev shows 0 functions
+    detection_pattern: "export const \\{ GET, POST, PUT \\} = serve"
+    version_range: ">=1.0.0"
+
+  - id: dev-server-not-running
+    summary: Inngest dev server not running during local development
+    severity: medium
+    situation: |
+      Sending events in local dev. Nothing happens. Check logs - nothing.
+      Events go to production Inngest cloud instead of local.
+    why: |
+      Inngest needs its dev server (inngest dev) running locally to receive
+      events. Without it, events either fail or go to cloud (depending on
+      config). Functions never execute locally.
+    solution: |
+      # Always run inngest dev alongside your app:
+      ```bash
+      # Terminal 1: Your app
+      npm run dev
+
+      # Terminal 2: Inngest dev server
+      npx inngest-cli@latest dev
+      ```
+
+      # Or use concurrently:
+      ```json
+      // package.json
+      {
+        "scripts": {
+          "dev": "concurrently \"next dev\" \"inngest-cli dev\""
+        }
+      }
+      ```
+
+      # Inngest dev dashboard:
+      - Open http://localhost:8288
+      - See registered functions
+      - View event history
+      - Replay events for debugging
+    symptoms:
+      - Events sent, nothing happens locally
+      - No function logs in terminal
+      - Works in production but not locally
+      - "Connection refused" errors
+    detection_pattern: null
+    version_range: ">=1.0.0"
+
+  - id: step-sleep-in-loop
+    summary: Using step.sleep() inside a loop creates many sleep operations
+    severity: medium
+    situation: |
+      Processing 1000 items with sleep between each. Function creates 1000
+      sleep checkpoints. Slow, expensive, and hits limits.
+    why: |
+      Each step.sleep() is a separate checkpoint stored by Inngest. In a loop,
+      this creates N checkpoints. High checkpoint count slows the function
+      and can hit plan limits.
+    solution: |
+      # Batch operations, sleep once per batch:
+      ```typescript
+      // WRONG - sleep per item
+      for (const item of items) {
+        await step.run(`process-${item.id}`, () => processItem(item));
+        await step.sleep(`wait-${item.id}`, '1s');  // 1000 sleeps!
+      }
+
+      // RIGHT - batch with single sleep
+      const BATCH_SIZE = 50;
+      for (let i = 0; i < items.length; i += BATCH_SIZE) {
+        const batch = items.slice(i, i + BATCH_SIZE);
+
+        await step.run(`batch-${i}`, async () => {
+          for (const item of batch) {
+            await processItem(item);
+            await delay(100);  // In-step delay, not checkpoint
+          }
+        });
+
+        // Only sleep between batches if needed
+        if (i + BATCH_SIZE < items.length) {
+          await step.sleep(`batch-wait-${i}`, '5s');
+        }
+      }
+      ```
+
+      # Use fan-out for parallel processing:
+      ```typescript
+      await step.sendEvent(
+        'spawn-workers',
+        items.map(item => ({
+          name: 'item/process',
+          data: { itemId: item.id }
+        }))
+      );
+      ```
+    symptoms:
+      - Function has thousands of steps
+      - Slow function execution
+      - High step count in dashboard
+      - Hitting plan limits
+    detection_pattern: "for.*step\\.sleep|while.*step\\.sleep"
+    version_range: ">=1.0.0"
+
+  - id: waitForEvent-timeout-infinite
+    summary: step.waitForEvent without timeout waits forever
+    severity: high
+    situation: |
+      Waiting for user action with waitForEvent. User never acts. Function
+      waits forever. Resources tied up. No visibility into stalled functions.
+    why: |
+      step.waitForEvent waits until matching event arrives or timeout.
+      Without timeout, it waits indefinitely. These zombie functions consume
+      resources and are hard to find.
+    solution: |
+      # Always set a timeout:
+      ```typescript
+      // WRONG - waits forever
+      const response = await step.waitForEvent('user-response', {
+        event: 'user/responded',
+        match: 'data.userId',
+      });
+
+      // RIGHT - timeout with handling
+      const response = await step.waitForEvent('user-response', {
+        event: 'user/responded',
+        match: 'data.userId',
+        timeout: '24h',  // Maximum wait time
+      });
+
+      if (!response) {
+        // Handle timeout case
+        await step.run('send-reminder', () => sendReminder(userId));
+        // Or cancel the workflow
+        return { status: 'timed_out' };
+      }
+      ```
+
+      # Common timeout patterns:
+      - User action: 24h-7d
+      - Payment confirmation: 1h
+      - External webhook: 15m-1h
+      - Always handle null (timeout) case
+    symptoms:
+      - Functions stuck in "waiting" state
+      - Resource usage grows over time
+      - Dashboard shows old running functions
+      - No way to know what's stalled
+    detection_pattern: "waitForEvent\\([^)]+\\)(?!.*timeout)"
+    version_range: ">=1.0.0"
+
+  - id: concurrency-not-set
+    summary: No concurrency limits allowing downstream service overload
+    severity: high
+    situation: |
+      Burst of 10,000 events. 10,000 functions start simultaneously. Database
+      connection pool exhausted. External API rate limited. Everything fails.
+    why: |
+      Inngest scales fast - that's the point. But downstream services don't
+      scale infinitely. Without concurrency limits, you can DDoS your own
+      database or hit external API rate limits.
+    solution: |
+      # Set appropriate concurrency limits:
+      ```typescript
+      export const processOrder = inngest.createFunction(
+        {
+          id: 'process-order',
+          concurrency: {
+            limit: 10,  // Max 10 concurrent executions
+          },
+        },
+        { event: 'order/placed' },
+        async ({ event, step }) => { ... }
+      );
+      ```
+
+      # Per-key concurrency (per user/tenant):
+      ```typescript
+      {
+        concurrency: {
+          limit: 5,
+          key: 'event.data.userId',  // 5 per user
+        },
+      }
+      ```
+
+      # Guidelines for limits:
+      - Database: Match connection pool size
+      - External APIs: Match rate limit
+      - Email: 50-100/minute typically
+      - Payments: Start at 5-10
+      - Start conservative, increase with monitoring
+    symptoms:
+      - Database connection exhausted
+      - "Too many requests" from external APIs
+      - Cascading failures
+      - All functions fail simultaneously
+    detection_pattern: "createFunction\\([^)]+\\)(?!.*concurrency)"
+    version_range: ">=1.0.0"

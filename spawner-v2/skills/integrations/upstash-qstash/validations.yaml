@@ -1,0 +1,179 @@
+# Upstash QStash Validations
+# Automated checks to catch message queue implementation mistakes
+
+validations:
+  - id: qstash-signature-verification
+    name: Webhook signature verification
+    severity: critical
+    type: regex
+    pattern: "Receiver|receiver\\.verify"
+    message: "QStash webhook handlers must verify signatures using Receiver"
+    fix_action: "Add signature verification: const receiver = new Receiver({ currentSigningKey, nextSigningKey }); await receiver.verify({ signature, body, url })"
+    applies_to:
+      - "**/webhook*.ts"
+      - "**/webhook*.js"
+      - "**/qstash*.ts"
+      - "**/qstash*.js"
+      - "**/api/**/route.ts"
+      - "**/api/**/route.js"
+    inverse: true  # Should find this pattern in webhook handlers
+
+  - id: qstash-signing-keys-present
+    name: Both signing keys configured
+    severity: critical
+    type: regex
+    pattern: "currentSigningKey.*nextSigningKey|nextSigningKey.*currentSigningKey"
+    message: "QStash Receiver must have both currentSigningKey and nextSigningKey for key rotation"
+    fix_action: "Configure both keys: new Receiver({ currentSigningKey: process.env.QSTASH_CURRENT_SIGNING_KEY, nextSigningKey: process.env.QSTASH_NEXT_SIGNING_KEY })"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+    inverse: true  # Should find both keys
+
+  - id: qstash-token-hardcoded
+    name: QStash token hardcoded
+    severity: critical
+    type: regex
+    pattern: "token:\\s*['\"]qstash_[a-zA-Z0-9]+"
+    message: "QStash token must not be hardcoded - use environment variables"
+    fix_action: "Use process.env.QSTASH_TOKEN"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  - id: qstash-signing-key-hardcoded
+    name: QStash signing keys hardcoded
+    severity: critical
+    type: regex
+    pattern: "(currentSigningKey|nextSigningKey):\\s*['\"]sig_[a-zA-Z0-9]+"
+    message: "QStash signing keys must not be hardcoded"
+    fix_action: "Use process.env.QSTASH_CURRENT_SIGNING_KEY and process.env.QSTASH_NEXT_SIGNING_KEY"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: qstash-localhost-url
+    name: Localhost URL in QStash publish
+    severity: critical
+    type: regex
+    pattern: "url:\\s*['\"]https?://localhost|url:\\s*['\"]https?://127\\.0\\.0\\.1"
+    message: "QStash cannot reach localhost - endpoints must be publicly accessible"
+    fix_action: "Use a public URL (e.g., your deployed domain or ngrok for testing)"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: qstash-http-url
+    name: HTTP URL instead of HTTPS
+    severity: error
+    type: regex
+    pattern: "url:\\s*['\"]http://(?!localhost|127\\.0\\.0\\.1)"
+    message: "QStash requires HTTPS URLs for security"
+    fix_action: "Change http:// to https://"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: qstash-missing-error-handling
+    name: QStash publish without error handling
+    severity: error
+    type: regex
+    pattern: "await qstash\\.publish(?:JSON)?\\([^)]+\\)(?![^;]*catch)"
+    message: "QStash publish calls should have error handling for rate limits and failures"
+    fix_action: "Wrap in try/catch and handle errors appropriately"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: qstash-raw-body-required
+    name: Using parsed JSON for signature verification
+    severity: critical
+    type: regex
+    pattern: "req\\.json\\(\\).*receiver\\.verify|receiver\\.verify.*req\\.json\\(\\)"
+    message: "Signature verification requires raw body (req.text()), not parsed JSON"
+    fix_action: "Use await req.text() to get raw body for verification"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: qstash-callback-missing-verification
+    name: Callback endpoint without signature verification
+    severity: critical
+    type: regex
+    pattern: "callback|failureCallback"
+    message: "Callback endpoints must also verify signatures - they receive QStash requests too"
+    fix_action: "Add Receiver signature verification to callback handlers"
+    applies_to:
+      - "**/callback*.ts"
+      - "**/callback*.js"
+    inverse: false  # This is a reminder when callbacks are used
+
+  - id: qstash-schedule-missing-destination
+    name: Schedule without destination URL
+    severity: error
+    type: regex
+    pattern: "schedules\\.create\\([^)]*\\)(?!.*destination)"
+    message: "QStash schedules require a destination URL"
+    fix_action: "Add destination: 'https://your-app.com/api/endpoint' to schedule options"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: qstash-deduplication-critical-ops
+    name: Critical operation without deduplication
+    severity: warning
+    type: regex
+    pattern: "(charge|payment|subscription|order).*publishJSON(?![^;]*deduplicationId)"
+    message: "Critical operations (payments, orders) should use deduplicationId to prevent duplicates"
+    fix_action: "Add deduplicationId: 'unique-operation-id' to prevent duplicate processing"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: qstash-missing-retries-config
+    name: Missing retry configuration
+    severity: warning
+    type: regex
+    pattern: "publishJSON\\([^)]*\\)(?!.*retries)"
+    message: "Consider configuring retries for your specific use case"
+    fix_action: "Add retries option if default (3) doesn't match your needs"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: qstash-large-body-warning
+    name: Potentially large message body
+    severity: warning
+    type: regex
+    pattern: "body:\\s*\\{[^}]{500,}\\}"
+    message: "Large message bodies may hit size limits - consider sending references instead"
+    fix_action: "Send IDs/references and fetch full data in the handler"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: qstash-url-group-without-name
+    name: URL group operations without name
+    severity: error
+    type: regex
+    pattern: "urlGroups\\.(add|remove)Endpoints\\([^)]*\\)(?!.*name)"
+    message: "URL group operations require a group name"
+    fix_action: "Add name: 'your-group-name' to URL group options"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: qstash-env-vars-in-client
+    name: Environment variables accessed in client code
+    severity: critical
+    type: regex
+    pattern: "process\\.env\\.QSTASH"
+    message: "QStash tokens and signing keys must only be used server-side"
+    fix_action: "Ensure QStash operations are only in server components or API routes"
+    applies_to:
+      - "**/*.tsx"
+      - "**/*.jsx"
+      - "**/components/**/*.ts"
+      - "**/components/**/*.js"
