@@ -1,0 +1,299 @@
+# Git Time Travel Sharp Edges
+
+sharp_edges:
+  - id: force-push-disaster
+    summary: Force push destroys team's work
+    severity: high
+    situation: Teammate loses hours of work to force push
+    why: |
+      No warning given.
+      Used --force instead of --force-with-lease.
+      Didn't check if others pushed.
+    solution: |
+      ## Safe Force Pushing
+
+      ### The Disaster
+
+      ```
+      WHAT HAPPENED:
+
+      1. You rebased locally
+      2. Teammate pushed to same branch
+      3. You force pushed
+      4. Their work is gone (from remote)
+      5. They pull and lose their history
+      ```
+
+      ### Prevention Protocol
+
+      | Step | Why |
+      |------|-----|
+      | 1. Announce | Slack: "Force pushing to X in 5 min" |
+      | 2. Wait | Let people save their work |
+      | 3. --force-with-lease | Fails if remote changed |
+      | 4. Confirm | "Done, please re-pull" |
+
+      ### Recovery (If It Happens)
+
+      ```bash
+      # Teammate's machine (if they had the commits):
+      git reflog
+      # Find their lost work
+
+      # Or from backup branch:
+      git checkout backup-branch
+      ```
+
+      ### Force-with-lease vs Force
+
+      ```bash
+      # DANGEROUS - ignores remote state
+      git push --force
+
+      # SAFE - fails if remote has new commits
+      git push --force-with-lease
+
+      # EVEN SAFER - specify expected ref
+      git push --force-with-lease=branch:abc1234
+      ```
+
+      ### When Force Push is OK
+
+      | Situation | Proceed? |
+      |-----------|----------|
+      | Personal feature branch | Yes |
+      | Shared branch, coordinated | Yes, with protocol |
+      | Main/master | Almost never |
+      | Secrets leaked | Yes, with coordination |
+    symptoms:
+      - "Where's my work?"
+      - Angry teammates
+      - Lost commits
+      - Broken builds
+    detection_pattern: "force push|lost commit|my work is gone|disappeared"
+
+  - id: reflog-timeout
+    summary: Reflog entries expire before recovery
+    severity: medium
+    situation: Needed to recover but reflog already pruned
+    why: |
+      Waited too long.
+      Ran aggressive gc.
+      Didn't know about expiry.
+    solution: |
+      ## Reflog Expiry
+
+      ### Default Expiration
+
+      ```
+      REFLOG EXPIRES:
+      - Reachable commits: 90 days
+      - Unreachable commits: 30 days
+
+      After this, git gc removes them!
+      ```
+
+      ### Checking Your Settings
+
+      ```bash
+      # See current settings
+      git config --get gc.reflogExpire
+      git config --get gc.reflogExpireUnreachable
+
+      # Extend if needed
+      git config --global gc.reflogExpire "180 days"
+      git config --global gc.reflogExpireUnreachable "90 days"
+      ```
+
+      ### Before It's Too Late
+
+      | Action | When |
+      |--------|------|
+      | Tag important states | Before risky operations |
+      | Backup branch | Before rebase |
+      | Push to remote | Remote has own reflog |
+      | Check reflog | After any "oops" moment |
+
+      ### Emergency Recovery
+
+      ```bash
+      # If reflog is empty, try fsck
+      git fsck --lost-found
+
+      # This finds ALL unreachable objects
+      # Including those not in reflog
+
+      # Check .git/lost-found/commit/
+      ```
+
+      ### Creating Safety Points
+
+      ```bash
+      # Before dangerous operation:
+      git tag BACKUP-before-rebase
+
+      # Tags don't expire like reflog!
+      # Delete after you're safe:
+      git tag -d BACKUP-before-rebase
+      ```
+    symptoms:
+      - Reflog empty
+      - "Where's my commit?"
+      - Can't recover old work
+      - Ran git gc
+    detection_pattern: "reflog empty|can't find|too late|expired"
+
+  - id: bisect-confusion
+    summary: Bisect gives wrong result
+    severity: medium
+    situation: Bisect points to wrong commit as cause
+    why: |
+      Tests inconsistent.
+      Build was broken at some points.
+      Wrong good/bad marking.
+    solution: |
+      ## Bisect Troubleshooting
+
+      ### Common Failures
+
+      | Issue | Cause | Fix |
+      |-------|-------|-----|
+      | Wrong commit found | Flaky test | Use deterministic test |
+      | Bisect endless | Broken commits | Use skip |
+      | False result | Build broken mid-range | Check build first |
+
+      ### The Reproducibility Problem
+
+      ```bash
+      # BEFORE bisecting:
+
+      1. Make sure your test is deterministic
+      2. Run it 3 times at "good" point
+      3. Run it 3 times at "bad" point
+      4. If any inconsistency, fix test first
+      ```
+
+      ### Using Skip Correctly
+
+      ```bash
+      # Can't test this commit (won't build, etc)
+      git bisect skip
+
+      # Multiple skips at once
+      git bisect skip v1.0.0..v1.0.5
+
+      # Warning: Too many skips = unreliable result
+      ```
+
+      ### The Build Check Pattern
+
+      ```bash
+      #!/bin/bash
+      # test-for-bisect.sh
+
+      # First, make sure it builds
+      if ! npm run build; then
+        exit 125  # Skip this commit
+      fi
+
+      # Then run the actual test
+      if npm run test:specific; then
+        exit 0  # Good
+      else
+        exit 1  # Bad
+      fi
+      ```
+
+      ### Verification
+
+      ```bash
+      # After bisect finds the commit:
+
+      1. Read the commit
+      2. Does it make sense as the cause?
+      3. Verify: checkout commit before, test good
+      4. Verify: checkout bisect result, test bad
+      5. If doesn't make sense, re-run bisect
+      ```
+    symptoms:
+      - "This commit doesn't make sense"
+      - Wrong commit identified
+      - Bug still exists after "fix"
+      - Bisect result surprising
+    detection_pattern: "wrong commit|doesn't make sense|still broken|bisect wrong"
+
+  - id: rebase-conflicts-loop
+    summary: Endless conflict resolution during rebase
+    severity: medium
+    situation: Same conflicts keep appearing during rebase
+    why: |
+      Many commits touch same area.
+      No rerere enabled.
+      Semantic conflicts.
+    solution: |
+      ## Managing Rebase Conflicts
+
+      ### Enable Rerere
+
+      ```bash
+      # "Reuse Recorded Resolution"
+      git config --global rerere.enabled true
+
+      # Now git remembers how you resolved conflicts
+      # And automatically applies same resolution
+      ```
+
+      ### The Conflict Loop
+
+      ```
+      WHY IT HAPPENS:
+
+      Commit 1: Change line 10
+      Commit 2: Also change line 10
+      Commit 3: Also change line 10
+
+      Rebasing requires resolving each separately!
+      ```
+
+      ### Solutions
+
+      | Strategy | When |
+      |----------|------|
+      | Squash first | If commits can combine |
+      | Merge instead | Preserve history, one resolution |
+      | Abort and rethink | If too painful |
+
+      ### Step-by-Step Conflict Resolution
+
+      ```bash
+      # 1. See what conflicts
+      git status
+
+      # 2. For each conflicted file:
+      #    - Edit to resolve
+      #    - git add <file>
+
+      # 3. Continue rebase
+      git rebase --continue
+
+      # 4. If stuck
+      git rebase --abort  # Start over
+
+      # 5. If want to skip this commit
+      git rebase --skip
+      ```
+
+      ### When to Give Up
+
+      | Sign | Alternative |
+      |------|-------------|
+      | > 10 conflicts | Consider merge |
+      | Same conflict 3x | Squash first |
+      | Conflicts you don't understand | Get help |
+      | Hours of work | Maybe not worth it |
+    symptoms:
+      - Same conflict repeatedly
+      - Hours in rebase
+      - Confused about state
+      - Ready to give up
+    detection_pattern: "conflict again|same conflict|rebase forever|abort"
