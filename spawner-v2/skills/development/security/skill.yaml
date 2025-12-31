@@ -234,3 +234,143 @@ tags:
   - authorization
   - vulnerabilities
   - secure-coding
+
+# Quick Wins - Immediate security improvements with high impact
+quick_wins:
+  - id: add-security-headers
+    title: Add Security Headers
+    effort: 15 minutes
+    impact: high
+    description: |
+      Add essential security headers to all responses. Prevents clickjacking,
+      XSS, MIME sniffing attacks. Single config change, immediate protection.
+    implementation: |
+      ```typescript
+      // next.config.js
+      const securityHeaders = [
+        { key: 'X-Content-Type-Options', value: 'nosniff' },
+        { key: 'X-Frame-Options', value: 'DENY' },
+        { key: 'X-XSS-Protection', value: '1; mode=block' },
+        { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+        { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+      ];
+
+      module.exports = {
+        async headers() {
+          return [{ source: '/:path*', headers: securityHeaders }];
+        },
+      };
+      ```
+    validates_with: missing-security-headers
+
+  - id: httponly-cookies
+    title: Make Session Cookies HttpOnly
+    effort: 5 minutes
+    impact: high
+    description: |
+      Add HttpOnly flag to all session/auth cookies. Prevents JavaScript access
+      to cookies, limiting XSS impact. If XSS happens, attacker can't steal session.
+    implementation: |
+      ```typescript
+      // Set cookie properly
+      res.setHeader('Set-Cookie', [
+        `session=${token}; HttpOnly; Secure; SameSite=Strict; Path=/`,
+      ]);
+
+      // Or with cookie library
+      cookies.set('session', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+      });
+      ```
+    validates_with: http-only-cookie-missing
+
+  - id: rate-limit-auth
+    title: Add Rate Limiting to Auth Endpoints
+    effort: 30 minutes
+    impact: critical
+    description: |
+      Prevent brute force attacks on login, registration, password reset.
+      5 attempts per minute is a good starting point. Blocks automated attacks.
+    implementation: |
+      ```typescript
+      import { Ratelimit } from '@upstash/ratelimit';
+      import { Redis } from '@upstash/redis';
+
+      const ratelimit = new Ratelimit({
+        redis: Redis.fromEnv(),
+        limiter: Ratelimit.slidingWindow(5, '1m'),
+        analytics: true,
+      });
+
+      export async function POST(req: Request) {
+        const ip = req.headers.get('x-forwarded-for') ?? '127.0.0.1';
+        const { success, remaining } = await ratelimit.limit(ip);
+
+        if (!success) {
+          return new Response('Too many requests', { status: 429 });
+        }
+        // Continue with login...
+      }
+      ```
+    validates_with: missing-rate-limiting
+
+  - id: env-validation
+    title: Validate Environment Variables at Startup
+    effort: 10 minutes
+    impact: medium
+    description: |
+      Fail fast if required secrets are missing. Prevents deploying with missing
+      config. Catches issues before they become runtime errors or security holes.
+    implementation: |
+      ```typescript
+      // lib/env.ts
+      import { z } from 'zod';
+
+      const envSchema = z.object({
+        DATABASE_URL: z.string().url(),
+        NEXTAUTH_SECRET: z.string().min(32),
+        STRIPE_SECRET_KEY: z.string().startsWith('sk_'),
+      });
+
+      // Validate at startup
+      const parsed = envSchema.safeParse(process.env);
+      if (!parsed.success) {
+        console.error('Invalid environment:', parsed.error.format());
+        process.exit(1);
+      }
+
+      export const env = parsed.data;
+      ```
+    validates_with: secrets-in-code
+
+  - id: csp-basic
+    title: Add Basic Content Security Policy
+    effort: 20 minutes
+    impact: high
+    description: |
+      Restrict where scripts, styles, and resources can load from. Significantly
+      reduces XSS impact even if vulnerability exists. Start restrictive, loosen as needed.
+    implementation: |
+      ```typescript
+      // Start with restrictive CSP
+      const csp = [
+        "default-src 'self'",
+        "script-src 'self'",  // Add 'unsafe-inline' only if required
+        "style-src 'self' 'unsafe-inline'",  // Most apps need inline styles
+        "img-src 'self' data: https:",
+        "font-src 'self'",
+        "connect-src 'self' https://api.yoursite.com",
+        "frame-ancestors 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+      ].join('; ');
+
+      // In next.config.js headers
+      { key: 'Content-Security-Policy', value: csp }
+
+      // Test with Report-Only first
+      { key: 'Content-Security-Policy-Report-Only', value: csp }
+      ```
+    validates_with: xss-unescaped-output

@@ -14,6 +14,33 @@ validations:
       - "*.tsx"
       - "*.ts"
       - "middleware.ts"
+    test_cases:
+      should_match:
+        - |
+          const { data: { session } } = await supabase.auth.getSession()
+          if (session?.user) {
+            // Do something
+          }
+        - |
+          const session = await supabase.auth.getSession()
+          return session.data.user
+        - |
+          await supabase.auth.getSession()
+          const user = session?.user
+      should_not_match:
+        - |
+          const { data: { user } } = await supabase.auth.getUser()
+          if (user) {
+            // Secure check
+          }
+        - |
+          // Get session for display, but verify with getUser
+          const { data: { session } } = await supabase.auth.getSession()
+          const { data: { user } } = await supabase.auth.getUser()
+        - |
+          // Just getting session for token, not for auth check
+          const { data: { session } } = await supabase.auth.getSession()
+          const token = session?.access_token
 
   - id: auth-missing-callback
     name: OAuth Without Callback Route
@@ -24,6 +51,21 @@ validations:
     fix_action: "Create app/auth/callback/route.ts to handle OAuth redirects"
     applies_to:
       - "app/**/*"
+    test_cases:
+      should_match:
+        - description: "Project with OAuth but no callback route"
+          files:
+            - "app/login/page.tsx"  # has signInWithOAuth
+          missing:
+            - "app/auth/callback/route.ts"
+      should_not_match:
+        - description: "Project with OAuth and callback route"
+          files:
+            - "app/login/page.tsx"
+            - "app/auth/callback/route.ts"
+        - description: "Project without OAuth"
+          files:
+            - "app/login/page.tsx"  # only has signInWithPassword
 
   - id: auth-browser-client-server
     name: Browser Client in Server Context
@@ -39,6 +81,36 @@ validations:
       - "app/**/layout.tsx"
       - "app/actions*.ts"
       - "middleware.ts"
+    test_cases:
+      should_match:
+        - |
+          import { createBrowserClient } from '@supabase/ssr'
+          import { cookies } from 'next/headers'
+
+          export async function getData() {
+            const supabase = createBrowserClient(...)
+          }
+        - |
+          import { createBrowserClient } from '@supabase/ssr'
+
+          export async function POST(request: Request) {
+            const supabase = createBrowserClient(...)
+          }
+      should_not_match:
+        - |
+          'use client'
+          import { createBrowserClient } from '@supabase/ssr'
+
+          export function MyComponent() {
+            const supabase = createBrowserClient(...)
+          }
+        - |
+          import { createServerClient } from '@supabase/ssr'
+          import { cookies } from 'next/headers'
+
+          export async function getData() {
+            const supabase = createServerClient(...)
+          }
 
   - id: auth-no-middleware
     name: Protected Routes Without Middleware
@@ -51,6 +123,23 @@ validations:
       - "app/dashboard/**"
       - "app/admin/**"
       - "app/account/**"
+    test_cases:
+      should_match:
+        - description: "Project with protected routes but no middleware"
+          files:
+            - "app/dashboard/page.tsx"
+            - "app/admin/settings/page.tsx"
+          missing:
+            - "middleware.ts"
+      should_not_match:
+        - description: "Project with middleware"
+          files:
+            - "app/dashboard/page.tsx"
+            - "middleware.ts"
+        - description: "Project without protected routes"
+          files:
+            - "app/page.tsx"
+            - "app/about/page.tsx"
 
   - id: auth-hardcoded-redirect
     name: Hardcoded Auth Redirect URL
@@ -64,6 +153,31 @@ validations:
     applies_to:
       - "*.tsx"
       - "*.ts"
+    test_cases:
+      should_match:
+        - |
+          await supabase.auth.signInWithOAuth({
+            provider: 'google',
+            options: {
+              redirectTo: 'http://localhost:3000/auth/callback'
+            }
+          })
+        - |
+          const redirect = 'https://localhost:3000/dashboard'
+        - |
+          redirectTo: "http://127.0.0.1:3000/auth/callback"
+      should_not_match:
+        - |
+          await supabase.auth.signInWithOAuth({
+            provider: 'google',
+            options: {
+              redirectTo: `${window.location.origin}/auth/callback`
+            }
+          })
+        - |
+          const redirectTo = process.env.NEXT_PUBLIC_SITE_URL + '/auth/callback'
+        - |
+          redirectTo: `${origin}/auth/callback`
 
   - id: auth-missing-error-handling
     name: Auth Call Without Error Handling
@@ -76,6 +190,33 @@ validations:
     applies_to:
       - "*.tsx"
       - "*.ts"
+    test_cases:
+      should_match:
+        - |
+          await supabase.auth.signInWithPassword({
+            email,
+            password
+          })
+          redirect('/dashboard')
+        - |
+          await supabase.auth.signUp({ email, password })
+          return { success: true }
+        - |
+          await supabase.auth.signOut()
+          router.push('/')
+      should_not_match:
+        - |
+          const { error } = await supabase.auth.signInWithPassword({
+            email,
+            password
+          })
+          if (error) return { error: error.message }
+        - |
+          const { data, error } = await supabase.auth.signUp({ email, password })
+          if (error) throw error
+        - |
+          const { error } = await supabase.auth.signOut()
+          if (!error) redirect('/')
 
   - id: auth-no-revalidate
     name: Auth Action Without Revalidation
@@ -89,6 +230,37 @@ validations:
     applies_to:
       - "app/actions*.ts"
       - "**/actions/*.ts"
+    test_cases:
+      should_match:
+        - |
+          'use server'
+          export async function signOut() {
+            const supabase = await createClient()
+            await supabase.auth.signOut()
+            redirect('/')
+          }
+        - |
+          const { error } = await supabase.auth.signInWithPassword({
+            email, password
+          })
+          redirect('/dashboard')
+      should_not_match:
+        - |
+          'use server'
+          export async function signOut() {
+            const supabase = await createClient()
+            await supabase.auth.signOut()
+            revalidatePath('/', 'layout')
+            redirect('/')
+          }
+        - |
+          const { error } = await supabase.auth.signInWithPassword({
+            email, password
+          })
+          if (!error) {
+            revalidatePath('/', 'layout')
+            redirect('/dashboard')
+          }
 
   - id: auth-client-side-protection
     name: Client-Only Route Protection
@@ -101,3 +273,54 @@ validations:
     fix_action: "Move protection to middleware.ts for better UX"
     applies_to:
       - "app/**/page.tsx"
+    test_cases:
+      should_match:
+        - |
+          'use client'
+          import { useEffect } from 'react'
+          import { useRouter } from 'next/navigation'
+
+          export default function Dashboard() {
+            const router = useRouter()
+
+            useEffect(() => {
+              supabase.auth.getUser().then(({ data }) => {
+                if (!data.user) router.redirect('/login')
+              })
+            }, [])
+
+            return <div>Dashboard Content</div>
+          }
+        - |
+          'use client'
+
+          export default function ProtectedPage() {
+            const { data } = await supabase.auth.getUser()
+            if (!data.user) redirect('/login')
+          }
+      should_not_match:
+        - |
+          // Server Component - no 'use client'
+          import { redirect } from 'next/navigation'
+
+          export default async function Dashboard() {
+            const { data: { user } } = await supabase.auth.getUser()
+            if (!user) redirect('/login')
+            return <div>Dashboard</div>
+          }
+        - |
+          'use client'
+
+          export default function Dashboard() {
+            // No redirect, just conditional rendering
+            const [user, setUser] = useState(null)
+
+            useEffect(() => {
+              supabase.auth.getUser().then(({ data }) => {
+                setUser(data.user)
+              })
+            }, [])
+
+            if (!user) return <LoginPrompt />
+            return <DashboardContent />
+          }

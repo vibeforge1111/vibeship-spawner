@@ -278,3 +278,155 @@ sharp_edges:
       - Works in API routes but not Server Actions
     detection_pattern: 'createServerClient(?![\\s\\S]{0,200}?setAll)'
     version_range: ">=1.0.0"
+
+# Maps error messages to solutions for quick debugging
+symptom_index:
+  # Authentication errors
+  - error_pattern: "AuthApiError: Invalid login credentials"
+    edge_id: null
+    quick_fix: "Check email/password spelling. Verify user exists in Supabase dashboard."
+    solution: |
+      1. Check Supabase Dashboard > Authentication > Users
+      2. Verify email is confirmed (if email confirmation enabled)
+      3. Try password reset flow
+
+  - error_pattern: "AuthApiError: User already registered"
+    edge_id: null
+    quick_fix: "User exists. Use signInWithPassword instead of signUp."
+    solution: "Redirect to login or offer password reset"
+
+  - error_pattern: "AuthApiError: Email not confirmed"
+    edge_id: null
+    quick_fix: "User needs to click confirmation link in email."
+    solution: |
+      1. Check spam folder
+      2. Resend confirmation: supabase.auth.resend({ type: 'signup', email })
+      3. Or disable email confirmation in Supabase Dashboard
+
+  - error_pattern: "AuthSessionMissingError"
+    edge_id: auth-server-action-cookies
+    quick_fix: "Server client not setting cookies properly."
+    solution: "Ensure setAll is implemented in createServerClient cookies config"
+
+  - error_pattern: "AuthRetryableFetchError"
+    edge_id: null
+    quick_fix: "Network issue or Supabase is down."
+    solution: "Check internet connection and status.supabase.com"
+
+  # Session errors
+  - error_pattern: "invalid JWT"
+    edge_id: auth-getsession-vs-getuser
+    quick_fix: "Token is malformed or expired. Refresh with getUser()."
+    solution: "Call supabase.auth.getUser() to refresh the session"
+
+  - error_pattern: "JWT expired"
+    edge_id: auth-middleware-order
+    quick_fix: "Token expired. Add session refresh in middleware."
+    solution: "Middleware should call getUser() before auth checks"
+
+  - error_pattern: "no session found"
+    edge_id: auth-client-server-mismatch
+    quick_fix: "Using wrong Supabase client for context."
+    solution: "Use createServerClient in server, createBrowserClient in client"
+
+  # OAuth errors
+  - error_pattern: "invalid redirect_uri"
+    edge_id: auth-pkce-cors
+    quick_fix: "Redirect URL not whitelisted in Supabase dashboard."
+    solution: "Add exact URL to Authentication > URL Configuration > Redirect URLs"
+
+  - error_pattern: "CORS"
+    edge_id: auth-pkce-cors
+    quick_fix: "Supabase redirect URL mismatch."
+    solution: "Ensure Site URL and Redirect URLs match your domain exactly"
+
+  - error_pattern: "code parameter"
+    edge_id: auth-callback-missing
+    quick_fix: "Missing auth callback route."
+    solution: "Create app/auth/callback/route.ts to handle OAuth code exchange"
+
+  - error_pattern: "provider.*disabled"
+    edge_id: null
+    quick_fix: "OAuth provider not enabled."
+    solution: "Enable provider in Supabase Dashboard > Authentication > Providers"
+
+  # Cookie errors
+  - error_pattern: "cookies is not a function"
+    edge_id: auth-client-server-mismatch
+    quick_fix: "Calling server code from client context."
+    solution: "Check 'use client' directive. Server code can't run in browser."
+
+  - error_pattern: "Failed to set cookie"
+    edge_id: auth-server-action-cookies
+    quick_fix: "Server Component trying to set cookies."
+    solution: "Move auth logic to Server Action or Route Handler"
+
+# Critical mistakes that need immediate attention
+red_flags:
+  - id: exposed-service-role-key
+    severity: critical
+    pattern: 'SUPABASE_SERVICE_ROLE|service_role_key'
+    in_files:
+      - "*.tsx"
+      - "*.jsx"
+      - "components/**"
+      - "app/**/page.tsx"
+    message: "Service role key exposed in client code!"
+    why: "Service role bypasses RLS. Never expose to browser."
+    immediate_action: |
+      1. ROTATE the key immediately in Supabase Dashboard
+      2. Move to server-only code (Route Handler, Server Action)
+      3. Use NEXT_PUBLIC_ only for anon key
+
+  - id: auth-in-client-component
+    severity: high
+    pattern: "'use client'[\\s\\S]{0,500}?signInWithPassword"
+    in_files:
+      - "app/**/page.tsx"
+      - "components/**"
+    message: "Password auth in Client Component exposes credentials in network tab"
+    why: "Client-side auth means passwords visible in browser DevTools"
+    immediate_action: "Move to Server Action for secure credential handling"
+
+  - id: no-rls-with-auth
+    severity: critical
+    pattern: 'createClient[\\s\\S]{0,300}?from\\([\'"](?!public\\.)'
+    in_files:
+      - "*.ts"
+      - "*.tsx"
+    message: "Querying non-public tables without RLS check"
+    why: "Auth without RLS = data exposed to any authenticated user"
+    immediate_action: |
+      1. Enable RLS on all tables: ALTER TABLE x ENABLE ROW LEVEL SECURITY;
+      2. Add policies: CREATE POLICY "Users own data" ON x FOR ALL USING (auth.uid() = user_id);
+
+  - id: storing-password-plaintext
+    severity: critical
+    pattern: 'password[\'"]?\\s*[=:]\\s*[\'"](?!.*\\$2[aby])'
+    in_files:
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+    message: "Possible plaintext password storage"
+    why: "Supabase handles password hashing. Never store passwords yourself."
+    immediate_action: "Remove custom password storage. Use Supabase Auth exclusively."
+
+  - id: jwt-in-localstorage
+    severity: high
+    pattern: 'localStorage\\.setItem.*(?:token|jwt|session|access_token)'
+    in_files:
+      - "*.ts"
+      - "*.tsx"
+    message: "Storing auth token in localStorage"
+    why: "localStorage is vulnerable to XSS. Use httpOnly cookies."
+    immediate_action: "Remove localStorage token storage. @supabase/ssr handles cookies."
+
+  - id: disabled-email-verification
+    severity: medium
+    pattern: 'signUp[\\s\\S]{0,200}?emailRedirectTo.*#'
+    in_files:
+      - "*.ts"
+      - "*.tsx"
+    message: "Email verification might be bypassed"
+    why: "Hash fragments can leak. Use proper redirect flow."
+    immediate_action: "Use proper callback URL without fragments"

@@ -422,3 +422,105 @@ sharp_edges:
       - Confused about fee splits
       - Testing only platform side
     detection_pattern: null
+
+# Symptom Index - Map error codes/messages to solutions
+symptom_index:
+  # API Errors
+  - error: "No signatures found matching the expected signature"
+    likely_cause: raw-body-middleware
+    quick_fix: "Use req.text() instead of req.json() for webhook body"
+
+  - error: "No such customer"
+    likely_cause: test-mode-to-live-mismatch
+    quick_fix: "Check you're using the correct API key (test vs live)"
+
+  - error: "This PaymentIntent has already been confirmed"
+    likely_cause: missing-idempotency
+    quick_fix: "Use idempotency keys to prevent duplicate confirmations"
+
+  - error: "amount_too_small"
+    likely_cause: currency-assumption
+    quick_fix: "Amounts are in cents - multiply dollars by 100"
+
+  - error: "No such price"
+    likely_cause: test-mode-to-live-mismatch
+    quick_fix: "Price IDs are different between test and live mode"
+
+  - error: "resource_already_exists"
+    likely_cause: missing-idempotency
+    quick_fix: "Handle duplicate creation gracefully with idempotency keys"
+
+  - error: "webhook_endpoint_url_invalid"
+    likely_cause: test-mode-to-live-mismatch
+    quick_fix: "Webhook URL must be HTTPS in production"
+
+  - error: "Received unknown parameter"
+    likely_cause: api-version-mismatch
+    quick_fix: "Check Stripe API version compatibility"
+
+  # Behavioral Symptoms
+  - symptom: "Webhook works locally but fails in production"
+    likely_cause: raw-body-middleware
+    quick_fix: "Production may parse JSON before webhook handler reaches it"
+
+  - symptom: "User charged but didn't get access"
+    likely_cause: api-as-source-of-truth
+    quick_fix: "Grant access from webhook, not checkout success page"
+
+  - symptom: "Duplicate charges on retry"
+    likely_cause: missing-idempotency
+    quick_fix: "Add idempotencyKey to all payment operations"
+
+  - symptom: "Subscription shows active but Stripe says canceled"
+    likely_cause: subscription-state-mismatch
+    quick_fix: "Sync subscription status from webhooks, not API"
+
+  - symptom: "Can't identify user from webhook"
+    likely_cause: checkout-session-missing-metadata
+    quick_fix: "Add metadata to checkout session with userId"
+
+  - symptom: "Refunds appearing without authorization"
+    likely_cause: refund-without-check
+    quick_fix: "Add auth check and audit logging to refund endpoint"
+
+# Red Flags - Critical mistakes that need immediate attention
+red_flags:
+  - flag: "Live API keys in source code"
+    severity: critical
+    action: "STOP - Rotate keys immediately in Stripe dashboard"
+    detection: "sk_live_|pk_live_"
+
+  - flag: "Webhook endpoint without signature verification"
+    severity: critical
+    action: "STOP - Add constructEvent() before processing any events"
+    detection: "No constructEvent call in webhook handler"
+
+  - flag: "Granting access from checkout success URL"
+    severity: critical
+    action: "STOP - Success URL can be visited directly; use webhooks"
+    detection: "success_url handler grants premium access"
+
+  - flag: "Storing raw card numbers"
+    severity: critical
+    action: "STOP - Never store card details; use Stripe tokens/Elements"
+    detection: "card_number|cardNumber|cc_number in database schema"
+
+  - flag: "No webhook handlers for payment failures"
+    severity: high
+    action: "Add invoice.payment_failed handler for dunning"
+    detection: "Missing payment_failed case in webhook switch"
+
+  - flag: "Single refund endpoint without rate limiting"
+    severity: high
+    action: "Add rate limiting and audit logging to prevent fraud"
+    detection: "refunds.create without rate limit middleware"
+
+  - flag: "Test mode keys in production environment"
+    severity: critical
+    action: "STOP - Replace with live keys; test data won't work"
+    detection: "sk_test_ in production .env"
+
+  - flag: "Webhook secret shared between environments"
+    severity: high
+    action: "Use separate webhook secrets for test/staging/production"
+    detection: "Same STRIPE_WEBHOOK_SECRET in multiple .env files"

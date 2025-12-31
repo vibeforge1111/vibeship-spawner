@@ -140,3 +140,203 @@ validations:
     applies_to:
       - "**/*.ts"
       - "**/*.js"
+
+  # === WEBHOOK SIGNATURE VERIFICATION ===
+  - id: stripe-webhook-missing-construct-event
+    name: Webhook handler without constructEvent
+    severity: critical
+    type: regex
+    pattern: "stripe-signature|stripe_signature"
+    inverse: true  # Should find this header check
+    message: "Webhook handlers must verify signatures with stripe.webhooks.constructEvent()"
+    fix_action: |
+      Add signature verification:
+      const sig = req.headers.get('stripe-signature');
+      const event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
+    applies_to:
+      - "**/webhook*.ts"
+      - "**/webhook*.js"
+      - "**/api/stripe/**/*.ts"
+
+  - id: stripe-webhook-json-parse-before-verify
+    name: Parsing JSON before signature verification
+    severity: critical
+    type: regex
+    pattern: "(JSON\\.parse|req\\.json\\(\\)).*constructEvent|await req\\.json\\(\\).*stripe"
+    message: "CRITICAL: JSON parsing before signature verification defeats security"
+    fix_action: "Use req.text() to get raw body, then verify signature, then parse if needed"
+    applies_to:
+      - "**/webhook*.ts"
+      - "**/webhook*.js"
+
+  # === IDEMPOTENCY KEY PATTERNS ===
+  - id: stripe-idempotency-charges
+    name: Charge creation without idempotency key
+    severity: error
+    type: regex
+    pattern: "charges\\.create\\([^)]+\\)(?!.*idempotencyKey)"
+    message: "Charge creation should use idempotency keys to prevent duplicate charges"
+    fix_action: "Add { idempotencyKey: `charge_${orderId}` } as second argument"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: stripe-idempotency-refunds
+    name: Refund creation without idempotency key
+    severity: warning
+    type: regex
+    pattern: "refunds\\.create\\([^)]+\\)(?!.*idempotencyKey)"
+    message: "Refund creation should use idempotency keys to prevent duplicate refunds"
+    fix_action: "Add { idempotencyKey: `refund_${paymentId}` } as second argument"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: stripe-idempotency-transfers
+    name: Transfer creation without idempotency key
+    severity: error
+    type: regex
+    pattern: "transfers\\.create\\([^)]+\\)(?!.*idempotencyKey)"
+    message: "Transfer creation should use idempotency keys"
+    fix_action: "Add { idempotencyKey: `transfer_${id}` } as second argument"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  # === TEST MODE DETECTION IN PRODUCTION ===
+  - id: stripe-test-key-production-check
+    name: Test key without environment check
+    severity: error
+    type: regex
+    pattern: "sk_test_[a-zA-Z0-9]{20,}|pk_test_[a-zA-Z0-9]{20,}"
+    message: "Test keys detected - ensure these are not used in production"
+    fix_action: |
+      Use environment-based key loading:
+      const stripe = new Stripe(
+        process.env.NODE_ENV === 'production'
+          ? process.env.STRIPE_SECRET_KEY  // Live key
+          : process.env.STRIPE_TEST_SECRET_KEY  // Test key
+      );
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.tsx"
+      - "**/*.jsx"
+    exclude:
+      - "**/*.test.ts"
+      - "**/*.test.js"
+      - "**/*.spec.ts"
+      - "**/__tests__/**"
+
+  - id: stripe-mixed-mode-detection
+    name: Both test and live keys in same file
+    severity: critical
+    type: regex
+    pattern: "(sk_test.*sk_live|sk_live.*sk_test)"
+    message: "CRITICAL: Both test and live keys in same file - potential mode confusion"
+    fix_action: "Use single environment variable STRIPE_SECRET_KEY that differs per environment"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.env*"
+
+  - id: stripe-hardcoded-price-id
+    name: Hardcoded Stripe price ID
+    severity: warning
+    type: regex
+    pattern: "price_[a-zA-Z0-9]{20,}"
+    message: "Hardcoded price IDs make updates difficult - consider using config or database"
+    fix_action: "Store price IDs in environment variables or database for easy updates"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+    exclude:
+      - "**/*.env*"
+      - "**/config.*"
+
+  # === SECURITY PATTERNS ===
+  - id: stripe-success-url-grants-access
+    name: Checkout success URL granting access directly
+    severity: critical
+    type: regex
+    pattern: "success.*url.*\\?.*grant|success.*url.*\\?.*activate|success.*url.*\\?.*premium"
+    message: "CRITICAL: Never grant access from success URL - it can be visited directly"
+    fix_action: "Grant access from webhook only (checkout.session.completed event)"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: stripe-customer-id-in-url
+    name: Customer ID exposed in URL
+    severity: warning
+    type: regex
+    pattern: "\\?.*customer.*cus_[a-zA-Z0-9]+|cus_[a-zA-Z0-9]+.*\\?"
+    message: "Customer IDs in URLs may leak via referrer headers"
+    fix_action: "Use session tokens instead of exposing Stripe IDs in URLs"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  - id: stripe-card-storage-attempt
+    name: Attempting to store card details
+    severity: critical
+    type: regex
+    pattern: "card_number|cardNumber|cc_number|cvv|cvc.*=.*req\\.|card\\.number"
+    message: "CRITICAL: Never store card details - use Stripe Elements and tokens"
+    fix_action: "Use Stripe.js Elements for secure card collection - never touch raw card data"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+
+  # === WEBHOOK HANDLER COMPLETENESS ===
+  - id: stripe-missing-payment-failed-handler
+    name: Missing invoice.payment_failed webhook handler
+    severity: warning
+    type: regex
+    pattern: "invoice\\.payment_failed"
+    inverse: true  # Should find this handler
+    message: "No payment failure handler - you may lose recoverable revenue"
+    fix_action: "Add invoice.payment_failed handler to send dunning emails"
+    applies_to:
+      - "**/webhook*.ts"
+      - "**/webhook*.js"
+      - "**/stripe*.ts"
+
+  - id: stripe-webhook-200-after-processing
+    name: Webhook returns 200 only after processing
+    severity: warning
+    type: regex
+    pattern: "constructEvent.*await.*return.*200|constructEvent.*process.*return.*200"
+    message: "Consider returning 200 immediately and processing asynchronously"
+    fix_action: "Queue webhook for processing, return 200 immediately to avoid Stripe retries"
+    applies_to:
+      - "**/webhook*.ts"
+      - "**/webhook*.js"
+
+  # === AMOUNT HANDLING ===
+  - id: stripe-amount-division-display
+    name: Amount divided for display without currency format
+    severity: warning
+    type: regex
+    pattern: "amount\\s*/\\s*100(?!.*Intl|.*toLocaleString|.*formatCurrency)"
+    message: "Dividing by 100 for display - use proper currency formatting"
+    fix_action: |
+      Use Intl.NumberFormat for proper currency display:
+      new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount / 100)
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.tsx"
+      - "**/*.jsx"
+
+  # === CONNECT PATTERNS ===
+  - id: stripe-connect-missing-stripe-account
+    name: Connect operation without stripeAccount header
+    severity: warning
+    type: regex
+    pattern: "(paymentIntents|charges|customers)\\.create.*destination(?!.*stripeAccount)"
+    message: "Connect operations may need stripeAccount header for proper routing"
+    fix_action: "Add { stripeAccount: connectedAccountId } for connected account operations"
+    applies_to:
+      - "**/*.ts"
+      - "**/*.js"

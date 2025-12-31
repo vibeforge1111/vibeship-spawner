@@ -446,3 +446,188 @@ sharp_edges:
       - Token in localStorage
       - document.cookie contains session
     detection_pattern: "Set-Cookie.*(?!.*HttpOnly)"
+
+# Symptom Index - Map error messages and symptoms to solutions
+symptom_index:
+  # SQL Injection symptoms
+  - symptom: "syntax error at or near"
+    matches: sql-injection-string-concat
+    context: Often indicates SQL injection vulnerability when user input causes syntax errors
+
+  - symptom: "unterminated quoted string"
+    matches: sql-injection-string-concat
+    context: User input containing quotes breaking SQL syntax
+
+  - symptom: "ERROR 1064 (42000)"
+    matches: sql-injection-string-concat
+    context: MySQL syntax error, often from unescaped user input
+
+  - symptom: "pg_query(): Query failed"
+    matches: sql-injection-string-concat
+    context: PostgreSQL query failure, check for string concatenation
+
+  # XSS symptoms
+  - symptom: "script execution blocked"
+    matches: xss-unescaped-output
+    context: CSP blocking inline scripts, but underlying XSS vulnerability exists
+
+  - symptom: "Refused to execute inline script"
+    matches: xss-unescaped-output
+    context: Browser CSP working, but code has XSS vulnerability
+
+  - symptom: "unsafe-inline"
+    matches: xss-unescaped-output
+    context: CSP requires unsafe-inline, indicating potential XSS risk
+
+  # Secrets exposure symptoms
+  - symptom: "Invalid API key"
+    matches: secrets-in-code
+    context: API key may be hardcoded and rotated/invalidated
+
+  - symptom: "API key expired"
+    matches: secrets-in-code
+    context: Hardcoded key was rotated, now broken
+
+  - symptom: "Detected secrets in commit"
+    matches: secrets-in-code
+    context: Git hooks or CI caught hardcoded secrets
+
+  - symptom: "GitGuardian alert"
+    matches: secrets-in-code
+    context: Secret scanning detected exposed credentials
+
+  # JWT symptoms
+  - symptom: "jwt malformed"
+    matches: jwt-none-algorithm
+    context: Check if accepting invalid algorithms
+
+  - symptom: "invalid algorithm"
+    matches: jwt-none-algorithm
+    context: Algorithm validation may be misconfigured
+
+  - symptom: "invalid signature"
+    matches: jwt-none-algorithm
+    context: Token signature validation - ensure algorithm is pinned
+
+  # CSRF symptoms
+  - symptom: "CSRF token mismatch"
+    matches: csrf-missing-protection
+    context: Good - CSRF protection is working, token handling issue
+
+  - symptom: "Request blocked by CORS"
+    matches: csrf-missing-protection
+    context: Cross-origin issue, check CSRF protection
+
+  # Rate limiting symptoms
+  - symptom: "Too many requests"
+    matches: missing-rate-limiting
+    context: Rate limiting working but may be too aggressive
+
+  - symptom: "429 Too Many Requests"
+    matches: missing-rate-limiting
+    context: Rate limiting active, adjust thresholds if needed
+
+  - symptom: "Account locked"
+    matches: missing-rate-limiting
+    context: Brute force protection triggered
+
+  # IDOR symptoms
+  - symptom: "You don't have permission"
+    matches: insecure-direct-object-reference
+    context: Good - authorization check working
+
+  - symptom: "unauthorized access attempt"
+    matches: insecure-direct-object-reference
+    context: Authorization logging working, review access patterns
+
+  # Path traversal symptoms
+  - symptom: "ENOENT: no such file or directory"
+    matches: path-traversal
+    context: File path manipulation, check for path traversal
+
+  - symptom: "Path contains invalid characters"
+    matches: path-traversal
+    context: Good - path validation catching malicious input
+
+  # Cookie symptoms
+  - symptom: "Cookie not sent"
+    matches: http-only-cookie-missing
+    context: Check SameSite and Secure flags
+
+  - symptom: "third-party cookie blocked"
+    matches: http-only-cookie-missing
+    context: SameSite policy preventing cookie, review cookie settings
+
+# Red Flags - Critical patterns that indicate immediate security risk
+red_flags:
+  - id: eval-user-input
+    pattern: "eval\\(.*req\\.|eval\\(.*user|eval\\(.*input"
+    severity: critical
+    message: "CRITICAL: eval() with user input enables Remote Code Execution"
+    action: "Remove eval() immediately. Use JSON.parse() for data, Function constructor with strict sandboxing if code execution required"
+
+  - id: exec-user-input
+    pattern: "exec\\(.*req\\.|child_process.*req\\.|spawn\\(.*req\\."
+    severity: critical
+    message: "CRITICAL: Command injection vulnerability - user input in shell command"
+    action: "Never pass user input to shell. Use parameterized commands or safe APIs"
+
+  - id: sql-concat-login
+    pattern: "SELECT.*FROM.*users.*WHERE.*(password|email).*\\$\\{"
+    severity: critical
+    message: "CRITICAL: SQL injection in authentication - account takeover possible"
+    action: "Use parameterized queries immediately. Review all auth queries"
+
+  - id: hardcoded-production-secrets
+    pattern: "sk_live_|pk_live_|prod.*secret.*=.*['\"][a-zA-Z0-9]"
+    severity: critical
+    message: "CRITICAL: Production secrets in code - likely already compromised"
+    action: "Revoke and rotate immediately. Move to environment variables. Assume breach"
+
+  - id: disabled-ssl-verification
+    pattern: "rejectUnauthorized.*false|NODE_TLS_REJECT_UNAUTHORIZED.*0"
+    severity: critical
+    message: "CRITICAL: SSL verification disabled - man-in-the-middle attacks possible"
+    action: "Never disable SSL verification. Fix certificate issues properly"
+
+  - id: password-in-url
+    pattern: "https?://[^:]+:[^@]+@"
+    severity: high
+    message: "HIGH: Credentials in URL - logged in server logs, browser history, referrer"
+    action: "Move credentials to headers or request body. Rotate exposed credentials"
+
+  - id: admin-bypass-comment
+    pattern: "TODO.*auth|FIXME.*security|skip.*auth.*for.*now"
+    severity: high
+    message: "HIGH: Security bypass in code comments - likely vulnerable"
+    action: "Implement proper authentication. Remove bypass code"
+
+  - id: wildcard-cors
+    pattern: "Access-Control-Allow-Origin.*\\*|cors.*origin.*true"
+    severity: high
+    message: "HIGH: Wildcard CORS allows any origin - CSRF and data theft possible"
+    action: "Specify allowed origins explicitly. Never use * with credentials"
+
+  - id: jwt-secret-weak
+    pattern: "jwt.*secret.*=.*(secret|password|123|test|dev)"
+    severity: high
+    message: "HIGH: Weak JWT secret - tokens can be forged"
+    action: "Use cryptographically random secret (32+ bytes). Store in environment"
+
+  - id: debug-mode-production
+    pattern: "DEBUG.*=.*true|NODE_ENV.*development.*production"
+    severity: medium
+    message: "MEDIUM: Debug mode may be enabled in production - information disclosure"
+    action: "Ensure DEBUG is false and NODE_ENV is 'production' in production"
+
+  - id: console-log-sensitive
+    pattern: "console\\.log.*(password|token|secret|key|credential)"
+    severity: medium
+    message: "MEDIUM: Sensitive data in console.log - may appear in logs"
+    action: "Remove sensitive data logging. Use structured logging with redaction"
+
+  - id: unsafe-regex
+    pattern: "(\\+|\\*)\\+|\\{\\d+,\\d*\\}\\+|\\(\\?=.*\\+\\)"
+    severity: medium
+    message: "MEDIUM: Potentially unsafe regex - ReDoS vulnerability"
+    action: "Review regex for catastrophic backtracking. Use regex timeout or safe-regex library"

@@ -235,6 +235,115 @@ anti_patterns:
     why: OAuth redirects need a route to exchange the code for a session
     instead: Create app/auth/callback/route.ts
 
+quick_wins:
+  - id: add-middleware-refresh
+    title: Add Session Refresh to Middleware
+    effort: 5min
+    impact: high
+    description: Prevents random logouts by refreshing expired tokens
+    code: |
+      // middleware.ts - Add this before any auth checks
+      const { data: { user } } = await supabase.auth.getUser()
+    when: Users report being randomly logged out
+
+  - id: switch-getsession-to-getuser
+    title: Replace getSession with getUser
+    effort: 2min
+    impact: critical
+    description: Fixes security vulnerability where JWTs aren't verified
+    before: |
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.user) { ... }
+    after: |
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) { ... }
+    when: Any security-critical auth check
+
+  - id: add-auth-listener
+    title: Add Auth State Listener
+    effort: 5min
+    impact: medium
+    description: Keeps UI in sync with auth state changes
+    code: |
+      useEffect(() => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(
+          (event, session) => setUser(session?.user ?? null)
+        )
+        return () => subscription.unsubscribe()
+      }, [])
+    when: Auth state gets out of sync between tabs
+
+  - id: add-loading-state
+    title: Add Auth Loading State
+    effort: 3min
+    impact: medium
+    description: Prevents flash of wrong content during auth check
+    code: |
+      const [loading, setLoading] = useState(true)
+
+      useEffect(() => {
+        supabase.auth.getUser().then(({ data: { user } }) => {
+          setUser(user)
+          setLoading(false)
+        })
+      }, [])
+
+      if (loading) return <Skeleton />
+    when: Users see protected content flash before redirect
+
+  - id: add-oauth-callback
+    title: Create OAuth Callback Route
+    effort: 5min
+    impact: high
+    description: Required for any OAuth provider to work
+    code: |
+      // app/auth/callback/route.ts
+      export async function GET(request: Request) {
+        const { searchParams, origin } = new URL(request.url)
+        const code = searchParams.get('code')
+        if (code) {
+          const supabase = await createClient()
+          await supabase.auth.exchangeCodeForSession(code)
+        }
+        return NextResponse.redirect(origin)
+      }
+    when: Setting up Google, GitHub, or any OAuth provider
+
+  - id: add-error-handling
+    title: Add Proper Error Handling
+    effort: 3min
+    impact: medium
+    description: Surface auth errors to users instead of silent failures
+    before: |
+      await supabase.auth.signInWithPassword({ email, password })
+      redirect('/dashboard')
+    after: |
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) return { error: error.message }
+      redirect('/dashboard')
+    when: Login "doesn't work" with no error shown
+
+  - id: add-revalidate
+    title: Add Cache Revalidation After Auth
+    effort: 1min
+    impact: medium
+    description: Clears cached auth state after login/logout
+    code: |
+      // After any auth operation in Server Action
+      revalidatePath('/', 'layout')
+    when: User sees stale auth state after login/logout
+
+  - id: secure-redirect-url
+    title: Use Dynamic Redirect URL
+    effort: 2min
+    impact: medium
+    description: Works across all environments without hardcoding
+    before: |
+      redirectTo: 'http://localhost:3000/auth/callback'
+    after: |
+      redirectTo: `${window.location.origin}/auth/callback`
+    when: OAuth works locally but fails in production
+
 handoffs:
   - trigger: database or rls
     to: supabase-backend
