@@ -2,6 +2,10 @@
 
 > The definitive guide to creating skills that transform Claude into a domain expert
 
+**Related docs:**
+- [SKILL_CONVENTIONS.md](./SKILL_CONVENTIONS.md) - Enforced naming and structure rules
+- [SKILL_SPEC_V2.md](./SKILL_SPEC_V2.md) - Technical YAML schema
+
 ## TL;DR
 
 A world-class skill has **4 YAML files**:
@@ -867,7 +871,7 @@ Identify:
 - [ ] `prerequisites.required:` lists hard dependencies
 - [ ] `prerequisites.recommended:` with reason and what_to_know for each
 - [ ] 3-5 `delegation_triggers:` with context and expected output
-- [ ] `receives_context_from:` lists what you get from other skills
+- [ ] `receives_from:` lists what you get from other skills (NOT receives_context_from)
 - [ ] `provides_context_to:` lists what you give to other skills
 - [ ] `escalation_paths:` for specialist handoffs
 - [ ] `workflow_integration:` with typical_sequence and decision_points
