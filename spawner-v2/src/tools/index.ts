@@ -60,6 +60,7 @@ import { setupToolDefinition, executeSetup } from './setup.js';
 import { emitToolDefinition, executeEmit } from './emit.js';
 import { workflowToolDefinition, executeWorkflow } from './workflow.js';
 import { orchestrateBrainstormDefinition, executeOrchestrateBrainstorm } from './orchestrate-brainstorm.js';
+import { missionToolDefinition, executeMission } from './mission.js';
 
 // =============================================================================
 // Register all tools
@@ -169,6 +170,12 @@ registerTool({
   execute: (env, args, _userId) => executeOrchestrateBrainstorm(env, args as Parameters<typeof executeOrchestrateBrainstorm>[1]),
 });
 
+// Mission Orchestration Tool
+registerTool({
+  definition: missionToolDefinition,
+  execute: (env, args, userId) => executeMission(env, args as Parameters<typeof executeMission>[1], userId),
+});
+
 // =============================================================================
 // Re-exports for backwards compatibility
 // =============================================================================
@@ -198,6 +205,7 @@ export {
   emitToolDefinition,
   workflowToolDefinition,
   orchestrateBrainstormDefinition,
+  missionToolDefinition,
 };
 
 // Re-export executors for direct access if needed
@@ -221,4 +229,5 @@ export {
   executeEmit,
   executeWorkflow,
   executeOrchestrateBrainstorm,
+  executeMission,
 };
