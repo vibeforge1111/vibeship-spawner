@@ -126,19 +126,71 @@ const LOCAL_SKILLS_PATH = '~/.spawner/skills';
 const LOCAL_SKILLS_REPO = 'https://github.com/vibeforge1111/vibeship-spawner-skills';
 
 /**
- * Map skill ID to its local filesystem path
+ * Fallback: infer category from skill.layer
+ * Layer mapping:
+ *   1 → development (core skills)
+ *   2 → frameworks (framework-specific)
+ *   3 → marketing (quality/completion - polish layer)
  */
-function getLocalSkillPath(skillId: string, category?: string): string {
-  // Default category mapping based on common patterns
-  const inferredCategory = category || inferCategoryFromSkillId(skillId);
-  return `${LOCAL_SKILLS_PATH}/${inferredCategory}/${skillId}`;
+function inferCategoryFromLayer(layer?: number): string | null {
+  if (!layer) return null;
+
+  const layerMap: Record<number, string> = {
+    1: 'development',
+    2: 'frameworks',
+    3: 'marketing'
+  };
+
+  return layerMap[layer] || null;
+}
+
+/**
+ * Map skill ID to its local filesystem path
+ * Enhanced with multi-step fallback logic
+ */
+async function getLocalSkillPath(
+  skillId: string,
+  category?: string,
+  v2Skills?: V2Skill[]
+): Promise<string> {
+  // 1. Try explicit category
+  if (category) {
+    return `${LOCAL_SKILLS_PATH}/${category}/${skillId}`;
+  }
+
+  // 2. Try V2 skills index for layer-based category inference
+  if (v2Skills && v2Skills.length > 0) {
+    const v2Skill = v2Skills.find(s =>
+      (s.id && normalizeSkillId(s.id) === normalizeSkillId(skillId)) ||
+      (s.name && normalizeSkillId(s.name) === normalizeSkillId(skillId))
+    );
+
+    if (v2Skill && v2Skill.layer) {
+      const layerCategory = inferCategoryFromLayer(v2Skill.layer);
+      if (layerCategory) {
+        return `${LOCAL_SKILLS_PATH}/${layerCategory}/${skillId}`;
+      }
+    }
+  }
+
+  // 3. Try pattern inference
+  try {
+    const inferredCategory = inferCategoryFromSkillId(skillId);
+    return `${LOCAL_SKILLS_PATH}/${inferredCategory}/${skillId}`;
+  } catch (error) {
+    // 4. Final fallback: throw error with helpful message
+    throw new Error(
+      `Cannot determine category for skill: ${skillId}. ` +
+      `Please specify category explicitly.`
+    );
+  }
 }
 
 /**
  * Infer category from skill ID patterns
  */
 function inferCategoryFromSkillId(skillId: string): string {
-  // Known category mappings
+  // Check categoryPatterns
   const categoryPatterns: Record<string, string[]> = {
     'ai': ['llm-', 'ml-', 'causal-', 'vector-', 'rag-', 'ai-agents'],
     'data': ['postgres-', 'redis-', 'graph-', 'temporal-', 'data-', 'drizzle-', 'vector-specialist'],
@@ -158,13 +210,14 @@ function inferCategoryFromSkillId(skillId: string): string {
     }
   }
 
-  // Default to development for most technical skills
-  return 'development';
+  // Default: throw error instead of returning hardcoded 'development'
+  throw new Error(`Category not found for skill: ${skillId}. Please add to categoryPatterns.`);
 }
 
 /**
  * Input schema for spawner_skills
  */
+export { normalizeSkillId, inferCategoryFromLayer };
 export const skillsInputSchema = z.object({
   action: z.enum(['search', 'list', 'get', 'squad', 'pack', 'exists', 'get_files', 'health', 'sync', 'local']).optional().describe(
     'Action: search (default), list, get, squad, pack (load skill pack from registry), exists, get_files, health, sync, local (get local paths for Claude to read)'
@@ -405,7 +458,7 @@ export async function executeSkills(
       if (!name) {
         throw new Error('name is required for exists action');
       }
-      return handleExists(v1Registry, v2Skills, name);
+      return await handleExists(v1Registry, v2Skills, name);
 
     case 'get_files':
       if (!name) {
@@ -421,9 +474,9 @@ export async function executeSkills(
 
     case 'local':
       if (!name) {
-        return handleLocalList(v1Registry, v2Skills, query, tag);
+        return await handleLocalList(v1Registry, v2Skills, query, tag);
       }
-      return handleLocal(v1Registry, v2Skills, name);
+      return await handleLocal(v1Registry, v2Skills, name);
 
     default:
       throw new Error(`Unknown action: ${action}`);
@@ -633,7 +686,7 @@ async function handleGet(
       const setupHint = getSetupHintForSkill(skill.id, skill.tags ?? []);
 
       // Get local path for this skill
-      const localPath = getLocalSkillPath(skill.id);
+      const localPath = await getLocalSkillPath(skill.id, undefined, v2Skills);
 
       const instruction = [
         `Loaded skill: **${skill.name}**`,
@@ -971,11 +1024,11 @@ async function handlePackList(env: Env): Promise<SkillsOutput> {
 /**
  * Handle exists action - check if a skill exists
  */
-function handleExists(
+async function handleExists(
   v1Registry: V1SkillRegistry | null,
   v2Skills: V2Skill[],
   name: string
-): SkillsOutput {
+): Promise<SkillsOutput> {
   const normalized = normalizeSkillId(name);
 
   // Check V2 first (preferred) - defensive check for undefined id/name
@@ -988,7 +1041,7 @@ function handleExists(
     // Determine path based on layer
     const layerFolder = v2Match.layer === 1 ? 'development' :
       v2Match.layer === 2 ? 'frameworks' : 'marketing';
-    const localPath = getLocalSkillPath(v2Match.id);
+    const localPath = await getLocalSkillPath(v2Match.id, undefined, v2Skills);
 
     return {
       exists: true,
@@ -1009,7 +1062,7 @@ function handleExists(
 
     if (v1Match) {
       const skillId = v1Match.name ? normalizeSkillId(v1Match.name) : 'unknown';
-      const localPath = getLocalSkillPath(skillId);
+      const localPath = await getLocalSkillPath(skillId, undefined, v2Skills);
       return {
         exists: true,
         skill_id: skillId,
@@ -1085,7 +1138,7 @@ async function handleGetFiles(
     // Determine path based on layer
     const layerFolder = v2Match.layer === 1 ? 'development' :
       v2Match.layer === 2 ? 'frameworks' : 'marketing';
-    const localPath = getLocalSkillPath(skillId);
+    const localPath = await getLocalSkillPath(skillId, undefined, v2Skills);
 
     const fileList = Object.keys(files);
     const expectedFiles = ['skill.yaml', 'sharp-edges.yaml', 'validations.yaml', 'collaboration.yaml'];
@@ -1422,11 +1475,11 @@ async function handleSync(
  * Handle local action - return local filesystem paths for Claude to read
  * This is the RECOMMENDED way to load skills - directly from local disk
  */
-function handleLocal(
+async function handleLocal(
   v1Registry: V1SkillRegistry | null,
   v2Skills: V2Skill[],
   name: string
-): SkillsOutput {
+): Promise<SkillsOutput> {
   const normalized = normalizeSkillId(name);
 
   // Find skill in V2 first
@@ -1436,7 +1489,7 @@ function handleLocal(
   );
 
   if (v2Match) {
-    const localPath = getLocalSkillPath(v2Match.id);
+    const localPath = await getLocalSkillPath(v2Match.id, undefined, v2Skills);
     const files = {
       skill: `${localPath}/skill.yaml`,
       sharp_edges: `${localPath}/sharp-edges.yaml`,
@@ -1471,7 +1524,7 @@ function handleLocal(
 
     if (v1Match) {
       const skillId = normalizeSkillId(v1Match.name);
-      const localPath = getLocalSkillPath(skillId);
+      const localPath = await getLocalSkillPath(skillId, undefined, v2Skills);
 
       return {
         local_path: localPath,
@@ -1498,12 +1551,12 @@ If not found, the skill may only be in the MCP's KV storage. Use \`action="get"\
 /**
  * Handle local list - show all skills with their local paths
  */
-function handleLocalList(
+async function handleLocalList(
   v1Registry: V1SkillRegistry | null,
   v2Skills: V2Skill[],
   query?: string,
   tag?: string
-): SkillsOutput {
+): Promise<SkillsOutput> {
   const results: Array<{
     id: string;
     name: string;
@@ -1524,7 +1577,7 @@ function handleLocalList(
     }
     if (tag && !safeArrayIncludes(skill.tags, tag.toLowerCase())) continue;
 
-    const localPath = getLocalSkillPath(skill.id);
+    const localPath = await getLocalSkillPath(skill.id, undefined, v2Skills);
     results.push({
       id: skill.id,
       name: skill.name,
