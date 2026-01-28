@@ -404,27 +404,29 @@ export async function getValidationsForFile(
  * Render the handoff protocol section for a skill
  */
 export function renderHandoffProtocol(skill: Skill, previousSkill?: string): string {
-  if (!skill.handoffs || skill.handoffs.length === 0) {
+  const handoffs = Array.isArray(skill.handoffs) ? skill.handoffs : [];
+  if (handoffs.length === 0) {
     return '';
   }
 
-  // Sort handoffs by priority (higher first)
-  const sortedHandoffs = [...skill.handoffs].sort(
-    (a, b) => (b.priority ?? 0) - (a.priority ?? 0)
-  );
+  // Sort handoffs by priority (higher first), filtering nullish entries
+  const sortedHandoffs = handoffs
+    .filter((h): h is NonNullable<typeof h> => !!h && typeof h === 'object')
+    .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
 
-  // Build trigger table rows
+  // Build trigger table rows (with type-checking for malformed skill data)
   const triggerRows = sortedHandoffs
+    .filter(h => typeof h.trigger === 'string' && typeof h.to === 'string')
     .map(h => {
-      // Show first 4 trigger keywords for readability
-      const triggers = h.trigger.split('|').slice(0, 4).join(', ');
-      const suffix = h.trigger.split('|').length > 4 ? '...' : '';
+      const triggerParts = h.trigger.split('|');
+      const triggers = triggerParts.slice(0, 4).join(', ') || 'unknown';
+      const suffix = triggerParts.length > 4 ? '...' : '';
       return `| ${triggers}${suffix} | \`spawner_load({ skill_id: "${h.to}" })\` |`;
     })
     .join('\n');
 
-  // Build the owns list (first 5 items)
-  const ownsList = skill.owns.slice(0, 5).join(', ');
+  // Build the owns list (first 5 items) - with Array.isArray check
+  const ownsList = (Array.isArray(skill.owns) ? skill.owns : []).slice(0, 5).join(', ') || 'this domain';
 
   // Build handoff history section if coming from another skill
   let historySection = '';
@@ -520,15 +522,26 @@ export function renderCollaborationProtocol(skill: Skill, previousSkill?: string
     return '';
   }
 
-  // Check if there's any collaboration data to show
-  const hasReceivesFrom = collab.receives_from && collab.receives_from.length > 0;
-  const hasDelegation = collab.delegation_triggers && collab.delegation_triggers.length > 0;
-  const hasFeedback = collab.feedback_loops?.receives_feedback_from?.length || collab.feedback_loops?.sends_feedback_to?.length;
-  const hasInsights = collab.cross_domain_insights && collab.cross_domain_insights.length > 0;
-  const hasCombinations = collab.common_combinations && collab.common_combinations.length > 0;
+  // Normalize arrays with Array.isArray to handle malformed KV data
+  const receivesFrom = Array.isArray(collab.receives_from) ? collab.receives_from : [];
+  const delegationTriggers = Array.isArray(collab.delegation_triggers) ? collab.delegation_triggers : [];
+  const insights = Array.isArray(collab.cross_domain_insights) ? collab.cross_domain_insights : [];
+  const combinations = Array.isArray(collab.common_combinations) ? collab.common_combinations : [];
+  const receivesFeedback = Array.isArray(collab.feedback_loops?.receives_feedback_from)
+    ? collab.feedback_loops!.receives_feedback_from
+    : [];
+  const sendsFeedback = Array.isArray(collab.feedback_loops?.sends_feedback_to)
+    ? collab.feedback_loops!.sends_feedback_to
+    : [];
+
+  const hasReceivesFrom = receivesFrom.length > 0;
+  const hasDelegation = delegationTriggers.length > 0;
+  const hasFeedback = receivesFeedback.length > 0 || sendsFeedback.length > 0;
+  const hasInsights = insights.length > 0;
+  const hasCombinations = combinations.length > 0;
   const hasPrerequisites = collab.prerequisites && Object.keys(collab.prerequisites).length > 0;
 
-  if (!hasReceivesFrom && !hasDelegation && !hasFeedback && !hasInsights && !hasCombinations) {
+  if (!hasReceivesFrom && !hasDelegation && !hasFeedback && !hasInsights && !hasCombinations && !hasPrerequisites) {
     return '';
   }
 
@@ -537,17 +550,18 @@ export function renderCollaborationProtocol(skill: Skill, previousSkill?: string
 
   // CRITICAL: Incoming handoff context when called from another skill
   if (previousSkill && hasReceivesFrom) {
-    const matchingReceive = collab.receives_from.find(r => r.skill === previousSkill);
+    const matchingReceive = receivesFrom.find(r => r.skill === previousSkill);
     if (matchingReceive) {
+      const receivesData = Array.isArray(matchingReceive.receives) ? matchingReceive.receives : [];
       sections.push(`### ⚠️ INCOMING HANDOFF FROM ${previousSkill.toUpperCase()}
 
 You were delegated to by **${previousSkill}**.
 
 **Data you MUST have received:**
-${matchingReceive.receives.map(d => `- [ ] ${d}`).join('\n')}
+${receivesData.map(d => `- [ ] ${d}`).join('\n')}
 
 **What you MUST provide back:**
-${matchingReceive.provides}
+${matchingReceive.provides ?? 'Not specified'}
 
 **STOP:** Verify you have all required data above. If any item is missing, ask for it before proceeding.`);
     }
@@ -555,8 +569,11 @@ ${matchingReceive.provides}
 
   // Build receives_from table (who might call this skill)
   if (hasReceivesFrom) {
-    const receivesRows = collab.receives_from
-      .map(r => `| ${r.skill} | ${r.context} | ${r.receives.slice(0, 2).join(', ')}${r.receives.length > 2 ? '...' : ''} |`)
+    const receivesRows = receivesFrom
+      .map(r => {
+        const receives = Array.isArray(r.receives) ? r.receives : [];
+        return `| ${r.skill ?? 'unknown'} | ${r.context ?? ''} | ${receives.slice(0, 2).join(', ')}${receives.length > 2 ? '...' : ''} |`;
+      })
       .join('\n');
 
     sections.push(`### SKILLS THAT MAY CALL YOU
@@ -568,11 +585,16 @@ ${receivesRows}`);
 
   // Build delegation_triggers section (when to delegate OUT to other skills)
   if (hasDelegation) {
-    const delegationRows = collab.delegation_triggers
+    const delegationRows = delegationTriggers
+      .filter(d => !!d && typeof d === 'object' && typeof d.trigger === 'string' && typeof d.delegate_to === 'string')
       .map(d => {
-        const triggers = d.trigger.split('|').slice(0, 3).join(', ');
-        const suffix = d.trigger.split('|').length > 3 ? '...' : '';
-        return `| ${triggers}${suffix} | **${d.delegate_to}** | ${d.pattern} | ${d.handoff_data.slice(0, 2).join(', ')}${d.handoff_data.length > 2 ? '...' : ''} |`;
+        const triggerParts = d.trigger.split('|');
+        const triggers = triggerParts.slice(0, 3).join(', ') || 'unknown';
+        const suffix = triggerParts.length > 3 ? '...' : '';
+        const handoffData = Array.isArray(d.handoff_data) ? d.handoff_data : [];
+        const handoffPreview = handoffData.slice(0, 2).join(', ') || 'none';
+        const handoffSuffix = handoffData.length > 2 ? '...' : '';
+        return `| ${triggers}${suffix} | **${d.delegate_to}** | ${d.pattern ?? 'sequential'} | ${handoffPreview}${handoffSuffix} |`;
       })
       .join('\n');
 
@@ -599,18 +621,22 @@ ${delegationRows}
   if (hasFeedback) {
     let feedbackContent = '### FEEDBACK LOOPS\n\n';
 
-    if (collab.feedback_loops?.receives_feedback_from?.length) {
+    if (receivesFeedback.length > 0) {
       feedbackContent += '**Listen for signals from:**\n';
-      for (const fb of collab.feedback_loops.receives_feedback_from) {
-        feedbackContent += `- **${fb.skill}**: "${fb.signal}" → ${fb.action}\n`;
+      for (const fb of receivesFeedback) {
+        if (fb && typeof fb === 'object') {
+          feedbackContent += `- **${fb.skill ?? 'unknown'}**: "${fb.signal ?? ''}" → ${fb.action ?? ''}\n`;
+        }
       }
       feedbackContent += '\n';
     }
 
-    if (collab.feedback_loops?.sends_feedback_to?.length) {
+    if (sendsFeedback.length > 0) {
       feedbackContent += '**Send signals to:**\n';
-      for (const fb of collab.feedback_loops.sends_feedback_to) {
-        feedbackContent += `- **${fb.skill}**: "${fb.signal}" → ${fb.action}\n`;
+      for (const fb of sendsFeedback) {
+        if (fb && typeof fb === 'object') {
+          feedbackContent += `- **${fb.skill ?? 'unknown'}**: "${fb.signal ?? ''}" → ${fb.action ?? ''}\n`;
+        }
       }
     }
 
@@ -620,9 +646,11 @@ ${delegationRows}
   // Build cross-domain insights
   if (hasInsights) {
     let insightsContent = '### CROSS-DOMAIN INSIGHTS\n\n';
-    for (const insight of collab.cross_domain_insights.slice(0, 3)) {
-      insightsContent += `**From ${insight.domain}:** ${insight.insight}\n`;
-      insightsContent += `_Applies when: ${insight.applies_when}_\n\n`;
+    for (const insight of insights.slice(0, 3)) {
+      if (insight && typeof insight === 'object') {
+        insightsContent += `**From ${insight.domain ?? 'Unknown'}:** ${insight.insight ?? ''}\n`;
+        insightsContent += `_Applies when: ${insight.applies_when ?? 'N/A'}_\n\n`;
+      }
     }
     sections.push(insightsContent);
   }
@@ -631,10 +659,13 @@ ${delegationRows}
   if (hasCombinations) {
     let combosContent = '### COMMON SKILL COMBINATIONS\n\n';
     combosContent += 'These pre-tested workflows are known to work well together:\n\n';
-    for (const combo of collab.common_combinations.slice(0, 3)) {
-      combosContent += `**${combo.name}**\n`;
-      combosContent += `Skills: ${combo.skills.join(' → ')}\n`;
-      combosContent += `Workflow: ${combo.workflow}\n\n`;
+    for (const combo of combinations.slice(0, 3)) {
+      if (combo && typeof combo === 'object') {
+        const skillsList = Array.isArray(combo.skills) ? combo.skills.join(' → ') : '';
+        combosContent += `**${combo.name ?? 'Workflow'}**\n`;
+        combosContent += `Skills: ${skillsList}\n`;
+        combosContent += `Workflow: ${combo.workflow ?? ''}\n\n`;
+      }
     }
     sections.push(combosContent);
   }
