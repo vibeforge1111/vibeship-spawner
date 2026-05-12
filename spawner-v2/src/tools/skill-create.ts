@@ -174,6 +174,15 @@ export interface SkillCreateOutput {
   _instruction: string;
 }
 
+interface SkillIndexEntry {
+  id?: string;
+  name?: string;
+}
+
+function lowerIfString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value.toLowerCase() : undefined;
+}
+
 /**
  * Execute the spawner_skill_new tool
  */
@@ -338,13 +347,13 @@ async function handleDryRun(
   let existingSource: 'v1' | 'v2' | undefined;
 
   // Check if skill already exists in V2
-  const v2Index = await env.SKILLS.get<{ skills: { id: string; name: string }[] }>('skill_index', 'json');
+  const v2Index = await env.SKILLS.get<{ skills: SkillIndexEntry[] }>('skill_index', 'json');
   if (v2Index?.skills) {
     const normalizedId = id.toLowerCase();
     const normalizedName = name.toLowerCase();
     const v2Match = v2Index.skills.find(s =>
-      s.id.toLowerCase() === normalizedId ||
-      s.name.toLowerCase() === normalizedName
+      lowerIfString(s.id) === normalizedId ||
+      lowerIfString(s.name) === normalizedName
     );
     if (v2Match) {
       skillExists = true;
@@ -445,10 +454,10 @@ async function handleScaffold(
   }
 
   // Check if skill already exists (this is the backup/overwrite protection)
-  const v2Index = await env.SKILLS.get<{ skills: { id: string; name: string }[] }>('skill_index', 'json');
+  const v2Index = await env.SKILLS.get<{ skills: SkillIndexEntry[] }>('skill_index', 'json');
   if (v2Index?.skills) {
     const normalizedId = id.toLowerCase();
-    const v2Match = v2Index.skills.find(s => s.id.toLowerCase() === normalizedId);
+    const v2Match = v2Index.skills.find(s => lowerIfString(s.id) === normalizedId);
     if (v2Match) {
       return {
         action: 'scaffold',
