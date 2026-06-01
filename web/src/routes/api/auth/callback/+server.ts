@@ -11,13 +11,13 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
   const state = url.searchParams.get('state');
   const storedState = cookies.get('oauth_state');
 
-  // Clear the state cookie
-  cookies.delete('oauth_state', { path: '/' });
-
   // Verify state to prevent CSRF
   if (!state || state !== storedState) {
     return new Response('Invalid state parameter', { status: 400 });
   }
+
+  // Clear the state cookie after successful validation
+  cookies.delete('oauth_state', { path: '/' });
 
   if (!code) {
     return new Response('No authorization code provided', { status: 400 });
