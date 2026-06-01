@@ -55,6 +55,14 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
       throw new Error(tokenData.error_description || tokenData.error);
     }
 
+    // Validate token response fields
+    if (typeof tokenData.access_token !== 'string' || !tokenData.access_token) {
+      throw new Error('Invalid token response: missing or invalid access_token');
+    }
+    if (typeof tokenData.token_type !== 'string' || !tokenData.token_type) {
+      throw new Error('Invalid token response: missing or invalid token_type');
+    }
+
     const accessToken = tokenData.access_token;
 
     // Fetch user info to get username
