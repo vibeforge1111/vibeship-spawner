@@ -42,7 +42,8 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
         client_id: clientId,
         client_secret: clientSecret,
         code
-      })
+      }),
+      signal: AbortSignal.timeout(10000)
     });
 
     if (!tokenResponse.ok) {
@@ -63,7 +64,8 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
         'Authorization': `Bearer ${accessToken}`,
         'Accept': 'application/vnd.github.v3+json',
         'User-Agent': 'vibeship-orchestrator'
-      }
+      },
+      signal: AbortSignal.timeout(10000)
     });
 
     if (!userResponse.ok) {
