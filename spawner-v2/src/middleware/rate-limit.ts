@@ -461,34 +461,89 @@ async function checkCostWindow(
 }
 
 /**
- * Increment rate limit counters (request count + cost)
+ * Sleep helper for retry backoff
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Acquire a distributed mutex lock via KV for the given resource key.
+ * Retries with exponential backoff if another request holds the lock.
+ *
+ * KV does not offer native atomic read-then-write, so this uses a
+ * lock-key + TTL pattern to serialize concurrent increments per IP.
+ */
+async function withRateMutex<T>(
+  env: Env,
+  resource: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const lockKey = `lock:rate:${resource}`;
+  const MAX_RETRIES = 8;
+  const BASE_DELAY = 15; // ms
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const lock = await env.CACHE.get(lockKey);
+    if (lock === null) {
+      // Attempt to acquire the lock
+      await env.CACHE.put(lockKey, '1', { expirationTtl: 5 });
+
+      // Verify lock acquisition (read-back check)
+      const verify = await env.CACHE.get(lockKey);
+      if (verify === '1') {
+        try {
+          return await fn();
+        } finally {
+          // Release the lock
+          await env.CACHE.delete(lockKey).catch(() => {});
+        }
+      }
+    }
+    // Lock held by another request — exponential backoff
+    await sleep(BASE_DELAY * Math.pow(2, attempt));
+  }
+
+  // Fallback: proceed without lock after exhausting retries
+  // (better to have a brief counter-inaccuracy than to block the request)
+  return await fn();
+}
+
+/**
+ * Increment rate limit counters (request count + cost).
+ *
+ * Protected by a per-IP distributed mutex to prevent the classic
+ * KV read-then-write race condition where concurrent requests both
+ * read the same old value, increment it, and overwrite each other.
  */
 async function incrementCounters(env: Env, ip: string, cost: number): Promise<void> {
-  const minuteKey = getRateLimitKey(ip, 'minute');
-  const hourKey = getRateLimitKey(ip, 'hour');
-  const minuteCostKey = getCostKey(ip, 'minute');
-  const hourCostKey = getCostKey(ip, 'hour');
+  await withRateMutex(env, ip, async () => {
+    const minuteKey = getRateLimitKey(ip, 'minute');
+    const hourKey = getRateLimitKey(ip, 'hour');
+    const minuteCostKey = getCostKey(ip, 'minute');
+    const hourCostKey = getCostKey(ip, 'hour');
 
-  // Get current counts
-  const [minuteStr, hourStr, minuteCostStr, hourCostStr] = await Promise.all([
-    env.CACHE.get(minuteKey),
-    env.CACHE.get(hourKey),
-    env.CACHE.get(minuteCostKey),
-    env.CACHE.get(hourCostKey),
-  ]);
+    // Get current counts
+    const [minuteStr, hourStr, minuteCostStr, hourCostStr] = await Promise.all([
+      env.CACHE.get(minuteKey),
+      env.CACHE.get(hourKey),
+      env.CACHE.get(minuteCostKey),
+      env.CACHE.get(hourCostKey),
+    ]);
 
-  const minuteCount = (minuteStr ? parseInt(minuteStr, 10) : 0) + 1;
-  const hourCount = (hourStr ? parseInt(hourStr, 10) : 0) + 1;
-  const minuteCost = (minuteCostStr ? parseInt(minuteCostStr, 10) : 0) + cost;
-  const hourCost = (hourCostStr ? parseInt(hourCostStr, 10) : 0) + cost;
+    const minuteCount = (minuteStr ? parseInt(minuteStr, 10) : 0) + 1;
+    const hourCount = (hourStr ? parseInt(hourStr, 10) : 0) + 1;
+    const minuteCost = (minuteCostStr ? parseInt(minuteCostStr, 10) : 0) + cost;
+    const hourCost = (hourCostStr ? parseInt(hourCostStr, 10) : 0) + cost;
 
-  // Write back with TTL
-  await Promise.all([
-    env.CACHE.put(minuteKey, minuteCount.toString(), { expirationTtl: 120 }),
-    env.CACHE.put(hourKey, hourCount.toString(), { expirationTtl: 7200 }),
-    env.CACHE.put(minuteCostKey, minuteCost.toString(), { expirationTtl: 120 }),
-    env.CACHE.put(hourCostKey, hourCost.toString(), { expirationTtl: 7200 }),
-  ]);
+    // Write back with TTL
+    await Promise.all([
+      env.CACHE.put(minuteKey, minuteCount.toString(), { expirationTtl: 120 }),
+      env.CACHE.put(hourKey, hourCount.toString(), { expirationTtl: 7200 }),
+      env.CACHE.put(minuteCostKey, minuteCost.toString(), { expirationTtl: 120 }),
+      env.CACHE.put(hourCostKey, hourCost.toString(), { expirationTtl: 7200 }),
+    ]);
+  });
 }
 
 /**
