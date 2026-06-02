@@ -599,20 +599,146 @@ export class WorkflowEngine {
   }
 
   /**
-   * Evaluate a condition expression
+   * Evaluate a condition expression safely — no code injection possible.
+   *
+   * Supports:
+   *  - Property access:  state.foo.bar
+   *  - Comparisons:      ==  !=  <  >  <=  >=
+   *  - Boolean logic:    &&  ||  !
+   *  - Parentheses:      ( )
+   *  - Literals:         numbers, strings (double-quoted), true/false/null
    */
   private evaluateCondition(condition: string, state: Record<string, unknown>): boolean {
     try {
-      // Simple condition evaluation (safe subset)
-      // Supports: state.key, comparisons, boolean logic
-      const safeCondition = condition
-        .replace(/state\./g, 'state.')
-        .replace(/[^a-zA-Z0-9_.\s<>=!&|()]/g, '');
-
-      const fn = new Function('state', `return ${safeCondition}`);
-      return Boolean(fn(state));
+      const tokens = this.tokenizeCondition(condition);
+      const ast = this.parseCondition(tokens);
+      return Boolean(this.evaluateConditionNode(ast, state));
     } catch {
       return true; // Default to running if condition is invalid
+    }
+  }
+
+  /** Tokenize a condition expression into an array of tokens. */
+  private tokenizeCondition(expr: string): string[] {
+    const tokens: string[] = [];
+    const re = /state\.[a-zA-Z_$][a-zA-Z0-9_$]*(?:\.[a-zA-Z_$][a-zA-Z0-9_$]*)*|true|false|null|\d+\.?\d*|"[^"]*"|'(?:[^'\\]|\\.)*'|[<>=!]+|&&|\|\||[()]|[a-zA-Z_$][a-zA-Z0-9_$]*|\S+/g;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(expr)) !== null) {
+      tokens.push(match[0]);
+    }
+    return tokens;
+  }
+
+  /** Simple recursive-descent parser for boolean expressions. */
+  private parseCondition(tokens: string[], start = 0): { node: any; end: number } {
+    return this.parseOr(tokens, start);
+  }
+
+  private parseOr(tokens: string[], start: number): { node: any; end: number } {
+    let left = this.parseAnd(tokens, start);
+    while (left.end < tokens.length && tokens[left.end] === '||') {
+      const right = this.parseAnd(tokens, left.end + 1);
+      left = { node: { type: 'or', left: left.node, right: right.node }, end: right.end };
+    }
+    return left;
+  }
+
+  private parseAnd(tokens: string[], start: number): { node: any; end: number } {
+    let left = this.parseComparison(tokens, start);
+    while (left.end < tokens.length && tokens[left.end] === '&&') {
+      const right = this.parseComparison(tokens, left.end + 1);
+      left = { node: { type: 'and', left: left.node, right: right.node }, end: right.end };
+    }
+    return left;
+  }
+
+  private parseComparison(tokens: string[], start: number): { node: any; end: number } {
+    let left = this.parseUnary(tokens, start);
+    const ops = ['==', '!=', '<=', '>=', '<', '>'];
+    while (left.end < tokens.length && ops.includes(tokens[left.end])) {
+      const op = tokens[left.end];
+      const right = this.parseUnary(tokens, left.end + 1);
+      left = { node: { type: 'compare', op, left: left.node, right: right.node }, end: right.end };
+    }
+    return left;
+  }
+
+  private parseUnary(tokens: string[], start: number): { node: any; end: number } {
+    if (start < tokens.length && tokens[start] === '!') {
+      const inner = this.parseUnary(tokens, start + 1);
+      return { node: { type: 'not', child: inner.node }, end: inner.end };
+    }
+    return this.parsePrimary(tokens, start);
+  }
+
+  private parsePrimary(tokens: string[], start: number): { node: any; end: number } {
+    if (start >= tokens.length) throw new Error('Unexpected end of expression');
+
+    // Parenthesized expression
+    if (tokens[start] === '(') {
+      const inner = this.parseCondition(tokens, start + 1);
+      if (inner.end >= tokens.length || tokens[inner.end] !== ')') {
+        throw new Error('Missing closing parenthesis');
+      }
+      return { node: inner.node, end: inner.end + 1 };
+    }
+
+    // Literal
+    const token = tokens[start];
+    if (token === 'true') return { node: { type: 'literal', value: true }, end: start + 1 };
+    if (token === 'false') return { node: { type: 'literal', value: false }, end: start + 1 };
+    if (token === 'null') return { node: { type: 'literal', value: null }, end: start + 1 };
+    if (/^\d+\.?\d*$/.test(token)) return { node: { type: 'literal', value: parseFloat(token) }, end: start + 1 };
+    if (/^"[^"]*"$/.test(token) || /^'(?:[^'\\]|\\.)*'$/.test(token)) {
+      return { node: { type: 'literal', value: token.slice(1, -1) }, end: start + 1 };
+    }
+
+    // Property access: state.foo.bar
+    if (token.startsWith('state.')) {
+      const parts = token.split('.');
+      parts.shift(); // remove 'state'
+      return { node: { type: 'prop', parts }, end: start + 1 };
+    }
+
+    throw new Error(`Unexpected token: ${token}`);
+  }
+
+  /** Evaluate an AST node against the state object. */
+  private evaluateConditionNode(node: any, state: Record<string, unknown>): unknown {
+    switch (node.type) {
+      case 'literal':
+        return node.value;
+      case 'prop': {
+        let value: unknown = state;
+        for (const part of node.parts) {
+          if (value === null || value === undefined || typeof value !== 'object') {
+            return undefined;
+          }
+          value = (value as Record<string, unknown>)[part];
+        }
+        return value;
+      }
+      case 'not':
+        return !this.evaluateConditionNode(node.child, state);
+      case 'and':
+        return Boolean(this.evaluateConditionNode(node.left, state)) && Boolean(this.evaluateConditionNode(node.right, state));
+      case 'or':
+        return Boolean(this.evaluateConditionNode(node.left, state)) || Boolean(this.evaluateConditionNode(node.right, state));
+      case 'compare': {
+        const leftVal = this.evaluateConditionNode(node.left, state);
+        const rightVal = this.evaluateConditionNode(node.right, state);
+        switch (node.op) {
+          case '==': return leftVal == rightVal;
+          case '!=': return leftVal != rightVal;
+          case '<':  return (leftVal as number) < (rightVal as number);
+          case '>':  return (leftVal as number) > (rightVal as number);
+          case '<=': return (leftVal as number) <= (rightVal as number);
+          case '>=': return (leftVal as number) >= (rightVal as number);
+          default: throw new Error(`Unknown operator: ${node.op}`);
+        }
+      }
+      default:
+        throw new Error(`Unknown node type: ${(node as any).type}`);
     }
   }
 
