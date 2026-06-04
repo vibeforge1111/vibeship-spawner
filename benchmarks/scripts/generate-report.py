@@ -413,6 +413,8 @@ def main():
     parser.add_argument("--run-id", required=True, help="Run ID to generate report for")
     parser.add_argument("--no-improvement-files", action="store_true",
                         help="Skip generating per-skill improvement files")
+    parser.add_argument("--version", action="store_true", help="Show version")
+
     args = parser.parse_args()
 
     print(f"\n{'='*60}")
