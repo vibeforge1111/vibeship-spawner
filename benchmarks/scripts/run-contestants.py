@@ -174,6 +174,7 @@ def main():
     parser.add_argument("--skills", required=True, help="Comma-separated skill IDs or 'all'")
     parser.add_argument("--test-id", help="Run specific test ID only")
     parser.add_argument("--run-id", help="Use specific run ID (default: auto-generated)")
+    parser.add_argument("--retry", type=int, default=0, help="Retry failed tests N times")
     args = parser.parse_args()
 
     config = load_config()
