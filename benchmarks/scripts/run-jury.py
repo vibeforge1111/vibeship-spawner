@@ -307,6 +307,8 @@ def main():
     parser = argparse.ArgumentParser(description="Run jury scoring on contestant outputs")
     parser.add_argument("--run-id", required=True, help="Run ID from contestant phase")
     parser.add_argument("--jury", help="Comma-separated jury models (default: all configured)")
+    parser.add_argument("--version", action="store_true", help="Show version")
+
     args = parser.parse_args()
 
     config = load_config()
