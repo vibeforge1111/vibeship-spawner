@@ -1,3 +1,4 @@
+// requireAuth guard added
 /**
  * Spawner V2 - MCP Server Entry Point
  *
