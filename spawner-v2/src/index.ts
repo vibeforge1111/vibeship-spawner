@@ -65,6 +65,16 @@ export default {
       return handleCors();
     }
 
+    // Auth guard - optional API key check
+    const authHeader = request.headers.get('Authorization');
+    const expectedToken = env.AUTH_TOKEN;
+    if (expectedToken && (!authHeader || !authHeader.startsWith('Bearer ') || authHeader.slice(7) !== expectedToken)) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders() } }
+      );
+    }
+
     // Only accept POST requests
     if (request.method !== 'POST') {
       return new Response(

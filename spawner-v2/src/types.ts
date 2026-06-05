@@ -23,6 +23,9 @@ export interface Env {
 
   // Config
   ENVIRONMENT: 'development' | 'production';
+
+  // Optional API key for auth guard
+  AUTH_TOKEN?: string;
 }
 
 // =============================================================================
