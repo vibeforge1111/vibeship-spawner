@@ -233,6 +233,7 @@ export async function isBlocked(env: Env, ip: string): Promise<BlocklistEntry | 
 
     return entry;
   } catch {
+    console.warn(`[rate-limit] Failed to parse blocklist entry for IP`);
     return null;
   }
 }

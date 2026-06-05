@@ -234,6 +234,7 @@ async function getProjectFromPath(env: Env, path: string): Promise<{
       updated_at: string;
     } | null;
   } catch {
+    console.warn(`[orchestrator] Failed to fetch project from DB for path: ${path}`);
     return null;
   }
 }
@@ -245,6 +246,7 @@ function parseStack(stack: string): string[] {
   try {
     return JSON.parse(stack);
   } catch {
+    console.warn(`[orchestrator] Failed to parse stack JSON`);
     return [];
   }
 }
@@ -308,6 +310,7 @@ async function loadSkillsForStack(env: Env, stack: string[]): Promise<LoadedSkil
           loadedIds.add(skillId);
         }
       } catch {
+        console.warn(`[orchestrator] Failed to load skill ${skillId}`);
         // Skill not found, continue
       }
     }
@@ -330,6 +333,7 @@ async function getSharpEdgesForStack(env: Env, stack: string[]): Promise<SharpEd
         edges.push(...parsed.slice(0, 3)); // Max 3 per tech
       }
     } catch {
+      console.warn(`[orchestrator] Failed to load sharp edges for tech: ${tech}`);
       // No edges for this tech
     }
   }
@@ -354,6 +358,7 @@ async function identifyMissingSkills(env: Env, stack: string[]): Promise<string[
         missing.push(tech);
       }
     } catch {
+      console.warn(`[orchestrator] Failed to check skill existence for tech: ${tech}`);
       missing.push(tech);
     }
   }
