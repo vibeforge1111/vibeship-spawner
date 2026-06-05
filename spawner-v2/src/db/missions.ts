@@ -112,15 +112,23 @@ function generateId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 }
 
+function safeJsonParse<T>(value: string, fallback: T): T {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 function rowToMission(row: MissionRow): Mission {
   return {
     ...row,
     mode: row.mode as ExecutionMode,
     status: row.status as MissionStatus,
-    agents: JSON.parse(row.agents),
-    tasks: JSON.parse(row.tasks),
-    context: JSON.parse(row.context),
-    outputs: JSON.parse(row.outputs),
+    agents: safeJsonParse(row.agents, []),
+    tasks: safeJsonParse(row.tasks, []),
+    context: safeJsonParse(row.context, {}),
+    outputs: safeJsonParse(row.outputs, []),
   };
 }
 
@@ -128,7 +136,7 @@ function rowToLog(row: MissionLogRow): MissionLog {
   return {
     ...row,
     type: row.type as LogType,
-    data: JSON.parse(row.data),
+    data: safeJsonParse(row.data, {}),
   };
 }
 
